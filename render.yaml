@@ -1,0 +1,34 @@
+# Render Blueprint — BIST Finans Backend
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: bist-finans-backend
+    runtime: python
+    region: frankfurt  # EU — Turkiye'ye yakin
+    plan: starter      # $7/ay — production icin
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: bist-finans-db
+          property: connectionString
+      - key: APP_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: firebase-service-account.json
+      - key: PYTHON_VERSION
+        value: "3.12"
+
+databases:
+  - name: bist-finans-db
+    region: frankfurt
+    plan: starter  # $7/ay — 1GB storage
+    databaseName: bist_finans
+    postgresMajorVersion: "16"
