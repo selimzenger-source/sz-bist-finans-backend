@@ -30,8 +30,8 @@ class IPO(Base):
 
     # --- Durum ---
     status: Mapped[str] = mapped_column(
-        String(20), default="upcoming",
-        comment="upcoming, active, completed, postponed, cancelled"
+        String(30), default="newly_approved",
+        comment="newly_approved, in_distribution, awaiting_trading, trading, archived (eski: upcoming, active, completed)"
     )
 
     # --- Fiyat & Buyukluk ---
@@ -49,10 +49,28 @@ class IPO(Base):
     subscription_hours: Mapped[str | None] = mapped_column(String(30), comment="Basvuru saatleri, orn: 09:00-17:00")
     trading_start: Mapped[date | None] = mapped_column(Date, comment="Borsada islem baslangic tarihi")
     spk_approval_date: Mapped[date | None] = mapped_column(Date, comment="SPK onay tarihi")
+    expected_trading_date: Mapped[date | None] = mapped_column(Date, comment="Beklenen islem baslangic tarihi")
 
-    # --- Dagitim ---
+    # --- SPK Referans ---
+    spk_bulletin_no: Mapped[str | None] = mapped_column(String(50), comment="SPK bulteni numarasi, orn: 2026/5")
+
+    # --- Dagitim Durumu ---
+    distribution_completed: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="Dagitim tamamlandi mi"
+    )
+
+    # --- Dagitim & Katilim ---
     distribution_method: Mapped[str | None] = mapped_column(
-        String(50), comment="Dagitim yontemi: esit, oransal, karma"
+        String(50), comment="Dagitim yontemi kodu: esit, bireysele_esit, tamami_esit, oransal, karma"
+    )
+    distribution_description: Mapped[str | None] = mapped_column(
+        Text, comment="Dagitim yontemi aciklama: Kucuk yatirimciya anlasilir dilde aciklama"
+    )
+    participation_method: Mapped[str | None] = mapped_column(
+        String(30), comment="Katilim yontemi: talep_toplama, borsada_satis"
+    )
+    participation_description: Mapped[str | None] = mapped_column(
+        Text, comment="Katilim yontemi aciklama: Kullaniciya anlasilir dilde nasil basvurulur"
     )
     public_float_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), comment="Halka aciklik orani (%)")
     discount_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), comment="Iskonto orani (%)")
@@ -62,6 +80,11 @@ class IPO(Base):
         String(30), comment="yildiz_pazar, ana_pazar, alt_pazar"
     )
     lead_broker: Mapped[str | None] = mapped_column(Text, comment="Konsorsiyum lideri araci kurum")
+
+    # --- Tahmini Lot ---
+    estimated_lots_per_person: Mapped[int | None] = mapped_column(
+        Integer, comment="Tahmini kisi basi lot (500K katilimci varsayimi, Gedik kaynakli)"
+    )
 
     # --- Ek Bilgiler ---
     lock_up_period_days: Mapped[int | None] = mapped_column(Integer, comment="Satmama taahhut suresi (gun)")
@@ -92,6 +115,14 @@ class IPO(Base):
     first_day_close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
     ceiling_broken: Mapped[bool] = mapped_column(Boolean, default=False)
     ceiling_broken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- Arsiv (25 is gunu sonrasi) ---
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, comment="25 is gunu gecti mi")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="Arsiv tarihi")
+    trading_day_count: Mapped[int] = mapped_column(Integer, default=0, comment="Mevcut islem gunu sayaci")
+    high_from_start: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), comment="Islem basindan bu yana en yuksek fiyat (%4 dusus hesabi icin)"
+    )
 
     # --- Zaman damgalari ---
     created_at: Mapped[datetime] = mapped_column(
@@ -150,19 +181,31 @@ class IPOAllocation(Base):
 
 
 class IPOCeilingTrack(Base):
-    """Halka arz sonrasi tavan takibi — ilk 14 islem gunu."""
+    """Halka arz sonrasi tavan/taban takibi — ilk 20 islem gunu.
+
+    Matriks Excel pipeline'indan gelen veriyle guncellenir.
+    Tavan bozuldu, tekrar tavana kitlendi, tabana kitlendi bildirimleri gonderir.
+    """
 
     __tablename__ = "ipo_ceiling_tracks"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ipo_id: Mapped[int] = mapped_column(ForeignKey("ipos.id", ondelete="CASCADE"))
-    trading_day: Mapped[int] = mapped_column(Integer, comment="1-14 arasi islem gunu")
+    trading_day: Mapped[int] = mapped_column(Integer, comment="1-20 arasi islem gunu")
     trade_date: Mapped[date] = mapped_column(Date)
-    close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
-    hit_ceiling: Mapped[bool] = mapped_column(Boolean, default=True)
-    ceiling_broken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    relocked: Mapped[bool] = mapped_column(Boolean, default=False, comment="Tekrar kilitlendi mi")
-    notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    open_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), comment="Acilis fiyati")
+    close_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), comment="Kapanis fiyati")
+    high_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), comment="Gun ici en yuksek")
+    low_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), comment="Gun ici en dusuk")
+    hit_ceiling: Mapped[bool] = mapped_column(Boolean, default=False, comment="Tavan yaptı mi")
+    hit_floor: Mapped[bool] = mapped_column(Boolean, default=False, comment="Taban yapti mi")
+    ceiling_broken_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="Tavan bozulma zamani")
+    floor_hit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), comment="Tabana kitlenme zamani")
+    relocked: Mapped[bool] = mapped_column(Boolean, default=False, comment="Tekrar tavana kitledi mi")
+    relocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notified_ceiling_break: Mapped[bool] = mapped_column(Boolean, default=False)
+    notified_relock: Mapped[bool] = mapped_column(Boolean, default=False)
+    notified_floor: Mapped[bool] = mapped_column(Boolean, default=False)
 
     ipo: Mapped["IPO"] = relationship(back_populates="ceiling_tracks")
 

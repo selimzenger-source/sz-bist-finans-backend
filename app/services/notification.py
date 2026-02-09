@@ -51,6 +51,10 @@ class NotificationService:
         data: Optional[dict] = None,
     ) -> bool:
         """Tek bir cihaza push bildirim gonderir."""
+        if not _firebase_initialized:
+            logger.info(f"[DRY-RUN] Push → device: {title} | {body}")
+            return True
+
         try:
             from firebase_admin import messaging
 
@@ -93,16 +97,11 @@ class NotificationService:
         body: str,
         data: Optional[dict] = None,
     ) -> bool:
-        """Bir konuya (topic) abone olan tum cihazlara bildirim gonderir.
+        """Bir konuya (topic) abone olan tum cihazlara bildirim gonderir."""
+        if not _firebase_initialized:
+            logger.info(f"[DRY-RUN] Push → topic/{topic}: {title} | {body}")
+            return True
 
-        Topic ornekleri:
-        - "ipo_all": Tum halka arz bildirimleri
-        - "ipo_{id}": Belirli bir halka arzin bildirimleri
-        - "news_bist30": BIST 30 haberleri
-        - "news_bist50": BIST 50 haberleri
-        - "news_bist100": BIST 100 haberleri
-        - "news_all": Tum haberler
-        """
         try:
             from firebase_admin import messaging
 

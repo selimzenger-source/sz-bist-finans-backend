@@ -30,3 +30,12 @@ Thumbs.db
 
 # Logs
 *.log
+
+# SQLite (local dev)
+*.db
+*.sqlite3
+
+# Gecici dosyalar
+nul
+cookies.txt
+seed_test_data.py

@@ -53,9 +53,9 @@ class IPOService:
         return list(result.scalars().all())
 
     async def get_upcoming_ipos(self) -> list[IPO]:
-        """Yaklasan ve aktif halka arzlari getirir."""
+        """Yaklasan ve dagitim surecindeki halka arzlari getirir."""
         query = select(IPO).where(
-            IPO.status.in_(["upcoming", "active"])
+            IPO.status.in_(["newly_approved", "in_distribution", "upcoming", "active"])
         ).order_by(IPO.subscription_start.asc().nullslast())
 
         result = await self.db.execute(query)
@@ -80,8 +80,10 @@ class IPOService:
     async def create_or_update_ipo(self, data: dict) -> IPO:
         """KAP/SPK verisinden halka arz olusturur veya gunceller.
 
-        Eger ayni kap_notification_url veya ticker varsa gunceller,
-        yoksa yeni olusturur.
+        Eslestirme onceligi:
+        1. ticker (hisse kodu)
+        2. kap_notification_url (KAP bildirim linki)
+        3. company_name (sirket adi — duplikat onleme)
         """
         # Mevcut kaydi kontrol et
         existing = None
@@ -94,10 +96,20 @@ class IPOService:
             )
             existing = result.scalar_one_or_none()
 
+        # company_name ile de eslestir — duplikat onleme
+        if not existing and data.get("company_name"):
+            result = await self.db.execute(
+                select(IPO).where(IPO.company_name == data["company_name"])
+            )
+            existing = result.scalar_one_or_none()
+
         if existing:
             # Guncelle — sadece None olmayan alanlari
+            # status alanini scraper'dan gelen veriyle GERI almayiz
+            # (auto_update_statuses zaten dogru statusu ayarlar)
+            protected_fields = {"status", "id", "created_at", "archived", "archived_at"}
             for key, value in data.items():
-                if value is not None and hasattr(existing, key):
+                if value is not None and hasattr(existing, key) and key not in protected_fields:
                     setattr(existing, key, value)
             existing.updated_at = datetime.utcnow()
             ipo = existing
@@ -197,8 +209,16 @@ class IPOService:
         trade_date: date,
         close_price: Decimal,
         hit_ceiling: bool,
+        open_price: Optional[Decimal] = None,
+        high_price: Optional[Decimal] = None,
+        low_price: Optional[Decimal] = None,
+        hit_floor: bool = False,
     ) -> IPOCeilingTrack:
-        """Tavan takip bilgisini gunceller veya olusturur."""
+        """Tavan/taban takip bilgisini gunceller veya olusturur.
+
+        OHLC fiyat verileri + tavan/taban durumu kaydedilir.
+        Onceki gun tavan degildi ama bugun tavan ise → relock (tekrar kitlendi).
+        """
         result = await self.db.execute(
             select(IPOCeilingTrack).where(
                 and_(
@@ -210,20 +230,50 @@ class IPOService:
         track = result.scalar_one_or_none()
 
         if track:
+            # Mevcut kaydi guncelle
+            track.open_price = open_price
             track.close_price = close_price
+            track.high_price = high_price
+            track.low_price = low_price
             track.hit_ceiling = hit_ceiling
+            track.hit_floor = hit_floor
+
             if not hit_ceiling and not track.ceiling_broken_at:
                 track.ceiling_broken_at = datetime.utcnow()
+
+            if hit_floor and not track.floor_hit_at:
+                track.floor_hit_at = datetime.utcnow()
+
         else:
             track = IPOCeilingTrack(
                 ipo_id=ipo_id,
                 trading_day=trading_day,
                 trade_date=trade_date,
+                open_price=open_price,
                 close_price=close_price,
+                high_price=high_price,
+                low_price=low_price,
                 hit_ceiling=hit_ceiling,
+                hit_floor=hit_floor,
                 ceiling_broken_at=datetime.utcnow() if not hit_ceiling else None,
+                floor_hit_at=datetime.utcnow() if hit_floor else None,
             )
             self.db.add(track)
+
+        # Relock kontrolu — onceki gun tavan degildi, bugun tavan
+        if hit_ceiling and trading_day > 1:
+            prev_result = await self.db.execute(
+                select(IPOCeilingTrack).where(
+                    and_(
+                        IPOCeilingTrack.ipo_id == ipo_id,
+                        IPOCeilingTrack.trading_day == trading_day - 1,
+                    )
+                )
+            )
+            prev_track = prev_result.scalar_one_or_none()
+            if prev_track and not prev_track.hit_ceiling:
+                track.relocked = True
+                track.relocked_at = datetime.utcnow()
 
         # Ana IPO kaydini da guncelle
         if not hit_ceiling:
@@ -231,6 +281,12 @@ class IPOService:
             if ipo and not ipo.ceiling_broken:
                 ipo.ceiling_broken = True
                 ipo.ceiling_broken_at = datetime.utcnow()
+
+        # Ilk gun kapanis fiyatini kaydet
+        if trading_day == 1:
+            ipo = await self.get_ipo_by_id(ipo_id)
+            if ipo and not ipo.first_day_close_price:
+                ipo.first_day_close_price = close_price
 
         await self.db.flush()
         return track
@@ -240,50 +296,121 @@ class IPOService:
     # -------------------------------------------------------
 
     async def auto_update_statuses(self):
-        """Tarihlere gore IPO durumlarini otomatik gunceller.
+        """Tarihlere gore IPO durumlarini otomatik gunceller — 5 bolumlu akis.
 
-        - upcoming → active: basvuru baslangic tarihi geldiyse
-        - active → completed: basvuru bitis tarihi gectiyse
+        Yeni akis (5 bolum):
+        1. newly_approved → in_distribution:  subscription_start geldiyse
+        2. in_distribution → awaiting_trading: subscription_end gectiyse
+        3. awaiting_trading → trading:         trading_start geldiyse
+
+        Geriye donuk uyumluluk (eski status degerleri):
+        - upcoming → newly_approved  (one-time migration)
+        - active → in_distribution   (one-time migration)
+        - completed → trading        (eger trading_start varsa, one-time migration)
         """
         today = date.today()
 
-        # upcoming → active
+        # ==========================================
+        # GERIYE DONUK UYUMLULUK — eski statuslari yeni sisteme tasi
+        # ==========================================
+
+        # upcoming → newly_approved
+        result = await self.db.execute(
+            select(IPO).where(IPO.status == "upcoming")
+        )
+        for ipo in result.scalars().all():
+            ipo.status = "newly_approved"
+            ipo.updated_at = datetime.utcnow()
+            logger.info(f"Eski status migration: {ipo.ticker} upcoming → newly_approved")
+
+        # active → in_distribution
+        result = await self.db.execute(
+            select(IPO).where(IPO.status == "active")
+        )
+        for ipo in result.scalars().all():
+            ipo.status = "in_distribution"
+            ipo.updated_at = datetime.utcnow()
+            logger.info(f"Eski status migration: {ipo.ticker} active → in_distribution")
+
+        # completed → trading (sadece trading_start varsa)
         result = await self.db.execute(
             select(IPO).where(
                 and_(
-                    IPO.status == "upcoming",
+                    IPO.status == "completed",
+                    IPO.trading_start.isnot(None),
+                )
+            )
+        )
+        for ipo in result.scalars().all():
+            ipo.status = "trading"
+            ipo.updated_at = datetime.utcnow()
+            logger.info(f"Eski status migration: {ipo.ticker} completed → trading")
+
+        # ==========================================
+        # 1. newly_approved → in_distribution
+        #    Kosul: subscription_start geldiyse
+        # ==========================================
+        result = await self.db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "newly_approved",
+                    IPO.subscription_start.isnot(None),
                     IPO.subscription_start <= today,
                 )
             )
         )
         for ipo in result.scalars().all():
-            ipo.status = "active"
+            ipo.status = "in_distribution"
             ipo.updated_at = datetime.utcnow()
-            logger.info(f"IPO aktif oldu: {ipo.ticker}")
+            logger.info(f"IPO dagitim surecinde: {ipo.ticker or ipo.company_name}")
 
-        # active → completed
+        # ==========================================
+        # 2. in_distribution → awaiting_trading
+        #    Kosul: subscription_end gectiyse
+        # ==========================================
         result = await self.db.execute(
             select(IPO).where(
                 and_(
-                    IPO.status == "active",
+                    IPO.status == "in_distribution",
+                    IPO.subscription_end.isnot(None),
                     IPO.subscription_end < today,
                 )
             )
         )
         for ipo in result.scalars().all():
-            ipo.status = "completed"
+            ipo.status = "awaiting_trading"
+            ipo.distribution_completed = True
             ipo.updated_at = datetime.utcnow()
-            logger.info(f"IPO tamamlandi: {ipo.ticker}")
+            logger.info(f"IPO islem gunu bekliyor: {ipo.ticker or ipo.company_name}")
+
+        # ==========================================
+        # 3. awaiting_trading → trading
+        #    Kosul: trading_start set edilmis VE bugune esit veya gecmis
+        # ==========================================
+        result = await self.db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "awaiting_trading",
+                    IPO.trading_start.isnot(None),
+                    IPO.trading_start <= today,
+                )
+            )
+        )
+        for ipo in result.scalars().all():
+            ipo.status = "trading"
+            ipo.ceiling_tracking_active = True
+            ipo.updated_at = datetime.utcnow()
+            logger.info(f"IPO isleme basladi: {ipo.ticker or ipo.company_name}")
 
         await self.db.flush()
 
     async def get_last_day_ipos(self) -> list[IPO]:
-        """Yarin son gunu olan aktif halka arzlari dondurur."""
+        """Yarin son gunu olan dagitim surecindeki halka arzlari dondurur."""
         tomorrow = date.today() + timedelta(days=1)
         result = await self.db.execute(
             select(IPO).where(
                 and_(
-                    IPO.status == "active",
+                    IPO.status.in_(["in_distribution", "active"]),  # yeni + geriye uyumluluk
                     IPO.subscription_end == tomorrow,
                 )
             )

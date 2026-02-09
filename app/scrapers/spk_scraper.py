@@ -1,12 +1,13 @@
 """SPK (Sermaye Piyasasi Kurulu) scraper.
 
-SPK resmi sitesinden onaylanan halka arz listesini cekmek icin kullanilir.
-SPK bultenleri ve haftalik karar ozetleri taranir.
+Kaynak: https://spk.gov.tr/istatistikler/basvurular/ilk-halka-arz-basvurusu
+Basit HTML tablo: sira no, sirket adi, basvuru tarihi.
+131+ bekleyen halka arz basvurusu listeleniyor.
 """
 
 import logging
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 import httpx
@@ -14,7 +15,8 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-SPK_BASE = "https://www.spk.gov.tr"
+SPK_BASE = "https://spk.gov.tr"
+SPK_IPO_URL = f"{SPK_BASE}/istatistikler/basvurular/ilk-halka-arz-basvurusu"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -24,137 +26,93 @@ HEADERS = {
 
 
 class SPKScraper:
-    """SPK onay listesi scraper."""
+    """SPK Ilk Halka Arz Basvurusu listesi scraper."""
 
     def __init__(self):
         self.client = httpx.AsyncClient(
             timeout=30.0,
             headers=HEADERS,
             follow_redirects=True,
+            verify=False,  # SPK SSL sertifika sorunu
         )
 
     async def close(self):
         await self.client.aclose()
 
-    async def fetch_approved_ipos(self) -> list[dict]:
-        """SPK'nin onayladigi halka arzlari getirir.
+    async def fetch_ipo_applications(self) -> list[dict]:
+        """SPK'daki tum halka arz basvurularini getirir.
 
-        SPK haftalik bulten ve karar ozetlerinde halka arz onaylari yer alir.
+        Tablo yapisi:
+        - Sira No
+        - Sirketler (sirket adi)
+        - Basvuru Tarihi (dd.mm.yyyy)
+
+        Returns:
+            [{company_name, application_date, row_number}, ...]
         """
         results = []
 
         try:
-            # SPK Bulten sayfasi
-            resp = await self.client.get(f"{SPK_BASE}/Bulten")
+            resp = await self.client.get(SPK_IPO_URL)
             if resp.status_code != 200:
-                logger.warning(f"SPK bulten sayfasi: {resp.status_code}")
+                logger.warning(f"SPK sayfa yaniti: {resp.status_code}")
                 return results
 
             soup = BeautifulSoup(resp.text, "lxml")
 
-            # Bulten linklerini tara
-            for link in soup.select("a[href*='Bulten']"):
-                href = link.get("href", "")
-                title = link.get_text(strip=True).lower()
+            # Ana tabloyu bul — "Sirketler" basligini iceren tablo
+            table = None
+            for t in soup.find_all("table"):
+                header_text = t.get_text(strip=True).lower()
+                if "şirketler" in header_text or "sirketler" in header_text:
+                    table = t
+                    break
 
-                # Halka arz ile ilgili bultenleri filtrele
-                if any(kw in title for kw in ["halka arz", "izahname", "pay satışı", "pay satisi"]):
-                    full_url = href if href.startswith("http") else SPK_BASE + href
-                    detail = await self._parse_bulletin(full_url)
-                    if detail:
-                        results.append(detail)
+            if not table:
+                # Fallback: sayfadaki en buyuk tabloyu al
+                tables = soup.find_all("table")
+                if tables:
+                    table = max(tables, key=lambda t: len(t.find_all("tr")))
+
+            if not table:
+                logger.warning("SPK: Tablo bulunamadi")
+                return results
+
+            rows = table.find_all("tr")
+            for row in rows:
+                cells = row.find_all("td")
+                if len(cells) < 3:
+                    continue
+
+                row_num = cells[0].get_text(strip=True)
+                company_name = cells[1].get_text(strip=True)
+                date_str = cells[2].get_text(strip=True)
+
+                # Sira numarasi kontrolu — baslik satirini atla
+                if not row_num.isdigit():
+                    continue
+
+                # Tarih parse
+                app_date = self._parse_date(date_str)
+
+                results.append({
+                    "source": "spk",
+                    "row_number": int(row_num),
+                    "company_name": company_name,
+                    "application_date": app_date,
+                    "application_date_str": date_str,
+                })
+
+            logger.info(f"SPK: {len(results)} halka arz basvurusu bulundu")
 
         except Exception as e:
             logger.error(f"SPK scraping hatasi: {e}")
 
-        # Ayrica SPK karar ozeti sayfasini da kontrol et
-        try:
-            decision_results = await self._fetch_decisions()
-            results.extend(decision_results)
-        except Exception as e:
-            logger.error(f"SPK karar ozeti hatasi: {e}")
-
-        logger.info(f"SPK: {len(results)} onay bulundu")
         return results
 
-    async def _fetch_decisions(self) -> list[dict]:
-        """SPK haftalik karar ozetlerinden halka arz onaylarini cekmek."""
-        results = []
-
+    def _parse_date(self, date_str: str) -> Optional[date]:
+        """dd.mm.yyyy formatindaki tarihi parse eder."""
         try:
-            # SPK Kurul Karar Ozeti sayfasi
-            resp = await self.client.get(f"{SPK_BASE}/Sayfa/KurulKararOzeti")
-            if resp.status_code != 200:
-                return results
-
-            soup = BeautifulSoup(resp.text, "lxml")
-
-            # Karar ozeti iceriginde halka arz ile ilgili bolumler
-            content = soup.get_text(separator="\n", strip=True)
-
-            # "Halka arz" iceren paragrafları bul
-            paragraphs = content.split("\n")
-            for i, para in enumerate(paragraphs):
-                if "halka arz" in para.lower() and any(
-                    kw in para.lower() for kw in ["onay", "uygun", "kabul", "izahname"]
-                ):
-                    result = self._parse_decision_paragraph(para, paragraphs, i)
-                    if result:
-                        results.append(result)
-
-        except Exception as e:
-            logger.error(f"SPK karar ozeti scraping hatasi: {e}")
-
-        return results
-
-    async def _parse_bulletin(self, url: str) -> Optional[dict]:
-        """Tek bir SPK bultenini parse eder."""
-        try:
-            resp = await self.client.get(url)
-            if resp.status_code != 200:
-                return None
-
-            soup = BeautifulSoup(resp.text, "lxml")
-            content = soup.get_text(separator="\n", strip=True)
-
-            # Sirket adini cikar
-            company_match = re.search(
-                r"([A-ZÇĞİÖŞÜa-zçğıöşü\s.]+?)\s*(?:A\.?Ş\.?|Anonim\s*Şirketi)",
-                content
-            )
-
-            return {
-                "source": "spk_bulletin",
-                "company_name": company_match.group(0).strip() if company_match else None,
-                "approval_type": "ipo_approval",
-                "url": url,
-                "raw_text": content[:2000],  # Ilk 2000 karakter
-                "scraped_at": date.today().isoformat(),
-            }
-
-        except Exception as e:
-            logger.error(f"SPK bulten parse hatasi ({url}): {e}")
-            return None
-
-    def _parse_decision_paragraph(
-        self, para: str, all_paragraphs: list[str], index: int
-    ) -> Optional[dict]:
-        """Karar ozetindeki halka arz paragrafini parse eder."""
-        try:
-            # Context icin onceki ve sonraki paragraflari da al
-            context = "\n".join(all_paragraphs[max(0, index - 2):index + 3])
-
-            company_match = re.search(
-                r"([A-ZÇĞİÖŞÜa-zçğıöşü\s.]+?)\s*(?:A\.?Ş\.?|Anonim)",
-                context
-            )
-
-            return {
-                "source": "spk_decision",
-                "company_name": company_match.group(0).strip() if company_match else None,
-                "approval_type": "ipo_decision",
-                "raw_text": context[:2000],
-                "scraped_at": date.today().isoformat(),
-            }
-        except Exception:
+            return datetime.strptime(date_str.strip(), "%d.%m.%Y").date()
+        except (ValueError, AttributeError):
             return None

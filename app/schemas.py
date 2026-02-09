@@ -35,10 +35,16 @@ class IPOCeilingTrackOut(BaseModel):
     id: int
     trading_day: int
     trade_date: date
+    open_price: Optional[Decimal] = None
     close_price: Optional[Decimal] = None
-    hit_ceiling: bool = True
+    high_price: Optional[Decimal] = None
+    low_price: Optional[Decimal] = None
+    hit_ceiling: bool = False
+    hit_floor: bool = False
     ceiling_broken_at: Optional[datetime] = None
+    floor_hit_at: Optional[datetime] = None
     relocked: bool = False
+    relocked_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,11 +63,22 @@ class IPOListOut(BaseModel):
     subscription_end: Optional[date] = None
     trading_start: Optional[date] = None
     distribution_method: Optional[str] = None
+    participation_method: Optional[str] = None
     market_segment: Optional[str] = None
-    lead_broker: Optional[str] = None
     public_float_pct: Optional[Decimal] = None
     discount_pct: Optional[Decimal] = None
     ceiling_broken: bool = False
+    total_applicants: Optional[int] = None
+    estimated_lots_per_person: Optional[int] = None
+    # v3 — 5 bolumlu yapi alanlari
+    spk_approval_date: Optional[date] = None
+    spk_bulletin_no: Optional[str] = None
+    distribution_completed: bool = False
+    expected_trading_date: Optional[date] = None
+    # Arsiv & takip alanlari
+    archived: bool = False
+    trading_day_count: int = 0
+    high_from_start: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,15 +104,23 @@ class IPODetailOut(BaseModel):
     subscription_hours: Optional[str] = None
     trading_start: Optional[date] = None
     spk_approval_date: Optional[date] = None
+    expected_trading_date: Optional[date] = None
 
-    # Dagitim
+    # SPK Referans
+    spk_bulletin_no: Optional[str] = None
+
+    # Dagitim & Katilim
     distribution_method: Optional[str] = None
+    participation_method: Optional[str] = None
+    distribution_completed: bool = False
     public_float_pct: Optional[Decimal] = None
     discount_pct: Optional[Decimal] = None
 
-    # Pazar & Araci
+    # Pazar
     market_segment: Optional[str] = None
-    lead_broker: Optional[str] = None
+
+    # Tahmini Lot (500K katilimci varsayimi)
+    estimated_lots_per_person: Optional[int] = None
 
     # Ek Bilgiler
     lock_up_period_days: Optional[int] = None
@@ -125,12 +150,16 @@ class IPODetailOut(BaseModel):
     ceiling_broken: bool = False
     ceiling_broken_at: Optional[datetime] = None
 
+    # Arsiv & Takip
+    archived: bool = False
+    trading_day_count: int = 0
+    high_from_start: Optional[Decimal] = None
+
     # Zaman
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     # Iliskiler
-    brokers: list[IPOBrokerOut] = []
     allocations: list[IPOAllocationOut] = []
     ceiling_tracks: list[IPOCeilingTrackOut] = []
 
@@ -159,6 +188,75 @@ class KapNewsOut(BaseModel):
 
 
 # -------------------------------------------------------
+# Telegram Haber Schemalari (YENi)
+# -------------------------------------------------------
+
+class TelegramNewsOut(BaseModel):
+    """Telegram kanalindan gelen haber."""
+    id: int
+    telegram_message_id: int
+    message_type: str  # seans_ici_pozitif, seans_ici_negatif, borsa_kapali, seans_disi_acilis
+    ticker: Optional[str] = None
+    price_at_time: Optional[Decimal] = None
+    parsed_title: Optional[str] = None
+    parsed_body: Optional[str] = None
+    sentiment: str
+    kap_notification_id: Optional[str] = None
+    expected_trading_date: Optional[date] = None
+    gap_pct: Optional[Decimal] = None
+    prev_close_price: Optional[Decimal] = None
+    theoretical_open: Optional[Decimal] = None
+    message_date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# SPK Basvuru Schema
+# -------------------------------------------------------
+
+class SPKApplicationOut(BaseModel):
+    """SPK onayi beklenen halka arz basvurusu."""
+    id: int
+    company_name: str
+    existing_capital: Optional[Decimal] = None
+    new_capital: Optional[Decimal] = None
+    capital_increase_paid: Optional[Decimal] = None
+    capital_increase_free: Optional[Decimal] = None
+    existing_share_sale: Optional[Decimal] = None
+    additional_share_sale: Optional[Decimal] = None
+    sale_price: Optional[Decimal] = None
+    application_date: Optional[datetime] = None
+    notes: Optional[str] = None
+    status: str = "pending"
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# IPO Bolumler Schema (v3.0 — 5 bolumlu endpoint)
+# -------------------------------------------------------
+
+class IPOSectionsOut(BaseModel):
+    """Halka arz ana ekrani — 5 bolum + arsiv sayisi.
+
+    1. spk_pending:      SPK onayi beklenen basvurular
+    2. newly_approved:   Yeni onaylanan (SPK bulteninden)
+    3. in_distribution:  Dagitim surecinde (talep toplama acik)
+    4. awaiting_trading: Islem gunu ilani beklenen
+    5. trading:          Isleme baslayanlar (25 gun takip)
+    """
+    spk_pending: list[SPKApplicationOut] = []
+    newly_approved: list[IPOListOut] = []
+    in_distribution: list[IPOListOut] = []
+    awaiting_trading: list[IPOListOut] = []
+    trading: list[IPOListOut] = []
+    archived_count: int = 0
+
+
+# -------------------------------------------------------
 # Kullanici Schemalari
 # -------------------------------------------------------
 
@@ -179,6 +277,19 @@ class UserUpdate(BaseModel):
     notify_ipo_last_day: Optional[bool] = None
     notify_ipo_result: Optional[bool] = None
     notify_ceiling_break: Optional[bool] = None
+    # Hatirlatma zamanları
+    reminder_30min: Optional[bool] = None
+    reminder_1h: Optional[bool] = None
+    reminder_2h: Optional[bool] = None
+    reminder_4h: Optional[bool] = None
+
+
+class ReminderSettingsUpdate(BaseModel):
+    """Hatirlatma zamani ayarlari."""
+    reminder_30min: bool = False
+    reminder_1h: bool = True
+    reminder_2h: bool = False
+    reminder_4h: bool = False
 
 
 class UserOut(BaseModel):
@@ -190,13 +301,17 @@ class UserOut(BaseModel):
     notify_ipo_last_day: bool = True
     notify_ipo_result: bool = True
     notify_ceiling_break: bool = True
+    reminder_30min: bool = False
+    reminder_1h: bool = True
+    reminder_2h: bool = False
+    reminder_4h: bool = False
     subscription_package: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class SubscriptionInfo(BaseModel):
-    package: str  # free, bist30, bist50, bist100, all
+    package: str  # free, bist100, yildiz_pazar, ana_yildiz
     is_active: bool = False
     expires_at: Optional[datetime] = None
 
@@ -214,9 +329,113 @@ class IPOAlertCreate(BaseModel):
 # -------------------------------------------------------
 
 class CeilingTrackUpdate(BaseModel):
-    """Matriks Excel pipeline'indan gelen tavan bilgisi."""
+    """Matriks Excel pipeline'indan gelen tavan/taban bilgisi."""
     ticker: str
     trading_day: int
     trade_date: date
+    open_price: Optional[Decimal] = None
     close_price: Decimal
+    high_price: Optional[Decimal] = None
+    low_price: Optional[Decimal] = None
     hit_ceiling: bool
+    hit_floor: bool = False
+
+
+# -------------------------------------------------------
+# Tavan Takip Abonelik Schemalari
+# -------------------------------------------------------
+
+class CeilingTierOut(BaseModel):
+    """Tavan takip paket bilgisi."""
+    tier: str           # 5_gun, 10_gun, 15_gun, 20_gun
+    days: int           # 5, 10, 15, 20
+    price_tl: Decimal   # 20, 50, 60, 75
+    label: str          # "Ilk 5 islem gunu"
+
+
+class CeilingSubscriptionCreate(BaseModel):
+    """Tavan takip aboneligi olusturma istegi."""
+    ipo_id: int
+    tier: str  # 5_gun, 10_gun, 15_gun, 20_gun
+
+
+class CeilingSubscriptionOut(BaseModel):
+    """Tavan takip abonelik bilgisi."""
+    id: int
+    ipo_id: int
+    tier: str
+    tracking_days: int
+    price_paid_tl: Decimal
+    is_active: bool = True
+    purchased_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    notified_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# Hisse Bildirim Abonelik Schemalari (YENi)
+# -------------------------------------------------------
+
+class NotificationTierOut(BaseModel):
+    """Bildirim tipi fiyat bilgisi."""
+    type: str           # tavan_bozulma, gunluk_acilis_kapanis, yuzde4_dusus
+    price_tl: Decimal
+    label: str
+    description: str
+
+
+class NewsTierOut(BaseModel):
+    """Haber abonelik paket bilgisi."""
+    package: str             # bist100, yildiz_pazar, ana_yildiz
+    price_tl_monthly: Decimal
+    annual_months: int       # Yillik alindiginda kac ay odenir
+    annual_price_tl: Decimal  # Hesaplanmis yillik fiyat
+    label: str
+    description: str
+
+
+class StockNotificationCreate(BaseModel):
+    """Hisse bazli bildirim aboneligi olusturma."""
+    ipo_id: Optional[int] = None  # None ise yillik paket
+    notification_type: str  # tavan_bozulma, gunluk_acilis_kapanis, yuzde4_dusus
+    is_annual_bundle: bool = False
+
+
+class StockNotificationOut(BaseModel):
+    """Hisse bildirim abonelik bilgisi."""
+    id: int
+    ipo_id: Optional[int] = None
+    notification_type: str
+    is_annual_bundle: bool = False
+    price_paid_tl: Decimal
+    is_active: bool = True
+    purchased_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    notified_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# Temettu Schemalari (yakinda)
+# -------------------------------------------------------
+
+class DividendOut(BaseModel):
+    """Temettu beklentisi bilgisi."""
+    id: int
+    ticker: str
+    company_name: Optional[str] = None
+    expected_dividend_yield_pct: Optional[Decimal] = None
+    expected_year: Optional[int] = None
+    last_year_yield_pct: Optional[Decimal] = None
+    avg_2y_yield_pct: Optional[Decimal] = None
+    avg_3y_yield_pct: Optional[Decimal] = None
+    pd_dd: Optional[Decimal] = None
+    fk: Optional[Decimal] = None
+    ytd_return_pct: Optional[Decimal] = None
+    yearly_return_pct: Optional[Decimal] = None
+    scraped_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
