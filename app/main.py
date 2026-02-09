@@ -69,16 +69,24 @@ async def lifespan(app: FastAPI):
     logger.info("BIST Finans Backend baslatiliyor...")
 
     # Veritabani tablolarini olustur
-    # Not: Alembic migration eklenince bu blok kaldirilacak
-    await init_db()
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error("Veritabani init hatasi: %s", e)
 
     # Scheduler'i baslat
-    setup_scheduler()
+    try:
+        setup_scheduler()
+    except Exception as e:
+        logger.error("Scheduler baslatilamadi: %s", e)
 
     yield
 
     # Kapanis
-    shutdown_scheduler()
+    try:
+        shutdown_scheduler()
+    except Exception:
+        pass
     logger.info("BIST Finans Backend kapatildi.")
 
 

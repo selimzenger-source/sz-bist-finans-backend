@@ -20,9 +20,9 @@ COPY . .
 # Port
 EXPOSE 8001
 
-# Gunicorn ile başlat — 2 worker, 120s timeout
+# Gunicorn ile başlat — 1 worker (free plan memory icin), 120s timeout
 CMD ["gunicorn", "app.main:app", \
-     "-w", "2", \
+     "-w", "1", \
      "-k", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8001", \
      "--timeout", "120", \

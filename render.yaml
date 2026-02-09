@@ -8,7 +8,7 @@ services:
     region: frankfurt  # EU — Turkiye'ye en yakin
     plan: free         # Baslangic icin ucretsiz — sonra starter'a gecilebilir
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
+    startCommand: gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 120
     healthCheckPath: /health
     autoDeploy: true
     envVars:

@@ -26,6 +26,9 @@ from app.database import async_session
 
 logger = logging.getLogger(__name__)
 
+# Startup'ta ilk calismadan once DB'nin hazir olmasini bekle
+_STARTUP_DELAY_SECONDS = 30
+
 scheduler = AsyncIOScheduler()
 
 
@@ -546,6 +549,14 @@ async def send_last_day_warnings():
 
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
+    try:
+        _setup_scheduler_impl()
+    except Exception as e:
+        logger.error("Scheduler baslatilamadi: %s", e)
+
+
+def _setup_scheduler_impl():
+    """Scheduler icin tum job tanimlamalari."""
     settings = get_settings()
 
     # 1. KAP Halka Arz — her 30 dakika
@@ -575,14 +586,14 @@ def setup_scheduler():
         replace_existing=True,
     )
 
-    # 4. SPK Onay Listesi — her 4 saatte bir + baslangicta hemen calistir
+    # 4. SPK Onay Listesi — her 4 saatte bir + baslangicta kisa gecikme ile calistir
     scheduler.add_job(
         scrape_spk,
         IntervalTrigger(hours=4),
         id="spk_scraper",
         name="SPK Onay Scraper (4 saatte bir)",
         replace_existing=True,
-        next_run_time=datetime.now(),  # Baslangicta hemen calistir
+        next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS),
     )
 
     # 5. HalkArz + Gedik — her 4 saatte bir
