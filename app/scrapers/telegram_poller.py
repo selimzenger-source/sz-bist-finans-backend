@@ -300,10 +300,15 @@ async def poll_telegram():
 
     Bot token ve chat ID'yi config/env'den alir.
     """
-    import os
+    from app.config import get_settings
+    settings = get_settings()
 
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "8269072222:AAFh5ubVm_P3Ho3ajhQq_HFD4gHAyOATGSA")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "-1002704950091")
+    bot_token = settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_CHAT_ID
+
+    if not bot_token:
+        logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, poller atlaniyor")
+        return
 
     try:
         count = await poll_telegram_messages(bot_token, chat_id)

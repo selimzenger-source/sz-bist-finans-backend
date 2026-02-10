@@ -10,7 +10,6 @@ Boylece:
 - Push notification ayrica Firebase ile gider
 """
 
-import os
 import logging
 from datetime import datetime
 from decimal import Decimal
@@ -24,8 +23,13 @@ from app.models.telegram_news import TelegramNews
 logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
-_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8269072222:AAFh5ubVm_P3Ho3ajhQq_HFD4gHAyOATGSA")
-_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "-1002704950091")
+
+
+def _get_telegram_config():
+    """Config'den Telegram ayarlarini al."""
+    from app.config import get_settings
+    settings = get_settings()
+    return settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID
 
 
 def _format_telegram_message(
@@ -124,11 +128,16 @@ async def send_to_telegram(
         news_title=news_title,
     )
 
+    bot_token, chat_id = _get_telegram_config()
+    if not bot_token:
+        logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, mesaj gonderilemedi")
+        return None
+
     try:
-        url = f"{TELEGRAM_API_BASE.format(token=_BOT_TOKEN)}/sendMessage"
+        url = f"{TELEGRAM_API_BASE.format(token=bot_token)}/sendMessage"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(url, data={
-                "chat_id": _CHAT_ID,
+                "chat_id": chat_id,
                 "text": text,
             })
             resp.raise_for_status()
@@ -169,9 +178,10 @@ async def save_to_telegram_news(
     if news_title:
         body_text = f"{news_title}\n{body_text}"
 
+    _, chat_id = _get_telegram_config()
     news = TelegramNews(
         telegram_message_id=telegram_message_id,
-        chat_id=_CHAT_ID,
+        chat_id=chat_id or "-1002704950091",
         message_type=message_type,
         ticker=ticker,
         price_at_time=None,

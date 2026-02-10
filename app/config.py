@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # Firebase
     GOOGLE_APPLICATION_CREDENTIALS: str = "firebase-service-account.json"
 
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = "-1002704950091"
+
     # Admin paneli
     ADMIN_PASSWORD: str = "bist2026admin"
 
