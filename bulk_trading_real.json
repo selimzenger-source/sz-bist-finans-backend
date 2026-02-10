@@ -4,6 +4,16 @@
     {
       "ticker": "UCAYM",
       "trading_day": 1,
+      "trade_date": "2026-01-22",
+      "close_price": "19.80",
+      "high_price": "19.80",
+      "low_price": "19.80",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 2,
       "trade_date": "2026-01-23",
       "close_price": "21.78",
       "high_price": "21.78",
@@ -13,7 +23,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 2,
+      "trading_day": 3,
       "trade_date": "2026-01-26",
       "close_price": "23.94",
       "high_price": "23.94",
@@ -23,7 +33,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 3,
+      "trading_day": 4,
       "trade_date": "2026-01-27",
       "close_price": "26.32",
       "high_price": "26.32",
@@ -33,7 +43,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 4,
+      "trading_day": 5,
       "trade_date": "2026-01-28",
       "close_price": "28.94",
       "high_price": "28.94",
@@ -43,7 +53,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 5,
+      "trading_day": 6,
       "trade_date": "2026-01-29",
       "close_price": "31.82",
       "high_price": "31.82",
@@ -53,7 +63,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 6,
+      "trading_day": 7,
       "trade_date": "2026-01-30",
       "close_price": "35.00",
       "high_price": "35.00",
@@ -63,17 +73,18 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 7,
+      "trading_day": 8,
       "trade_date": "2026-02-02",
       "close_price": "38.50",
       "high_price": "38.50",
       "low_price": "36.76",
+      "open_price": "36.82",
       "hit_ceiling": true,
       "hit_floor": false
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 8,
+      "trading_day": 9,
       "trade_date": "2026-02-03",
       "close_price": "34.66",
       "open_price": "40.70",
@@ -84,7 +95,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 9,
+      "trading_day": 10,
       "trade_date": "2026-02-04",
       "close_price": "38.12",
       "open_price": "34.66",
@@ -95,7 +106,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 10,
+      "trading_day": 11,
       "trade_date": "2026-02-05",
       "close_price": "36.98",
       "open_price": "38.22",
@@ -106,7 +117,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 11,
+      "trading_day": 12,
       "trade_date": "2026-02-06",
       "close_price": "35.50",
       "open_price": "36.98",
@@ -117,7 +128,7 @@
     },
     {
       "ticker": "UCAYM",
-      "trading_day": 12,
+      "trading_day": 13,
       "trade_date": "2026-02-09",
       "close_price": "35.92",
       "open_price": "35.50",

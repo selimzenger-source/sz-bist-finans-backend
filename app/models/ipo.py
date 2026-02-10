@@ -207,14 +207,14 @@ class IPOCeilingTrack(Base):
     notified_relock: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_floor: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # v3: 5 durum + kümülatif % fark
+    # v4: 5 durum + gunluk % degisim
     durum: Mapped[str] = mapped_column(
         String(20), default="alici_kapatti",
         comment="tavan, alici_kapatti, not_kapatti, satici_kapatti, taban",
     )
     pct_change: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2), nullable=True,
-        comment="IPO fiyatina gore kumulatif % fark",
+        comment="Gunluk % degisim (onceki gun kapanisina gore)",
     )
 
     ipo: Mapped["IPO"] = relationship(back_populates="ceiling_tracks")

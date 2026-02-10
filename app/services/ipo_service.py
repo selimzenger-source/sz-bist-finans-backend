@@ -289,43 +289,39 @@ class IPOService:
             if ipo and not ipo.first_day_close_price:
                 ipo.first_day_close_price = close_price
 
-        # v2: Kumulatif % fark (IPO fiyatina gore)
+        # v4: Gunluk % degisim hesapla (onceki gun kapanisina gore)
         ipo_price = ipo.ipo_price if ipo else None
-        if ipo_price and close_price and ipo_price > 0:
-            from decimal import Decimal as D
-            track.pct_change = ((close_price - ipo_price) / ipo_price) * 100
-        else:
-            track.pct_change = None
+        daily_pct = None
 
-        # v3: 5 durum — gunluk degisime gore hesaplanir (onceki gun kapanisa gore)
+        if trading_day > 1:
+            prev_result = await self.db.execute(
+                select(IPOCeilingTrack).where(
+                    and_(
+                        IPOCeilingTrack.ipo_id == ipo_id,
+                        IPOCeilingTrack.trading_day == trading_day - 1,
+                    )
+                )
+            )
+            prev_track = prev_result.scalar_one_or_none()
+            if prev_track and prev_track.close_price and prev_track.close_price > 0:
+                daily_pct = ((close_price - prev_track.close_price) / prev_track.close_price) * 100
+        elif trading_day == 1 and ipo_price and ipo_price > 0:
+            daily_pct = ((close_price - ipo_price) / ipo_price) * 100
+
+        # pct_change = gunluk degisim (eski: kumulatif)
+        track.pct_change = daily_pct
+
+        # v3: 5 durum — gunluk degisime gore
         if hit_ceiling:
             track.durum = "tavan"
         elif hit_floor:
             track.durum = "taban"
+        elif daily_pct is not None and daily_pct == 0:
+            track.durum = "not_kapatti"
+        elif daily_pct is not None and daily_pct > 0:
+            track.durum = "alici_kapatti"
         else:
-            # Gunluk degisim hesapla — onceki gunun kapanisina gore
-            daily_pct = None
-            if trading_day > 1:
-                prev_result = await self.db.execute(
-                    select(IPOCeilingTrack).where(
-                        and_(
-                            IPOCeilingTrack.ipo_id == ipo_id,
-                            IPOCeilingTrack.trading_day == trading_day - 1,
-                        )
-                    )
-                )
-                prev_track = prev_result.scalar_one_or_none()
-                if prev_track and prev_track.close_price and prev_track.close_price > 0:
-                    daily_pct = ((close_price - prev_track.close_price) / prev_track.close_price) * 100
-            elif trading_day == 1 and ipo_price and ipo_price > 0:
-                daily_pct = ((close_price - ipo_price) / ipo_price) * 100
-
-            if daily_pct is not None and daily_pct == 0:
-                track.durum = "not_kapatti"
-            elif daily_pct is not None and daily_pct > 0:
-                track.durum = "alici_kapatti"
-            else:
-                track.durum = "satici_kapatti"
+            track.durum = "satici_kapatti"
 
         await self.db.flush()
         return track
