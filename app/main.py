@@ -1710,3 +1710,30 @@ async def test_notification(payload: dict):
             "push_error": str(e),
             "message": f"Push gonderme hatasi: {e}",
         }
+
+
+@app.post("/api/v1/admin/users")
+async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Kayitli kullanicilari ve FCM tokenlarini listeler."""
+    settings = get_settings()
+
+    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(
+        select(User).order_by(desc(User.created_at)).limit(20)
+    )
+    users = result.scalars().all()
+
+    return [
+        {
+            "id": u.id,
+            "device_id": u.device_id[:8] + "...",
+            "platform": u.platform,
+            "fcm_token": u.fcm_token[:30] + "..." if u.fcm_token and len(u.fcm_token) > 30 else u.fcm_token,
+            "fcm_token_full": u.fcm_token,
+            "app_version": u.app_version,
+            "created_at": str(u.created_at) if u.created_at else None,
+        }
+        for u in users
+    ]
