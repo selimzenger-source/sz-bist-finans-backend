@@ -115,7 +115,7 @@ CEILING_TIER_PRICES = {
 }
 
 # YENİ v2: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
-# 4 bildirim tipi — yuzde4 ve yuzde7 ayri, kullanici birini secer
+# 4 bildirim tipi — yuzde_dusus tek hizmet: %4 ve %7 esik, gunde max 2 bildirim
 NOTIFICATION_TIER_PRICES = {
     "tavan_bozulma": {
         "price_tl": Decimal("15.00"),
@@ -132,15 +132,10 @@ NOTIFICATION_TIER_PRICES = {
         "label": "Gunluk Acilis Kapanis Bilgisi",
         "description": "Her gun acilis ve kapanis analizini bildirim olarak al",
     },
-    "yuzde4_dusus": {
+    "yuzde_dusus": {
         "price_tl": Decimal("20.00"),
-        "label": "En Yukseginden %4 Dusunce Bildirim",
-        "description": "Hisse en yukseginden %4 dustugunde anlik bildirim (gunde 1 kez)",
-    },
-    "yuzde7_dusus": {
-        "price_tl": Decimal("20.00"),
-        "label": "En Yukseginden %7 Dusunce Bildirim",
-        "description": "Hisse en yukseginden %7 dustugunde anlik bildirim (gunde 1 kez)",
+        "label": "En Yukseginden % Dusus Bildirimi",
+        "description": "%4 ve %7 esik bildirimi — gunde max 2 (once %4, sonra %7)",
     },
 }
 COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL

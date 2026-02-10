@@ -413,15 +413,16 @@ class RealtimeNotifRequest(BaseModel):
     """Gercek zamanli bildirim gonderimi (halka_arz_sync.py'den gelir)."""
     admin_password: str
     ticker: str
-    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde4_dusus, yuzde7_dusus
+    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde_dusus
     title: str
     body: str
+    sub_event: Optional[str] = None  # yuzde_dusus icin: "pct4" veya "pct7"
 
 
 class StockNotificationCreate(BaseModel):
     """Hisse bazli bildirim aboneligi olusturma."""
     ipo_id: Optional[int] = None  # None ise yillik paket
-    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde4_dusus, yuzde7_dusus
+    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde_dusus
     is_annual_bundle: bool = False
 
 

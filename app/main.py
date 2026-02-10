@@ -3,7 +3,7 @@
 Servisler:
 1. Halka Arz Takip (ucretsiz)
 2. Tavan/Taban Takip — hisse bazli ucretli paketler (5/10/15/20 gun)
-3. Hisse Bazli Bildirim Aboneligi — 5 tip (tavan_bozulma/taban_acilma/gunluk_acilis_kapanis/yuzde4_dusus/yuzde7_dusus)
+3. Hisse Bazli Bildirim Aboneligi — 4 tip (tavan_bozulma/taban_acilma/gunluk_acilis_kapanis/yuzde_dusus)
    + Kombo (44 TL) + 3 Aylik (90 TL) + 6 Aylik (145 TL) + Yillik (245 TL)
 4. Yapay Zeka Haber Takibi — Telegram kanal entegrasyonu (bist100/yildiz/ana_yildiz)
 5. KAP Haber Bildirimleri
@@ -933,12 +933,12 @@ async def send_realtime_notification(
     """
     Gercek zamanli bildirim gonder — halka_arz_sync.py'den cagirilir.
 
-    5 bildirim tipi:
+    4 bildirim tipi:
       - tavan_bozulma:          Tavan acilinca/kitlenince
       - taban_acilma:           Taban acilinca/kitlenince
       - gunluk_acilis_kapanis:  Gunluk acilis (09:56) ve kapanis (18:08)
-      - yuzde4_dusus:           En yukseginden %3-4 dustugunde
-      - yuzde7_dusus:           En yukseginden %6-7 dustugunde
+      - yuzde_dusus:            Tek hizmet — %4 ve %7 esik, gunde max 2 bildirim
+                                sub_event: "pct4" veya "pct7"
 
     Bildirim mesajlarinda fiyat bilgisi YOKTUR.
     """
@@ -952,7 +952,7 @@ async def send_realtime_notification(
 
     valid_types = [
         "tavan_bozulma", "taban_acilma",
-        "gunluk_acilis_kapanis", "yuzde4_dusus", "yuzde7_dusus",
+        "gunluk_acilis_kapanis", "yuzde_dusus",
     ]
     if data.notification_type not in valid_types:
         raise HTTPException(
@@ -1326,8 +1326,10 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
         "bist_finans_notif_tavan": "tavan_bozulma",
         "bist_finans_notif_taban": "taban_acilma",
         "bist_finans_notif_acilis": "gunluk_acilis_kapanis",
-        "bist_finans_notif_yuzde4": "yuzde4_dusus",
-        "bist_finans_notif_yuzde7": "yuzde7_dusus",
+        "bist_finans_notif_yuzde_dusus": "yuzde_dusus",
+        # Eski urunler (geriye donuk uyumluluk)
+        "bist_finans_notif_yuzde4": "yuzde_dusus",
+        "bist_finans_notif_yuzde7": "yuzde_dusus",
         "bist_finans_notif_combo": "combo",
         "bist_finans_notif_quarterly": "quarterly",
         "bist_finans_notif_semiannual": "semiannual",

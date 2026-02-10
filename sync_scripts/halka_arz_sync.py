@@ -35,13 +35,11 @@ Excel Formati (Matriks — 9 sutun):
      - 09:56 acilis bildirimi: "AKHAN tavan acti!" / "normal islem ile acildi"
      - 18:08 kapanis bildirimi: "AKHAN tavan kapatti!" / "normal islem ile kapatti"
 
-  4. EN YUKSEGINDEN %4 DUSUS (yuzde4_dusus)  — 20 TL / 10 TL ilk HA
-     - Gun ici en yukseginden %3-4 dustugunde bildirim
-     - Gunde 1 kez
-
-  5. EN YUKSEGINDEN %7 DUSUS (yuzde7_dusus)  — 20 TL / 10 TL ilk HA
-     - Gun ici en yukseginden %6-7 dustugunde bildirim
-     - Gunde 1 kez
+  4. EN YUKSEGINDEN % DUSUS (yuzde_dusus)  — 20 TL / 10 TL ilk HA
+     - Tek hizmet, 2 esik bildirimi:
+       a) %3-4 dustugunde → 1. bildirim (sub_event: pct4)
+       b) %6-7 dustugunde → 2. bildirim (sub_event: pct7)
+     - Gunde max 2 bildirim (once %4, sonra %7)
 
 ONEMLI: Bildirim mesajlarinda FIYAT BILGISI YOKTUR!
 
@@ -405,10 +403,13 @@ def send_notification_to_backend(
     notif_type: str,
     title: str,
     body: str,
+    sub_event: str = None,
 ):
     """
     Backend /api/v1/realtime-notification endpoint'ine bildirim gonder.
     Backend dogru abonelere FCM push gonderir.
+
+    yuzde_dusus icin sub_event: "pct4" veya "pct7"
 
     ONEMLI: Mesajlarda FIYAT BILGISI YOKTUR!
     """
@@ -420,6 +421,8 @@ def send_notification_to_backend(
             "title": title,
             "body": body,
         }
+        if sub_event:
+            payload["sub_event"] = sub_event
 
         resp = requests.post(API_NOTIF_URL, json=payload, timeout=10)
         if resp.status_code == 200:
@@ -501,27 +504,29 @@ def process_stock(stock: StockState, now: dt.datetime):
         # Dusus yuzdesini hesapla: (en_yuksek - son) / en_yuksek * 100
         drop_pct = ((gun_high - stock.son_fiyat) / gun_high) * 100
 
-        # %3-4 dusus → yuzde4_dusus servisine gonder
+        # %3-4 dusus → yuzde_dusus servisine gonder (sub_event: pct4)
         if drop_pct >= 3.0 and not state.notified_drop_4pct:
             send_notification_to_backend(
                 ticker=ticker,
-                notif_type="yuzde4_dusus",
+                notif_type="yuzde_dusus",
                 title=f"{ticker} En Yukseginden %4 Dustu!",
                 body=f"{ticker} gun ici en yukseginden %4 dustu!",
+                sub_event="pct4",
             )
             state.notified_drop_4pct = True
-            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde4_dusus)")
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct4)")
 
-        # %6-7 dusus → yuzde7_dusus servisine gonder
+        # %6-7 dusus → yuzde_dusus servisine gonder (sub_event: pct7)
         if drop_pct >= 6.0 and not state.notified_drop_7pct:
             send_notification_to_backend(
                 ticker=ticker,
-                notif_type="yuzde7_dusus",
+                notif_type="yuzde_dusus",
                 title=f"{ticker} En Yukseginden %7 Dustu!",
                 body=f"{ticker} gun ici en yukseginden %7 dustu!",
+                sub_event="pct7",
             )
             state.notified_drop_7pct = True
-            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde7_dusus)")
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct7)")
 
     # =====================
     # TAVAN TAKIBI
