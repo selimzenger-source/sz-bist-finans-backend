@@ -88,3 +88,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v5 migration: users.expo_push_token kolonu
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS expo_push_token VARCHAR(255)")
+            )
+        except Exception:
+            pass

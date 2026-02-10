@@ -685,12 +685,15 @@ async def register_device(data: UserRegister, db: AsyncSession = Depends(get_db)
 
     if user:
         user.fcm_token = data.fcm_token
+        if data.expo_push_token:
+            user.expo_push_token = data.expo_push_token
         user.platform = data.platform
         user.app_version = data.app_version
     else:
         user = User(
             device_id=data.device_id,
             fcm_token=data.fcm_token,
+            expo_push_token=data.expo_push_token,
             platform=data.platform,
             app_version=data.app_version,
         )
@@ -1641,18 +1644,64 @@ async def test_notification(payload: dict):
 
     firebase_ok = is_firebase_initialized()
     fcm_token = payload.get("fcm_token")
+    expo_token = payload.get("expo_push_token")
 
     # Token yoksa sadece durum raporla
-    if not fcm_token:
+    if not fcm_token and not expo_token:
         return {
             "firebase_initialized": firebase_ok,
             "push_sent": False,
             "push_error": None,
-            "message": "FCM token verilmedi — sadece Firebase durumu raporlandi."
+            "message": "Token verilmedi — sadece Firebase durumu raporlandi."
                        + (" Firebase AKTIF ✅" if firebase_ok else " Firebase INAKTIF ❌"),
         }
 
-    # Token var — gercek push gonder
+    title = payload.get("title", "🔔 BIST Finans Test")
+    body = payload.get("body", "Bu bir test bildirimidir. Push calisiyor! ✅")
+
+    # --- Expo Push Token varsa Expo Push API kullan ---
+    if expo_token:
+        try:
+            import httpx
+
+            push_message = {
+                "to": expo_token,
+                "sound": "default",
+                "title": title,
+                "body": body,
+                "data": {"type": "test", "timestamp": datetime.now().isoformat()},
+            }
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=push_message,
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=10.0,
+                )
+                result = resp.json()
+
+            return {
+                "firebase_initialized": firebase_ok,
+                "push_sent": True,
+                "push_error": None,
+                "expo_response": result,
+                "token_type": "expo",
+                "message": "Expo push bildirim gonderildi! ✅",
+            }
+        except Exception as e:
+            return {
+                "firebase_initialized": firebase_ok,
+                "push_sent": False,
+                "push_error": str(e),
+                "token_type": "expo",
+                "message": f"Expo push hatasi: {e}",
+            }
+
+    # --- FCM Token varsa Firebase kullan ---
     if not firebase_ok:
         return {
             "firebase_initialized": False,
@@ -1660,9 +1709,6 @@ async def test_notification(payload: dict):
             "push_error": "Firebase baslatilamamis",
             "message": "Firebase init basarisiz — push gonderilemez.",
         }
-
-    title = payload.get("title", "🔔 BIST Finans Test")
-    body = payload.get("body", "Bu bir test bildirimidir. Firebase push calisiyor! ✅")
 
     try:
         from firebase_admin import messaging
@@ -1700,7 +1746,8 @@ async def test_notification(payload: dict):
             "push_sent": True,
             "push_error": None,
             "fcm_response": response,
-            "message": f"Push bildirim basariyla gonderildi! ✅",
+            "token_type": "fcm",
+            "message": "FCM push bildirim gonderildi! ✅",
         }
 
     except Exception as e:
@@ -1708,7 +1755,8 @@ async def test_notification(payload: dict):
             "firebase_initialized": True,
             "push_sent": False,
             "push_error": str(e),
-            "message": f"Push gonderme hatasi: {e}",
+            "token_type": "fcm",
+            "message": f"FCM push hatasi: {e}",
         }
 
 
@@ -1732,6 +1780,7 @@ async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
             "platform": u.platform,
             "fcm_token": u.fcm_token[:30] + "..." if u.fcm_token and len(u.fcm_token) > 30 else u.fcm_token,
             "fcm_token_full": u.fcm_token,
+            "expo_push_token": getattr(u, "expo_push_token", None),
             "app_version": u.app_version,
             "created_at": str(u.created_at) if u.created_at else None,
         }

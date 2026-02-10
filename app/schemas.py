@@ -277,6 +277,7 @@ class UserRegister(BaseModel):
     """Cihaz kayit istegi."""
     device_id: str
     fcm_token: str
+    expo_push_token: Optional[str] = None
     platform: str  # ios, android
     app_version: Optional[str] = None
 
@@ -284,6 +285,7 @@ class UserRegister(BaseModel):
 class UserUpdate(BaseModel):
     """Kullanici bilgi guncelleme."""
     fcm_token: Optional[str] = None
+    expo_push_token: Optional[str] = None
     app_version: Optional[str] = None
     notify_new_ipo: Optional[bool] = None
     notify_ipo_start: Optional[bool] = None
