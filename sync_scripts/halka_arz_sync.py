@@ -504,8 +504,8 @@ def process_stock(stock: StockState, now: dt.datetime):
         # Dusus yuzdesini hesapla: (en_yuksek - son) / en_yuksek * 100
         drop_pct = ((gun_high - stock.son_fiyat) / gun_high) * 100
 
-        # %3-4 dusus → yuzde_dusus servisine gonder (sub_event: pct4)
-        if drop_pct >= 3.0 and not state.notified_drop_4pct:
+        # %4 dusus → yuzde_dusus servisine gonder (sub_event: pct4)
+        if drop_pct >= 4.0 and not state.notified_drop_4pct:
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="yuzde_dusus",
@@ -516,8 +516,8 @@ def process_stock(stock: StockState, now: dt.datetime):
             state.notified_drop_4pct = True
             log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct4)")
 
-        # %6-7 dusus → yuzde_dusus servisine gonder (sub_event: pct7)
-        if drop_pct >= 6.0 and not state.notified_drop_7pct:
+        # %7 dusus → yuzde_dusus servisine gonder (sub_event: pct7)
+        if drop_pct >= 7.0 and not state.notified_drop_7pct:
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="yuzde_dusus",
