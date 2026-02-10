@@ -1111,3 +1111,116 @@ async def get_dividend_by_ticker(ticker: str, db: AsyncSession = Depends(get_db)
     if not dividend:
         raise HTTPException(status_code=404, detail=f"Temettu verisi bulunamadi: {ticker}")
     return dividend
+
+
+# -------------------------------------------------------
+# SEED DATA ENDPOINT (gecici — production'a veri yuklemek icin)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/seed-ipos")
+async def seed_ipos(payload: dict, db: AsyncSession = Depends(get_db)):
+    """Local DB'den export edilen IPO verilerini production'a yukler.
+
+    Bu endpoint sadece bos DB'ye ilk veri yuklemesi icin kullanilir.
+    Gonderilen JSON:
+        { "admin_password": "...", "ipos": [...], "allocations": [...] }
+    """
+    from app.config import get_settings
+    _settings = get_settings()
+
+    if payload.get("admin_password") != _settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipos_data = payload.get("ipos", [])
+    allocs_data = payload.get("allocations", [])
+    created_ipos = 0
+    created_allocs = 0
+
+    for ipo_raw in ipos_data:
+        # Ticker ile kontrol — zaten varsa atla
+        ticker = ipo_raw.get("ticker")
+        if ticker:
+            existing = await db.execute(
+                select(IPO).where(IPO.ticker == ticker)
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+        from datetime import date as _date
+        def _parse_date(val):
+            if not val:
+                return None
+            try:
+                return _date.fromisoformat(str(val)[:10])
+            except Exception:
+                return None
+
+        from decimal import Decimal
+        def _dec(val):
+            if val is None:
+                return None
+            try:
+                return Decimal(str(val))
+            except Exception:
+                return None
+
+        ipo = IPO(
+            company_name=ipo_raw.get("company_name", ""),
+            ticker=ticker,
+            status=ipo_raw.get("status", "newly_approved"),
+            ipo_price=_dec(ipo_raw.get("ipo_price")),
+            total_lots=ipo_raw.get("total_lots"),
+            offering_size_tl=_dec(ipo_raw.get("offering_size_tl")),
+            capital_increase_lots=ipo_raw.get("capital_increase_lots"),
+            partner_sale_lots=ipo_raw.get("partner_sale_lots"),
+            subscription_start=_parse_date(ipo_raw.get("subscription_start")),
+            subscription_end=_parse_date(ipo_raw.get("subscription_end")),
+            subscription_hours=ipo_raw.get("subscription_hours"),
+            trading_start=_parse_date(ipo_raw.get("trading_start")),
+            spk_approval_date=_parse_date(ipo_raw.get("spk_approval_date")),
+            expected_trading_date=_parse_date(ipo_raw.get("expected_trading_date")),
+            spk_bulletin_no=ipo_raw.get("spk_bulletin_no"),
+            distribution_completed=bool(ipo_raw.get("distribution_completed")),
+            distribution_method=ipo_raw.get("distribution_method"),
+            distribution_description=ipo_raw.get("distribution_description"),
+            participation_method=ipo_raw.get("participation_method"),
+            participation_description=ipo_raw.get("participation_description"),
+            public_float_pct=_dec(ipo_raw.get("public_float_pct")),
+            discount_pct=_dec(ipo_raw.get("discount_pct")),
+            market_segment=ipo_raw.get("market_segment"),
+            lead_broker=ipo_raw.get("lead_broker"),
+            estimated_lots_per_person=ipo_raw.get("estimated_lots_per_person"),
+            min_application_lot=ipo_raw.get("min_application_lot"),
+            company_description=ipo_raw.get("company_description"),
+            sector=ipo_raw.get("sector"),
+            ceiling_tracking_active=bool(ipo_raw.get("ceiling_tracking_active")),
+            first_day_close_price=_dec(ipo_raw.get("first_day_close_price")),
+            trading_day_count=ipo_raw.get("trading_day_count", 0),
+            total_applicants=ipo_raw.get("total_applicants"),
+        )
+        db.add(ipo)
+        await db.flush()
+
+        # Allocations for this IPO
+        old_id = ipo_raw.get("id")
+        for alloc_raw in allocs_data:
+            if alloc_raw.get("ipo_id") == old_id:
+                alloc = IPOAllocation(
+                    ipo_id=ipo.id,
+                    group_name=alloc_raw.get("group_name", ""),
+                    allocation_pct=_dec(alloc_raw.get("allocation_pct")),
+                    allocated_lots=alloc_raw.get("allocated_lots"),
+                    participant_count=alloc_raw.get("participant_count"),
+                    avg_lot_per_person=alloc_raw.get("avg_lot_per_person"),
+                )
+                db.add(alloc)
+                created_allocs += 1
+
+        created_ipos += 1
+
+    await db.flush()
+    return {
+        "status": "ok",
+        "created_ipos": created_ipos,
+        "created_allocations": created_allocs,
+    }
