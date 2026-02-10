@@ -231,6 +231,7 @@ class IPOService:
 
         if track:
             # Mevcut kaydi guncelle
+            track.trade_date = trade_date
             track.open_price = open_price
             track.close_price = close_price
             track.high_price = high_price
