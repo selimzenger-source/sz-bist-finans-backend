@@ -224,7 +224,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     # 25 takvim gunu siniri: trading_start + 25 gun > bugun
     from datetime import date as date_type, timedelta
     today = date_type.today()
-    calendar_cutoff = today - timedelta(days=24)  # 25. gun dahil (gun 1 = trading_start)
+    calendar_cutoff = today - timedelta(days=25)  # 25 takvim gunu (ilk islem gunu sayilmaz)
 
     trading_result = await db.execute(
         select(IPO)
