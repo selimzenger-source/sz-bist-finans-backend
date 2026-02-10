@@ -114,10 +114,11 @@ CEILING_TIER_PRICES = {
     "20_gun": {"days": 20, "price_tl": Decimal("75.00"), "label": "Ilk 20 islem gunu"},
 }
 
-# YENİ: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
+# YENİ v2: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
+# 4 bildirim tipi — yuzde4/yuzde7 birlestirildi → yuzde_dusus (kullanici %1-%9 secer)
 NOTIFICATION_TIER_PRICES = {
     "tavan_bozulma": {
-        "price_tl": Decimal("10.00"),
+        "price_tl": Decimal("15.00"),
         "label": "Tavan Acilinca / Kitlenince Bildirimi",
         "description": "Tavan acildiginda ve tekrar kitlendiginde anlik bildirim",
     },
@@ -131,21 +132,16 @@ NOTIFICATION_TIER_PRICES = {
         "label": "Gunluk Acilis Kapanis Bilgisi",
         "description": "Her gun acilis ve kapanis analizini bildirim olarak al",
     },
-    "yuzde4_dusus": {
-        "price_tl": Decimal("15.00"),
-        "label": "En Yukseginden %4 Dusunce Bildirim",
-        "description": "Hisse en yukseginden %4 dustugunde anlik bildirim",
-    },
-    "yuzde7_dusus": {
-        "price_tl": Decimal("15.00"),
-        "label": "En Yukseginden %7 Dusunce Bildirim",
-        "description": "Hisse en yukseginden %7 dustugunde anlik bildirim",
+    "yuzde_dusus": {
+        "price_tl": Decimal("20.00"),
+        "label": "En Yukseginden %X Dusunce Bildirim",
+        "description": "Kullanicinin sectigi orana gore gun ici en yukseginden dusunce bildirim (gunde 1 kez)",
     },
 }
-COMBO_PRICE = Decimal("45.00")  # Hepsi secilince ~~55~~ 45 TL
-QUARTERLY_PRICE = Decimal("195.00")  # 3 Aylik (istegi 3 bildirim)
-SEMIANNUAL_PRICE = Decimal("295.00")  # Tum Halka Arz 6 Aylik (istegi 3 bildirim)
-ANNUAL_BUNDLE_PRICE = Decimal("395.00")  # Tum Halka Arz Yillik (istegi 3 bildirim)
+COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
+QUARTERLY_PRICE = Decimal("90.00")  # 3 Aylik
+SEMIANNUAL_PRICE = Decimal("145.00")  # 6 Aylik
+ANNUAL_BUNDLE_PRICE = Decimal("245.00")  # Yillik
 
 # YENİ: Haber abonelik fiyatlari
 NEWS_TIER_PRICES = {
@@ -222,18 +218,17 @@ class CeilingTrackSubscription(Base):
 class StockNotificationSubscription(Base):
     """Hisse bazli bildirim aboneligi — 25 gun takip.
 
-    Her halka arz hissesi icin 5 bildirim tipi ayri ayri satin alinabilir:
-      - tavan_bozulma:         10 TL (tavan acilinca / kitlenince bildirimi)
+    4 bildirim tipi (hisse basina, 25 gun):
+      - tavan_bozulma:         15 TL (tavan acilinca / kitlenince bildirimi)
       - taban_acilma:          10 TL (taban acilinca bildirim)
       - gunluk_acilis_kapanis:  5 TL (gunluk acilis ve kapanis bilgisi)
-      - yuzde4_dusus:          15 TL (en yukseginden %4 dusunce bildirim)
-      - yuzde7_dusus:          15 TL (en yukseginden %7 dusunce bildirim)
-      - Hepsi secilince:  ~~55~~ 45 TL
+      - yuzde_dusus:           20 TL (kullanicinin sectigi %X dusunce bildirim)
+      - Hepsi secilince:  ~~50~~ 44 TL (%11 indirim)
 
-    Paketler:
-      - 3 Aylik:               195 TL (istegi 3 bildirim)
-      - Tum Halka Arz 6 Aylik: 295 TL (istegi 3 bildirim)
-      - Tum Halka Arz Yillik:  395 TL (istegi 3 bildirim)
+    Paketler (Tum Halka Arz Canli Anlik Paketi):
+      - 3 Aylik:                90 TL
+      - 6 Aylik:               145 TL
+      - Yillik:                245 TL
     """
 
     __tablename__ = "stock_notification_subscriptions"
@@ -249,11 +244,17 @@ class StockNotificationSubscription(Base):
     # Bildirim tipi
     notification_type: Mapped[str] = mapped_column(
         String(30), nullable=False,
-        comment="tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde4_dusus, yuzde7_dusus"
+        comment="tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde_dusus"
     )
     is_annual_bundle: Mapped[bool] = mapped_column(
         Boolean, default=False,
         comment="Paket mi? (quarterly/semiannual/annual)"
+    )
+
+    # Yuzde dusus icin kullanicinin sectigi oran (%1-%9)
+    custom_percentage: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        comment="Yuzde dusus icin kullanicinin sectigi oran (1-9)"
     )
 
     # Odeme

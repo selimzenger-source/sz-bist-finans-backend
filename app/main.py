@@ -524,6 +524,14 @@ async def create_stock_notification(
             detail=f"Gecersiz bildirim tipi: {data.notification_type}"
         )
 
+    # yuzde_dusus icin custom_percentage zorunlu (1-9)
+    if data.notification_type == "yuzde_dusus":
+        if not data.custom_percentage or data.custom_percentage < 1 or data.custom_percentage > 9:
+            raise HTTPException(
+                status_code=400,
+                detail="yuzde_dusus icin custom_percentage 1-9 arasi olmali"
+            )
+
     if not data.ipo_id:
         raise HTTPException(status_code=400, detail="Tek hisse bildirimi icin ipo_id zorunlu")
 
@@ -555,6 +563,7 @@ async def create_stock_notification(
         ipo_id=data.ipo_id,
         notification_type=data.notification_type,
         is_annual_bundle=False,
+        custom_percentage=data.custom_percentage if data.notification_type == "yuzde_dusus" else None,
         price_paid_tl=tier_info["price_tl"],
         is_active=True,
     )
@@ -933,13 +942,14 @@ async def send_realtime_notification(
     """
     Gercek zamanli bildirim gonder — halka_arz_sync.py'den cagirilir.
 
-    5 bildirim tipi:
+    4 bildirim tipi:
       - tavan_bozulma:          Tavan acilinca/kitlenince
       - taban_acilma:           Taban acilinca/kitlenince
       - gunluk_acilis_kapanis:  Gunluk acilis (09:56) ve kapanis (18:08)
-      - yuzde4_dusus:           En yukseginden %4 dusus
-      - yuzde7_dusus:           En yukseginden %7 dusus
+      - yuzde_dusus:            Kullanicinin sectigi %X dusus (current_price + day_high gerekli)
 
+    yuzde_dusus icin: sync script current_price + day_high gonderir,
+    backend her abonenin custom_percentage'ina gore karar verir.
     Bildirim mesajlarinda fiyat bilgisi YOKTUR.
     """
     import os
@@ -952,13 +962,21 @@ async def send_realtime_notification(
 
     valid_types = [
         "tavan_bozulma", "taban_acilma",
-        "gunluk_acilis_kapanis", "yuzde4_dusus", "yuzde7_dusus",
+        "gunluk_acilis_kapanis", "yuzde_dusus",
     ]
     if data.notification_type not in valid_types:
         raise HTTPException(
             status_code=400,
             detail=f"Gecersiz notification_type: {data.notification_type}. Gecerli: {valid_types}",
         )
+
+    # yuzde_dusus icin fiyat bilgisi zorunlu
+    if data.notification_type == "yuzde_dusus":
+        if not data.current_price or not data.day_high or data.day_high <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="yuzde_dusus icin current_price ve day_high zorunlu",
+            )
 
     # IPO bul
     ipo_service = IPOService(db)
@@ -978,11 +996,8 @@ async def send_realtime_notification(
                         StockNotificationSubscription.ipo_id == ipo.id,
                         StockNotificationSubscription.notification_type == data.notification_type,
                     ),
-                    # Yillik paket (tum halka arzlar icin)
-                    and_(
-                        StockNotificationSubscription.is_annual_bundle == True,
-                        StockNotificationSubscription.notification_type == data.notification_type,
-                    ),
+                    # Paket aboneleri (tum halka arzlar icin)
+                    StockNotificationSubscription.is_annual_bundle == True,
                 ),
                 StockNotificationSubscription.is_active == True,
                 StockNotificationSubscription.muted == False,
@@ -995,6 +1010,24 @@ async def send_realtime_notification(
     errors = 0
 
     for sub in active_subs:
+        # yuzde_dusus icin: her abonenin custom_percentage'ina gore kontrol et
+        if data.notification_type == "yuzde_dusus":
+            custom_pct = sub.custom_percentage or 4  # default %4
+            drop_pct = ((data.day_high - data.current_price) / data.day_high) * 100
+            if drop_pct < custom_pct:
+                continue  # Bu abone icin esik asılmadi, bildirim gonderme
+
+            # Mesaji abonenin oranina gore olustur (fiyat bilgisi yok)
+            notif_title = f"{data.ticker} Dusus Bildirimi"
+            notif_body = f"{data.ticker} en yukseginden %{custom_pct} dustu!"
+        else:
+            # Paket aboneleri icin: sadece matching notification_type
+            if sub.is_annual_bundle and sub.notification_type != "all":
+                # Paket aboneleri "all" tipinde kayıtlı, her bildirim tipini alır
+                pass
+            notif_title = data.title
+            notif_body = data.body
+
         user_result = await db.execute(
             select(User).where(User.id == sub.user_id)
         )
@@ -1005,8 +1038,8 @@ async def send_realtime_notification(
         try:
             await notif_service.send_to_device(
                 token=user.fcm_token,
-                title=data.title,
-                body=data.body,
+                title=notif_title,
+                body=notif_body,
                 data={
                     "type": "stock_notification",
                     "notification_type": data.notification_type,
@@ -1322,8 +1355,10 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
         "bist_finans_notif_tavan": "tavan_bozulma",
         "bist_finans_notif_taban": "taban_acilma",
         "bist_finans_notif_acilis": "gunluk_acilis_kapanis",
-        "bist_finans_notif_yuzde4": "yuzde4_dusus",
-        "bist_finans_notif_yuzde7": "yuzde7_dusus",
+        "bist_finans_notif_yuzde_dusus": "yuzde_dusus",
+        # Eski urunler (geriye donuk uyumluluk)
+        "bist_finans_notif_yuzde4": "yuzde_dusus",
+        "bist_finans_notif_yuzde7": "yuzde_dusus",
         "bist_finans_notif_combo": "combo",
         "bist_finans_notif_quarterly": "quarterly",
         "bist_finans_notif_semiannual": "semiannual",
