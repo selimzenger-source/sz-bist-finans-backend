@@ -231,7 +231,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(30)
     )
-    trading = list(trading_result.scalars().all())
+    trading = list(trading_result.scalars().unique().all())
 
     # Arsiv sayisi
     archived_count_result = await db.execute(
