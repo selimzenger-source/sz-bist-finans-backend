@@ -168,12 +168,11 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     """
     from sqlalchemy import func as sa_func
 
-    # 1. SPK Onayi Beklenen — spk_applications tablosu
+    # 1. SPK Onayi Beklenen — spk_applications tablosu (tum basvurular)
     spk_result = await db.execute(
         select(SPKApplication)
         .where(SPKApplication.status == "pending")
-        .order_by(SPKApplication.created_at.desc())
-        .limit(50)
+        .order_by(SPKApplication.application_date.asc())
     )
     spk_pending = list(spk_result.scalars().all())
 
