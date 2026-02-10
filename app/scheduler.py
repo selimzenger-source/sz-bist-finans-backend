@@ -1,7 +1,7 @@
 """APScheduler — periyodik scraping gorevleri.
 
-1. KAP Halka Arz: her 30 dakikada bir
-2. KAP Haberler: her 30 saniyede bir
+1. SPK Halka Arz (eski KAP): her 30 dakikada bir — SPK ihrac API
+2. KAP Haberler: DEVRE DISI (KAP API bozuk, 404)
 3. SPK Bulten Monitor: her 5 dk (20:00-05:00 arasi)
 4. SPK Basvuru Listesi: gunluk 08:00 (SPKApplication tablosuna)
 5. HalkArz + Gedik: her 4 saatte bir
@@ -34,29 +34,44 @@ scheduler = AsyncIOScheduler()
 
 
 async def scrape_kap_ipo():
-    """KAP'tan halka arz bildirimlerini tarar."""
-    logger.info("KAP halka arz scraper calisiyor...")
+    """SPK ihrac verileri API'den halka arz bilgilerini ceker.
+
+    Eski KAP API (memberDisclosureQuery) 404 donuyor.
+    Yeni kaynak: https://ws.spk.gov.tr/BorclanmaAraclari/api/IlkHalkaArzVerileri
+    fetch_all_years() ile mevcut yil + onceki yili ceker (yil gecisi korunmasi).
+    """
+    logger.info("SPK halka arz scraper calisiyor...")
     try:
-        from app.scrapers.kap_scraper import KAPScraper
+        from app.scrapers.spk_ihrac_scraper import SPKIhracScraper
         from app.services.ipo_service import IPOService
         from app.services.notification import NotificationService
 
-        scraper = KAPScraper()
+        scraper = SPKIhracScraper()
         try:
-            disclosures = await scraper.fetch_ipo_disclosures()
+            # fetch_all_years() → mevcut yil + onceki yil (yil gecisi korunmasi)
+            all_data = await scraper.fetch_all_years()
+
+            if not all_data:
+                logger.warning("SPK ihrac API: Veri gelmedi")
+                return
 
             async with async_session() as db:
                 ipo_service = IPOService(db)
                 notif_service = NotificationService(db)
 
-                for disclosure in disclosures:
+                for item in all_data:
                     ipo = await ipo_service.create_or_update_ipo({
-                        "company_name": disclosure.get("company_name", ""),
-                        "ticker": disclosure.get("ticker"),
-                        "kap_notification_url": disclosure.get("url"),
-                        "status": "newly_approved",
+                        "company_name": item.get("company_name", ""),
+                        "ticker": item.get("ticker"),
+                        "ipo_price": item.get("ipo_price"),
+                        "trading_start": item.get("trading_start_date"),
+                        "market_segment": item.get("market_segment"),
+                        "lead_broker": item.get("lead_broker"),
+                        "offering_size_tl": item.get("offering_size_tl"),
+                        "status": "trading",
                     })
 
+                    # Yeni eklenen IPO ise bildirim gonder
                     if ipo and ipo.created_at and (
                         datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
                     ).total_seconds() < 60:
@@ -64,90 +79,23 @@ async def scrape_kap_ipo():
 
                 await db.commit()
 
-            logger.info(f"KAP halka arz: {len(disclosures)} bildirim islendi")
+            logger.info(f"SPK halka arz: {len(all_data)} kayit islendi")
         finally:
             await scraper.close()
 
     except Exception as e:
-        logger.error(f"KAP halka arz scraper hatasi: {e}")
+        logger.error(f"SPK halka arz scraper hatasi: {e}")
 
 
 async def scrape_kap_news():
-    """KAP'tan son haberleri tarar, keyword ile filtreler,
-    Telegram kanalina gonderir ve telegram_news tablosuna kaydeder."""
-    try:
-        from app.scrapers.kap_scraper import KAPScraper
-        from app.services.news_service import NewsFilterService
-        from app.services.notification import NotificationService
-        from app.services.telegram_sender import send_and_save_kap_news
-        from app.models.news import KapNews
+    """KAP haber scraper — gecici olarak devre disi.
 
-        scraper = KAPScraper()
-        try:
-            disclosures = await scraper.fetch_latest_disclosures(minutes=2)
-            filter_service = NewsFilterService()
-
-            async with async_session() as db:
-                notif_service = NotificationService(db)
-
-                for disclosure in disclosures:
-                    matched = filter_service.filter_disclosure(disclosure)
-                    if not matched:
-                        continue
-
-                    from sqlalchemy import select
-                    existing = await db.execute(
-                        select(KapNews).where(
-                            KapNews.kap_notification_id == matched["kap_notification_id"]
-                        )
-                    )
-                    if existing.scalar_one_or_none():
-                        continue
-
-                    # 1. KapNews tablosuna kaydet
-                    news = KapNews(
-                        ticker=matched["ticker"],
-                        kap_notification_id=matched["kap_notification_id"],
-                        news_title=matched.get("news_title"),
-                        news_detail=matched.get("news_detail"),
-                        matched_keyword=matched["matched_keyword"],
-                        news_type=matched["news_type"],
-                        sentiment=matched["sentiment"],
-                        raw_text=matched.get("raw_text"),
-                        kap_url=matched.get("kap_url"),
-                    )
-                    db.add(news)
-
-                    # 2. Firebase push notification
-                    await notif_service.notify_kap_news(
-                        ticker=matched["ticker"],
-                        price=None,
-                        kap_id=matched["kap_notification_id"] or "",
-                        matched_keyword=matched["matched_keyword"],
-                        sentiment=matched["sentiment"],
-                        news_type=matched["news_type"],
-                    )
-
-                    # 3. Telegram kanalina gonder + telegram_news tablosuna kaydet
-                    await send_and_save_kap_news(
-                        db=db,
-                        ticker=matched["ticker"],
-                        sentiment=matched["sentiment"],
-                        news_type=matched["news_type"],
-                        matched_keyword=matched["matched_keyword"],
-                        kap_url=matched.get("kap_url"),
-                        kap_id=matched["kap_notification_id"],
-                        news_title=matched.get("news_title"),
-                        raw_text=matched.get("raw_text"),
-                    )
-
-                await db.commit()
-
-        finally:
-            await scraper.close()
-
-    except Exception as e:
-        logger.error(f"KAP haber scraper hatasi: {e}")
+    KAP sitesi Next.js'e gecti, eski API (memberDisclosureQuery) 404 donuyor.
+    Halka arz verileri artik SPK ihrac API'den geliyor (scrape_kap_ipo).
+    KAP haberleri icin yeni bir kaynak bulunana kadar bu job bos calisir.
+    """
+    # KAP API bozuk — gereksiz 404 hatalari log'u kirletmesin
+    return
 
 
 async def scrape_spk():
