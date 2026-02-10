@@ -17,7 +17,7 @@ from typing import Optional
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select, desc, and_, or_
+from sqlalchemy import select, desc, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -954,6 +954,48 @@ async def bulk_ceiling_track(
         "results": results,
         "error_details": errors,
     }
+
+
+@app.delete("/api/v1/admin/ceiling-track/{ticker}/{trading_day}")
+async def delete_ceiling_track(
+    ticker: str,
+    trading_day: int,
+    password: str = Query(..., alias="password"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir ceiling track kaydini siler (admin)."""
+    import os
+    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    if password != admin_pw:
+        raise HTTPException(status_code=403, detail="Gecersiz admin sifresi")
+
+    result = await db.execute(
+        select(IPOCeilingTrack)
+        .join(IPO, IPO.id == IPOCeilingTrack.ipo_id)
+        .where(
+            and_(
+                IPO.ticker == ticker.upper(),
+                IPOCeilingTrack.trading_day == trading_day,
+            )
+        )
+    )
+    track = result.scalar_one_or_none()
+    if not track:
+        raise HTTPException(status_code=404, detail=f"{ticker} gun {trading_day} bulunamadi")
+
+    await db.delete(track)
+
+    # trading_day_count guncelle
+    ipo_result = await db.execute(select(IPO).where(IPO.ticker == ticker.upper()))
+    ipo = ipo_result.scalar_one_or_none()
+    if ipo:
+        count_result = await db.execute(
+            select(func.count(IPOCeilingTrack.id)).where(IPOCeilingTrack.ipo_id == ipo.id)
+        )
+        ipo.trading_day_count = (count_result.scalar() or 0) - 1  # -1 cunku silinen henuz commit olmadi
+
+    await db.commit()
+    return {"status": "ok", "deleted": f"{ticker} gun {trading_day}"}
 
 
 # -------------------------------------------------------
