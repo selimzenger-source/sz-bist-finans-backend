@@ -207,6 +207,16 @@ class IPOCeilingTrack(Base):
     notified_relock: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_floor: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # v2: 4 durum + kümülatif % fark
+    durum: Mapped[str] = mapped_column(
+        String(20), default="aktif",
+        comment="tavan, aktif, satici, taban",
+    )
+    pct_change: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), nullable=True,
+        comment="IPO fiyatina gore kumulatif % fark",
+    )
+
     ipo: Mapped["IPO"] = relationship(back_populates="ceiling_tracks")
 
     __table_args__ = (

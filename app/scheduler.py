@@ -12,6 +12,7 @@
 10. SPK Ihrac Verileri: her 2 saatte bir (islem tarihi tespiti)
 11. InfoYatirim: her 6 saatte bir (yedek veri kaynagi)
 12. Son Gun Uyarisi: her gun 09:00 ve 17:00
+13. Tavan Takip Gun Sonu: her gun 18:20 (UTC 15:20) Pzt-Cuma
 """
 
 import logging
@@ -547,6 +548,64 @@ async def send_last_day_warnings():
         logger.error(f"Son gun uyarisi hatasi: {e}")
 
 
+async def daily_ceiling_update():
+    """Gun sonu tavan takip guncellemesi — 18:20 (UTC 15:20).
+
+    Borsa 18:00'de kapanir, 18:20'de kapanis verileri kesinlesir.
+    Isleme baslayan halka arzlarin gunluk kapanis verilerini
+    Excel/Matriks pipeline'indan alip ipo_ceiling_tracks tablosuna yazar.
+
+    Simdilik placeholder — ileride Matriks API entegrasyonu yapilacak.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+
+        async with async_session() as db:
+            # Isleme baslayan ve henuz arsivlenmemis IPO'lari bul
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status == "trading",
+                        IPO.archived == False,
+                        IPO.ceiling_tracking_active == True,
+                    )
+                )
+            )
+            active_ipos = result.scalars().all()
+
+            if not active_ipos:
+                logger.info("Tavan takip: Aktif islem goren IPO yok")
+                return
+
+            tickers = [ipo.ticker for ipo in active_ipos if ipo.ticker]
+            logger.info(
+                "Tavan takip gun sonu: %d aktif IPO — %s",
+                len(active_ipos),
+                ", ".join(tickers),
+            )
+
+            # TODO: Matriks API / Excel pipeline entegrasyonu
+            # 1. Matriks'ten gunun kapanis verilerini cek (SON, TAVAN, TABAN)
+            # 2. Her IPO icin:
+            #    - close_price = SON
+            #    - hit_ceiling = (SON == TAVAN)
+            #    - hit_floor = (SON == TABAN)
+            #    - trading_day = mevcut trading_day_count + 1
+            #    - trade_date = bugun
+            # 3. update_ceiling_track() ile kaydet (durum + pct_change otomatik)
+            # 4. 25 takvim gunu dolmussa arsivle
+
+            logger.info(
+                "Tavan takip: Matriks entegrasyonu bekliyor — "
+                "simdilik sadece log. %d IPO guncellenmedi.",
+                len(active_ipos),
+            )
+
+    except Exception as e:
+        logger.error("Tavan takip gun sonu hatasi: %s", e)
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -672,6 +731,15 @@ def _setup_scheduler_impl():
         CronTrigger(hour=17, minute=0),
         id="last_day_warning_evening",
         name="Son Gun Uyarisi (Aksam)",
+        replace_existing=True,
+    )
+
+    # 13. Tavan Takip Gun Sonu — her gun 18:20 (UTC 15:20) Pzt-Cuma
+    scheduler.add_job(
+        daily_ceiling_update,
+        CronTrigger(hour=15, minute=20, day_of_week="mon-fri"),
+        id="daily_ceiling_update",
+        name="Tavan Takip Gun Sonu (18:20)",
         replace_existing=True,
     )
 

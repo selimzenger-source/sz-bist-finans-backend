@@ -45,6 +45,9 @@ class IPOCeilingTrackOut(BaseModel):
     floor_hit_at: Optional[datetime] = None
     relocked: bool = False
     relocked_at: Optional[datetime] = None
+    # v2: durum + kumulatif % fark
+    durum: str = "aktif"
+    pct_change: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,6 +82,8 @@ class IPOListOut(BaseModel):
     archived: bool = False
     trading_day_count: int = 0
     high_from_start: Optional[Decimal] = None
+    # v2: trading IPO'lar icin ceiling_tracks (sections endpoint'te eager load)
+    ceiling_tracks: list[IPOCeilingTrackOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 

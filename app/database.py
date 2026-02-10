@@ -4,6 +4,7 @@ Local: SQLite (aiosqlite) — kurulum gerektirmez
 Production: PostgreSQL (asyncpg)
 """
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
@@ -49,6 +50,17 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
-    """Tablo olusturma (gelistirme ortami icin)."""
+    """Tablo olusturma + migration (yeni kolon ekleme)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # v2 migration: durum + pct_change kolonlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS durum VARCHAR(20) DEFAULT 'aktif'")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS pct_change NUMERIC(10,2)")
+            )
+        except Exception:
+            pass  # Zaten varsa hata vermez (IF NOT EXISTS)

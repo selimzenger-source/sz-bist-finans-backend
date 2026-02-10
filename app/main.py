@@ -218,7 +218,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     )
     awaiting_trading = list(awaiting_result.scalars().all())
 
-    # 5. Isleme Baslayanlar — trading status, arsivlenmemis
+    # 5. Isleme Baslayanlar — trading status, arsivlenmemis + ceiling_tracks eager load
     trading_result = await db.execute(
         select(IPO)
         .where(
@@ -227,6 +227,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
+        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(30)
     )

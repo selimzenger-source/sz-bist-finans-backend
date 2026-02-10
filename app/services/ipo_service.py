@@ -275,18 +275,36 @@ class IPOService:
                 track.relocked = True
                 track.relocked_at = datetime.utcnow()
 
+        # Ana IPO kaydini al
+        ipo = await self.get_ipo_by_id(ipo_id)
+
         # Ana IPO kaydini da guncelle
         if not hit_ceiling:
-            ipo = await self.get_ipo_by_id(ipo_id)
             if ipo and not ipo.ceiling_broken:
                 ipo.ceiling_broken = True
                 ipo.ceiling_broken_at = datetime.utcnow()
 
         # Ilk gun kapanis fiyatini kaydet
         if trading_day == 1:
-            ipo = await self.get_ipo_by_id(ipo_id)
             if ipo and not ipo.first_day_close_price:
                 ipo.first_day_close_price = close_price
+
+        # v2: Kumulatif % fark + durum hesapla
+        ipo_price = ipo.ipo_price if ipo else None
+        if ipo_price and close_price and ipo_price > 0:
+            from decimal import Decimal as D
+            track.pct_change = ((close_price - ipo_price) / ipo_price) * 100
+        else:
+            track.pct_change = None
+
+        if hit_ceiling:
+            track.durum = "tavan"
+        elif hit_floor:
+            track.durum = "taban"
+        elif track.pct_change is not None and track.pct_change >= 0:
+            track.durum = "aktif"
+        else:
+            track.durum = "satici"
 
         await self.db.flush()
         return track
