@@ -115,7 +115,7 @@ CEILING_TIER_PRICES = {
 }
 
 # YENİ v2: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
-# 4 bildirim tipi — yuzde4/yuzde7 birlestirildi → yuzde_dusus (kullanici %1-%9 secer)
+# 4 bildirim tipi — yuzde4 ve yuzde7 ayri, kullanici birini secer
 NOTIFICATION_TIER_PRICES = {
     "tavan_bozulma": {
         "price_tl": Decimal("15.00"),
@@ -132,10 +132,15 @@ NOTIFICATION_TIER_PRICES = {
         "label": "Gunluk Acilis Kapanis Bilgisi",
         "description": "Her gun acilis ve kapanis analizini bildirim olarak al",
     },
-    "yuzde_dusus": {
+    "yuzde4_dusus": {
         "price_tl": Decimal("20.00"),
-        "label": "En Yukseginden %X Dusunce Bildirim",
-        "description": "Kullanicinin sectigi orana gore gun ici en yukseginden dusunce bildirim (gunde 1 kez)",
+        "label": "En Yukseginden %4 Dusunce Bildirim",
+        "description": "Hisse en yukseginden %4 dustugunde anlik bildirim (gunde 1 kez)",
+    },
+    "yuzde7_dusus": {
+        "price_tl": Decimal("20.00"),
+        "label": "En Yukseginden %7 Dusunce Bildirim",
+        "description": "Hisse en yukseginden %7 dustugunde anlik bildirim (gunde 1 kez)",
     },
 }
 COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
@@ -222,7 +227,7 @@ class StockNotificationSubscription(Base):
       - tavan_bozulma:         15 TL (tavan acilinca / kitlenince bildirimi)
       - taban_acilma:          10 TL (taban acilinca bildirim)
       - gunluk_acilis_kapanis:  5 TL (gunluk acilis ve kapanis bilgisi)
-      - yuzde_dusus:           20 TL (kullanicinin sectigi %X dusunce bildirim)
+      - yuzde4_dusus VEYA yuzde7_dusus: 20 TL (kullanici birini secer)
       - Hepsi secilince:  ~~50~~ 44 TL (%11 indirim)
 
     Paketler (Tum Halka Arz Canli Anlik Paketi):

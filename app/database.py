@@ -73,25 +73,24 @@ async def init_db():
         except Exception:
             pass
 
-        # v4 migration: custom_percentage kolonu + yuzde4/yuzde7 → yuzde_dusus donusumu
+        # v4 migration: custom_percentage kolonu (gelecek icin saklanir)
         try:
             await conn.execute(
                 text("ALTER TABLE stock_notification_subscriptions ADD COLUMN IF NOT EXISTS custom_percentage INTEGER")
             )
-            # Eski yuzde4_dusus → yuzde_dusus (custom_percentage=4)
+            # yuzde_dusus → yuzde4_dusus geri donusum (eger v4 uygulandiysa)
             await conn.execute(
                 text("""
                     UPDATE stock_notification_subscriptions
-                    SET notification_type = 'yuzde_dusus', custom_percentage = 4
-                    WHERE notification_type = 'yuzde4_dusus'
+                    SET notification_type = 'yuzde4_dusus'
+                    WHERE notification_type = 'yuzde_dusus' AND (custom_percentage = 4 OR custom_percentage IS NULL)
                 """)
             )
-            # Eski yuzde7_dusus → yuzde_dusus (custom_percentage=7)
             await conn.execute(
                 text("""
                     UPDATE stock_notification_subscriptions
-                    SET notification_type = 'yuzde_dusus', custom_percentage = 7
-                    WHERE notification_type = 'yuzde7_dusus'
+                    SET notification_type = 'yuzde7_dusus'
+                    WHERE notification_type = 'yuzde_dusus' AND custom_percentage = 7
                 """)
             )
         except Exception:

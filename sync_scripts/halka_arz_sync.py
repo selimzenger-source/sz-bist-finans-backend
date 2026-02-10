@@ -35,10 +35,13 @@ Excel Formati (Matriks — 9 sutun):
      - 09:56 acilis bildirimi: "AKHAN tavan acti!" / "normal islem ile acildi"
      - 18:08 kapanis bildirimi: "AKHAN tavan kapatti!" / "normal islem ile kapatti"
 
-  4. EN YUKSEGINDEN %X DUSUS (yuzde_dusus)  — 20 TL / 10 TL ilk HA
-     - 10:00-18:08 arasi, kullanicinin sectigi %X oranina gore dusus bildirimi
-     - Sync script fiyat + gun_en_yuksek gonderir, backend her abonenin oranina gore karar verir
-     - Gunde 1 bildirim (backend dedup yapar)
+  4. EN YUKSEGINDEN %4 DUSUS (yuzde4_dusus)  — 20 TL / 10 TL ilk HA
+     - Gun ici en yukseginden %3-4 dustugunde bildirim
+     - Gunde 1 kez
+
+  5. EN YUKSEGINDEN %7 DUSUS (yuzde7_dusus)  — 20 TL / 10 TL ilk HA
+     - Gun ici en yukseginden %6-7 dustugunde bildirim
+     - Gunde 1 kez
 
 ONEMLI: Bildirim mesajlarinda FIYAT BILGISI YOKTUR!
 
@@ -188,9 +191,10 @@ class TrackingState:
     notified_floor_5min: bool = False
     notified_relock_floor: bool = False
 
-    # --- %X dusus takibi (backend her abonenin oranina gore karar verir) ---
+    # --- %4/%7 dusus takibi ---
     day_high: float = 0.0               # Gunun en yuksek fiyati
-    notified_drop_sent: bool = False     # yuzde_dusus bildirimi gonderildi mi? (gunde 1 kez)
+    notified_drop_4pct: bool = False     # %4 dusus bildirimi gonderildi mi? (gunde 1 kez)
+    notified_drop_7pct: bool = False     # %7 dusus bildirimi gonderildi mi? (gunde 1 kez)
 
     # --- Acilis/kapanis ---
     opening_notified: bool = False       # Acilis bildirimi gonderildi mi?
@@ -401,15 +405,10 @@ def send_notification_to_backend(
     notif_type: str,
     title: str,
     body: str,
-    current_price: float = None,
-    day_high: float = None,
 ):
     """
     Backend /api/v1/realtime-notification endpoint'ine bildirim gonder.
     Backend dogru abonelere FCM push gonderir.
-
-    yuzde_dusus icin: current_price + day_high gonderilir,
-    backend her abonenin custom_percentage'ina gore karar verir.
 
     ONEMLI: Mesajlarda FIYAT BILGISI YOKTUR!
     """
@@ -421,11 +420,6 @@ def send_notification_to_backend(
             "title": title,
             "body": body,
         }
-        # yuzde_dusus icin fiyat bilgisi ekle (backend bunu abone bazli kullanir)
-        if current_price is not None:
-            payload["current_price"] = current_price
-        if day_high is not None:
-            payload["day_high"] = day_high
 
         resp = requests.post(API_NOTIF_URL, json=payload, timeout=10)
         if resp.status_code == 200:
@@ -507,21 +501,27 @@ def process_stock(stock: StockState, now: dt.datetime):
         # Dusus yuzdesini hesapla: (en_yuksek - son) / en_yuksek * 100
         drop_pct = ((gun_high - stock.son_fiyat) / gun_high) * 100
 
-        # %1+ dusus varsa backend'e gonder — backend her abonenin custom_percentage'ina gore karar verir
-        # Backend gunde 1 kez bildirim gonderir (notified_count ile track eder)
-        # Sync script her tick gonderir, backend dedup yapar
-        if drop_pct >= 1.0 and not state.notified_drop_sent:
+        # %3-4 dusus → yuzde4_dusus servisine gonder
+        if drop_pct >= 3.0 and not state.notified_drop_4pct:
             send_notification_to_backend(
                 ticker=ticker,
-                notif_type="yuzde_dusus",
-                title=f"{ticker} Dusus Bildirimi",
-                body=f"{ticker} gun ici en yukseginden dustu!",
-                current_price=stock.son_fiyat,
-                day_high=gun_high,
+                notif_type="yuzde4_dusus",
+                title=f"{ticker} En Yukseginden %4 Dustu!",
+                body=f"{ticker} gun ici en yukseginden %4 dustu!",
             )
-            # Sadece loglama — backend karar verir
-            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus dispatch)")
-            state.notified_drop_sent = True  # Bu gun icin 1 kez backend'e sor yeterli
+            state.notified_drop_4pct = True
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde4_dusus)")
+
+        # %6-7 dusus → yuzde7_dusus servisine gonder
+        if drop_pct >= 6.0 and not state.notified_drop_7pct:
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="yuzde7_dusus",
+                title=f"{ticker} En Yukseginden %7 Dustu!",
+                body=f"{ticker} gun ici en yukseginden %7 dustu!",
+            )
+            state.notified_drop_7pct = True
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde7_dusus)")
 
     # =====================
     # TAVAN TAKIBI
@@ -769,9 +769,10 @@ def reset_daily_states():
         state.notified_relock_floor = False
         state.floor_broke_at = None
 
-        # %X dusus sifirla
+        # %4/%7 dusus sifirla
         state.day_high = 0.0
-        state.notified_drop_sent = False
+        state.notified_drop_4pct = False
+        state.notified_drop_7pct = False
 
         # Acilis/kapanis sifirla
         state.opening_notified = False
