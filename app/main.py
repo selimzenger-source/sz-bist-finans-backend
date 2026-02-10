@@ -4,8 +4,8 @@ Servisler:
 1. Halka Arz Takip (ucretsiz)
 2. Tavan/Taban Takip — hisse bazli ucretli paketler (5/10/15/20 gun)
 3. Hisse Bazli Bildirim Aboneligi — 4 tip (tavan_bozulma/taban_acilma/gunluk_acilis_kapanis/yuzde_dusus)
-   + Kombo (44 TL) + 3 Aylik (90 TL) + 6 Aylik (145 TL) + Yillik (245 TL)
-4. Yapay Zeka Haber Takibi — Telegram kanal entegrasyonu (bist100/yildiz/ana_yildiz)
+   + Kombo (44 TL) + 3 Aylik (90 TL) + Yillik (245 TL)
+4. Yapay Zeka Haber Takibi — Telegram kanal entegrasyonu (yildiz/ana_yildiz)
 5. KAP Haber Bildirimleri
 """
 
@@ -30,7 +30,7 @@ from app.models import (
     CeilingTrackSubscription, CEILING_TIER_PRICES,
     TelegramNews, StockNotificationSubscription,
     NOTIFICATION_TIER_PRICES, NEWS_TIER_PRICES,
-    COMBO_PRICE, QUARTERLY_PRICE, SEMIANNUAL_PRICE,
+    COMBO_PRICE, QUARTERLY_PRICE,
     ANNUAL_BUNDLE_PRICE, COMBINED_ANNUAL_DISCOUNT_PCT,
     Dividend, DividendHistory,
 )
@@ -363,7 +363,7 @@ async def list_telegram_news(
                     and_(
                         UserSubscription.user_id == user.id,
                         UserSubscription.is_active == True,
-                        UserSubscription.package.in_(["bist100", "yildiz_pazar", "ana_yildiz"]),
+                        UserSubscription.package.in_(["yildiz_pazar", "ana_yildiz"]),
                     )
                 )
             )
@@ -935,8 +935,8 @@ async def update_ceiling_track(
         if track.relocked and not track.notified_relock:
             await notif_service.send_to_device(
                 token=user.fcm_token,
-                title=f"{data.ticker} Tekrar Tavana Kitlendi!",
-                body=f"{data.ticker} {data.trading_day}. islem gunu tekrar tavana kitlendi.",
+                title=f"{data.ticker} TAVANA KİTLEDİ",
+                body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
                 data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
             )
             notifications_sent += 1
@@ -1345,15 +1345,15 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
 
     # Haber abonelikleri
     news_package_map = {
-        "bist_finans_bist100_monthly": "bist100",
-        "bist_finans_bist100_annual": "bist100",
         "bist_finans_yildiz_monthly": "yildiz_pazar",
         "bist_finans_yildiz_annual": "yildiz_pazar",
         "bist_finans_ana_yildiz_monthly": "ana_yildiz",
         "bist_finans_ana_yildiz_annual": "ana_yildiz",
-        # Eski paketler
-        "bist_finans_bist30_monthly": "bist100",
-        "bist_finans_bist50_monthly": "bist100",
+        # Eski paketler (geriye donuk uyumluluk)
+        "bist_finans_bist100_monthly": "yildiz_pazar",
+        "bist_finans_bist100_annual": "yildiz_pazar",
+        "bist_finans_bist30_monthly": "yildiz_pazar",
+        "bist_finans_bist50_monthly": "yildiz_pazar",
         "bist_finans_all_monthly": "ana_yildiz",
     }
 
@@ -1367,7 +1367,7 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
         "bist_finans_notif_yuzde7": "yuzde_dusus",
         "bist_finans_notif_combo": "combo",
         "bist_finans_notif_quarterly": "quarterly",
-        "bist_finans_notif_semiannual": "semiannual",
+        "bist_finans_notif_semiannual": "quarterly",  # Eski 6 aylik → quarterly olarak isle
         "bist_finans_notif_annual": "all",
     }
 
@@ -1406,8 +1406,8 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
             notif_type = notif_package_map[product_id]
             is_bundle = product_id in (
                 "bist_finans_notif_annual",
-                "bist_finans_notif_semiannual",
                 "bist_finans_notif_quarterly",
+                "bist_finans_notif_semiannual",  # Eski, geriye donuk uyumluluk
             )
 
             ipo_id = event.get("metadata", {}).get("ipo_id")
@@ -1415,7 +1415,6 @@ async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
             # Fiyat belirleme
             bundle_prices = {
                 "bist_finans_notif_annual": ANNUAL_BUNDLE_PRICE,
-                "bist_finans_notif_semiannual": SEMIANNUAL_PRICE,
                 "bist_finans_notif_quarterly": QUARTERLY_PRICE,
                 "bist_finans_notif_combo": COMBO_PRICE,
             }

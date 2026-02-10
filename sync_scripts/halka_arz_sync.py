@@ -23,13 +23,13 @@ Excel Formati (Matriks — 9 sutun):
      - Tavana kitlendi → bildirim
      - Tavan cozuldu → bildirim
      - 5dk gecti kilitleyemedi → bildirim
-     - Tekrar tavana kitlendi → bildirim
+     - Tavana kitledi (tekrar) → ayni mesaj
 
   2. TABAN ACILINCA (taban_acilma)  — 10 TL / 5 TL ilk HA
      - Tabana kitlendi → bildirim
      - Taban cozuldu → bildirim
      - 5dk gecti kilitleyemedi → bildirim
-     - Tekrar tabana kitlendi → bildirim
+     - Tabana kitlendi (tekrar) → ayni mesaj
 
   3. GUNLUK ACILIS / KAPANIS (gunluk_acilis_kapanis)  — 5 TL / 3 TL ilk HA
      - 09:56 acilis bildirimi: "AKHAN tavan acti!" / "normal islem ile acildi"
@@ -582,15 +582,15 @@ def process_stock(stock: StockState, now: dt.datetime):
         send_notification_to_backend(
             ticker=ticker,
             notif_type="tavan_bozulma",
-            title=f"{ticker} Tekrar Tavana Kitlendi!",
-            body=f"{ticker} tekrar tavana kitlendi!",
+            title=f"{ticker} TAVANA KİTLEDİ",
+            body=f"{ticker} tavana kitledi!",
         )
         send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
         state.notified_relock_ceiling = True
         state.ceiling_broke_at = None
         state.notified_ceiling_break = False
         state.notified_ceiling_5min = False
-        log(f"  >>> {ticker} TEKRAR TAVANA KITLENDI! ({int(relock_seconds)}sn sonra)")
+        log(f"  >>> {ticker} TAVANA KİTLEDİ! ({int(relock_seconds)}sn sonra)")
 
     # =====================
     # TABAN TAKIBI
@@ -646,15 +646,15 @@ def process_stock(stock: StockState, now: dt.datetime):
         send_notification_to_backend(
             ticker=ticker,
             notif_type="taban_acilma",
-            title=f"{ticker} Tekrar Tabana Kitlendi!",
-            body=f"{ticker} tekrar tabana kitlendi!",
+            title=f"{ticker} TABANA KİTLENDİ",
+            body=f"{ticker} tabana kitlendi!",
         )
         send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
         state.notified_relock_floor = True
         state.floor_broke_at = None
         state.notified_floor_break = False
         state.notified_floor_5min = False
-        log(f"  >>> {ticker} TEKRAR TABANA KITLENDI! ({int(relock_seconds)}sn sonra)")
+        log(f"  >>> {ticker} TABANA KİTLENDİ! ({int(relock_seconds)}sn sonra)")
 
     # Mevcut durumu kaydet (bir sonraki tick icin)
     state.was_ceiling_locked = stock.is_ceiling_locked

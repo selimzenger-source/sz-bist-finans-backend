@@ -52,7 +52,7 @@ class User(Base):
 class UserSubscription(Base):
     """Kullanici abonelik bilgisi — RevenueCat ile senkronize.
 
-    Bu KAP haber aboneligi icin (bist30/50/100/all paketleri).
+    Bu KAP haber aboneligi icin (yildiz_pazar / ana_yildiz paketleri).
     """
 
     __tablename__ = "user_subscriptions"
@@ -140,27 +140,20 @@ NOTIFICATION_TIER_PRICES = {
 }
 COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
 QUARTERLY_PRICE = Decimal("90.00")  # 3 Aylik
-SEMIANNUAL_PRICE = Decimal("145.00")  # 6 Aylik
 ANNUAL_BUNDLE_PRICE = Decimal("245.00")  # Yillik
 
 # YENİ: Haber abonelik fiyatlari
 NEWS_TIER_PRICES = {
-    "bist100": {
+    "yildiz_pazar": {
         "price_tl_monthly": Decimal("45.00"),
         "annual_months": 10,
-        "label": "BIST 100 Hisseleri",
-        "description": "BIST 100 endeksindeki tum hisselerin haber takibi",
-    },
-    "yildiz_pazar": {
-        "price_tl_monthly": Decimal("65.00"),
-        "annual_months": 9,
         "label": "BIST Yildiz Pazar Hisseleri",
         "description": "Yildiz Pazar'daki tum hisselerin haber takibi",
     },
     "ana_yildiz": {
-        "price_tl_monthly": Decimal("95.00"),
+        "price_tl_monthly": Decimal("65.00"),
         "annual_months": 8,
-        "label": "Ana Pazar + Yildiz Pazar Hisseleri",
+        "label": "Ana Pazar + Yildiz Pazar Hisseleri (~350 hisse)",
         "description": "Ana ve Yildiz Pazar'daki tum hisselerin haber takibi",
     },
 }
@@ -227,7 +220,6 @@ class StockNotificationSubscription(Base):
 
     Paketler (Tum Halka Arz Canli Anlik Paketi):
       - 3 Aylik:                90 TL
-      - 6 Aylik:               145 TL
       - Yillik:                245 TL
     """
 

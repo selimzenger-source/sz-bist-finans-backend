@@ -5,7 +5,7 @@ from app.models.user import (
     User, UserSubscription, UserIPOAlert,
     CeilingTrackSubscription, CEILING_TIER_PRICES,
     StockNotificationSubscription, NOTIFICATION_TIER_PRICES,
-    NEWS_TIER_PRICES, COMBO_PRICE, QUARTERLY_PRICE, SEMIANNUAL_PRICE,
+    NEWS_TIER_PRICES, COMBO_PRICE, QUARTERLY_PRICE,
     ANNUAL_BUNDLE_PRICE, COMBINED_ANNUAL_DISCOUNT_PCT,
 )
 from app.models.dividend import Dividend, DividendHistory
@@ -19,7 +19,7 @@ __all__ = [
     "User", "UserSubscription", "UserIPOAlert",
     "CeilingTrackSubscription", "CEILING_TIER_PRICES",
     "StockNotificationSubscription", "NOTIFICATION_TIER_PRICES",
-    "NEWS_TIER_PRICES", "COMBO_PRICE", "QUARTERLY_PRICE", "SEMIANNUAL_PRICE",
+    "NEWS_TIER_PRICES", "COMBO_PRICE", "QUARTERLY_PRICE",
     "ANNUAL_BUNDLE_PRICE", "COMBINED_ANNUAL_DISCOUNT_PCT",
     "Dividend", "DividendHistory",
     "TelegramNews",
