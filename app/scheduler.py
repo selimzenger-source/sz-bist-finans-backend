@@ -73,11 +73,13 @@ async def scrape_kap_ipo():
 
 
 async def scrape_kap_news():
-    """KAP'tan son haberleri tarar ve keyword ile filtreler."""
+    """KAP'tan son haberleri tarar, keyword ile filtreler,
+    Telegram kanalina gonderir ve telegram_news tablosuna kaydeder."""
     try:
         from app.scrapers.kap_scraper import KAPScraper
         from app.services.news_service import NewsFilterService
         from app.services.notification import NotificationService
+        from app.services.telegram_sender import send_and_save_kap_news
         from app.models.news import KapNews
 
         scraper = KAPScraper()
@@ -102,6 +104,7 @@ async def scrape_kap_news():
                     if existing.scalar_one_or_none():
                         continue
 
+                    # 1. KapNews tablosuna kaydet
                     news = KapNews(
                         ticker=matched["ticker"],
                         kap_notification_id=matched["kap_notification_id"],
@@ -115,6 +118,7 @@ async def scrape_kap_news():
                     )
                     db.add(news)
 
+                    # 2. Firebase push notification
                     await notif_service.notify_kap_news(
                         ticker=matched["ticker"],
                         price=None,
@@ -122,6 +126,19 @@ async def scrape_kap_news():
                         matched_keyword=matched["matched_keyword"],
                         sentiment=matched["sentiment"],
                         news_type=matched["news_type"],
+                    )
+
+                    # 3. Telegram kanalina gonder + telegram_news tablosuna kaydet
+                    await send_and_save_kap_news(
+                        db=db,
+                        ticker=matched["ticker"],
+                        sentiment=matched["sentiment"],
+                        news_type=matched["news_type"],
+                        matched_keyword=matched["matched_keyword"],
+                        kap_url=matched.get("kap_url"),
+                        kap_id=matched["kap_notification_id"],
+                        news_title=matched.get("news_title"),
+                        raw_text=matched.get("raw_text"),
                     )
 
                 await db.commit()

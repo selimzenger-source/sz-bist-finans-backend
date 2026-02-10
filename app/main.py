@@ -398,6 +398,41 @@ async def list_telegram_news(
 
 
 # -------------------------------------------------------
+# TELEGRAM DEBUG / TEST ENDPOINT
+# -------------------------------------------------------
+
+@app.post("/api/v1/telegram-news/test-send")
+async def test_send_telegram_news(
+    ticker: str = Query("TEST", description="Hisse kodu"),
+    sentiment: str = Query("positive", description="positive veya negative"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Test icin Telegram kanalina mesaj gonder + DB'ye kaydet.
+
+    Sadece development/test icin. Production'da kapatilabilir.
+    """
+    from app.services.telegram_sender import send_and_save_kap_news
+
+    success = await send_and_save_kap_news(
+        db=db,
+        ticker=ticker.upper(),
+        sentiment=sentiment,
+        news_type="seans_ici",
+        matched_keyword="test - pipeline dogrulama",
+        kap_url=None,
+        kap_id=str(int(datetime.utcnow().timestamp())),
+        news_title=f"{ticker.upper()} Test Haberi",
+        raw_text=f"Bu bir test mesajidir. Sembol: {ticker.upper()}",
+    )
+    await db.commit()
+
+    return {
+        "success": success,
+        "message": f"Telegram + DB kaydedildi: {ticker.upper()}" if success else "Hata olustu",
+    }
+
+
+# -------------------------------------------------------
 # KAP HABER ENDPOINTS
 # -------------------------------------------------------
 
