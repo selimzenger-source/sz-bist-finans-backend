@@ -847,6 +847,114 @@ async def update_ceiling_track(
     }
 
 
+@app.post("/api/v1/admin/bulk-ceiling-track")
+async def bulk_ceiling_track(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Toplu tavan/taban verisi yukler.
+    Excel/CSV yerine JSON bulk — admin sifresiyle korunur.
+
+    Body:
+    {
+      "admin_password": "...",
+      "tracks": [
+        {
+          "ticker": "AKHAN",
+          "trading_day": 1,
+          "trade_date": "2026-02-03",
+          "open_price": "23.65",
+          "close_price": "23.65",
+          "high_price": "23.65",
+          "low_price": "21.50",
+          "hit_ceiling": true,
+          "hit_floor": false
+        },
+        ...
+      ]
+    }
+    """
+    import os
+    from decimal import Decimal as D
+    from datetime import date as date_type
+
+    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    if payload.get("admin_password") != admin_pw:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    tracks_raw = payload.get("tracks", [])
+    if not tracks_raw:
+        raise HTTPException(status_code=400, detail="tracks listesi bos")
+
+    from app.services.ipo_service import IPOService
+    ipo_service = IPOService(db)
+
+    results = []
+    errors = []
+
+    for idx, t in enumerate(tracks_raw):
+        try:
+            ticker = t["ticker"]
+            ipo = await ipo_service.get_ipo_by_ticker(ticker)
+            if not ipo:
+                errors.append({"index": idx, "ticker": ticker, "error": "IPO bulunamadi"})
+                continue
+
+            trading_day = int(t["trading_day"])
+            trade_date = t["trade_date"]
+            if isinstance(trade_date, str):
+                parts = trade_date.split("-")
+                trade_date = date_type(int(parts[0]), int(parts[1]), int(parts[2]))
+
+            open_price = D(str(t["open_price"])) if t.get("open_price") else None
+            close_price = D(str(t["close_price"]))
+            high_price = D(str(t["high_price"])) if t.get("high_price") else None
+            low_price = D(str(t["low_price"])) if t.get("low_price") else None
+            hit_ceiling = bool(t.get("hit_ceiling", False))
+            hit_floor = bool(t.get("hit_floor", False))
+
+            track = await ipo_service.update_ceiling_track(
+                ipo_id=ipo.id,
+                trading_day=trading_day,
+                trade_date=trade_date,
+                open_price=open_price,
+                close_price=close_price,
+                high_price=high_price,
+                low_price=low_price,
+                hit_ceiling=hit_ceiling,
+                hit_floor=hit_floor,
+            )
+
+            # trading_day_count guncelle
+            if trading_day > (ipo.trading_day_count or 0):
+                ipo.trading_day_count = trading_day
+
+            # ceiling_tracking_active
+            if not ipo.ceiling_tracking_active:
+                ipo.ceiling_tracking_active = True
+
+            results.append({
+                "ticker": ticker,
+                "trading_day": trading_day,
+                "close_price": str(close_price),
+                "hit_ceiling": hit_ceiling,
+                "hit_floor": hit_floor,
+            })
+        except Exception as e:
+            errors.append({"index": idx, "ticker": t.get("ticker", "?"), "error": str(e)})
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "loaded": len(results),
+        "errors": len(errors),
+        "results": results,
+        "error_details": errors,
+    }
+
+
 # -------------------------------------------------------
 # TAVAN TAKIP PAKETLERI
 # -------------------------------------------------------
