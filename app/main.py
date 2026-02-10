@@ -1786,3 +1786,228 @@ async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
         }
         for u in users
     ]
+
+
+# -------------------------------------------------------
+# Admin: Eksik IPO verilerini InfoYatirim'dan doldur
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/fill-missing-ipo-data")
+async def admin_fill_missing_ipo_data(payload: dict, db: AsyncSession = Depends(get_db)):
+    """InfoYatirim scraper'i calistirarak eksik IPO verilerini doldurur.
+
+    total_lots, subscription_start/end, total_applicants, trading_start
+    alanlari NULL olan IPO'lari InfoYatirim'dan gelen veriyle eslestirir.
+    """
+    settings = get_settings()
+    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.scrapers.infoyatirim_scraper import InfoYatirimScraper
+    from app.services.ipo_service import IPOService
+
+    # 1. InfoYatirim'dan tum halka arz verilerini cek
+    scraper = InfoYatirimScraper()
+    try:
+        scraped_ipos = await scraper.fetch_all_ipos(max_pages=5)
+    finally:
+        await scraper.close()
+
+    if not scraped_ipos:
+        return {"success": False, "message": "InfoYatirim'dan veri cekilemedi", "updated": 0}
+
+    # 2. Ticker bazli lookup dict olustur
+    scraped_by_ticker = {}
+    for s in scraped_ipos:
+        t = s.get("ticker")
+        if t:
+            scraped_by_ticker[t.upper()] = s
+
+    # 3. DB'den tum IPO'lari al
+    result = await db.execute(select(IPO).order_by(IPO.id))
+    all_ipos = result.scalars().all()
+
+    updated_list = []
+    ipo_service = IPOService(db)
+
+    for ipo in all_ipos:
+        if not ipo.ticker:
+            continue
+
+        scraped = scraped_by_ticker.get(ipo.ticker.upper())
+        if not scraped:
+            continue
+
+        changes = {}
+
+        # Eksik alanlari doldur
+        if ipo.total_lots is None and scraped.get("total_lots"):
+            changes["total_lots"] = scraped["total_lots"]
+
+        if ipo.subscription_start is None and scraped.get("subscription_start"):
+            changes["subscription_start"] = scraped["subscription_start"]
+
+        if ipo.subscription_end is None and scraped.get("subscription_end"):
+            changes["subscription_end"] = scraped["subscription_end"]
+
+        if ipo.total_applicants is None and scraped.get("total_applicants"):
+            changes["total_applicants"] = scraped["total_applicants"]
+
+        if ipo.trading_start is None and scraped.get("trading_start"):
+            changes["trading_start"] = scraped["trading_start"]
+
+        if ipo.distribution_method is None and scraped.get("distribution_method"):
+            changes["distribution_method"] = scraped["distribution_method"]
+
+        if ipo.distribution_description is None and scraped.get("distribution_description"):
+            changes["distribution_description"] = scraped["distribution_description"]
+
+        if ipo.participation_method is None and scraped.get("participation_method"):
+            changes["participation_method"] = scraped["participation_method"]
+
+        if ipo.participation_description is None and scraped.get("participation_description"):
+            changes["participation_description"] = scraped["participation_description"]
+
+        if changes:
+            for key, value in changes.items():
+                setattr(ipo, key, value)
+            updated_list.append({
+                "ticker": ipo.ticker,
+                "fields_updated": list(changes.keys()),
+            })
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "scraped_count": len(scraped_ipos),
+        "updated_count": len(updated_list),
+        "updated": updated_list,
+    }
+
+
+# -------------------------------------------------------
+# Admin: Gunluk kapanis fiyatlarini Yahoo Finance'den cek
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/fill-ceiling-data")
+async def admin_fill_ceiling_data(payload: dict, db: AsyncSession = Depends(get_db)):
+    """Yahoo Finance'den gunluk OHLC verisini cekerek ipo_ceiling_tracks tablosunu doldurur.
+
+    status='trading' olan ve ceiling track verisi eksik olan tum IPO'lar icin:
+    - trading_start tarihinden itibaren gunluk OHLC verisi cekilir
+    - Tavan/taban tespiti yapilir
+    - ipo_ceiling_tracks tablosuna yazilir
+    - trading_day_count guncellenir
+    """
+    settings = get_settings()
+    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper, detect_ceiling_floor
+    from app.services.ipo_service import IPOService
+
+    # Hangi IPO'lari guncelleyecegimizi bul
+    # status='trading' ve trading_start dolmus olan IPO'lar
+    result = await db.execute(
+        select(IPO).where(
+            and_(
+                IPO.status == "trading",
+                IPO.trading_start.isnot(None),
+            )
+        ).order_by(IPO.trading_start.desc())
+    )
+    trading_ipos = result.scalars().all()
+
+    if not trading_ipos:
+        return {"success": True, "message": "Guncellenecek IPO bulunamadi", "results": []}
+
+    scraper = YahooFinanceScraper()
+    ipo_service = IPOService(db)
+    results_list = []
+
+    try:
+        for ipo in trading_ipos:
+            if not ipo.ticker or not ipo.trading_start:
+                continue
+
+            # Yahoo Finance'den OHLC verisi cek
+            days_data = await scraper.fetch_ohlc_since_trading_start(
+                ticker=ipo.ticker,
+                trading_start=ipo.trading_start,
+                max_days=25,
+            )
+
+            if not days_data:
+                results_list.append({
+                    "ticker": ipo.ticker,
+                    "status": "no_data",
+                    "days_found": 0,
+                })
+                continue
+
+            # Her gun icin ceiling track kaydi olustur/guncelle
+            days_written = 0
+            prev_close = None
+
+            # Eger IPO fiyati varsa, ilk gun icin referans olarak kullan
+            if ipo.ipo_price:
+                prev_close = ipo.ipo_price
+
+            for day in days_data:
+                # Tavan/taban tespit et
+                detection = detect_ceiling_floor(
+                    close_price=day["close"],
+                    prev_close=prev_close,
+                    high_price=day.get("high"),
+                    low_price=day.get("low"),
+                )
+
+                # Ceiling track kaydi olustur
+                track = await ipo_service.update_ceiling_track(
+                    ipo_id=ipo.id,
+                    trading_day=day["trading_day"],
+                    trade_date=day["date"],
+                    close_price=day["close"],
+                    hit_ceiling=detection["hit_ceiling"],
+                    open_price=day.get("open"),
+                    high_price=day.get("high"),
+                    low_price=day.get("low"),
+                    hit_floor=detection["hit_floor"],
+                )
+
+                # Durum ve pct_change ayarla
+                if track:
+                    track.durum = detection["durum"]
+                    track.pct_change = detection["pct_change"]
+
+                prev_close = day["close"]
+                days_written += 1
+
+            # trading_day_count guncelle
+            ipo.trading_day_count = len(days_data)
+
+            # first_day_close_price guncelle
+            if days_data and not ipo.first_day_close_price:
+                ipo.first_day_close_price = days_data[0]["close"]
+
+            results_list.append({
+                "ticker": ipo.ticker,
+                "status": "updated",
+                "days_found": len(days_data),
+                "days_written": days_written,
+                "trading_day_count": len(days_data),
+            })
+
+    finally:
+        await scraper.close()
+
+    await db.commit()
+
+    total_updated = sum(1 for r in results_list if r["status"] == "updated")
+    return {
+        "success": True,
+        "ipos_processed": len(results_list),
+        "ipos_updated": total_updated,
+        "results": results_list,
+    }

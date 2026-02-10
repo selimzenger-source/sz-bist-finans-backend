@@ -517,14 +517,14 @@ async def daily_ceiling_update():
     """Gun sonu tavan takip guncellemesi — 18:20 (UTC 15:20).
 
     Borsa 18:00'de kapanir, 18:20'de kapanis verileri kesinlesir.
-    Isleme baslayan halka arzlarin gunluk kapanis verilerini
-    Excel/Matriks pipeline'indan alip ipo_ceiling_tracks tablosuna yazar.
-
-    Simdilik placeholder — ileride Matriks API entegrasyonu yapilacak.
+    Yahoo Finance'den gunluk OHLC verilerini cekip ipo_ceiling_tracks
+    tablosuna yazar.
     """
     try:
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
+        from app.services.ipo_service import IPOService
+        from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper, detect_ceiling_floor
 
         async with async_session() as db:
             # Isleme baslayan ve henuz arsivlenmemis IPO'lari bul
@@ -533,7 +533,7 @@ async def daily_ceiling_update():
                     and_(
                         IPO.status == "trading",
                         IPO.archived == False,
-                        IPO.ceiling_tracking_active == True,
+                        IPO.trading_start.isnot(None),
                     )
                 )
             )
@@ -550,22 +550,70 @@ async def daily_ceiling_update():
                 ", ".join(tickers),
             )
 
-            # TODO: Matriks API / Excel pipeline entegrasyonu
-            # 1. Matriks'ten gunun kapanis verilerini cek (SON, TAVAN, TABAN)
-            # 2. Her IPO icin:
-            #    - close_price = SON
-            #    - hit_ceiling = (SON == TAVAN)
-            #    - hit_floor = (SON == TABAN)
-            #    - trading_day = mevcut trading_day_count + 1
-            #    - trade_date = bugun
-            # 3. update_ceiling_track() ile kaydet (durum + pct_change otomatik)
-            # 4. 25 takvim gunu dolmussa arsivle
+            scraper = YahooFinanceScraper()
+            ipo_service = IPOService(db)
 
-            logger.info(
-                "Tavan takip: Matriks entegrasyonu bekliyor — "
-                "simdilik sadece log. %d IPO guncellenmedi.",
-                len(active_ipos),
-            )
+            try:
+                for ipo in active_ipos:
+                    if not ipo.ticker or not ipo.trading_start:
+                        continue
+
+                    # Yahoo Finance'den OHLC verisi cek
+                    days_data = await scraper.fetch_ohlc_since_trading_start(
+                        ticker=ipo.ticker,
+                        trading_start=ipo.trading_start,
+                        max_days=25,
+                    )
+
+                    if not days_data:
+                        logger.warning("Tavan takip: %s icin veri cekilemedi", ipo.ticker)
+                        continue
+
+                    # Her gun icin ceiling track kaydi olustur/guncelle
+                    prev_close = ipo.ipo_price  # Ilk gun referansi
+
+                    for day in days_data:
+                        detection = detect_ceiling_floor(
+                            close_price=day["close"],
+                            prev_close=prev_close,
+                            high_price=day.get("high"),
+                            low_price=day.get("low"),
+                        )
+
+                        track = await ipo_service.update_ceiling_track(
+                            ipo_id=ipo.id,
+                            trading_day=day["trading_day"],
+                            trade_date=day["date"],
+                            close_price=day["close"],
+                            hit_ceiling=detection["hit_ceiling"],
+                            open_price=day.get("open"),
+                            high_price=day.get("high"),
+                            low_price=day.get("low"),
+                            hit_floor=detection["hit_floor"],
+                        )
+
+                        if track:
+                            track.durum = detection["durum"]
+                            track.pct_change = detection["pct_change"]
+
+                        prev_close = day["close"]
+
+                    # trading_day_count guncelle
+                    ipo.trading_day_count = len(days_data)
+
+                    if days_data and not ipo.first_day_close_price:
+                        ipo.first_day_close_price = days_data[0]["close"]
+
+                    logger.info(
+                        "Tavan takip: %s — %d gun guncellendi",
+                        ipo.ticker, len(days_data),
+                    )
+
+            finally:
+                await scraper.close()
+
+            await db.commit()
+            logger.info("Tavan takip gun sonu tamamlandi — %d IPO islendi", len(active_ipos))
 
     except Exception as e:
         logger.error("Tavan takip gun sonu hatasi: %s", e)
