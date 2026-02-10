@@ -588,6 +588,46 @@ async def list_stock_notifications(
     return list(result.scalars().all())
 
 
+@app.patch("/api/v1/users/{device_id}/stock-notifications/{sub_id}/mute")
+async def toggle_mute_stock_notification(
+    device_id: str,
+    sub_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Hisse bildirim aboneligini sessize al / sesi ac (toggle).
+
+    Kullanici tek tusla bildirimi pasif/aktif yapabilir.
+    muted=True ise bildirim gelmez, False ise gelir.
+    """
+    user_result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    sub_result = await db.execute(
+        select(StockNotificationSubscription).where(
+            StockNotificationSubscription.id == sub_id,
+            StockNotificationSubscription.user_id == user.id,
+        )
+    )
+    sub = sub_result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Abonelik bulunamadi")
+
+    sub.muted = not sub.muted
+    await db.commit()
+    await db.refresh(sub)
+
+    return {
+        "status": "ok",
+        "subscription_id": sub.id,
+        "muted": sub.muted,
+        "message": "Bildirim sessize alindi" if sub.muted else "Bildirim aktif edildi",
+    }
+
+
 # -------------------------------------------------------
 # KULLANICI ENDPOINTS
 # -------------------------------------------------------

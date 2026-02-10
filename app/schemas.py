@@ -436,6 +436,7 @@ class StockNotificationOut(BaseModel):
     purchased_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     notified_count: int = 0
+    muted: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

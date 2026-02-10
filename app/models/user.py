@@ -270,6 +270,12 @@ class StockNotificationSubscription(Base):
     # Bildirim sayaci
     notified_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # Kullanici bildirimi pasif yapabilir (mute)
+    muted: Mapped[bool] = mapped_column(
+        Boolean, default=False,
+        comment="Kullanici tek tusla sessiz moda alabilir"
+    )
+
     user: Mapped["User"] = relationship(back_populates="stock_notifications")
 
     __table_args__ = (

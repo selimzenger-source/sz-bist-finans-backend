@@ -64,3 +64,11 @@ async def init_db():
             )
         except Exception:
             pass  # Zaten varsa hata vermez (IF NOT EXISTS)
+
+        # v3 migration: stock_notification_subscriptions.muted kolonu
+        try:
+            await conn.execute(
+                text("ALTER TABLE stock_notification_subscriptions ADD COLUMN IF NOT EXISTS muted BOOLEAN DEFAULT FALSE")
+            )
+        except Exception:
+            pass
