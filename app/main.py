@@ -219,13 +219,19 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     )
     awaiting_trading = list(awaiting_result.scalars().all())
 
-    # 5. Isleme Baslayanlar — trading status, arsivlenmemis + ceiling_tracks eager load
+    # 5. Isleme Baslayanlar — trading status + 25 takvim gunu icinde
+    # 25 takvim gunu siniri: trading_start + 25 gun > bugun
+    from datetime import date as date_type, timedelta
+    today = date_type.today()
+    calendar_cutoff = today - timedelta(days=24)  # 25. gun dahil (gun 1 = trading_start)
+
     trading_result = await db.execute(
         select(IPO)
         .where(
             and_(
                 IPO.status == "trading",
-                IPO.archived == False,
+                IPO.trading_start != None,
+                IPO.trading_start >= calendar_cutoff,  # 25 takvim gunu icinde
             )
         )
         .options(selectinload(IPO.ceiling_tracks))
@@ -234,10 +240,19 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     )
     trading = list(trading_result.scalars().all())
 
-    # 6. Ilk 25 Takvim Gunu Performansi — arsivlenmis + ceiling_tracks
+    # 6. Ilk 25 Takvim Gunu Performansi — 25 takvim gunu gecmis VEYA arsivlenmis
     perf_result = await db.execute(
         select(IPO)
-        .where(IPO.archived == True)
+        .where(
+            or_(
+                IPO.archived == True,
+                and_(
+                    IPO.status == "trading",
+                    IPO.trading_start != None,
+                    IPO.trading_start < calendar_cutoff,  # 25 takvim gunu gecmis
+                ),
+            )
+        )
         .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(20)
@@ -246,7 +261,16 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
 
     # Arsiv sayisi (toplam)
     archived_count_result = await db.execute(
-        select(sa_func.count(IPO.id)).where(IPO.archived == True)
+        select(sa_func.count(IPO.id)).where(
+            or_(
+                IPO.archived == True,
+                and_(
+                    IPO.status == "trading",
+                    IPO.trading_start != None,
+                    IPO.trading_start < calendar_cutoff,
+                ),
+            )
+        )
     )
     archived_count = archived_count_result.scalar() or 0
 
