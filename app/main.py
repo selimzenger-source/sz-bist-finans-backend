@@ -158,13 +158,14 @@ async def upcoming_ipos(db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/v1/ipos/sections", response_model=IPOSectionsOut)
 async def ipo_sections(db: AsyncSession = Depends(get_db)):
-    """Halka arz ana ekrani — 5 bolum + arsiv sayisi.
+    """Halka arz ana ekrani — 6 bolum.
 
     1. SPK Onayi Beklenen: spk_applications tablosundan pending olanlar
     2. Yeni Onaylanan: SPK onayli, talep toplama henuz baslamamislar
     3. Dagitim Surecinde: Talep toplama acik (in_distribution)
     4. Islem Gunu Beklenen: Dagitim bitmis, islem tarihi bekleniyor
     5. Isleme Baslayanlar: Borsada islem goren, 25 gun takip
+    6. Ilk 25 Takvim Gunu Performansi: 25 gunu gecmis arsivlenmis IPO'lar
     """
     from sqlalchemy import func as sa_func
 
@@ -233,7 +234,17 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
     )
     trading = list(trading_result.scalars().all())
 
-    # Arsiv sayisi
+    # 6. Ilk 25 Takvim Gunu Performansi — arsivlenmis + ceiling_tracks
+    perf_result = await db.execute(
+        select(IPO)
+        .where(IPO.archived == True)
+        .options(selectinload(IPO.ceiling_tracks))
+        .order_by(IPO.trading_start.desc().nullslast())
+        .limit(20)
+    )
+    performance_archive = list(perf_result.scalars().all())
+
+    # Arsiv sayisi (toplam)
     archived_count_result = await db.execute(
         select(sa_func.count(IPO.id)).where(IPO.archived == True)
     )
@@ -245,6 +256,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
         in_distribution=in_distribution,
         awaiting_trading=awaiting_trading,
         trading=trading,
+        performance_archive=performance_archive,
         archived_count=archived_count,
     )
 

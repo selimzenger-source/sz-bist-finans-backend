@@ -251,19 +251,21 @@ class SPKApplicationOut(BaseModel):
 # -------------------------------------------------------
 
 class IPOSectionsOut(BaseModel):
-    """Halka arz ana ekrani — 5 bolum + arsiv sayisi.
+    """Halka arz ana ekrani — 6 bolum.
 
-    1. spk_pending:      SPK onayi beklenen basvurular
-    2. newly_approved:   Yeni onaylanan (SPK bulteninden)
-    3. in_distribution:  Dagitim surecinde (talep toplama acik)
-    4. awaiting_trading: Islem gunu ilani beklenen
-    5. trading:          Isleme baslayanlar (25 gun takip)
+    1. spk_pending:         SPK onayi beklenen basvurular
+    2. newly_approved:      Yeni onaylanan (SPK bulteninden)
+    3. in_distribution:     Dagitim surecinde (talep toplama acik)
+    4. awaiting_trading:    Islem gunu ilani beklenen
+    5. trading:             Isleme baslayanlar (25 gun takip)
+    6. performance_archive: 25 gunu gecmis — Ilk 25 Takvim Gunu Performansi
     """
     spk_pending: list[SPKApplicationOut] = []
     newly_approved: list[IPOListOut] = []
     in_distribution: list[IPOListOut] = []
     awaiting_trading: list[IPOListOut] = []
     trading: list[IPOTradingOut] = []
+    performance_archive: list[IPOTradingOut] = []
     archived_count: int = 0
 
 
