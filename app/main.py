@@ -127,7 +127,15 @@ app.include_router(admin_router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "bist-finans-backend", "version": "2.0.0"}
+    from app.services.notification import is_firebase_initialized
+    settings = get_settings()
+    return {
+        "status": "ok",
+        "service": "bist-finans-backend",
+        "version": "2.0.0",
+        "firebase_initialized": is_firebase_initialized(),
+        "telegram_configured": bool(settings.TELEGRAM_BOT_TOKEN),
+    }
 
 
 # -------------------------------------------------------
@@ -1600,3 +1608,105 @@ async def seed_ipos(payload: dict, db: AsyncSession = Depends(get_db)):
         "created_ipos": created_ipos,
         "created_allocations": created_allocs,
     }
+
+
+# -------------------------------------------------------
+# ADMIN: TEST NOTIFICATION ENDPOINT
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/test-notification")
+async def test_notification(payload: dict):
+    """Firebase push bildirim test endpoint'i.
+
+    FCM token verilirse gercek push gonderir.
+    Token verilmezse sadece Firebase durumunu raporlar.
+
+    Body: {
+        "admin_password": "...",
+        "fcm_token": "...",           (opsiyonel)
+        "title": "Test Bildirimi",    (opsiyonel)
+        "body": "Bu bir test..."      (opsiyonel)
+    }
+    """
+    from app.services.notification import is_firebase_initialized, _init_firebase
+
+    settings = get_settings()
+
+    # Admin yetki kontrolu
+    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    # Firebase'i baslatmayi dene (henuz baslatilmadiysa)
+    _init_firebase()
+
+    firebase_ok = is_firebase_initialized()
+    fcm_token = payload.get("fcm_token")
+
+    # Token yoksa sadece durum raporla
+    if not fcm_token:
+        return {
+            "firebase_initialized": firebase_ok,
+            "push_sent": False,
+            "push_error": None,
+            "message": "FCM token verilmedi — sadece Firebase durumu raporlandi."
+                       + (" Firebase AKTIF ✅" if firebase_ok else " Firebase INAKTIF ❌"),
+        }
+
+    # Token var — gercek push gonder
+    if not firebase_ok:
+        return {
+            "firebase_initialized": False,
+            "push_sent": False,
+            "push_error": "Firebase baslatilamamis",
+            "message": "Firebase init basarisiz — push gonderilemez.",
+        }
+
+    title = payload.get("title", "🔔 BIST Finans Test")
+    body = payload.get("body", "Bu bir test bildirimidir. Firebase push calisiyor! ✅")
+
+    try:
+        from firebase_admin import messaging
+
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            data={
+                "type": "test",
+                "timestamp": datetime.now().isoformat(),
+            },
+            token=fcm_token,
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    channel_id="bist_finans_channel",
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        sound="default",
+                        badge=1,
+                    ),
+                ),
+            ),
+        )
+
+        response = messaging.send(message)
+        return {
+            "firebase_initialized": True,
+            "push_sent": True,
+            "push_error": None,
+            "fcm_response": response,
+            "message": f"Push bildirim basariyla gonderildi! ✅",
+        }
+
+    except Exception as e:
+        return {
+            "firebase_initialized": True,
+            "push_sent": False,
+            "push_error": str(e),
+            "message": f"Push gonderme hatasi: {e}",
+        }

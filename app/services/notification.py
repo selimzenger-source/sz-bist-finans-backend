@@ -54,6 +54,11 @@ def _init_firebase():
         logger.error(f"Firebase baslatma hatasi: {e}")
 
 
+def is_firebase_initialized() -> bool:
+    """Firebase Admin SDK'nin baslatilip baslatilmadigini dondurur."""
+    return _firebase_initialized
+
+
 class NotificationService:
     """FCM push bildirim gonderici."""
 
