@@ -185,6 +185,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
+        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.created_at.desc())
         .limit(20)
     )
@@ -199,6 +200,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
+        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.subscription_end.asc().nullslast())
         .limit(20)
     )
@@ -213,6 +215,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
+        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.created_at.desc())
         .limit(20)
     )
@@ -231,7 +234,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(30)
     )
-    trading = list(trading_result.scalars().unique().all())
+    trading = list(trading_result.scalars().all())
 
     # Arsiv sayisi
     archived_count_result = await db.execute(
