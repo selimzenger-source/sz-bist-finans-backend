@@ -185,7 +185,6 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
-        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.created_at.desc())
         .limit(20)
     )
@@ -200,7 +199,6 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
-        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.subscription_end.asc().nullslast())
         .limit(20)
     )
@@ -215,7 +213,6 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.archived == False,
             )
         )
-        .options(selectinload(IPO.ceiling_tracks))
         .order_by(IPO.created_at.desc())
         .limit(20)
     )
