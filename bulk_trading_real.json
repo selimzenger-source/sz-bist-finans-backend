@@ -1,0 +1,170 @@
+{
+  "admin_password": "SzBist2026Admin!",
+  "tracks": [
+    {
+      "ticker": "UCAYM",
+      "trading_day": 1,
+      "trade_date": "2026-01-23",
+      "close_price": "21.78",
+      "high_price": "21.78",
+      "low_price": "21.78",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 2,
+      "trade_date": "2026-01-26",
+      "close_price": "23.94",
+      "high_price": "23.94",
+      "low_price": "23.94",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 3,
+      "trade_date": "2026-01-27",
+      "close_price": "26.32",
+      "high_price": "26.32",
+      "low_price": "26.32",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 4,
+      "trade_date": "2026-01-28",
+      "close_price": "28.94",
+      "high_price": "28.94",
+      "low_price": "28.94",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 5,
+      "trade_date": "2026-01-29",
+      "close_price": "31.82",
+      "high_price": "31.82",
+      "low_price": "31.82",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 6,
+      "trade_date": "2026-01-30",
+      "close_price": "35.00",
+      "high_price": "35.00",
+      "low_price": "34.96",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 7,
+      "trade_date": "2026-02-02",
+      "close_price": "38.50",
+      "high_price": "38.50",
+      "low_price": "36.76",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 8,
+      "trade_date": "2026-02-03",
+      "close_price": "34.66",
+      "open_price": "40.70",
+      "high_price": "41.20",
+      "low_price": "34.66",
+      "hit_ceiling": false,
+      "hit_floor": true
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 9,
+      "trade_date": "2026-02-04",
+      "close_price": "38.12",
+      "open_price": "34.66",
+      "high_price": "38.12",
+      "low_price": "33.76",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 10,
+      "trade_date": "2026-02-05",
+      "close_price": "36.98",
+      "open_price": "38.22",
+      "high_price": "38.68",
+      "low_price": "35.16",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 11,
+      "trade_date": "2026-02-06",
+      "close_price": "35.50",
+      "open_price": "36.98",
+      "high_price": "37.94",
+      "low_price": "35.44",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 12,
+      "trade_date": "2026-02-09",
+      "close_price": "35.92",
+      "open_price": "35.50",
+      "high_price": "36.88",
+      "low_price": "35.24",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "NETCD",
+      "trading_day": 1,
+      "trade_date": "2026-02-06",
+      "close_price": "55.65",
+      "high_price": "55.65",
+      "low_price": "55.65",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "NETCD",
+      "trading_day": 2,
+      "trade_date": "2026-02-09",
+      "close_price": "61.20",
+      "high_price": "61.20",
+      "low_price": "61.20",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "AKHAN",
+      "trading_day": 1,
+      "trade_date": "2026-02-06",
+      "close_price": "23.65",
+      "high_price": "23.65",
+      "low_price": "23.65",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "AKHAN",
+      "trading_day": 2,
+      "trade_date": "2026-02-09",
+      "close_price": "26.00",
+      "high_price": "26.00",
+      "low_price": "26.00",
+      "hit_ceiling": true,
+      "hit_floor": false
+    }
+  ]
+}

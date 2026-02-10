@@ -207,10 +207,10 @@ class IPOCeilingTrack(Base):
     notified_relock: Mapped[bool] = mapped_column(Boolean, default=False)
     notified_floor: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # v2: 4 durum + kümülatif % fark
+    # v3: 5 durum + kümülatif % fark
     durum: Mapped[str] = mapped_column(
-        String(20), default="aktif",
-        comment="tavan, aktif, satici, taban",
+        String(20), default="alici_kapatti",
+        comment="tavan, alici_kapatti, not_kapatti, satici_kapatti, taban",
     )
     pct_change: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2), nullable=True,

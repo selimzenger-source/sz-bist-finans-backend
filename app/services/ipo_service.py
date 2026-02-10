@@ -297,14 +297,17 @@ class IPOService:
         else:
             track.pct_change = None
 
+        # v3: 5 durum — tavan, alici_kapatti, not_kapatti, satici_kapatti, taban
         if hit_ceiling:
             track.durum = "tavan"
         elif hit_floor:
             track.durum = "taban"
-        elif track.pct_change is not None and track.pct_change >= 0:
-            track.durum = "aktif"
+        elif track.pct_change is not None and track.pct_change == 0:
+            track.durum = "not_kapatti"
+        elif track.pct_change is not None and track.pct_change > 0:
+            track.durum = "alici_kapatti"
         else:
-            track.durum = "satici"
+            track.durum = "satici_kapatti"
 
         await self.db.flush()
         return track
