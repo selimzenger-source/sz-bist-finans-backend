@@ -3,6 +3,7 @@
 Kullanicilara halka arz ve KAP haber bildirimlerini gonderir.
 """
 
+import json
 import logging
 from typing import Optional
 
@@ -16,7 +17,12 @@ _firebase_initialized = False
 
 
 def _init_firebase():
-    """Firebase Admin SDK'yi baslatir (tek seferlik)."""
+    """Firebase Admin SDK'yi baslatir (tek seferlik).
+
+    GOOGLE_APPLICATION_CREDENTIALS degerini su sekilde yorumlar:
+    - JSON string ise → parse edip dict olarak kullanir (Render icin)
+    - Dosya yolu ise → dosyadan okur (lokal gelistirme icin)
+    """
     global _firebase_initialized
     if _firebase_initialized:
         return
@@ -28,7 +34,19 @@ def _init_firebase():
         from app.config import get_settings
         settings = get_settings()
 
-        cred = credentials.Certificate(settings.GOOGLE_APPLICATION_CREDENTIALS)
+        cred_value = settings.GOOGLE_APPLICATION_CREDENTIALS
+
+        # JSON string mi yoksa dosya yolu mu?
+        if cred_value.strip().startswith("{"):
+            # Render'da env var olarak JSON string gelir
+            cred_dict = json.loads(cred_value)
+            cred = credentials.Certificate(cred_dict)
+            logger.info("Firebase credentials JSON string'den yuklendi")
+        else:
+            # Lokal gelistirmede dosya yolu kullanilir
+            cred = credentials.Certificate(cred_value)
+            logger.info("Firebase credentials dosyadan yuklendi")
+
         firebase_admin.initialize_app(cred)
         _firebase_initialized = True
         logger.info("Firebase Admin SDK baslatildi")
