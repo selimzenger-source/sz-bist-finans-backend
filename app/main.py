@@ -44,6 +44,7 @@ from app.schemas import (
     CeilingTierOut, CeilingSubscriptionCreate, CeilingSubscriptionOut,
     NotificationTierOut, NewsTierOut,
     StockNotificationCreate, StockNotificationOut,
+    RealtimeNotifRequest,
     DividendOut,
 )
 from app.scheduler import setup_scheduler, shutdown_scheduler
@@ -881,6 +882,113 @@ async def update_ceiling_track(
         "ticker": data.ticker,
         "trading_day": data.trading_day,
         "notifications_sent": notifications_sent,
+    }
+
+
+@app.post("/api/v1/realtime-notification")
+async def send_realtime_notification(
+    data: RealtimeNotifRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Gercek zamanli bildirim gonder — halka_arz_sync.py'den cagirilir.
+
+    5 bildirim tipi:
+      - tavan_bozulma:          Tavan acilinca/kitlenince
+      - taban_acilma:           Taban acilinca/kitlenince
+      - gunluk_acilis_kapanis:  Gunluk acilis (09:56) ve kapanis (18:08)
+      - yuzde4_dusus:           En yukseginden %4 dusus
+      - yuzde7_dusus:           En yukseginden %7 dusus
+
+    Bildirim mesajlarinda fiyat bilgisi YOKTUR.
+    """
+    import os
+    from app.services.ipo_service import IPOService
+    from app.services.notification import NotificationService
+
+    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    if data.admin_password != admin_pw:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    valid_types = [
+        "tavan_bozulma", "taban_acilma",
+        "gunluk_acilis_kapanis", "yuzde4_dusus", "yuzde7_dusus",
+    ]
+    if data.notification_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gecersiz notification_type: {data.notification_type}. Gecerli: {valid_types}",
+        )
+
+    # IPO bul
+    ipo_service = IPOService(db)
+    ipo = await ipo_service.get_ipo_by_ticker(data.ticker)
+    if not ipo:
+        raise HTTPException(status_code=404, detail=f"IPO bulunamadi: {data.ticker}")
+
+    notif_service = NotificationService(db)
+
+    # Bu IPO + bildirim tipi icin aktif aboneleri bul
+    stock_notif_result = await db.execute(
+        select(StockNotificationSubscription).where(
+            and_(
+                or_(
+                    # Bu IPO icin spesifik abone
+                    and_(
+                        StockNotificationSubscription.ipo_id == ipo.id,
+                        StockNotificationSubscription.notification_type == data.notification_type,
+                    ),
+                    # Yillik paket (tum halka arzlar icin)
+                    and_(
+                        StockNotificationSubscription.is_annual_bundle == True,
+                        StockNotificationSubscription.notification_type == data.notification_type,
+                    ),
+                ),
+                StockNotificationSubscription.is_active == True,
+                StockNotificationSubscription.muted == False,
+            )
+        )
+    )
+    active_subs = list(stock_notif_result.scalars().all())
+
+    notifications_sent = 0
+    errors = 0
+
+    for sub in active_subs:
+        user_result = await db.execute(
+            select(User).where(User.id == sub.user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if not user or not user.fcm_token:
+            continue
+
+        try:
+            await notif_service.send_to_device(
+                token=user.fcm_token,
+                title=data.title,
+                body=data.body,
+                data={
+                    "type": "stock_notification",
+                    "notification_type": data.notification_type,
+                    "ticker": data.ticker,
+                    "ipo_id": str(ipo.id),
+                },
+            )
+            notifications_sent += 1
+            sub.notified_count = (sub.notified_count or 0) + 1
+        except Exception as e:
+            errors += 1
+            logging.warning(f"Bildirim gonderilemedi (user={user.id}): {e}")
+
+    await db.flush()
+
+    return {
+        "status": "ok",
+        "ticker": data.ticker,
+        "notification_type": data.notification_type,
+        "active_subscribers": len(active_subs),
+        "notifications_sent": notifications_sent,
+        "errors": errors,
     }
 
 

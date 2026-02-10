@@ -409,6 +409,15 @@ class NewsTierOut(BaseModel):
     description: str
 
 
+class RealtimeNotifRequest(BaseModel):
+    """Gercek zamanli bildirim gonderimi (halka_arz_sync.py'den gelir)."""
+    admin_password: str
+    ticker: str
+    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde4_dusus, yuzde7_dusus
+    title: str
+    body: str
+
+
 class StockNotificationCreate(BaseModel):
     """Hisse bazli bildirim aboneligi olusturma."""
     ipo_id: Optional[int] = None  # None ise yillik paket

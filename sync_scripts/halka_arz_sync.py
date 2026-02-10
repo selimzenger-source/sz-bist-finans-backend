@@ -1,22 +1,47 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Halka Arz Tavan/Taban Takip - Excel -> Backend Canli Sync
+Halka Arz Tavan/Taban Takip — Excel -> Backend Canli Sync
+==========================================================
 
-Her 10 saniyede bir 'halka arz TAVAN TABAN.xlsm' dosyasindan
-canli fiyat verilerini okuyup tavan/taban durumunu analiz eder.
+Her 15 saniyede bir Matriks Excel'den canli fiyat verilerini okuyup
+tavan/taban durumunu analiz eder, 5 bildirim tipini yonetir.
 
-TAVAN KİLİT TESPİTİ:
-  - Satis Kademe = #YOK (veya bos) VE Alis Kademe = Tavan → TAVANA KİLİTLİ
-  - Bu denge bozulursa → 1. BİLDİRİM: "Tavan cozuldu!"
-  - 5 dakika bekle → hala tavana kilitlemediyse → 2. BİLDİRİM: "5dk gecti, kilitleyemedi"
-  - Taban icin ayni mantik (tersi)
+Excel Formati (Matriks — 9 sutun):
+  A: ILK ISLEM  (22.Oca.26 gibi)
+  B: HISSE      (AKHAN, NETCD, UCAYM)
+  C: TAVAN      (Tavan limit fiyati)
+  D: TABAN      (Taban limit fiyati)
+  E: ALIS       (Alis Kademe fiyati — bos/#YOK olabilir)
+  F: SATIS      (Satis Kademe fiyati — bos/#YOK olabilir)
+  G: SON        (Son fiyat / Kapanis)
+  H: %G FARK    (Gunluk % degisim)
+  I: TARIH      (Verinin tarihi)
 
-TABAN KİLİT TESPİTİ:
-  - Alis Kademe = #YOK (veya bos) VE Satis Kademe = Taban → TABANA KİLİTLİ
+5 Bildirim Servisi:
+  1. TAVAN ACILINCA / KiTLENiNCE (tavan_bozulma)  — 10 TL / 5 TL ilk HA
+     - Tavana kitlendi → bildirim
+     - Tavan cozuldu → bildirim
+     - 5dk gecti kilitleyemedi → bildirim
+     - Tekrar tavana kitlendi → bildirim
 
-ACILIS BİLDİRİMİ:
-  - Her sabah 09:56'da acilis bilgisi gonderir
+  2. TABAN ACILINCA (taban_acilma)  — 10 TL / 5 TL ilk HA
+     - Tabana kitlendi → bildirim
+     - Taban cozuldu → bildirim
+     - 5dk gecti kilitleyemedi → bildirim
+     - Tekrar tabana kitlendi → bildirim
+
+  3. GUNLUK ACILIS / KAPANIS (gunluk_acilis_kapanis)  — 5 TL / 3 TL ilk HA
+     - 09:56 acilis bildirimi: "AKHAN tavan acti!" / "normal islem ile acildi"
+     - 18:08 kapanis bildirimi: "AKHAN tavan kapatti!" / "normal islem ile kapatti"
+
+  4. EN YUKSEGINDEN %4 DUSUS (yuzde4_dusus)  — 15 TL / 8 TL ilk HA
+     - 10:00-18:08 arasi, gunluk en yukseginden %4+ duserse bildirim
+
+  5. EN YUKSEGINDEN %7 DUSUS (yuzde7_dusus)  — 15 TL / 8 TL ilk HA
+     - 10:00-18:08 arasi, gunluk en yukseginden %7+ duserse bildirim
+
+ONEMLI: Bildirim mesajlarinda FIYAT BILGISI YOKTUR!
 
 NOT: win32com ile ACIK OLAN Excel'den canli veri okur (Matriks DDE/RTD).
 """
@@ -28,7 +53,6 @@ import datetime as dt
 import requests
 import json
 from pathlib import Path
-from decimal import Decimal
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -39,7 +63,7 @@ if sys.platform == 'win32':
         try:
             sys.stdout.reconfigure(encoding='utf-8', errors='replace')
             sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-        except:
+        except Exception:
             pass
 
 # Excel okuma icin win32com (pywin32) gerekli
@@ -62,46 +86,63 @@ except ImportError:
 # Excel dosya yolu
 EXCEL_FILE_PATH = r"C:\Users\PC\Desktop\halka arz TAVAN TABAN.xlsm"
 
-# Backend API endpoint
-API_URL = "http://localhost:8000/api/v1/ceiling-track"
-# Production: API_URL = "https://bist-finans-backend.onrender.com/api/v1/ceiling-track"
+# Backend API endpointleri
+API_BASE_URL = os.getenv("BIST_API_URL", "https://sz-bist-finans-api.onrender.com")
+API_NOTIF_URL = f"{API_BASE_URL}/api/v1/realtime-notification"
+API_CEILING_URL = f"{API_BASE_URL}/api/v1/ceiling-track"
 
-# Sync araligi (saniye) - 10 saniye
-SYNC_INTERVAL = 10
+# Admin sifresi
+ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "SzBist2026Admin!")
 
-# Tavan bozulma sonrasi bekleme suresi (saniye) - 5 dakika
+# Sync araligi (saniye) — 15 saniyede bir
+SYNC_INTERVAL = 15
+
+# Tavan/taban bozulma sonrasi bekleme suresi (saniye) — 5 dakika
 RELOCK_WAIT_SECONDS = 300
 
 # Piyasa calisma saatleri
 MARKET_OPEN_HOUR = 9
-MARKET_OPEN_MIN = 56  # Acilis bildirimi saati
+MARKET_OPEN_MIN = 56   # Acilis bildirimi saati
 SEANS_START_HOUR = 10
 SEANS_START_MIN = 0
 SEANS_END_HOUR = 18
 SEANS_END_MIN = 10
+KAPANIS_HOUR = 18
+KAPANIS_MIN = 8        # Kapanis bildirimi saati
 
 # Retry ayarlari
 RETRY_DELAY = 5
 MAX_RETRIES = 2
 
+# Tavan/taban eslesme toleransi (kurus)
+PRICE_TOLERANCE = 0.02
+
 
 # ============================================
-# EXCEL SUTUN YAPILANDIRMASI
+# EXCEL SUTUN YAPILANDIRMASI (Matriks 10 sutun)
 # ============================================
 
-# A: HISSE (ticker)
-# B: TAVAN (tavan fiyati)
-# C: TABAN (taban fiyati)
-# D: SON FIYAT
-# E: SATIS KADEME (#YOK = tavana kilitli)
-# F: ALIS KADEME
+# A: ILK ISLEM  (index 0 — kullanilmiyor, bilgi amacli)
+# B: HISSE      (index 1)
+# C: TAVAN      (index 2)
+# D: TABAN      (index 3)
+# E: ALIS       (index 4 — Alis Kademe fiyati)
+# F: SATIS      (index 5 — Satis Kademe fiyati)
+# G: SON        (index 6 — Son islem fiyati)
+# H: %G FARK    (index 7 — Gunluk yuzde degisim)
+# I: TARIH      (index 8)
+# J: G.EN YUKSEK (index 9 — Gun ici en yuksek fiyat, %4/%7 dusus icin)
 
-HISSE_SUTUN = "A"
-TAVAN_SUTUN = "B"
-TABAN_SUTUN = "C"
-SON_FIYAT_SUTUN = "D"
-SATIS_KADEME_SUTUN = "E"
-ALIS_KADEME_SUTUN = "F"
+ILK_ISLEM_SUTUN = "A"
+HISSE_SUTUN = "B"
+TAVAN_SUTUN = "C"
+TABAN_SUTUN = "D"
+ALIS_KADEME_SUTUN = "E"
+SATIS_KADEME_SUTUN = "F"
+SON_FIYAT_SUTUN = "G"
+GUN_FARK_SUTUN = "H"
+TARIH_SUTUN = "I"
+GUN_EN_YUKSEK_SUTUN = "J"
 
 BASLIK_SATIR = 1
 VERI_BASLANGIC = 2
@@ -119,34 +160,48 @@ class StockState:
     tavan: float = 0.0
     taban: float = 0.0
     son_fiyat: float = 0.0
-    satis_kademe: Optional[str] = None  # "#YOK" veya fiyat
-    alis_kademe: Optional[str] = None   # "#YOK" veya fiyat
-    is_ceiling_locked: bool = False      # Tavana kilitli mi?
-    is_floor_locked: bool = False        # Tabana kilitli mi?
-    ipo_price: float = 0.0              # Halka arz fiyati (DB'den alinacak)
-    opening_price: float = 0.0          # Gunun acilis fiyati
+    alis_kademe: Optional[str] = None   # Alis kademe fiyati veya "#YOK"/None
+    satis_kademe: Optional[str] = None  # Satis kademe fiyati veya "#YOK"/None
+    gun_fark: float = 0.0              # Gunluk % degisim
+    gun_en_yuksek: float = 0.0         # Gun ici en yuksek fiyat (J sutunu)
+    is_ceiling_locked: bool = False     # Tavana kilitli mi?
+    is_floor_locked: bool = False       # Tabana kilitli mi?
 
 
 @dataclass
 class TrackingState:
     """Bir hissenin takip durumu — bildirim gecmisi."""
     ticker: str
+
+    # --- Tavan takibi ---
     was_ceiling_locked: bool = False      # Onceki durumda tavana kilitli miydi?
-    was_floor_locked: bool = False        # Onceki durumda tabana kilitli miydi?
     ceiling_broke_at: Optional[dt.datetime] = None  # Tavan ne zaman bozuldu?
-    floor_broke_at: Optional[dt.datetime] = None    # Taban ne zaman bozuldu?
-    notified_ceiling_break: bool = False  # 1. bildirim gonderildi mi?
-    notified_ceiling_5min: bool = False   # 5dk bildirim gonderildi mi?
+    notified_ceiling_first_lock: bool = False  # Ilk tavana kilit bildirimi
+    notified_ceiling_break: bool = False  # Tavan cozuldu bildirimi
+    notified_ceiling_5min: bool = False   # 5dk gecti bildirimi
+    notified_relock_ceiling: bool = False # Tekrar tavana kitledi bildirimi
+
+    # --- Taban takibi ---
+    was_floor_locked: bool = False
+    floor_broke_at: Optional[dt.datetime] = None
+    notified_floor_first_lock: bool = False
     notified_floor_break: bool = False
     notified_floor_5min: bool = False
-    notified_relock_ceiling: bool = False  # Tekrar tavana kitledi bildirimi
     notified_relock_floor: bool = False
-    notified_ceiling_first_lock: bool = False  # Ilk tavana kilit bildirimi
-    notified_floor_first_lock: bool = False    # Ilk tabana kilit bildirimi
-    opening_notified: bool = False         # Acilis bildirimi gonderildi mi?
-    trading_day: int = 1                   # Kacinci islem gunu
-    day_open_price: float = 0.0           # Gunun acilis fiyati (ilk okunan)
-    first_read_done: bool = False          # Gun icin ilk okuma yapildi mi?
+
+    # --- %4/%7 dusus takibi ---
+    day_high: float = 0.0               # Gunun en yuksek fiyati
+    notified_drop_4pct: bool = False     # %4 dusus bildirimi
+    notified_drop_7pct: bool = False     # %7 dusus bildirimi
+
+    # --- Acilis/kapanis ---
+    opening_notified: bool = False       # Acilis bildirimi gonderildi mi?
+    closing_notified: bool = False       # Kapanis bildirimi gonderildi mi?
+
+    # --- Genel ---
+    trading_day: int = 1                 # Kacinci islem gunu
+    day_open_price: float = 0.0          # Gunun acilis fiyati
+    first_read_done: bool = False        # Gun icin ilk okuma yapildi mi?
 
 
 # Global takip durumu — her hisse icin
@@ -154,13 +209,34 @@ tracking_states: dict[str, TrackingState] = {}
 
 
 # ============================================
-# EXCEL OKUMA
+# LOG YONETIMI
+# ============================================
+
+LOG_FILE = Path(__file__).parent / "halka_arz_sync.log"
+
+
+def log(msg: str):
+    """Konsol + dosyaya log."""
+    ts = dt.datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
+# ============================================
+# EXCEL OKUMA (win32com — canli Matriks verisi)
 # ============================================
 
 def read_excel_data() -> list[StockState]:
     """
     WIN32COM ile ACIK OLAN Excel'den halka arz hisselerini oku.
     Matriks DDE/RTD canli verilerini alir.
+
+    Sutunlar: A=ILK ISLEM, B=HISSE, C=TAVAN, D=TABAN, E=ALIS, F=SATIS, G=SON, H=%GFARK, I=TARIH
     """
     try:
         excel = win32com.client.GetObject(Class="Excel.Application")
@@ -180,27 +256,33 @@ def read_excel_data() -> list[StockState]:
         satir = VERI_BASLANGIC
 
         while satir <= MAX_SATIR + VERI_BASLANGIC:
+            # B: HISSE
             ticker = sheet.Range(f"{HISSE_SUTUN}{satir}").Value
             if ticker is None or str(ticker).strip() == "":
                 break
 
             ticker = str(ticker).strip().upper()
 
-            # Fiyat verilerini oku
-            tavan_val = sheet.Range(f"{TAVAN_SUTUN}{satir}").Value
-            taban_val = sheet.Range(f"{TABAN_SUTUN}{satir}").Value
-            son_fiyat_val = sheet.Range(f"{SON_FIYAT_SUTUN}{satir}").Value
-            satis_kademe_val = sheet.Range(f"{SATIS_KADEME_SUTUN}{satir}").Value
+            # C: TAVAN, D: TABAN
+            tavan = safe_float(sheet.Range(f"{TAVAN_SUTUN}{satir}").Value)
+            taban = safe_float(sheet.Range(f"{TABAN_SUTUN}{satir}").Value)
+
+            # E: ALIS KADEME, F: SATIS KADEME
             alis_kademe_val = sheet.Range(f"{ALIS_KADEME_SUTUN}{satir}").Value
+            satis_kademe_val = sheet.Range(f"{SATIS_KADEME_SUTUN}{satir}").Value
 
-            # Fiyatlari parse et
-            tavan = safe_float(tavan_val)
-            taban = safe_float(taban_val)
-            son_fiyat = safe_float(son_fiyat_val)
+            # G: SON FIYAT
+            son_fiyat = safe_float(sheet.Range(f"{SON_FIYAT_SUTUN}{satir}").Value)
 
-            # Kademe degerlerini string olarak tut
-            satis_kademe = parse_kademe(satis_kademe_val)
+            # H: %G FARK
+            gun_fark = safe_float(sheet.Range(f"{GUN_FARK_SUTUN}{satir}").Value)
+
+            # J: G.EN YUKSEK (gun ici en yuksek fiyat)
+            gun_en_yuksek = safe_float(sheet.Range(f"{GUN_EN_YUKSEK_SUTUN}{satir}").Value)
+
+            # Kademe degerlerini parse et
             alis_kademe = parse_kademe(alis_kademe_val)
+            satis_kademe = parse_kademe(satis_kademe_val)
 
             # Tavan/Taban kilit tespiti
             is_ceiling_locked = check_ceiling_lock(tavan, satis_kademe, alis_kademe)
@@ -211,8 +293,10 @@ def read_excel_data() -> list[StockState]:
                 tavan=tavan,
                 taban=taban,
                 son_fiyat=son_fiyat,
-                satis_kademe=satis_kademe,
                 alis_kademe=alis_kademe,
+                satis_kademe=satis_kademe,
+                gun_fark=gun_fark,
+                gun_en_yuksek=gun_en_yuksek,
                 is_ceiling_locked=is_ceiling_locked,
                 is_floor_locked=is_floor_locked,
             )
@@ -226,7 +310,7 @@ def read_excel_data() -> list[StockState]:
         if "operation unavailable" in error_msg.lower() or "moniker" in error_msg.lower():
             pass  # Excel kapali, sessizce gec
         else:
-            print(f"  Excel okuma hatasi: {e}")
+            log(f"Excel okuma hatasi: {e}")
         return []
 
 
@@ -245,26 +329,32 @@ def parse_kademe(val) -> Optional[str]:
     if val is None:
         return None
     s = str(val).strip()
-    if s == "" or s == "0":
+    if s == "" or s == "0" or s == "0.0":
         return None
     return s
+
+
+def is_kademe_empty(kademe: Optional[str]) -> bool:
+    """Kademe degeri bos/yok mu? Tavan/taban kilit tespiti icin."""
+    if kademe is None:
+        return True
+    s = kademe.upper().strip()
+    return s in ("", "#YOK", "#N/A", "YOK", "-", "0", "0.0")
 
 
 def check_ceiling_lock(tavan: float, satis_kademe: Optional[str], alis_kademe: Optional[str]) -> bool:
     """Tavana kilitli mi?
 
     KURAL:
-    - Satis Kademe = #YOK (veya None/bos)  → Alici yok, satici beklemiyor
+    - Satis Kademe = #YOK (veya None/bos)  → Satici yok
     - Alis Kademe = Tavan fiyati ile esit    → Alicilar tavan fiyatindan bekliyor
-    → Bu durumda TAVANA KİLİTLİ
+    → Bu durumda TAVANA KILITLI
     """
     if tavan <= 0:
         return False
 
-    # Satis kademe #YOK veya bos olmali
-    satis_yok = (satis_kademe is None or satis_kademe.upper() in ("#YOK", "#N/A", "YOK", "-"))
-
-    if not satis_yok:
+    # Satis kademe bos olmali (satici yok)
+    if not is_kademe_empty(satis_kademe):
         return False
 
     # Alis kademe tavan fiyatina esit olmali
@@ -273,8 +363,7 @@ def check_ceiling_lock(tavan: float, satis_kademe: Optional[str], alis_kademe: O
 
     try:
         alis_fiyat = float(alis_kademe.replace(",", "."))
-        # Tavan ile esit mi? (kucuk tolerans)
-        return abs(alis_fiyat - tavan) < 0.02
+        return abs(alis_fiyat - tavan) < PRICE_TOLERANCE
     except (ValueError, TypeError):
         return False
 
@@ -285,15 +374,13 @@ def check_floor_lock(taban: float, satis_kademe: Optional[str], alis_kademe: Opt
     KURAL:
     - Alis Kademe = #YOK (veya None/bos)  → Alici yok
     - Satis Kademe = Taban fiyati ile esit  → Saticilar taban fiyatindan bekliyor
-    → Bu durumda TABANA KİLİTLİ
+    → Bu durumda TABANA KILITLI
     """
     if taban <= 0:
         return False
 
-    # Alis kademe #YOK veya bos olmali
-    alis_yok = (alis_kademe is None or alis_kademe.upper() in ("#YOK", "#N/A", "YOK", "-"))
-
-    if not alis_yok:
+    # Alis kademe bos olmali (alici yok)
+    if not is_kademe_empty(alis_kademe):
         return False
 
     # Satis kademe taban fiyatina esit olmali
@@ -302,13 +389,76 @@ def check_floor_lock(taban: float, satis_kademe: Optional[str], alis_kademe: Opt
 
     try:
         satis_fiyat = float(satis_kademe.replace(",", "."))
-        return abs(satis_fiyat - taban) < 0.02
+        return abs(satis_fiyat - taban) < PRICE_TOLERANCE
     except (ValueError, TypeError):
         return False
 
 
 # ============================================
-# BİLDİRİM YÖNETİMİ
+# BACKEND API GONDERIMI
+# ============================================
+
+def send_notification_to_backend(ticker: str, notif_type: str, title: str, body: str):
+    """
+    Backend /api/v1/realtime-notification endpoint'ine bildirim gonder.
+    Backend dogru abonelere FCM push gonderir.
+
+    ONEMLI: Mesajlarda FIYAT BILGISI YOKTUR!
+    """
+    try:
+        payload = {
+            "admin_password": ADMIN_PASSWORD,
+            "ticker": ticker,
+            "notification_type": notif_type,
+            "title": title,
+            "body": body,
+        }
+        resp = requests.post(API_NOTIF_URL, json=payload, timeout=10)
+        if resp.status_code == 200:
+            result = resp.json()
+            subs = result.get("active_subscribers", 0)
+            sent = result.get("notifications_sent", 0)
+            if subs > 0:
+                log(f"  {ticker} [{notif_type}]: {sent}/{subs} bildirim gonderildi")
+        elif resp.status_code == 404:
+            pass  # IPO bulunamadi — normal
+        else:
+            log(f"  {ticker} [{notif_type}]: Backend hata {resp.status_code}")
+    except Exception as e:
+        log(f"  {ticker} [{notif_type}]: Baglanti hatasi: {e}")
+
+
+def send_ceiling_data_to_backend(stock: StockState, hit_ceiling: bool, hit_floor: bool, state: TrackingState):
+    """Backend /api/v1/ceiling-track endpoint'ine tavan/taban verisini gonder."""
+    try:
+        today = dt.date.today()
+        payload = {
+            "ticker": stock.ticker,
+            "trading_day": state.trading_day,
+            "trade_date": today.isoformat(),
+            "close_price": stock.son_fiyat,
+            "high_price": stock.tavan,
+            "low_price": stock.taban,
+            "hit_ceiling": hit_ceiling,
+            "hit_floor": hit_floor,
+        }
+        if state.day_open_price > 0:
+            payload["open_price"] = state.day_open_price
+
+        response = requests.post(API_CEILING_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            result = response.json()
+            subs = result.get("notifications_sent", 0)
+            if subs > 0:
+                log(f"  Backend ceiling: {stock.ticker} -> {subs} bildirim")
+        elif response.status_code != 404:
+            log(f"  Backend ceiling hata: {response.status_code}")
+    except Exception as e:
+        log(f"  Backend ceiling baglanti hatasi: {e}")
+
+
+# ============================================
+# BILDIRIM YONETIMI
 # ============================================
 
 def process_stock(stock: StockState, now: dt.datetime):
@@ -321,133 +471,177 @@ def process_stock(stock: StockState, now: dt.datetime):
 
     state = tracking_states[ticker]
 
+    # Ilk okumada acilis fiyatini kaydet
+    if not state.first_read_done and stock.son_fiyat > 0:
+        state.day_open_price = stock.son_fiyat
+        state.first_read_done = True
+
     # =====================
-    # TAVAN TAKİBİ
+    # %4 / %7 DUSUS TAKIBI
+    # =====================
+    # J sutunundan gun ici en yuksek fiyati al (Excel'den direkt)
+    gun_high = stock.gun_en_yuksek
+    if gun_high <= 0:
+        # J sutunu bossa kendi takibimizi kullan (fallback)
+        if stock.son_fiyat > state.day_high:
+            state.day_high = stock.son_fiyat
+        gun_high = state.day_high
+    else:
+        state.day_high = gun_high  # Senkronize tut
+
+    if stock.son_fiyat > 0 and gun_high > 0:
+        # Dusus yuzdesini hesapla: (en_yuksek - son) / en_yuksek * 100
+        drop_pct = ((gun_high - stock.son_fiyat) / gun_high) * 100
+
+        # %4 dusus
+        if drop_pct >= 4.0 and not state.notified_drop_4pct:
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="yuzde4_dusus",
+                title=f"{ticker} En Yukseginden %4 Dustu!",
+                body=f"{ticker} gun icinde en yukseginden %4'ten fazla dustu!",
+            )
+            state.notified_drop_4pct = True
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (%4 esigi)")
+
+        # %7 dusus
+        if drop_pct >= 7.0 and not state.notified_drop_7pct:
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="yuzde7_dusus",
+                title=f"{ticker} En Yukseginden %7 Dustu!",
+                body=f"{ticker} gun icinde en yukseginden %7'den fazla dustu!",
+            )
+            state.notified_drop_7pct = True
+            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (%7 esigi)")
+
+    # =====================
+    # TAVAN TAKIBI
     # =====================
 
-    # Ilk kez tavana kitlendi (acilistan sonra)
+    # Ilk kez tavana kitlendi
     if stock.is_ceiling_locked and not state.was_ceiling_locked and not state.notified_ceiling_first_lock:
-        send_notification(
+        send_notification_to_backend(
             ticker=ticker,
-            title=f"{ticker} TAVANA KİTLENDİ!",
-            body=f"{ticker} tavana kitlendi! Fiyat: {stock.son_fiyat:.2f} TL = Tavan: {stock.tavan:.2f} TL",
-            notif_type="ceiling_first_lock",
+            notif_type="tavan_bozulma",
+            title=f"{ticker} Tavana Kitlendi!",
+            body=f"{ticker} tavana kitlendi!",
         )
+        send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
         state.notified_ceiling_first_lock = True
-        print(f"  >>> {ticker} TAVANA KİTLENDİ! {stock.son_fiyat:.2f} = {stock.tavan:.2f}")
-
-    # Ilk kez tabana kitlendi
-    if stock.is_floor_locked and not state.was_floor_locked and not state.notified_floor_first_lock:
-        send_notification(
-            ticker=ticker,
-            title=f"{ticker} TABANA KİTLENDİ!",
-            body=f"{ticker} tabana kitlendi! Fiyat: {stock.son_fiyat:.2f} TL = Taban: {stock.taban:.2f} TL",
-            notif_type="floor_first_lock",
-        )
-        state.notified_floor_first_lock = True
-        print(f"  >>> {ticker} TABANA KİTLENDİ! {stock.son_fiyat:.2f} = {stock.taban:.2f}")
+        log(f"  >>> {ticker} TAVANA KITLENDI!")
 
     # Daha once tavana kilitliydi, simdi cozuldu
     if state.was_ceiling_locked and not stock.is_ceiling_locked:
         if not state.notified_ceiling_break:
-            # 1. BİLDİRİM — Tavan cozuldu!
-            send_notification(
+            send_notification_to_backend(
                 ticker=ticker,
-                title=f"{ticker} TAVAN COZULDU!",
-                body=f"{ticker} tavan cozuldu! Son fiyat: {stock.son_fiyat:.2f} TL (Tavan: {stock.tavan:.2f})",
-                notif_type="ceiling_break",
+                notif_type="tavan_bozulma",
+                title=f"{ticker} Tavan Cozuldu!",
+                body=f"{ticker} tavan cozuldu!",
             )
-            send_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
+            send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
             state.ceiling_broke_at = now
             state.notified_ceiling_break = True
             state.notified_ceiling_5min = False
             state.notified_relock_ceiling = False
-            print(f"  >>> {ticker} TAVAN COZULDU! Son: {stock.son_fiyat:.2f} (Tavan: {stock.tavan:.2f})")
+            log(f"  >>> {ticker} TAVAN COZULDU!")
 
     # Tavan cozuldukten 5 dakika gecti, hala kilitlemediyse
     if (state.ceiling_broke_at
         and not stock.is_ceiling_locked
         and not state.notified_ceiling_5min
         and (now - state.ceiling_broke_at).total_seconds() >= RELOCK_WAIT_SECONDS):
-        # 2. BİLDİRİM — 5 dakika gecti, tavana kilitleyemedi
-        send_notification(
+        send_notification_to_backend(
             ticker=ticker,
+            notif_type="tavan_bozulma",
             title=f"{ticker} 5dk gecti, tavana kilitleyemedi!",
-            body=f"{ticker} tavan cozuldukten 5 dakika gecti, hala tavana kilitleyemedi. Son: {stock.son_fiyat:.2f} TL",
-            notif_type="ceiling_5min_warning",
+            body=f"{ticker} tavan cozuldukten 5 dakika gecti, tavana kilitleyemedi!",
         )
         state.notified_ceiling_5min = True
-        print(f"  >>> {ticker} 5DK GECTİ, TAVANA KİLİTLEYEMEDİ! Son: {stock.son_fiyat:.2f}")
+        log(f"  >>> {ticker} 5DK GECTI, TAVANA KILITLEYEMEDI!")
 
     # Tavan cozuldukten sonra tekrar tavana kitlendi
     if (state.ceiling_broke_at
         and stock.is_ceiling_locked
         and not state.notified_relock_ceiling):
         relock_seconds = (now - state.ceiling_broke_at).total_seconds()
-        send_notification(
+        send_notification_to_backend(
             ticker=ticker,
-            title=f"{ticker} TEKRAR TAVANA KİTLENDİ!",
-            body=f"{ticker} tekrar tavana kitlendi! ({int(relock_seconds)}sn sonra). Son: {stock.son_fiyat:.2f} TL",
-            notif_type="ceiling_relock",
+            notif_type="tavan_bozulma",
+            title=f"{ticker} Tekrar Tavana Kitlendi!",
+            body=f"{ticker} tekrar tavana kitlendi!",
         )
-        send_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
+        send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
         state.notified_relock_ceiling = True
         state.ceiling_broke_at = None
         state.notified_ceiling_break = False
         state.notified_ceiling_5min = False
-        print(f"  >>> {ticker} TEKRAR TAVANA KİTLENDİ! ({int(relock_seconds)}sn sonra)")
+        log(f"  >>> {ticker} TEKRAR TAVANA KITLENDI! ({int(relock_seconds)}sn sonra)")
 
     # =====================
-    # TABAN TAKİBİ (ayni mantik)
+    # TABAN TAKIBI
     # =====================
+
+    # Ilk kez tabana kitlendi
+    if stock.is_floor_locked and not state.was_floor_locked and not state.notified_floor_first_lock:
+        send_notification_to_backend(
+            ticker=ticker,
+            notif_type="taban_acilma",
+            title=f"{ticker} Tabana Kitlendi!",
+            body=f"{ticker} tabana kitlendi!",
+        )
+        send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
+        state.notified_floor_first_lock = True
+        log(f"  >>> {ticker} TABANA KITLENDI!")
 
     # Daha once tabana kilitliydi, simdi cozuldu
     if state.was_floor_locked and not stock.is_floor_locked:
         if not state.notified_floor_break:
-            send_notification(
+            send_notification_to_backend(
                 ticker=ticker,
-                title=f"{ticker} TABAN COZULDU!",
-                body=f"{ticker} taban cozuldu! Son fiyat: {stock.son_fiyat:.2f} TL (Taban: {stock.taban:.2f})",
-                notif_type="floor_break",
+                notif_type="taban_acilma",
+                title=f"{ticker} Taban Cozuldu!",
+                body=f"{ticker} taban cozuldu!",
             )
-            send_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
+            send_ceiling_data_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
             state.floor_broke_at = now
             state.notified_floor_break = True
             state.notified_floor_5min = False
             state.notified_relock_floor = False
-            print(f"  >>> {ticker} TABAN COZULDU! Son: {stock.son_fiyat:.2f} (Taban: {stock.taban:.2f})")
+            log(f"  >>> {ticker} TABAN COZULDU!")
 
-    # Taban cozuldukten 5 dakika gecti, hala kilitlemediyse
+    # Taban cozuldukten 5 dakika gecti
     if (state.floor_broke_at
         and not stock.is_floor_locked
         and not state.notified_floor_5min
         and (now - state.floor_broke_at).total_seconds() >= RELOCK_WAIT_SECONDS):
-        send_notification(
+        send_notification_to_backend(
             ticker=ticker,
+            notif_type="taban_acilma",
             title=f"{ticker} 5dk gecti, tabana kilitleyemedi!",
-            body=f"{ticker} taban cozuldukten 5 dakika gecti. Son: {stock.son_fiyat:.2f} TL",
-            notif_type="floor_5min_warning",
+            body=f"{ticker} taban cozuldukten 5 dakika gecti, tabana kilitleyemedi!",
         )
         state.notified_floor_5min = True
-        print(f"  >>> {ticker} 5DK GECTİ, TABANA KİLİTLEYEMEDİ! Son: {stock.son_fiyat:.2f}")
+        log(f"  >>> {ticker} 5DK GECTI, TABANA KILITLEYEMEDI!")
 
     # Taban cozuldukten sonra tekrar tabana kitlendi
     if (state.floor_broke_at
         and stock.is_floor_locked
         and not state.notified_relock_floor):
         relock_seconds = (now - state.floor_broke_at).total_seconds()
-        send_notification(
+        send_notification_to_backend(
             ticker=ticker,
-            title=f"{ticker} TEKRAR TABANA KİTLENDİ!",
-            body=f"{ticker} tekrar tabana kitlendi! ({int(relock_seconds)}sn sonra)",
-            notif_type="floor_relock",
+            notif_type="taban_acilma",
+            title=f"{ticker} Tekrar Tabana Kitlendi!",
+            body=f"{ticker} tekrar tabana kitlendi!",
         )
-        send_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
+        send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
         state.notified_relock_floor = True
         state.floor_broke_at = None
         state.notified_floor_break = False
         state.notified_floor_5min = False
-        print(f"  >>> {ticker} TEKRAR TABANA KİTLENDİ! ({int(relock_seconds)}sn sonra)")
+        log(f"  >>> {ticker} TEKRAR TABANA KITLENDI! ({int(relock_seconds)}sn sonra)")
 
     # Mevcut durumu kaydet (bir sonraki tick icin)
     state.was_ceiling_locked = stock.is_ceiling_locked
@@ -455,171 +649,134 @@ def process_stock(stock: StockState, now: dt.datetime):
 
 
 # ============================================
-# BACKEND API GONDERIMI
+# ACILIS + KAPANIS BILDIRIMI
 # ============================================
 
-def send_to_backend(stock: StockState, hit_ceiling: bool, hit_floor: bool, state: TrackingState):
-    """Backend API'ye tavan/taban bilgisini gonder."""
-    try:
-        today = dt.date.today()
-        payload = {
-            "ticker": stock.ticker,
-            "trading_day": state.trading_day,
-            "trade_date": today.isoformat(),
-            "open_price": stock.son_fiyat,  # Acilis fiyati ayrica izlenecek
-            "close_price": stock.son_fiyat,
-            "high_price": stock.tavan,
-            "low_price": stock.taban,
-            "hit_ceiling": hit_ceiling,
-            "hit_floor": hit_floor,
-        }
-
-        response = requests.post(API_URL, json=payload, timeout=10)
-        if response.status_code == 200:
-            result = response.json()
-            subs = result.get("active_subscribers", 0)
-            notifs = result.get("notifications_sent", 0)
-            if subs > 0:
-                print(f"    Backend: {stock.ticker} -> {subs} abone, {notifs} bildirim gonderildi")
-        elif response.status_code == 404:
-            pass  # IPO bulunamadi — normal, yeni hisse olabilir
-        else:
-            print(f"    Backend hata: {response.status_code}")
-
-    except Exception as e:
-        print(f"    Backend baglanti hatasi: {e}")
-
-
-def send_notification(ticker: str, title: str, body: str, notif_type: str):
-    """Push bildirim gonder (backend uzerinden).
-
-    Backend zaten tavan takip aboneleri icin FCM bildirimlerini yonetiyor.
-    Burada ek olarak topic-based bildirim gonderebiliriz.
+def send_opening_notifications(stocks: list[StockState]):
     """
-    try:
-        # Backend ceiling-track endpoint'i zaten bildirimleri gonderiyor
-        # Ek bildirim gerekirse burada topic-based gonderim yapilabilir
-        log_notification(ticker, title, body, notif_type)
-    except Exception as e:
-        print(f"    Bildirim hatasi: {e}")
+    Her sabah 09:56'da acilis bildirimi gonder.
+    Her hisse icin: "AKHAN tavan acti!", "NETCD normal islem ile acildi"
 
-
-def log_notification(ticker: str, title: str, body: str, notif_type: str):
-    """Bildirimi log dosyasina yaz."""
-    log_file = Path(__file__).parent / "halka_arz_sync.log"
-    now = dt.datetime.now()
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] [{notif_type}] {title} | {body}\n")
-
-
-# ============================================
-# ACILIS BİLDİRİMİ (09:56)
-# ============================================
-
-def get_ipo_prices() -> dict[str, float]:
-    """Backend'den halka arz fiyatlarini cek (gunluk 1 kez yeterli)."""
-    try:
-        response = requests.get(
-            API_URL.replace("/ceiling-track", "/ipos?status=active&limit=50"),
-            timeout=10,
-        )
-        if response.status_code == 200:
-            ipos = response.json()
-            return {
-                ipo["ticker"]: float(ipo.get("ipo_price") or 0)
-                for ipo in ipos
-                if ipo.get("ticker") and ipo.get("ipo_price")
-            }
-    except Exception as e:
-        print(f"  IPO fiyatlari alinamadi: {e}")
-    return {}
-
-
-# Gunluk IPO fiyatlari cache
-_ipo_prices_cache: dict[str, float] = {}
-_ipo_prices_loaded = False
-
-
-def send_opening_notification(stocks: list[StockState]):
-    """Her sabah 09:56'da acilis bilgisi gonder.
-
-    Her hisse icin ayri bildirim:
-    - "AKHAN tavan acti!" (acilis fiyati = tavan)
-    - "NETCD %8.5 yukselisle acti!" (yuksek acilis ama tavan degil)
-    - "FRMPL -%3.2 dususle acti!" (dusuk acilis)
+    Bildirim tipi: gunluk_acilis_kapanis
+    FIYAT BILGISI YOK!
     """
-    global _ipo_prices_cache, _ipo_prices_loaded
-    now = dt.datetime.now()
-
-    # IPO fiyatlarini cache'le
-    if not _ipo_prices_loaded:
-        _ipo_prices_cache = get_ipo_prices()
-        _ipo_prices_loaded = True
-
-    print(f"\n  {'='*60}")
-    print(f"  ACILIS RAPORU ({now.strftime('%d.%m.%Y %H:%M')})")
-    print(f"  {'='*60}")
+    log(f"\n  {'='*60}")
+    log(f"  ACILIS RAPORU ({dt.datetime.now().strftime('%d.%m.%Y %H:%M')})")
+    log(f"  {'='*60}")
 
     for stock in stocks:
         ticker = stock.ticker
-        ipo_price = _ipo_prices_cache.get(ticker, 0)
+        if stock.son_fiyat <= 0:
+            continue
 
-        # Tracking state guncelle — acilis fiyatini kaydet
+        # Tracking state
         if ticker not in tracking_states:
             tracking_states[ticker] = TrackingState(ticker=ticker)
         state = tracking_states[ticker]
         state.day_open_price = stock.son_fiyat
         state.first_read_done = True
 
-        # Acilis analizi
-        if stock.son_fiyat >= stock.tavan and stock.tavan > 0:
-            # TAVAN ACTI!
-            pct = ""
-            if ipo_price > 0:
-                change = ((stock.son_fiyat - ipo_price) / ipo_price) * 100
-                pct = f" (Halka arz fiyatindan %{change:.1f})"
+        # Gunluk en yuksek fiyati baslat
+        state.day_high = stock.son_fiyat
 
-            send_notification(
-                ticker=ticker,
-                title=f"{ticker} TAVAN ACTI!",
-                body=f"{ticker} tavan fiyatindan acildi! Acilis: {stock.son_fiyat:.2f} TL (Tavan: {stock.tavan:.2f}){pct}",
-                notif_type="opening_ceiling",
-            )
-            print(f"  {ticker}: TAVAN ACTI! {stock.son_fiyat:.2f} TL{pct}")
-
-        elif stock.son_fiyat <= stock.taban and stock.taban > 0:
-            # TABAN ACTI!
-            pct = ""
-            if ipo_price > 0:
-                change = ((stock.son_fiyat - ipo_price) / ipo_price) * 100
-                pct = f" (Halka arz fiyatindan %{change:.1f})"
-
-            send_notification(
-                ticker=ticker,
-                title=f"{ticker} TABAN ACTI!",
-                body=f"{ticker} taban fiyatindan acildi! Acilis: {stock.son_fiyat:.2f} TL (Taban: {stock.taban:.2f}){pct}",
-                notif_type="opening_floor",
-            )
-            print(f"  {ticker}: TABAN ACTI! {stock.son_fiyat:.2f} TL{pct}")
-
+        # Acilis durumu
+        if stock.is_ceiling_locked:
+            title = f"{ticker} Tavan Acti!"
+            body = f"{ticker} tavan acti!"
+            log(f"  {ticker}: TAVAN ACTI!")
+        elif stock.is_floor_locked:
+            title = f"{ticker} Taban Acti!"
+            body = f"{ticker} taban acti!"
+            log(f"  {ticker}: TABAN ACTI!")
         else:
-            # Normal acilis — yuzde degisim goster
-            if ipo_price > 0:
-                change = ((stock.son_fiyat - ipo_price) / ipo_price) * 100
-                direction = "yukselisle" if change > 0 else "dususle"
-                send_notification(
-                    ticker=ticker,
-                    title=f"{ticker} %{abs(change):.1f} {direction} acildi",
-                    body=f"{ticker} acilis: {stock.son_fiyat:.2f} TL (Halka arz: {ipo_price:.2f} TL, %{change:+.1f})",
-                    notif_type="opening_normal",
-                )
-                print(f"  {ticker}: %{change:+.1f} acildi -> {stock.son_fiyat:.2f} TL (HA: {ipo_price:.2f})")
-            else:
-                print(f"  {ticker}: Acilis {stock.son_fiyat:.2f} TL (Tavan: {stock.tavan:.2f}, Taban: {stock.taban:.2f})")
+            title = f"{ticker} Acilis"
+            body = f"{ticker} normal islem ile acildi"
+            log(f"  {ticker}: Normal acilis")
 
+        send_notification_to_backend(ticker, "gunluk_acilis_kapanis", title, body)
         state.opening_notified = True
 
-    print(f"  {'='*60}\n")
+    log(f"  {'='*60}\n")
+
+
+def send_closing_notifications(stocks: list[StockState]):
+    """
+    Her aksam 18:08'de kapanis bildirimi gonder.
+    Her hisse icin: "AKHAN tavan kapatti!", "NETCD normal islem ile kapatti"
+
+    Bildirim tipi: gunluk_acilis_kapanis
+    FIYAT BILGISI YOK!
+    """
+    log(f"\n  {'='*60}")
+    log(f"  KAPANIS RAPORU ({dt.datetime.now().strftime('%d.%m.%Y %H:%M')})")
+    log(f"  {'='*60}")
+
+    for stock in stocks:
+        ticker = stock.ticker
+        if stock.son_fiyat <= 0:
+            continue
+
+        # Tracking state
+        if ticker not in tracking_states:
+            tracking_states[ticker] = TrackingState(ticker=ticker)
+        state = tracking_states[ticker]
+
+        # Kapanis durumu
+        if stock.is_ceiling_locked:
+            title = f"{ticker} Tavan Kapatti!"
+            body = f"{ticker} tavan kapatti!"
+            log(f"  {ticker}: TAVAN KAPATTI!")
+        elif stock.is_floor_locked:
+            title = f"{ticker} Taban Kapatti!"
+            body = f"{ticker} taban kapatti!"
+            log(f"  {ticker}: TABAN KAPATTI!")
+        else:
+            title = f"{ticker} Kapanis"
+            body = f"{ticker} normal islem ile kapatti"
+            log(f"  {ticker}: Normal kapanis")
+
+        send_notification_to_backend(ticker, "gunluk_acilis_kapanis", title, body)
+        state.closing_notified = True
+
+    log(f"  {'='*60}\n")
+
+
+# ============================================
+# GUNLUK SIFIRLAMA
+# ============================================
+
+def reset_daily_states():
+    """Her gun baslangicinda takip durumlarini sifirla."""
+    for ticker, state in tracking_states.items():
+        # Tavan/taban bildirim flagleri sifirla
+        state.notified_ceiling_first_lock = False
+        state.notified_ceiling_break = False
+        state.notified_ceiling_5min = False
+        state.notified_relock_ceiling = False
+        state.ceiling_broke_at = None
+
+        state.notified_floor_first_lock = False
+        state.notified_floor_break = False
+        state.notified_floor_5min = False
+        state.notified_relock_floor = False
+        state.floor_broke_at = None
+
+        # %4/%7 dusus sifirla
+        state.day_high = 0.0
+        state.notified_drop_4pct = False
+        state.notified_drop_7pct = False
+
+        # Acilis/kapanis sifirla
+        state.opening_notified = False
+        state.closing_notified = False
+
+        # Onceki durum
+        state.was_ceiling_locked = False
+        state.was_floor_locked = False
+        state.day_open_price = 0.0
+        state.first_read_done = False
+
+    log("Gunluk takip durumlari sifirlandi.")
 
 
 # ============================================
@@ -630,8 +787,8 @@ def print_stock_table(stocks: list[StockState]):
     """Hisse durumlarini tablo olarak goster."""
     now = dt.datetime.now()
     print(f"\n[{now.strftime('%H:%M:%S')}] {len(stocks)} hisse okundu:")
-    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'SATIS K.':>10s} {'ALIS K.':>10s} {'DURUM'}")
-    print(f"  {'-'*70}")
+    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'G.HIGH':>8s} {'ALIS K.':>10s} {'SATIS K.':>10s} {'DURUM'}")
+    print(f"  {'-'*80}")
     for s in stocks:
         durum = ""
         if s.is_ceiling_locked:
@@ -640,13 +797,22 @@ def print_stock_table(stocks: list[StockState]):
             durum = "TABANA KILITLI"
         else:
             durum = "Normal"
-        sk = s.satis_kademe or "-"
+
         ak = s.alis_kademe or "-"
-        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {sk:>10s} {ak:>10s} {durum}")
+        sk = s.satis_kademe or "-"
+
+        # %4/%7 dusus durumunu goster (J sutunundan gun_en_yuksek)
+        gun_high = s.gun_en_yuksek
+        if gun_high > 0 and s.son_fiyat > 0:
+            drop = ((gun_high - s.son_fiyat) / gun_high) * 100
+            if drop >= 1.0:
+                durum += f" (-%{drop:.1f})"
+
+        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {gun_high:>8.2f} {ak:>10s} {sk:>10s} {durum}")
 
 
 def is_market_hours() -> bool:
-    """Piyasa saatleri icinde mi?"""
+    """Piyasa saatleri icinde mi? (09:55 — 18:10)"""
     now = dt.datetime.now()
     current_min = now.hour * 60 + now.minute
     start_min = SEANS_START_HOUR * 60 + SEANS_START_MIN - 5  # 09:55
@@ -660,30 +826,41 @@ def is_opening_time() -> bool:
     return now.hour == MARKET_OPEN_HOUR and now.minute == MARKET_OPEN_MIN
 
 
+def is_closing_time() -> bool:
+    """Kapanis bildirimi zamani mi? (18:08)"""
+    now = dt.datetime.now()
+    return now.hour == KAPANIS_HOUR and now.minute == KAPANIS_MIN
+
+
 def is_weekend() -> bool:
     """Hafta sonu mu?"""
     return dt.datetime.now().weekday() >= 5
 
 
+# Global gunluk flagler
 opening_sent_today = False
+closing_sent_today = False
+daily_reset_done = False
 
 
 def run():
-    """Ana calisma dongusu — 10 saniyede bir Excel'den oku, analiz et."""
-    global opening_sent_today
+    """Ana calisma dongusu — 15 saniyede bir Excel'den oku, analiz et."""
+    global opening_sent_today, closing_sent_today, daily_reset_done
 
     now = dt.datetime.now()
     print("=" * 60)
-    print(f"  Halka Arz Tavan/Taban Takip Sync")
+    print(f"  Halka Arz Tavan/Taban Takip — Canli Sync")
     print(f"  Excel: {Path(EXCEL_FILE_PATH).name}")
     print(f"  Sync Araligi: {SYNC_INTERVAL} saniye")
     print(f"  Piyasa: {SEANS_START_HOUR:02d}:{SEANS_START_MIN:02d} - {SEANS_END_HOUR:02d}:{SEANS_END_MIN:02d}")
     print(f"  Acilis Bildirimi: {MARKET_OPEN_HOUR:02d}:{MARKET_OPEN_MIN:02d}")
+    print(f"  Kapanis Bildirimi: {KAPANIS_HOUR:02d}:{KAPANIS_MIN:02d}")
     print(f"  Tavan Bozulma Bekleme: {RELOCK_WAIT_SECONDS // 60} dakika")
+    print(f"  Backend: {API_BASE_URL}")
     print(f"  [{now.strftime('%Y-%m-%d %H:%M:%S')}]")
     print("=" * 60)
 
-    log_notification("SYSTEM", "Halka Arz Sync Baslatildi", f"Interval: {SYNC_INTERVAL}s", "startup")
+    log("SYSTEM: Halka Arz Sync baslatildi")
 
     tick_count = 0
 
@@ -697,9 +874,14 @@ def run():
                 time.sleep(60)
                 continue
 
-            # Gun degisimi — acilis bildirimini sifirla
-            if now.hour < 9:
+            # Gun degisimi — gunluk sifirlama
+            if now.hour < 9 and not daily_reset_done:
+                reset_daily_states()
                 opening_sent_today = False
+                closing_sent_today = False
+                daily_reset_done = True
+            elif now.hour >= 9:
+                daily_reset_done = False  # Ertesi gun icin sifirla
 
             # Piyasa saatleri disinda bekle
             if not is_market_hours():
@@ -720,17 +902,22 @@ def run():
 
             # 09:56 Acilis bildirimi
             if is_opening_time() and not opening_sent_today:
-                send_opening_notification(stocks)
+                send_opening_notifications(stocks)
                 opening_sent_today = True
 
-            # Her hisseyi analiz et
+            # 18:08 Kapanis bildirimi
+            if is_closing_time() and not closing_sent_today:
+                send_closing_notifications(stocks)
+                closing_sent_today = True
+
+            # Her hisseyi analiz et (tavan/taban/dusus)
             for stock in stocks:
                 process_stock(stock, now)
 
             tick_count += 1
 
-            # Her 6 tick'te bir (60 saniyede bir) tablo goster
-            if tick_count % 6 == 0:
+            # Her 4 tick'te bir (60 saniyede bir) tablo goster
+            if tick_count % 4 == 0:
                 print_stock_table(stocks)
 
                 # Kilitli hisseleri kisa ozet
@@ -752,11 +939,11 @@ def run():
 
         except KeyboardInterrupt:
             print(f"\n\n  Halka Arz Sync durduruldu (Ctrl+C)")
-            log_notification("SYSTEM", "Sync Durduruldu", "Ctrl+C", "shutdown")
+            log("SYSTEM: Sync durduruldu (Ctrl+C)")
             break
         except Exception as e:
             print(f"\n  Beklenmeyen hata: {e}")
-            log_notification("SYSTEM", "Hata", str(e), "error")
+            log(f"SYSTEM HATA: {e}")
             time.sleep(30)
 
 
