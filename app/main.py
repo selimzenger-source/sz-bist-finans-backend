@@ -996,15 +996,17 @@ async def delete_ceiling_track(
         raise HTTPException(status_code=404, detail=f"{ticker} gun {trading_day} bulunamadi")
 
     await db.delete(track)
+    await db.flush()  # Silme islemini flush et
 
-    # trading_day_count guncelle
+    # trading_day_count guncelle — max trading_day'e gore
     ipo_result = await db.execute(select(IPO).where(IPO.ticker == ticker.upper()))
     ipo = ipo_result.scalar_one_or_none()
     if ipo:
-        count_result = await db.execute(
-            select(func.count(IPOCeilingTrack.id)).where(IPOCeilingTrack.ipo_id == ipo.id)
+        from sqlalchemy import func as sa_func
+        max_day_result = await db.execute(
+            select(sa_func.max(IPOCeilingTrack.trading_day)).where(IPOCeilingTrack.ipo_id == ipo.id)
         )
-        ipo.trading_day_count = (count_result.scalar() or 0) - 1  # -1 cunku silinen henuz commit olmadi
+        ipo.trading_day_count = max_day_result.scalar() or 0
 
     await db.commit()
     return {"status": "ok", "deleted": f"{ticker} gun {trading_day}"}
