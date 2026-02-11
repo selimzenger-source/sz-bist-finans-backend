@@ -1,14 +1,19 @@
 """Firebase Cloud Messaging (FCM) push bildirim servisi.
 
 Kullanicilara halka arz ve KAP haber bildirimlerini gonderir.
+Ust uste seri bildirim onlemek icin her bildirim arasi 5 saniye beklenir.
 """
 
+import asyncio
 import json
 import logging
 from typing import Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Bildirimler arasi bekleme suresi (saniye) — seri bildirim onleme
+NOTIFICATION_DELAY_SECONDS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +77,17 @@ class NotificationService:
         title: str,
         body: str,
         data: Optional[dict] = None,
+        delay: bool = True,
     ) -> bool:
-        """Tek bir cihaza push bildirim gonderir."""
+        """Tek bir cihaza push bildirim gonderir.
+
+        delay=True ise bildirim gonderildikten sonra NOTIFICATION_DELAY_SECONDS
+        kadar bekler — ust uste seri bildirim onleme.
+        """
         if not _firebase_initialized:
             logger.info(f"[DRY-RUN] Push → device: {title} | {body}")
+            if delay:
+                await asyncio.sleep(NOTIFICATION_DELAY_SECONDS)
             return True
 
         try:
@@ -107,6 +119,11 @@ class NotificationService:
 
             response = messaging.send(message)
             logger.info(f"Push bildirim gonderildi: {response}")
+
+            # Seri bildirim onleme — sonraki bildirimden once bekle
+            if delay:
+                await asyncio.sleep(NOTIFICATION_DELAY_SECONDS)
+
             return True
 
         except Exception as e:
@@ -119,10 +136,17 @@ class NotificationService:
         title: str,
         body: str,
         data: Optional[dict] = None,
+        delay: bool = True,
     ) -> bool:
-        """Bir konuya (topic) abone olan tum cihazlara bildirim gonderir."""
+        """Bir konuya (topic) abone olan tum cihazlara bildirim gonderir.
+
+        delay=True ise bildirim gonderildikten sonra NOTIFICATION_DELAY_SECONDS
+        kadar bekler — ust uste seri bildirim onleme.
+        """
         if not _firebase_initialized:
             logger.info(f"[DRY-RUN] Push → topic/{topic}: {title} | {body}")
+            if delay:
+                await asyncio.sleep(NOTIFICATION_DELAY_SECONDS)
             return True
 
         try:
@@ -154,6 +178,11 @@ class NotificationService:
 
             response = messaging.send(message)
             logger.info(f"Topic bildirim gonderildi ({topic}): {response}")
+
+            # Seri bildirim onleme — sonraki bildirimden once bekle
+            if delay:
+                await asyncio.sleep(NOTIFICATION_DELAY_SECONDS)
+
             return True
 
         except Exception as e:
@@ -230,6 +259,57 @@ class NotificationService:
         await self.send_to_topic("ipo_all", title, body, data)
         await self.send_to_topic(f"ipo_{ipo.id}", title, body, data)
         return 1
+
+    async def notify_first_trading_day(self, ipo) -> int:
+        """Ilk islem gunu bildirimi — trading_start == bugun olan IPO'lar icin.
+
+        notify_first_trading_day = True olan kullanicilara gonderir.
+        Her IPO icin tek 1 bildirim (09:30'da).
+        """
+        from app.models.user import User
+
+        title = "🔔 Bugün İşlem Görmeye Başlıyor"
+        body = f"{ipo.ticker or ipo.company_name} bugün borsada işlem görmeye başlıyor!"
+        if ipo.ipo_price:
+            body += f" (Halka arz fiyatı: {ipo.ipo_price} TL)"
+
+        data = {
+            "type": "first_trading_day",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        # notify_first_trading_day = True olan kullanicilari bul
+        users_result = await self.db.execute(
+            select(User).where(
+                and_(
+                    User.notify_first_trading_day == True,
+                    or_(
+                        User.expo_push_token.isnot(None),
+                        User.fcm_token.isnot(None),
+                    ),
+                )
+            )
+        )
+        users = list(users_result.scalars().all())
+
+        sent_count = 0
+        for user in users:
+            token = user.expo_push_token or user.fcm_token
+            if token:
+                await self.send_to_device(
+                    fcm_token=token,
+                    title=title,
+                    body=body,
+                    data=data,
+                )
+                sent_count += 1
+
+        logger.info(
+            "Ilk islem gunu bildirimi: %s — %d kullaniciya gonderildi",
+            ipo.ticker or ipo.company_name, sent_count,
+        )
+        return sent_count
 
     async def notify_ceiling_broken(self, ipo) -> int:
         """Tavan bozuldu bildirimi."""

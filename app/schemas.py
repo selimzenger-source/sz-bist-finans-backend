@@ -292,6 +292,7 @@ class UserUpdate(BaseModel):
     notify_ipo_last_day: Optional[bool] = None
     notify_ipo_result: Optional[bool] = None
     notify_ceiling_break: Optional[bool] = None
+    notify_first_trading_day: Optional[bool] = None
     # Hatirlatma zamanları
     reminder_30min: Optional[bool] = None
     reminder_1h: Optional[bool] = None
@@ -316,6 +317,7 @@ class UserOut(BaseModel):
     notify_ipo_last_day: bool = True
     notify_ipo_result: bool = True
     notify_ceiling_break: bool = True
+    notify_first_trading_day: bool = True
     reminder_30min: bool = False
     reminder_1h: bool = True
     reminder_2h: bool = False

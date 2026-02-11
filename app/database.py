@@ -96,3 +96,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v6 migration: users.notify_first_trading_day kolonu (ilk islem gunu bildirimi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_first_trading_day BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass

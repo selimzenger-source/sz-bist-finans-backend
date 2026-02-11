@@ -4,7 +4,7 @@
 2. KAP Haberler: DEVRE DISI (KAP API bozuk, 404)
 3. SPK Bulten Monitor: her 5 dk (20:00-05:00 arasi)
 4. SPK Basvuru Listesi: gunluk 08:00 (SPKApplication tablosuna)
-5. HalkArz + Gedik: her 4 saatte bir
+5. HalkArz + Gedik: her 2 saatte bir
 6. Telegram Poller: her 10 saniyede bir
 7. IPO Durum Guncelleme: her saat (5 bolumlu status gecisleri)
 8. 25 Is Gunu Arsiv: her gece 00:00
@@ -13,6 +13,8 @@
 11. InfoYatirim: her 6 saatte bir (yedek veri kaynagi)
 12. Son Gun Uyarisi: her gun 09:00 ve 17:00
 13. Tavan Takip Gun Sonu: her gun 18:20 (UTC 15:20) Pzt-Cuma
+14. Sabah Scraper: her gun 09:00 (UTC 06:00) — tum scraper'lar + status update
+15. Ilk Islem Gunu Bildirimi: her gun 09:30 (UTC 06:30) — trading_start == bugun
 """
 
 import logging
@@ -619,6 +621,86 @@ async def daily_ceiling_update():
         logger.error("Tavan takip gun sonu hatasi: %s", e)
 
 
+async def morning_scraper_run():
+    """Sabah 09:00 (UTC 06:00) — tum scraper'lari calistir + status guncelle.
+
+    Borsa acilmadan once verilerin guncel olmasini garanti eder.
+    Sirayla calistirir: HalkArz+Gedik → SPK Ihrac → InfoYatirim → Status Update
+    """
+    logger.info("=== SABAH SCRAPER BASLADI (09:00) ===")
+    try:
+        await scrape_halkarz_gedik()
+    except Exception as e:
+        logger.error(f"Sabah scraper — HalkArz/Gedik hatasi: {e}")
+
+    try:
+        await check_spk_ihrac_data()
+    except Exception as e:
+        logger.error(f"Sabah scraper — SPK ihrac hatasi: {e}")
+
+    try:
+        await scrape_infoyatirim()
+    except Exception as e:
+        logger.error(f"Sabah scraper — InfoYatirim hatasi: {e}")
+
+    try:
+        await auto_update_ipo_statuses()
+    except Exception as e:
+        logger.error(f"Sabah scraper — Status update hatasi: {e}")
+
+    logger.info("=== SABAH SCRAPER TAMAMLANDI ===")
+
+
+async def send_first_trading_day_notifications():
+    """Ilk islem gunu bildirimi — her gun 09:30 (UTC 06:30).
+
+    trading_start == bugun olan IPO'lari bulur ve
+    notify_first_trading_day = True olan kullanicilara bildirim gonderir.
+    Her IPO icin tek 1 bildirim.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from app.services.notification import NotificationService
+
+        async with async_session() as db:
+            today = date.today()
+
+            # Bugun isleme baslayan IPO'lari bul
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.trading_start == today,
+                        IPO.status.in_(["trading", "awaiting_trading"]),
+                    )
+                )
+            )
+            todays_ipos = list(result.scalars().all())
+
+            if not todays_ipos:
+                logger.info("Ilk islem gunu: Bugun baslayan IPO yok")
+                return
+
+            notif_service = NotificationService(db)
+
+            total_sent = 0
+            for ipo in todays_ipos:
+                sent = await notif_service.notify_first_trading_day(ipo)
+                total_sent += sent
+                logger.info(
+                    "Ilk islem gunu bildirimi: %s — %d kullaniciya gonderildi",
+                    ipo.ticker or ipo.company_name, sent,
+                )
+
+            logger.info(
+                "Ilk islem gunu bildirimi tamamlandi: %d IPO, %d bildirim",
+                len(todays_ipos), total_sent,
+            )
+
+    except Exception as e:
+        logger.error(f"Ilk islem gunu bildirim hatasi: {e}")
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -753,6 +835,26 @@ def _setup_scheduler_impl():
         CronTrigger(hour=15, minute=20, day_of_week="mon-fri"),
         id="daily_ceiling_update",
         name="Tavan Takip Gun Sonu (18:20)",
+        replace_existing=True,
+    )
+
+    # 14. Sabah Scraper — her gun 09:00 Turkiye (UTC 06:00) Pzt-Cuma
+    # Borsa acilmadan once tum verileri guncellemek icin
+    scheduler.add_job(
+        morning_scraper_run,
+        CronTrigger(hour=6, minute=0, day_of_week="mon-fri"),
+        id="morning_scraper",
+        name="Sabah Scraper (09:00 TR)",
+        replace_existing=True,
+    )
+
+    # 15. Ilk Islem Gunu Bildirimi — her gun 09:30 Turkiye (UTC 06:30) Pzt-Cuma
+    # trading_start == bugun olan IPO'lar icin tek 1 bildirim
+    scheduler.add_job(
+        send_first_trading_day_notifications,
+        CronTrigger(hour=6, minute=30, day_of_week="mon-fri"),
+        id="first_trading_day_notif",
+        name="Ilk Islem Gunu Bildirimi (09:30 TR)",
         replace_existing=True,
     )
 
