@@ -712,6 +712,21 @@ async def register_device(data: UserRegister, db: AsyncSession = Depends(get_db)
     return user
 
 
+@app.get("/api/v1/users/{device_id}", response_model=UserOut)
+async def get_user(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanici profilini getirir — bildirim tercihleri dahil."""
+    result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+    return user
+
+
 @app.put("/api/v1/users/{device_id}", response_model=UserOut)
 async def update_user(
     device_id: str,
