@@ -2,11 +2,14 @@
 
 Telegram Bot API uzerinden belirli kanaldan mesajlari ceker,
 3 farkli mesaj formatini parse eder ve veritabanina kaydeder.
+Yeni haber geldiginde push bildirim gonderir.
 
-Mesaj Tipleri:
-1. SEANS ICI POZITIF/NEGATIF HABER — Borsa acikken gelen haberler
-2. BORSA KAPALI - Haber Kaydedildi — Borsa kapattiktan sonra gelen
-3. SEANS DISI HABER - ACILIS BILGILERI — Acilis oncesi analiz
+Mesaj Tipleri (sadece pozitif):
+1. seans_ici_pozitif — Seans Ici Pozitif Haber Yakalandi
+2. borsa_kapali — Seans Disi Pozitif Haber Yakalandi
+3. seans_disi_acilis — Seans Disi Haber Yakalanan Hisse Acilisi (GAP)
+
+NOT: Negatif haber yok. Fiyat bilgisi kaydedilmez (veri ihlali).
 
 Konfigürasyon:
     TELEGRAM_BOT_TOKEN: Bot token (env var)
@@ -15,7 +18,7 @@ Konfigürasyon:
 
 import re
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
 
 import httpx
@@ -24,6 +27,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session
 from app.models.telegram_news import TelegramNews
+
+# Turkiye saat dilimi (UTC+3)
+TZ_TR = timezone(timedelta(hours=3))
 
 logger = logging.getLogger(__name__)
 
@@ -59,19 +65,21 @@ async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> l
 # -------------------------------------------------------------------
 
 def detect_message_type(text: str) -> str | None:
-    """Mesaj metninden tipini tespit et."""
+    """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli."""
     text_upper = text.upper()
 
+    # Seans ici pozitif haber (negatif yok)
     if "SEANS İÇİ" in text_upper or "SEANS ICI" in text_upper:
         if "POZİTİF" in text_upper or "POZITIF" in text_upper:
             return "seans_ici_pozitif"
-        elif "NEGATİF" in text_upper or "NEGATIF" in text_upper:
-            return "seans_ici_negatif"
-        return "seans_ici_pozitif"  # default
+        # Negatif mesajlar atlanir
+        return None
 
+    # Borsa kapali = Seans disi pozitif haber
     if "BORSA KAPALI" in text_upper:
         return "borsa_kapali"
 
+    # Acilis bilgileri
     if "AÇILIŞ BİLGİLERİ" in text_upper or "ACILIS BILGILERI" in text_upper:
         return "seans_disi_acilis"
 
@@ -162,22 +170,17 @@ def parse_theoretical_open(text: str) -> Decimal | None:
 
 
 def parse_sentiment(message_type: str) -> str:
-    """Mesaj tipinden sentiment belirle."""
-    if "pozitif" in message_type:
-        return "positive"
-    elif "negatif" in message_type:
-        return "negative"
-    return "neutral"
+    """Mesaj tipinden sentiment belirle. Tum haberler pozitif."""
+    return "positive"
 
 
 def build_parsed_title(message_type: str, ticker: str | None) -> str:
     """Mesaj tipi ve ticker'dan baslik olustur."""
     ticker_str = ticker or "???"
     type_labels = {
-        "seans_ici_pozitif": f"📈 Seans İçi Pozitif — {ticker_str}",
-        "seans_ici_negatif": f"📉 Seans İçi Negatif — {ticker_str}",
-        "borsa_kapali": f"🔒 Borsa Kapalı — {ticker_str}",
-        "seans_disi_acilis": f"📊 Açılış Bilgileri — {ticker_str}",
+        "seans_ici_pozitif": f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker_str}",
+        "borsa_kapali": f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker_str}",
+        "seans_disi_acilis": f"📊 Seans Dışı Haber Yakalanan Hisse Açılışı - {ticker_str}",
     }
     return type_labels.get(message_type, f"Haber — {ticker_str}")
 
@@ -246,7 +249,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             # Parse
             ticker = parse_ticker(text)
-            price = parse_price(text, "Fiyat")
+            # Fiyat bilgisi KAYDEDILMEZ (veri ihlali)
             kap_id = parse_kap_id(text)
             expected_date = parse_expected_trading_date(text)
             gap = parse_gap_pct(text)
@@ -255,30 +258,68 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             sentiment = parse_sentiment(message_type)
             title = build_parsed_title(message_type, ticker)
 
-            # Mesaj tarihini al
+            # Mesaj tarihini al — Turkiye saat diliminde (UTC+3)
             msg_date_unix = message.get("date")
-            msg_date = datetime.fromtimestamp(msg_date_unix) if msg_date_unix else None
+            msg_date = (
+                datetime.fromtimestamp(msg_date_unix, tz=TZ_TR).replace(tzinfo=None)
+                if msg_date_unix else None
+            )
 
-            # DB'ye kaydet
+            # Parsed body — fiyat bilgisi olmadan temiz format
+            parsed_body = f"Sembol: {ticker or '???'}"
+            if message_type == "seans_disi_acilis" and gap is not None:
+                parsed_body += f"\nGap: %{gap}"
+            elif message_type == "borsa_kapali" and expected_date:
+                parsed_body += f"\nBeklenen İşlem Günü: {expected_date.isoformat()}"
+
+            # DB'ye kaydet — fiyat yok
             news = TelegramNews(
                 telegram_message_id=telegram_message_id,
                 chat_id=msg_chat_id,
                 message_type=message_type,
                 ticker=ticker,
-                price_at_time=price,
+                price_at_time=None,  # Fiyat kaydedilmez
                 raw_text=text,
                 parsed_title=title,
-                parsed_body=text,  # Tam metin body olarak
+                parsed_body=parsed_body,
                 sentiment=sentiment,
                 kap_notification_id=kap_id,
                 expected_trading_date=expected_date,
                 gap_pct=gap,
-                prev_close_price=prev_close,
-                theoretical_open=theo_open,
+                prev_close_price=None,  # Fiyat kaydedilmez
+                theoretical_open=None,  # Fiyat kaydedilmez
                 message_date=msg_date,
             )
             session.add(news)
             new_count += 1
+
+            # Hemen push bildirim gonder
+            try:
+                from app.services.notification import NotificationService
+                notif = NotificationService()
+                price_val = parse_price(text, "Fiyat")  # Gecici: sadece keyword icin parse
+                # Matched keyword'u raw text'ten cikar
+                matched_kw = ""
+                if kap_id:
+                    # "Iliskilendirilen Haber Detayi:" sonrasini al
+                    detail_match = re.search(r"[İI]lişkilendirilen\s+Haber\s+Detay[ıi]:\s*\n(.+)", text, re.IGNORECASE)
+                    if detail_match:
+                        matched_kw = detail_match.group(1).strip()
+                if not matched_kw:
+                    matched_kw = ticker or ""
+
+                news_type = "seans_ici" if message_type == "seans_ici_pozitif" else "seans_disi"
+                await notif.notify_kap_news(
+                    ticker=ticker or "",
+                    price=None,
+                    kap_id=kap_id or "",
+                    matched_keyword=matched_kw,
+                    sentiment="positive",
+                    news_type=news_type,
+                )
+                logger.info("Push bildirim gonderildi: %s — %s", ticker, title)
+            except Exception as notif_err:
+                logger.error("Push bildirim hatasi: %s", notif_err)
 
             logger.info(
                 "Telegram haber kaydedildi: [%s] %s — %s",
