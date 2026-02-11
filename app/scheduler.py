@@ -764,12 +764,16 @@ def _setup_scheduler_impl():
     )
 
     # 6. Telegram Poller — her 10 saniyede bir
+    # max_instances=1: APScheduler ayni anda sadece 1 instance calistirir
+    # Ek olarak telegram_poller.py icinde asyncio.Lock koruması var
     scheduler.add_job(
         poll_telegram_job,
         IntervalTrigger(seconds=10),
         id="telegram_poller",
         name="Telegram Kanal Poller",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,  # Biriken cagrilari birlestir
     )
 
     # 7. IPO Durum Guncelleme — her saat

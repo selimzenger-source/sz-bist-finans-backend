@@ -17,6 +17,7 @@ Konfigürasyon:
 """
 
 import re
+import asyncio
 import logging
 from datetime import datetime, date, timezone, timedelta
 from decimal import Decimal
@@ -39,20 +40,22 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 _last_update_id: int | None = None
+_poll_lock = asyncio.Lock()  # Eszamanli getUpdates cagrilarini engelle
 
 
 async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> list[dict]:
     """Telegram getUpdates API'sini cagir.
 
-    409 Conflict: Baska bir process (webhook veya baska getUpdates) ayni token'i kullaniyor.
-    Bu durumda once webhook'u kaldirmaya calis, sonra tekrar dene.
+    timeout=0: Aninda cevap al (long polling kullanma).
+    Bu sayede 10 sn aralikla cagrildiginda cakisma olmaz.
+    409 Conflict: Baska bir process ayni token'i kullaniyor — webhook kaldir + tekrar dene.
     """
     url = f"{TELEGRAM_API_BASE.format(token=bot_token)}/getUpdates"
-    params = {"timeout": 5, "limit": 100}
+    params = {"timeout": 0, "limit": 100}  # timeout=0: long polling yok, aninda yanit
     if offset is not None:
         params["offset"] = offset
 
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(url, params=params)
 
         # 409 Conflict — webhook ayarli olabilir, kaldirmaya calis
@@ -409,20 +412,27 @@ async def poll_telegram():
     """Scheduler tarafindan cagirilir.
 
     Bot token ve chat ID'yi config/env'den alir.
+    asyncio.Lock ile eszamanli cagrilari engeller — 409 Conflict onlenir.
     """
-    from app.config import get_settings
-    settings = get_settings()
-
-    bot_token = settings.TELEGRAM_BOT_TOKEN
-    chat_id = settings.TELEGRAM_CHAT_ID
-
-    if not bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, poller atlaniyor")
+    # Lock ile koruma: Eger onceki poll hala suruyorsa atlaniyor
+    if _poll_lock.locked():
+        logger.debug("Telegram poll zaten calisiyor, atlaniyor")
         return
 
-    try:
-        count = await poll_telegram_messages(bot_token, chat_id)
-        if count > 0:
-            logger.info("Telegram: %d yeni mesaj islendi", count)
-    except Exception as e:
-        logger.error("Telegram poller hatasi: %s", e)
+    async with _poll_lock:
+        from app.config import get_settings
+        settings = get_settings()
+
+        bot_token = settings.TELEGRAM_BOT_TOKEN
+        chat_id = settings.TELEGRAM_CHAT_ID
+
+        if not bot_token:
+            logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, poller atlaniyor")
+            return
+
+        try:
+            count = await poll_telegram_messages(bot_token, chat_id)
+            if count > 0:
+                logger.info("Telegram: %d yeni mesaj islendi", count)
+        except Exception as e:
+            logger.error("Telegram poller hatasi: %s", e)
