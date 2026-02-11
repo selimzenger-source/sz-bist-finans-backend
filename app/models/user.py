@@ -31,6 +31,7 @@ class User(Base):
     notify_ipo_result: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tahsisat sonucu")
     notify_ceiling_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tavan bozuldu bildirimi")
     notify_first_trading_day: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ilk islem gunu bildirimi (ucretsiz)")
+    notify_kap_bist30: Mapped[bool] = mapped_column(Boolean, default=True, comment="BIST 30 KAP ucretsiz bildirim")
 
     # Hatirlatma zamanlari (son gun icin)
     reminder_30min: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 30 dk kala")

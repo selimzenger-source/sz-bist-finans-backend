@@ -369,7 +369,11 @@ class NotificationService:
         sentiment: str,
         news_type: str,
     ) -> int:
-        """KAP haber bildirimini ilgili paketlere gonder."""
+        """KAP haber bildirimini gonder.
+
+        Ucretli aboneler: Firebase topic'lere (news_all, news_bist100, news_bist50)
+        Ucretsiz BIST 30: Per-user push (_send_bist30_free) — ucretli aboneler haric (dedup)
+        """
         sentiment_label = "POZİTİF" if sentiment == "positive" else "NEGATİF"
         session_label = "SEANS İÇİ" if news_type == "seans_ici" else "SEANS DIŞI"
 
@@ -387,7 +391,6 @@ class NotificationService:
             "matched_keyword": matched_keyword,
         }
 
-        # Her abonelik paketine uygun topic'e gonder
         from app.services.news_service import (
             BIST30_TICKERS, BIST50_TICKERS, BIST100_TICKERS
         )
@@ -395,23 +398,81 @@ class NotificationService:
         sent = 0
         ticker_upper = ticker.upper()
 
-        # Tum hisseler paketi — her zaman
+        # 1. Ucretli abonelere topic-based bildirim (mevcut mantik)
         await self.send_to_topic("news_all", title, body, data)
         sent += 1
 
-        # BIST 100
         if ticker_upper in BIST100_TICKERS:
             await self.send_to_topic("news_bist100", title, body, data)
             sent += 1
 
-        # BIST 50
         if ticker_upper in BIST50_TICKERS:
             await self.send_to_topic("news_bist50", title, body, data)
             sent += 1
 
-        # BIST 30
+        # 2. BIST 30 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         if ticker_upper in BIST30_TICKERS:
-            await self.send_to_topic("news_bist30", title, body, data)
-            sent += 1
+            sent += await self._send_bist30_free(title, body, data, ticker_upper)
 
         return sent
+
+    async def _send_bist30_free(
+        self,
+        title: str,
+        body: str,
+        data: dict,
+        ticker: str,
+    ) -> int:
+        """BIST 30 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
+
+        Dedup: UserSubscription aktif yildiz_pazar/ana_yildiz olan kullanicilar haric tutulur.
+        Onlar zaten topic uzerinden bildirimi aliyor.
+        """
+        from app.models.user import User, UserSubscription
+
+        # Ucretli abonelerin user_id'leri (haric tutulacak)
+        paid_user_ids = (
+            select(UserSubscription.user_id)
+            .where(
+                and_(
+                    UserSubscription.is_active == True,
+                    UserSubscription.package.in_(["yildiz_pazar", "ana_yildiz"]),
+                )
+            )
+        )
+
+        users_result = await self.db.execute(
+            select(User).where(
+                and_(
+                    User.notifications_enabled == True,
+                    User.notify_kap_bist30 == True,
+                    or_(
+                        User.expo_push_token.isnot(None),
+                        User.fcm_token.isnot(None),
+                    ),
+                    User.id.notin_(paid_user_ids),
+                )
+            )
+        )
+        users = list(users_result.scalars().all())
+
+        sent_count = 0
+        for user in users:
+            token = user.expo_push_token or user.fcm_token
+            if token:
+                try:
+                    await self.send_to_device(
+                        fcm_token=token,
+                        title=title,
+                        body=body,
+                        data=data,
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    logger.warning("BIST30 free bildirim hatasi (user=%s): %s", user.id, e)
+
+        logger.info(
+            "BIST30 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",
+            ticker, sent_count,
+        )
+        return sent_count

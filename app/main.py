@@ -358,8 +358,17 @@ async def list_telegram_news(
     device_id: Optional[str] = Query(None, description="Abonelik kontrolu icin device_id"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Telegram kanalindan gelen AI haberler — sadece abonelere acik."""
-    # Abonelik kontrolu
+    """Telegram kanalindan gelen AI haberler.
+
+    - Abone DEGiL: BIST 30 hisselerinin son 10 haberi (ucretsiz tanitim)
+    - Abone (yildiz_pazar): BIST 100 kapsaminda son 20 haber
+    - Abone (ana_yildiz): Tum hisselerin son 20 haberi
+    """
+    from app.services.news_service import BIST30_TICKERS, BIST100_TICKERS
+
+    has_paid_sub = False
+    active_package = None
+
     if device_id:
         user_result = await db.execute(
             select(User).where(User.device_id == device_id)
@@ -376,31 +385,54 @@ async def list_telegram_news(
                 )
             )
             sub = sub_result.scalar_one_or_none()
-            if not sub:
-                raise HTTPException(
-                    status_code=403,
-                    detail="AI Haber Takibi icin abonelik gerekli."
-                )
-        else:
-            raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+            if sub:
+                has_paid_sub = True
+                active_package = sub.package
 
     # Tarih filtresi
     since = datetime.utcnow() - timedelta(days=days)
 
-    query = (
-        select(TelegramNews)
-        .where(TelegramNews.created_at >= since)
-        .order_by(desc(TelegramNews.created_at))
-    )
+    if has_paid_sub:
+        # Ucretli abone: paket kapsaminda son 20 haber
+        query = (
+            select(TelegramNews)
+            .where(TelegramNews.created_at >= since)
+            .order_by(desc(TelegramNews.created_at))
+        )
+        # yildiz_pazar → BIST 100 filtresi, ana_yildiz → filtre yok
+        if active_package == "yildiz_pazar":
+            query = query.where(TelegramNews.ticker.in_(BIST100_TICKERS))
 
-    if ticker:
-        query = query.where(TelegramNews.ticker == ticker.upper())
-    if message_type:
-        query = query.where(TelegramNews.message_type == message_type)
-    if sentiment:
-        query = query.where(TelegramNews.sentiment == sentiment)
+        if ticker:
+            query = query.where(TelegramNews.ticker == ticker.upper())
+        if message_type:
+            query = query.where(TelegramNews.message_type == message_type)
+        if sentiment:
+            query = query.where(TelegramNews.sentiment == sentiment)
 
-    query = query.limit(limit).offset(offset)
+        query = query.limit(min(limit, 20)).offset(offset)
+    else:
+        # Ucretsiz: BIST 30 hisselerinin son 10 haberi
+        query = (
+            select(TelegramNews)
+            .where(
+                and_(
+                    TelegramNews.created_at >= since,
+                    TelegramNews.ticker.in_(BIST30_TICKERS),
+                )
+            )
+            .order_by(desc(TelegramNews.created_at))
+        )
+
+        if ticker:
+            query = query.where(TelegramNews.ticker == ticker.upper())
+        if message_type:
+            query = query.where(TelegramNews.message_type == message_type)
+        if sentiment:
+            query = query.where(TelegramNews.sentiment == sentiment)
+
+        query = query.limit(min(limit, 10)).offset(offset)
+
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -1209,6 +1241,192 @@ async def bulk_ceiling_track(
         "results": results,
         "error_details": errors,
     }
+
+
+# -------------------------------------------------------
+# BIST 30 SEED — adsiz.txt'den son 10 BIST 30 mesaji
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/seed-bist30-news")
+async def seed_bist30_news(
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """adsiz.txt'den parse edilmis son 10 BIST 30 KAP haberini DB'ye ekler."""
+    import os
+
+    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    if payload.get("admin_password") != admin_pw:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    # Son 10 BIST 30 mesaji — adsiz.txt'den parse edilmis (en yeniden eskiye)
+    seed_data = [
+        {
+            "telegram_message_id": 7200349,
+            "message_type": "seans_ici_pozitif",
+            "ticker": "ASELS",
+            "price_at_time": 296.25,
+            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
+            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 296.25 TL\nKonu: savunma sanayi",
+            "sentiment": "positive",
+            "kap_notification_id": "6200349",
+            "message_date": "2026-02-11T11:06:03",
+        },
+        {
+            "telegram_message_id": 7199734,
+            "message_type": "seans_disi_acilis",
+            "ticker": "FROTO",
+            "price_at_time": 115.90,
+            "prev_close_price": 115.90,
+            "theoretical_open": 115.00,
+            "gap_pct": -0.78,
+            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - FROTO",
+            "parsed_body": "Sembol: FROTO\nÖnceki Kapanış: 115.90\nTeorik Açılış: 115.00\nAçılış Gap: %-0.78",
+            "sentiment": "neutral",
+            "kap_notification_id": "6199734",
+            "expected_trading_date": "2026-02-11",
+            "message_date": "2026-02-11T09:56:00",
+        },
+        {
+            "telegram_message_id": 71997342,
+            "message_type": "borsa_kapali",
+            "ticker": "FROTO",
+            "price_at_time": 115.90,
+            "parsed_title": "🔒 BORSA KAPALI - FROTO",
+            "parsed_body": "Sembol: FROTO\nSon Fiyat: 115.90\nBeklenen İşlem Günü: 2026-02-11",
+            "sentiment": "neutral",
+            "kap_notification_id": "6199734",
+            "expected_trading_date": "2026-02-11",
+            "message_date": "2026-02-11T07:02:37",
+        },
+        {
+            "telegram_message_id": 7198749,
+            "message_type": "seans_ici_pozitif",
+            "ticker": "FROTO",
+            "price_at_time": 115.50,
+            "parsed_title": "⚡ SEANS İÇİ POZİTİF - FROTO",
+            "parsed_body": "Sembol: FROTO\nAnlık Fiyat: 115.50 TL\nKonu: milyon eur",
+            "sentiment": "positive",
+            "kap_notification_id": "6198749",
+            "message_date": "2026-02-10T16:31:48",
+        },
+        {
+            "telegram_message_id": 7196982,
+            "message_type": "seans_disi_acilis",
+            "ticker": "FROTO",
+            "price_at_time": 119.40,
+            "prev_close_price": 119.40,
+            "theoretical_open": 118.00,
+            "gap_pct": -1.17,
+            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - FROTO",
+            "parsed_body": "Sembol: FROTO\nÖnceki Kapanış: 119.40\nTeorik Açılış: 118.00\nAçılış Gap: %-1.17",
+            "sentiment": "neutral",
+            "kap_notification_id": "6196982",
+            "expected_trading_date": "2026-02-10",
+            "message_date": "2026-02-10T09:56:00",
+        },
+        {
+            "telegram_message_id": 71969822,
+            "message_type": "borsa_kapali",
+            "ticker": "FROTO",
+            "price_at_time": 119.40,
+            "parsed_title": "🔒 BORSA KAPALI - FROTO",
+            "parsed_body": "Sembol: FROTO\nSon Fiyat: 119.40\nBeklenen İşlem Günü: 2026-02-10",
+            "sentiment": "neutral",
+            "kap_notification_id": "6196982",
+            "expected_trading_date": "2026-02-10",
+            "message_date": "2026-02-10T08:42:07",
+        },
+        {
+            "telegram_message_id": 7186659,
+            "message_type": "seans_ici_pozitif",
+            "ticker": "ASELS",
+            "price_at_time": 294.50,
+            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
+            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 294.50 TL\nKonu: savunma sanayi, seri üretim",
+            "sentiment": "positive",
+            "kap_notification_id": "6186659",
+            "message_date": "2026-02-05T15:24:25",
+        },
+        {
+            "telegram_message_id": 7182535,
+            "message_type": "seans_ici_pozitif",
+            "ticker": "ASELS",
+            "price_at_time": 300.75,
+            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
+            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 300.75 TL\nKonu: milyon dolar",
+            "sentiment": "positive",
+            "kap_notification_id": "6182535",
+            "message_date": "2026-02-04T10:47:33",
+        },
+        {
+            "telegram_message_id": 7176202,
+            "message_type": "seans_disi_acilis",
+            "ticker": "ENKAI",
+            "price_at_time": 97.85,
+            "prev_close_price": 97.85,
+            "theoretical_open": 95.40,
+            "gap_pct": -2.50,
+            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - ENKAI",
+            "parsed_body": "Sembol: ENKAI\nÖnceki Kapanış: 97.85\nTeorik Açılış: 95.40\nAçılış Gap: %-2.50",
+            "sentiment": "neutral",
+            "kap_notification_id": "6176202",
+            "expected_trading_date": "2026-02-02",
+            "message_date": "2026-02-02T09:56:00",
+        },
+        {
+            "telegram_message_id": 7175970,
+            "message_type": "seans_disi_acilis",
+            "ticker": "ARCLK",
+            "price_at_time": 114.00,
+            "prev_close_price": 114.00,
+            "theoretical_open": 113.50,
+            "gap_pct": -0.44,
+            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - ARCLK",
+            "parsed_body": "Sembol: ARCLK\nÖnceki Kapanış: 114.00\nTeorik Açılış: 113.50\nAçılış Gap: %-0.44",
+            "sentiment": "neutral",
+            "kap_notification_id": "6175970",
+            "expected_trading_date": "2026-02-02",
+            "message_date": "2026-02-02T09:56:00",
+        },
+    ]
+
+    from decimal import Decimal as D
+
+    inserted = 0
+    for item in seed_data:
+        # Ayni telegram_message_id varsa atla (duplicate kontrolu)
+        existing = await db.execute(
+            select(TelegramNews).where(
+                TelegramNews.telegram_message_id == item["telegram_message_id"]
+            )
+        )
+        if existing.scalar_one_or_none():
+            continue
+
+        news = TelegramNews(
+            telegram_message_id=item["telegram_message_id"],
+            chat_id="seed_bist30",
+            message_type=item["message_type"],
+            ticker=item["ticker"],
+            price_at_time=D(str(item.get("price_at_time", 0))) if item.get("price_at_time") else None,
+            raw_text=item.get("parsed_body", ""),
+            parsed_title=item["parsed_title"],
+            parsed_body=item["parsed_body"],
+            sentiment=item["sentiment"],
+            kap_notification_id=item.get("kap_notification_id"),
+            expected_trading_date=datetime.fromisoformat(item["expected_trading_date"]).date() if item.get("expected_trading_date") else None,
+            gap_pct=D(str(item["gap_pct"])) if item.get("gap_pct") is not None else None,
+            prev_close_price=D(str(item["prev_close_price"])) if item.get("prev_close_price") else None,
+            theoretical_open=D(str(item["theoretical_open"])) if item.get("theoretical_open") else None,
+            message_date=datetime.fromisoformat(item["message_date"]),
+            created_at=datetime.fromisoformat(item["message_date"]),
+        )
+        db.add(news)
+        inserted += 1
+
+    await db.commit()
+    return {"status": "ok", "inserted": inserted, "total_seed": len(seed_data)}
 
 
 @app.delete("/api/v1/admin/ceiling-track/{ticker}/{trading_day}")

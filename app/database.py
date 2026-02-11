@@ -112,3 +112,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v8 migration: users.notify_kap_bist30 (BIST 30 KAP ucretsiz bildirim)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_kap_bist30 BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass
