@@ -42,7 +42,11 @@ _last_update_id: int | None = None
 
 
 async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> list[dict]:
-    """Telegram getUpdates API'sini cagir."""
+    """Telegram getUpdates API'sini cagir.
+
+    409 Conflict: Baska bir process (webhook veya baska getUpdates) ayni token'i kullaniyor.
+    Bu durumda once webhook'u kaldirmaya calis, sonra tekrar dene.
+    """
     url = f"{TELEGRAM_API_BASE.format(token=bot_token)}/getUpdates"
     params = {"timeout": 5, "limit": 100}
     if offset is not None:
@@ -50,6 +54,20 @@ async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> l
 
     async with httpx.AsyncClient(timeout=15) as client:
         resp = await client.get(url, params=params)
+
+        # 409 Conflict — webhook ayarli olabilir, kaldirmaya calis
+        if resp.status_code == 409:
+            logger.warning("Telegram 409 Conflict — webhook kaldiriliyor...")
+            try:
+                delete_url = f"{TELEGRAM_API_BASE.format(token=bot_token)}/deleteWebhook"
+                await client.post(delete_url)
+                logger.info("Telegram webhook kaldirildi, tekrar deneniyor...")
+                # Tekrar dene
+                resp = await client.get(url, params=params)
+            except Exception as e:
+                logger.error("Webhook kaldirma hatasi: %s", e)
+                return []
+
         resp.raise_for_status()
         data = resp.json()
 
@@ -65,7 +83,14 @@ async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> l
 # -------------------------------------------------------------------
 
 def detect_message_type(text: str) -> str | None:
-    """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli."""
+    """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli.
+
+    Telegram bot mesaj formatlari:
+    1. "SEANS İÇİ POZİTİF HABER"          → seans_ici_pozitif
+    2. "🔒 BORSA KAPALI - Haber Kaydedildi" → borsa_kapali
+    3. "ℹ️ Seans Dışı Haber Kaydedildi"     → borsa_kapali
+    4. "📊 Seans Dışı Haber - AÇILIŞ BİLGİLERİ" → seans_disi_acilis
+    """
     text_upper = text.upper()
 
     # Seans ici pozitif haber (negatif yok)
@@ -75,13 +100,17 @@ def detect_message_type(text: str) -> str | None:
         # Negatif mesajlar atlanir
         return None
 
-    # Borsa kapali = Seans disi pozitif haber
-    if "BORSA KAPALI" in text_upper:
-        return "borsa_kapali"
-
-    # Acilis bilgileri
+    # Acilis bilgileri (bu kontrolu borsa_kapali'dan ONCE yap —
+    # cunku acilis mesaji da "Seans Disi" iceriyor)
     if "AÇILIŞ BİLGİLERİ" in text_upper or "ACILIS BILGILERI" in text_upper:
         return "seans_disi_acilis"
+
+    # Borsa kapali = Seans disi pozitif haber
+    # "🔒 BORSA KAPALI" veya "ℹ️ Seans Dışı Haber Kaydedildi"
+    if "BORSA KAPALI" in text_upper:
+        return "borsa_kapali"
+    if "SEANS DIŞI HABER" in text_upper or "SEANS DISI HABER" in text_upper:
+        return "borsa_kapali"
 
     return None
 
