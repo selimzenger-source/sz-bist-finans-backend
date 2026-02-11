@@ -1,5 +1,5 @@
 {
-  "admin_password": "SzBist2026Admin!",
+  "admin_password": "***",
   "tracks": [
     {
       "ticker": "UCAYM",
@@ -140,6 +140,16 @@
     {
       "ticker": "NETCD",
       "trading_day": 1,
+      "trade_date": "2026-02-05",
+      "close_price": "50.60",
+      "high_price": "50.60",
+      "low_price": "50.60",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "NETCD",
+      "trading_day": 2,
       "trade_date": "2026-02-06",
       "close_price": "55.65",
       "high_price": "55.65",
@@ -149,7 +159,7 @@
     },
     {
       "ticker": "NETCD",
-      "trading_day": 2,
+      "trading_day": 3,
       "trade_date": "2026-02-09",
       "close_price": "61.20",
       "high_price": "61.20",

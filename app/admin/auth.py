@@ -1,5 +1,6 @@
 """Admin kimlik dogrulama — basit session-cookie tabanli."""
 
+import hmac
 import secrets
 from functools import wraps
 from typing import Optional
@@ -18,11 +19,11 @@ SESSION_COOKIE_NAME = "admin_session"
 
 
 def verify_password(password: str) -> bool:
-    """Admin sifresini dogrular."""
+    """Admin sifresini dogrular — timing-safe karsilastirma."""
     admin_pw = settings.ADMIN_PASSWORD
-    if not admin_pw:
+    if not admin_pw or not password:
         return False
-    return password == admin_pw
+    return hmac.compare_digest(password.encode("utf-8"), admin_pw.encode("utf-8"))
 
 
 def create_session() -> str:

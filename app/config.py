@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # App
     APP_ENV: str = "development"
-    SECRET_KEY: str = "dev-secret-key"
+    SECRET_KEY: str = ""
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
     PORT: int = 8001
 

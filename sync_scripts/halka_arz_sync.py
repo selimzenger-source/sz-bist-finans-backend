@@ -92,7 +92,7 @@ API_NOTIF_URL = f"{API_BASE_URL}/api/v1/realtime-notification"
 API_CEILING_URL = f"{API_BASE_URL}/api/v1/ceiling-track"
 
 # Admin sifresi
-ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "SzBist2026Admin!")
+ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "")
 
 # Sync araligi (saniye) — 15 saniyede bir
 SYNC_INTERVAL = 15

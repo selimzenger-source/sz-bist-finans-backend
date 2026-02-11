@@ -1,0 +1,205 @@
+{
+  "admin_password": "***",
+  "tracks": [
+    {
+      "ticker": "AKHAN",
+      "trading_day": 1,
+      "trade_date": "2026-02-06",
+      "open_price": "23.65",
+      "close_price": "23.65",
+      "high_price": "23.65",
+      "low_price": "21.50",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "AKHAN",
+      "trading_day": 2,
+      "trade_date": "2026-02-09",
+      "open_price": "25.10",
+      "close_price": "22.80",
+      "high_price": "25.50",
+      "low_price": "22.10",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+
+    {
+      "ticker": "NETCD",
+      "trading_day": 1,
+      "trade_date": "2026-02-05",
+      "open_price": "50.60",
+      "close_price": "50.60",
+      "high_price": "50.60",
+      "low_price": "46.00",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "NETCD",
+      "trading_day": 2,
+      "trade_date": "2026-02-06",
+      "open_price": "55.66",
+      "close_price": "55.66",
+      "high_price": "55.66",
+      "low_price": "50.60",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "NETCD",
+      "trading_day": 3,
+      "trade_date": "2026-02-07",
+      "open_price": "61.23",
+      "close_price": "61.23",
+      "high_price": "61.23",
+      "low_price": "55.66",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+
+    {
+      "ticker": "UCAYM",
+      "trading_day": 1,
+      "trade_date": "2026-01-23",
+      "open_price": "19.80",
+      "close_price": "19.80",
+      "high_price": "19.80",
+      "low_price": "18.00",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 2,
+      "trade_date": "2026-01-24",
+      "open_price": "21.78",
+      "close_price": "21.78",
+      "high_price": "21.78",
+      "low_price": "19.80",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 3,
+      "trade_date": "2026-01-27",
+      "open_price": "23.96",
+      "close_price": "23.96",
+      "high_price": "23.96",
+      "low_price": "21.78",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 4,
+      "trade_date": "2026-01-28",
+      "open_price": "26.36",
+      "close_price": "26.36",
+      "high_price": "26.36",
+      "low_price": "23.96",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 5,
+      "trade_date": "2026-01-29",
+      "open_price": "28.00",
+      "close_price": "25.20",
+      "high_price": "28.50",
+      "low_price": "24.80",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 6,
+      "trade_date": "2026-01-30",
+      "open_price": "25.00",
+      "close_price": "23.50",
+      "high_price": "25.50",
+      "low_price": "22.90",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 7,
+      "trade_date": "2026-01-31",
+      "open_price": "23.00",
+      "close_price": "21.15",
+      "high_price": "23.40",
+      "low_price": "20.80",
+      "hit_ceiling": false,
+      "hit_floor": true
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 8,
+      "trade_date": "2026-02-02",
+      "open_price": "19.04",
+      "close_price": "19.04",
+      "high_price": "19.50",
+      "low_price": "19.04",
+      "hit_ceiling": false,
+      "hit_floor": true
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 9,
+      "trade_date": "2026-02-03",
+      "open_price": "18.50",
+      "close_price": "19.80",
+      "high_price": "20.10",
+      "low_price": "17.50",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 10,
+      "trade_date": "2026-02-04",
+      "open_price": "20.00",
+      "close_price": "21.50",
+      "high_price": "21.78",
+      "low_price": "19.90",
+      "hit_ceiling": true,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 11,
+      "trade_date": "2026-02-05",
+      "open_price": "22.50",
+      "close_price": "20.80",
+      "high_price": "23.00",
+      "low_price": "20.50",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 12,
+      "trade_date": "2026-02-06",
+      "open_price": "20.50",
+      "close_price": "19.20",
+      "high_price": "20.80",
+      "low_price": "19.00",
+      "hit_ceiling": false,
+      "hit_floor": false
+    },
+    {
+      "ticker": "UCAYM",
+      "trading_day": 13,
+      "trade_date": "2026-02-07",
+      "open_price": "19.00",
+      "close_price": "18.50",
+      "high_price": "19.50",
+      "low_price": "18.20",
+      "hit_ceiling": false,
+      "hit_floor": false
+    }
+  ]
+}

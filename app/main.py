@@ -14,9 +14,14 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Query
+import hmac
+
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import select, desc, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -100,16 +105,40 @@ app = FastAPI(
     description="Halka Arz Takip + Hisse Bildirim + AI Haber Takibi",
     version="2.0.0",
     lifespan=lifespan,
+    # Production'da API dokumantasyonunu kapat
+    docs_url=None if settings.is_production else "/docs",
+    redoc_url=None if settings.is_production else "/redoc",
+    openapi_url=None if settings.is_production else "/openapi.json",
 )
 
-# CORS
+# Rate Limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS — production'da spesifik origin, gelistirmede *
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+
+# Guvenlik Header Middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 
 # Static dosyalar (admin panel logo vb.)
 import os
@@ -119,6 +148,18 @@ if os.path.isdir(_static_dir):
 
 # Admin Panel
 app.include_router(admin_router)
+
+
+# -------------------------------------------------------
+# Admin sifre dogrulama — timing-safe
+# -------------------------------------------------------
+
+def _verify_admin_password(provided: str) -> bool:
+    """Timing-safe admin sifre dogrulama. Brute force'a karsi hmac kullanir."""
+    admin_pw = settings.ADMIN_PASSWORD
+    if not admin_pw or not provided:
+        return False
+    return hmac.compare_digest(provided.encode("utf-8"), admin_pw.encode("utf-8"))
 
 
 # -------------------------------------------------------
@@ -704,7 +745,8 @@ async def toggle_mute_stock_notification(
 # -------------------------------------------------------
 
 @app.post("/api/v1/users/register", response_model=UserOut)
-async def register_device(data: UserRegister, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def register_device(request: Request, data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Cihaz kayit — ilk acilista cagrilir."""
     result = await db.execute(
         select(User).where(User.device_id == data.device_id)
@@ -1018,7 +1060,9 @@ async def update_ceiling_track(
 
 
 @app.post("/api/v1/realtime-notification")
+@limiter.limit("20/minute")
 async def send_realtime_notification(
+    request: Request,
     data: RealtimeNotifRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -1038,8 +1082,7 @@ async def send_realtime_notification(
     from app.services.ipo_service import IPOService
     from app.services.notification import NotificationService
 
-    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
-    if data.admin_password != admin_pw:
+    if not _verify_admin_password(data.admin_password):
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     valid_types = [
@@ -1132,7 +1175,9 @@ async def send_realtime_notification(
 
 
 @app.post("/api/v1/admin/bulk-ceiling-track")
+@limiter.limit("10/minute")
 async def bulk_ceiling_track(
+    request: Request,
     payload: dict,
     db: AsyncSession = Depends(get_db),
 ):
@@ -1163,8 +1208,7 @@ async def bulk_ceiling_track(
     from decimal import Decimal as D
     from datetime import date as date_type
 
-    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
-    if payload.get("admin_password") != admin_pw:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     tracks_raw = payload.get("tracks", [])
@@ -1244,15 +1288,16 @@ async def bulk_ceiling_track(
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/seed-bist30-news")
+@limiter.limit("10/minute")
 async def seed_bist30_news(
+    request: Request,
     payload: dict,
     db: AsyncSession = Depends(get_db),
 ):
     """BIST 30 seed haberlerini yeniden ekler. Eski seed kayitlari silinir."""
     import os
 
-    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
-    if payload.get("admin_password") != admin_pw:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     # BIST 30 seed mesajlari — 3 tip bildirim (fiyat yok, sadece GAP)
@@ -1424,16 +1469,16 @@ async def seed_bist30_news(
 
 
 @app.delete("/api/v1/admin/ceiling-track/{ticker}/{trading_day}")
+@limiter.limit("10/minute")
 async def delete_ceiling_track(
+    request: Request,
     ticker: str,
     trading_day: int,
     password: str = Query(..., alias="password"),
     db: AsyncSession = Depends(get_db),
 ):
     """Belirli bir ceiling track kaydini siler (admin)."""
-    import os
-    admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
-    if password != admin_pw:
+    if not _verify_admin_password(password):
         raise HTTPException(status_code=403, detail="Gecersiz admin sifresi")
 
     result = await db.execute(
@@ -1571,7 +1616,8 @@ async def list_user_ceiling_subscriptions(
 # -------------------------------------------------------
 
 @app.post("/api/v1/webhooks/revenuecat")
-async def revenuecat_webhook(payload: dict, db: AsyncSession = Depends(get_db)):
+@limiter.limit("30/minute")
+async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """RevenueCat webhook — abonelik olaylari."""
     event = payload.get("event", {})
     event_type = event.get("type", "")
@@ -1738,7 +1784,8 @@ async def get_dividend_by_ticker(ticker: str, db: AsyncSession = Depends(get_db)
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/seed-ipos")
-async def seed_ipos(payload: dict, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def seed_ipos(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """Local DB'den export edilen IPO verilerini production'a yukler.
 
     Bu endpoint sadece bos DB'ye ilk veri yuklemesi icin kullanilir.
@@ -1748,7 +1795,7 @@ async def seed_ipos(payload: dict, db: AsyncSession = Depends(get_db)):
     from app.config import get_settings
     _settings = get_settings()
 
-    if payload.get("admin_password") != _settings.ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     ipos_data = payload.get("ipos", [])
@@ -1851,7 +1898,8 @@ async def seed_ipos(payload: dict, db: AsyncSession = Depends(get_db)):
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/test-notification")
-async def test_notification(payload: dict):
+@limiter.limit("10/minute")
+async def test_notification(request: Request, payload: dict):
     """Firebase push bildirim test endpoint'i.
 
     FCM token verilirse gercek push gonderir.
@@ -1869,7 +1917,7 @@ async def test_notification(payload: dict):
     settings = get_settings()
 
     # Admin yetki kontrolu
-    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     # Firebase'i baslatmayi dene (henuz baslatilmadiysa)
@@ -1994,11 +2042,12 @@ async def test_notification(payload: dict):
 
 
 @app.post("/api/v1/admin/users")
-async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
+@limiter.limit("10/minute")
+async def admin_list_users(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """Admin: Kayitli kullanicilari ve FCM tokenlarini listeler."""
     settings = get_settings()
 
-    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     result = await db.execute(
@@ -2012,7 +2061,6 @@ async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
             "device_id": u.device_id[:8] + "...",
             "platform": u.platform,
             "fcm_token": u.fcm_token[:30] + "..." if u.fcm_token and len(u.fcm_token) > 30 else u.fcm_token,
-            "fcm_token_full": u.fcm_token,
             "expo_push_token": getattr(u, "expo_push_token", None),
             "app_version": u.app_version,
             "created_at": str(u.created_at) if u.created_at else None,
@@ -2026,14 +2074,15 @@ async def admin_list_users(payload: dict, db: AsyncSession = Depends(get_db)):
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/fill-missing-ipo-data")
-async def admin_fill_missing_ipo_data(payload: dict, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def admin_fill_missing_ipo_data(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """InfoYatirim scraper'i calistirarak eksik IPO verilerini doldurur.
 
     total_lots, subscription_start/end, total_applicants, trading_start
     alanlari NULL olan IPO'lari InfoYatirim'dan gelen veriyle eslestirir.
     """
     settings = get_settings()
-    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     from app.scrapers.infoyatirim_scraper import InfoYatirimScraper
@@ -2124,7 +2173,8 @@ async def admin_fill_missing_ipo_data(payload: dict, db: AsyncSession = Depends(
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/fill-ceiling-data")
-async def admin_fill_ceiling_data(payload: dict, db: AsyncSession = Depends(get_db)):
+@limiter.limit("5/minute")
+async def admin_fill_ceiling_data(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """Yahoo Finance'den gunluk OHLC verisini cekerek ipo_ceiling_tracks tablosunu doldurur.
 
     status='trading' olan ve ceiling track verisi eksik olan tum IPO'lar icin:
@@ -2134,7 +2184,7 @@ async def admin_fill_ceiling_data(payload: dict, db: AsyncSession = Depends(get_
     - trading_day_count guncellenir
     """
     settings = get_settings()
-    if payload.get("admin_password") != settings.ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper, detect_ceiling_floor

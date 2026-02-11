@@ -87,14 +87,24 @@ async def login_submit(request: Request, password: str = Form(...)):
     if verify_password(password):
         token = create_session()
         response = RedirectResponse(url="/admin/", status_code=303)
+
+        from app.config import get_settings
+        _settings = get_settings()
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=token,
             httponly=True,
-            max_age=86400 * 7,  # 7 gun
-            samesite="lax",
+            max_age=86400,  # 1 gun (7 gunden dusuruldu)
+            samesite="strict",  # lax → strict (CSRF korumasini guclendir)
+            secure=_settings.is_production,  # HTTPS-only in production
         )
         return response
+
+    # Basarisiz giris — loglama
+    import logging
+    _logger = logging.getLogger(__name__)
+    client_ip = request.client.host if request.client else "unknown"
+    _logger.warning("Admin login basarisiz — IP: %s", client_ip)
 
     return templates.TemplateResponse("admin/login.html", {
         "request": request,
