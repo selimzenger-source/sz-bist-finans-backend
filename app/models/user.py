@@ -148,17 +148,12 @@ COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
 QUARTERLY_PRICE = Decimal("90.00")  # 3 Aylik
 ANNUAL_BUNDLE_PRICE = Decimal("245.00")  # Yillik
 
-# YENİ: Haber abonelik fiyatlari
+# YENİ: Haber abonelik fiyatlari — tek paket: Ana+Yildiz
 NEWS_TIER_PRICES = {
-    "yildiz_pazar": {
-        "price_tl_monthly": Decimal("45.00"),
-        "annual_months": 10,
-        "label": "BIST Yildiz Pazar Hisseleri",
-        "description": "Yildiz Pazar'daki tum hisselerin haber takibi",
-    },
     "ana_yildiz": {
-        "price_tl_monthly": Decimal("65.00"),
-        "annual_months": 8,
+        "price_tl_monthly": Decimal("75.00"),
+        "price_tl_annual": Decimal("675.00"),  # 9 aylik fiyat (3 ay tasarruf)
+        "annual_months": 9,
         "label": "Ana Pazar + Yildiz Pazar Hisseleri (~350 hisse)",
         "description": "Ana ve Yildiz Pazar'daki tum hisselerin haber takibi",
     },

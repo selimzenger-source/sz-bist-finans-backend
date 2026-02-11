@@ -1,8 +1,8 @@
 """KAP Haber Filtreleme Servisi — 300+ anahtar kelime kalibi.
 
 Mevcut Telegram botundaki keyword veritabaninin aynisi.
-Seans ici (09:30-18:10) ve seans disi olmak uzere haberleri siniflandirir.
-Pozitif / negatif sentiment tespiti yapar.
+Seans ici (10:00-18:10) ve seans disi olmak uzere haberleri siniflandirir.
+Sadece POZiTiF sentiment tespiti yapar — negatif haber filtrelenmez.
 """
 
 import logging
@@ -347,35 +347,24 @@ class NewsFilterService:
     def __init__(self):
         # Compile — hizli arama icin kucuk harfe donustur
         self.positive_keywords = [kw.lower() for kw in POSITIVE_KEYWORDS]
-        self.negative_keywords = [kw.lower() for kw in NEGATIVE_KEYWORDS]
-        self.all_keywords = self.positive_keywords + self.negative_keywords
 
     def filter_disclosure(self, disclosure: dict) -> Optional[dict]:
-        """Bir KAP bildirimini keyword ile filtreler.
+        """Bir KAP bildirimini pozitif keyword ile filtreler.
 
         Returns:
             Eslesen haber bilgisi veya None (eslesmezse).
+            Sadece pozitif haberler gecerli — negatif filtrelenmez.
         """
         subject = (disclosure.get("subject", "") or "").lower()
         text = subject  # Ileride detay metni de eklenebilir
 
         matched_keyword = None
-        sentiment = None
 
         # Pozitif keyword kontrolu
         for kw in self.positive_keywords:
             if kw in text:
                 matched_keyword = kw
-                sentiment = "positive"
                 break
-
-        # Negatif keyword kontrolu
-        if not matched_keyword:
-            for kw in self.negative_keywords:
-                if kw in text:
-                    matched_keyword = kw
-                    sentiment = "negative"
-                    break
 
         if not matched_keyword:
             return None
@@ -391,7 +380,7 @@ class NewsFilterService:
             "news_detail": matched_keyword,
             "matched_keyword": matched_keyword,
             "news_type": news_type,
-            "sentiment": sentiment,
+            "sentiment": "positive",
             "raw_text": disclosure.get("subject"),
             "kap_url": disclosure.get("url"),
             "published_at": disclosure.get("published_at"),

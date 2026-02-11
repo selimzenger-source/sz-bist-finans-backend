@@ -369,19 +369,23 @@ class NotificationService:
         sentiment: str,
         news_type: str,
     ) -> int:
-        """KAP haber bildirimini gonder.
+        """KAP haber bildirimini gonder (sadece pozitif).
 
         Ucretli aboneler: Firebase topic'lere (news_all, news_bist100, news_bist50)
         Ucretsiz BIST 30: Per-user push (_send_bist30_free) — ucretli aboneler haric (dedup)
-        """
-        sentiment_label = "POZİTİF" if sentiment == "positive" else "NEGATİF"
-        session_label = "SEANS İÇİ" if news_type == "seans_ici" else "SEANS DIŞI"
 
-        title = f"{session_label} {sentiment_label} HABER"
-        body = f"{ticker}"
-        if price:
-            body += f" | {price:.2f} TL"
-        body += f"\n{matched_keyword}"
+        3 Tip Bildirim:
+        - Seans Ici Pozitif Haber Yakalandi
+        - Seans Disi Pozitif Haber Yakalandi
+        - Seans Disi Haber Yakalanan Hisse Acilisi (GAP bilgisi ile)
+        """
+        if news_type == "seans_ici":
+            title = f"Seans İçi Pozitif Haber Yakalandı - {ticker}"
+        else:
+            title = f"Seans Dışı Pozitif Haber Yakalandı - {ticker}"
+
+        # Fiyat bilgisi gonderilmez (veri ihlali)
+        body = f"Sembol: {ticker}\n{matched_keyword}"
 
         data = {
             "type": "kap_news",
@@ -425,7 +429,7 @@ class NotificationService:
     ) -> int:
         """BIST 30 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
 
-        Dedup: UserSubscription aktif yildiz_pazar/ana_yildiz olan kullanicilar haric tutulur.
+        Dedup: UserSubscription aktif ana_yildiz olan kullanicilar haric tutulur.
         Onlar zaten topic uzerinden bildirimi aliyor.
         """
         from app.models.user import User, UserSubscription
@@ -436,7 +440,7 @@ class NotificationService:
             .where(
                 and_(
                     UserSubscription.is_active == True,
-                    UserSubscription.package.in_(["yildiz_pazar", "ana_yildiz"]),
+                    UserSubscription.package == "ana_yildiz",
                 )
             )
         )

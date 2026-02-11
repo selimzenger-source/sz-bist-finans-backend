@@ -350,7 +350,7 @@ async def get_ipo_detail(ipo_id: int, db: AsyncSession = Depends(get_db)):
 @app.get("/api/v1/telegram-news", response_model=list[TelegramNewsOut])
 async def list_telegram_news(
     ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
-    message_type: Optional[str] = Query(None, description="seans_ici_pozitif, seans_ici_negatif, borsa_kapali, seans_disi_acilis"),
+    message_type: Optional[str] = Query(None, description="seans_ici_pozitif, borsa_kapali, seans_disi_acilis"),
     sentiment: Optional[str] = Query(None, description="positive, negative, neutral"),
     days: int = Query(7, ge=1, le=30, description="Son kac gun"),
     limit: int = Query(100, ge=1, le=500),
@@ -361,10 +361,9 @@ async def list_telegram_news(
     """Telegram kanalindan gelen AI haberler.
 
     - Abone DEGiL: BIST 30 hisselerinin son 10 haberi (ucretsiz tanitim)
-    - Abone (yildiz_pazar): BIST 100 kapsaminda son 20 haber
-    - Abone (ana_yildiz): Tum hisselerin son 20 haberi
+    - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 20 haberi
     """
-    from app.services.news_service import BIST30_TICKERS, BIST100_TICKERS
+    from app.services.news_service import BIST30_TICKERS
 
     has_paid_sub = False
     active_package = None
@@ -380,7 +379,7 @@ async def list_telegram_news(
                     and_(
                         UserSubscription.user_id == user.id,
                         UserSubscription.is_active == True,
-                        UserSubscription.package.in_(["yildiz_pazar", "ana_yildiz"]),
+                        UserSubscription.package == "ana_yildiz",
                     )
                 )
             )
@@ -393,15 +392,12 @@ async def list_telegram_news(
     since = datetime.utcnow() - timedelta(days=days)
 
     if has_paid_sub:
-        # Ucretli abone: paket kapsaminda son 20 haber
+        # Ucretli abone (ana_yildiz): tum hisselerin son 20 haberi
         query = (
             select(TelegramNews)
             .where(TelegramNews.created_at >= since)
             .order_by(desc(TelegramNews.created_at))
         )
-        # yildiz_pazar → BIST 100 filtresi, ana_yildiz → filtre yok
-        if active_package == "yildiz_pazar":
-            query = query.where(TelegramNews.ticker.in_(BIST100_TICKERS))
 
         if ticker:
             query = query.where(TelegramNews.ticker == ticker.upper())
@@ -1252,22 +1248,21 @@ async def seed_bist30_news(
     payload: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """adsiz.txt'den parse edilmis son 10 BIST 30 KAP haberini DB'ye ekler."""
+    """BIST 30 seed haberlerini yeniden ekler. Eski seed kayitlari silinir."""
     import os
 
     admin_pw = os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
     if payload.get("admin_password") != admin_pw:
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
-    # Son 10 BIST 30 mesaji — adsiz.txt'den parse edilmis (en yeniden eskiye)
+    # Son 10 BIST 30 mesaji — 3 tip bildirim (fiyat yok, sadece GAP)
     seed_data = [
         {
             "telegram_message_id": 7200349,
             "message_type": "seans_ici_pozitif",
             "ticker": "ASELS",
-            "price_at_time": 296.25,
-            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
-            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 296.25 TL\nKonu: savunma sanayi",
+            "parsed_title": "⚡ Seans İçi Pozitif Haber Yakalandı - ASELS",
+            "parsed_body": "Sembol: ASELS\nKonu: savunma sanayi",
             "sentiment": "positive",
             "kap_notification_id": "6200349",
             "message_date": "2026-02-11T11:06:03",
@@ -1276,13 +1271,10 @@ async def seed_bist30_news(
             "telegram_message_id": 7199734,
             "message_type": "seans_disi_acilis",
             "ticker": "FROTO",
-            "price_at_time": 115.90,
-            "prev_close_price": 115.90,
-            "theoretical_open": 115.00,
             "gap_pct": -0.78,
-            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - FROTO",
-            "parsed_body": "Sembol: FROTO\nÖnceki Kapanış: 115.90\nTeorik Açılış: 115.00\nAçılış Gap: %-0.78",
-            "sentiment": "neutral",
+            "parsed_title": "📊 Seans Dışı Haber Yakalanan Hisse Açılışı - FROTO",
+            "parsed_body": "Sembol: FROTO\nGap: %-0.78",
+            "sentiment": "positive",
             "kap_notification_id": "6199734",
             "expected_trading_date": "2026-02-11",
             "message_date": "2026-02-11T09:56:00",
@@ -1291,10 +1283,9 @@ async def seed_bist30_news(
             "telegram_message_id": 71997342,
             "message_type": "borsa_kapali",
             "ticker": "FROTO",
-            "price_at_time": 115.90,
-            "parsed_title": "🔒 BORSA KAPALI - FROTO",
-            "parsed_body": "Sembol: FROTO\nSon Fiyat: 115.90\nBeklenen İşlem Günü: 2026-02-11",
-            "sentiment": "neutral",
+            "parsed_title": "🌙 Seans Dışı Pozitif Haber Yakalandı - FROTO",
+            "parsed_body": "Sembol: FROTO\nBeklenen İşlem Günü: 2026-02-11",
+            "sentiment": "positive",
             "kap_notification_id": "6199734",
             "expected_trading_date": "2026-02-11",
             "message_date": "2026-02-11T07:02:37",
@@ -1303,9 +1294,8 @@ async def seed_bist30_news(
             "telegram_message_id": 7198749,
             "message_type": "seans_ici_pozitif",
             "ticker": "FROTO",
-            "price_at_time": 115.50,
-            "parsed_title": "⚡ SEANS İÇİ POZİTİF - FROTO",
-            "parsed_body": "Sembol: FROTO\nAnlık Fiyat: 115.50 TL\nKonu: milyon eur",
+            "parsed_title": "⚡ Seans İçi Pozitif Haber Yakalandı - FROTO",
+            "parsed_body": "Sembol: FROTO\nKonu: milyon eur",
             "sentiment": "positive",
             "kap_notification_id": "6198749",
             "message_date": "2026-02-10T16:31:48",
@@ -1314,13 +1304,10 @@ async def seed_bist30_news(
             "telegram_message_id": 7196982,
             "message_type": "seans_disi_acilis",
             "ticker": "FROTO",
-            "price_at_time": 119.40,
-            "prev_close_price": 119.40,
-            "theoretical_open": 118.00,
             "gap_pct": -1.17,
-            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - FROTO",
-            "parsed_body": "Sembol: FROTO\nÖnceki Kapanış: 119.40\nTeorik Açılış: 118.00\nAçılış Gap: %-1.17",
-            "sentiment": "neutral",
+            "parsed_title": "📊 Seans Dışı Haber Yakalanan Hisse Açılışı - FROTO",
+            "parsed_body": "Sembol: FROTO\nGap: %-1.17",
+            "sentiment": "positive",
             "kap_notification_id": "6196982",
             "expected_trading_date": "2026-02-10",
             "message_date": "2026-02-10T09:56:00",
@@ -1329,10 +1316,9 @@ async def seed_bist30_news(
             "telegram_message_id": 71969822,
             "message_type": "borsa_kapali",
             "ticker": "FROTO",
-            "price_at_time": 119.40,
-            "parsed_title": "🔒 BORSA KAPALI - FROTO",
-            "parsed_body": "Sembol: FROTO\nSon Fiyat: 119.40\nBeklenen İşlem Günü: 2026-02-10",
-            "sentiment": "neutral",
+            "parsed_title": "🌙 Seans Dışı Pozitif Haber Yakalandı - FROTO",
+            "parsed_body": "Sembol: FROTO\nBeklenen İşlem Günü: 2026-02-10",
+            "sentiment": "positive",
             "kap_notification_id": "6196982",
             "expected_trading_date": "2026-02-10",
             "message_date": "2026-02-10T08:42:07",
@@ -1341,9 +1327,8 @@ async def seed_bist30_news(
             "telegram_message_id": 7186659,
             "message_type": "seans_ici_pozitif",
             "ticker": "ASELS",
-            "price_at_time": 294.50,
-            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
-            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 294.50 TL\nKonu: savunma sanayi, seri üretim",
+            "parsed_title": "⚡ Seans İçi Pozitif Haber Yakalandı - ASELS",
+            "parsed_body": "Sembol: ASELS\nKonu: savunma sanayi, seri üretim",
             "sentiment": "positive",
             "kap_notification_id": "6186659",
             "message_date": "2026-02-05T15:24:25",
@@ -1352,9 +1337,8 @@ async def seed_bist30_news(
             "telegram_message_id": 7182535,
             "message_type": "seans_ici_pozitif",
             "ticker": "ASELS",
-            "price_at_time": 300.75,
-            "parsed_title": "⚡ SEANS İÇİ POZİTİF - ASELS",
-            "parsed_body": "Sembol: ASELS\nAnlık Fiyat: 300.75 TL\nKonu: milyon dolar",
+            "parsed_title": "⚡ Seans İçi Pozitif Haber Yakalandı - ASELS",
+            "parsed_body": "Sembol: ASELS\nKonu: milyon dolar",
             "sentiment": "positive",
             "kap_notification_id": "6182535",
             "message_date": "2026-02-04T10:47:33",
@@ -1363,13 +1347,10 @@ async def seed_bist30_news(
             "telegram_message_id": 7176202,
             "message_type": "seans_disi_acilis",
             "ticker": "ENKAI",
-            "price_at_time": 97.85,
-            "prev_close_price": 97.85,
-            "theoretical_open": 95.40,
             "gap_pct": -2.50,
-            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - ENKAI",
-            "parsed_body": "Sembol: ENKAI\nÖnceki Kapanış: 97.85\nTeorik Açılış: 95.40\nAçılış Gap: %-2.50",
-            "sentiment": "neutral",
+            "parsed_title": "📊 Seans Dışı Haber Yakalanan Hisse Açılışı - ENKAI",
+            "parsed_body": "Sembol: ENKAI\nGap: %-2.50",
+            "sentiment": "positive",
             "kap_notification_id": "6176202",
             "expected_trading_date": "2026-02-02",
             "message_date": "2026-02-02T09:56:00",
@@ -1378,13 +1359,10 @@ async def seed_bist30_news(
             "telegram_message_id": 7175970,
             "message_type": "seans_disi_acilis",
             "ticker": "ARCLK",
-            "price_at_time": 114.00,
-            "prev_close_price": 114.00,
-            "theoretical_open": 113.50,
             "gap_pct": -0.44,
-            "parsed_title": "📊 AÇILIŞ BİLGİLERİ - ARCLK",
-            "parsed_body": "Sembol: ARCLK\nÖnceki Kapanış: 114.00\nTeorik Açılış: 113.50\nAçılış Gap: %-0.44",
-            "sentiment": "neutral",
+            "parsed_title": "📊 Seans Dışı Haber Yakalanan Hisse Açılışı - ARCLK",
+            "parsed_body": "Sembol: ARCLK\nGap: %-0.44",
+            "sentiment": "positive",
             "kap_notification_id": "6175970",
             "expected_trading_date": "2026-02-02",
             "message_date": "2026-02-02T09:56:00",
@@ -1393,16 +1371,22 @@ async def seed_bist30_news(
 
     from decimal import Decimal as D
 
+    # Eski seed kayitlarini sil (guncellenmis seed ile degistir)
+    seed_msg_ids = [item["telegram_message_id"] for item in seed_data]
+    await db.execute(
+        TelegramNews.__table__.delete().where(
+            TelegramNews.telegram_message_id.in_(seed_msg_ids)
+        )
+    )
+    # Ayrica negatif sentiment kayitlarini da temizle
+    await db.execute(
+        TelegramNews.__table__.delete().where(
+            TelegramNews.sentiment == "negative"
+        )
+    )
+
     inserted = 0
     for item in seed_data:
-        # Ayni telegram_message_id varsa atla (duplicate kontrolu)
-        existing = await db.execute(
-            select(TelegramNews).where(
-                TelegramNews.telegram_message_id == item["telegram_message_id"]
-            )
-        )
-        if existing.scalar_one_or_none():
-            continue
 
         news = TelegramNews(
             telegram_message_id=item["telegram_message_id"],
