@@ -142,3 +142,26 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
+        # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
+        # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.
+        try:
+            # Marker kolon var mi kontrol et
+            check = await conn.execute(
+                text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'telegram_news' AND column_name = 'tz_fix_applied'
+                """)
+            )
+            if not check.fetchone():
+                # Tum kayitlarda 3 saat geri al (UTC+3 → UTC)
+                await conn.execute(
+                    text("UPDATE telegram_news SET message_date = message_date - INTERVAL '3 hours' WHERE message_date IS NOT NULL")
+                )
+                # Marker kolon ekle — tekrar calismasini engeller
+                await conn.execute(
+                    text("ALTER TABLE telegram_news ADD COLUMN IF NOT EXISTS tz_fix_applied BOOLEAN DEFAULT TRUE")
+                )
+        except Exception:
+            pass

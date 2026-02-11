@@ -147,6 +147,31 @@ def parse_gap_pct(text: str) -> Decimal | None:
     return None
 
 
+def parse_pct_change(text: str) -> str | None:
+    """Anlik yuzdesel degisimi cikart: 'Anlık: +%3,56' veya 'Anlık: -%1.20'.
+
+    Fiyat degil, sadece yuzdesel degisim bilgisi (str olarak).
+    Ornek: '+%3,56', '-%1.20', '+%0.45'
+    """
+    # Anlık: +%3,56  /  Anlık: -%1.20  /  Anlık:+%0,45
+    match = re.search(
+        r"Anl[ıi]k\s*:\s*([+-]?\s*%?\s*[\d]+[.,][\d]+)",
+        text, re.IGNORECASE
+    )
+    if match:
+        raw = match.group(1).strip()
+        # Normalize: bosluk temizle, % isareti ekle
+        raw = raw.replace(" ", "")
+        if "%" not in raw:
+            # +3,56 → +%3,56
+            if raw.startswith("+") or raw.startswith("-"):
+                raw = raw[0] + "%" + raw[1:]
+            else:
+                raw = "%" + raw
+        return raw
+    return None
+
+
 def parse_prev_close(text: str) -> Decimal | None:
     """Onceki kapanis fiyatini cikart."""
     match = re.search(r"[Öö]nceki\s+Kapanış[:\s]*([\d]+[.,][\d]+)", text, re.IGNORECASE)
@@ -255,6 +280,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             gap = parse_gap_pct(text)
             prev_close = parse_prev_close(text)
             theo_open = parse_theoretical_open(text)
+            pct_change = parse_pct_change(text)  # Seans ici yuzdesel degisim
             sentiment = parse_sentiment(message_type)
             title = build_parsed_title(message_type, ticker)
 
@@ -282,7 +308,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             parsed_body = f"Sembol: {ticker or '???'}"
             if matched_kw and matched_kw != ticker:
                 parsed_body += f"\n{matched_kw}"
-            if message_type == "seans_disi_acilis" and gap is not None:
+            if message_type == "seans_ici_pozitif" and pct_change:
+                parsed_body += f"\nDeğişim: {pct_change}"
+            elif message_type == "seans_disi_acilis" and gap is not None:
                 parsed_body += f"\nGap: %{gap}"
             elif message_type == "borsa_kapali" and expected_date:
                 parsed_body += f"\nBeklenen İşlem Günü: {expected_date.isoformat()}"
@@ -327,6 +355,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     matched_keyword=matched_kw,
                     sentiment="positive",
                     news_type=news_type,
+                    pct_change=pct_change if message_type == "seans_ici_pozitif" else None,
                 )
                 logger.info("Push bildirim gonderildi: %s — %s", ticker, title)
             except Exception as notif_err:

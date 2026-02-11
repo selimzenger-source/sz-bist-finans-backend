@@ -368,6 +368,7 @@ class NotificationService:
         matched_keyword: str,
         sentiment: str,
         news_type: str,
+        pct_change: Optional[str] = None,
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
@@ -388,6 +389,9 @@ class NotificationService:
 
         # Fiyat bilgisi gonderilmez (veri ihlali)
         body = f"Sembol: {ticker}\n{matched_keyword}"
+        # Seans ici yuzdesel degisim varsa ekle
+        if news_type == "seans_ici" and pct_change:
+            body += f"\nDeğişim: {pct_change}"
 
         data = {
             "type": "kap_news",
