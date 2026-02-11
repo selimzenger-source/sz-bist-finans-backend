@@ -939,6 +939,9 @@ async def update_ceiling_track(
         user = user_result.scalar_one_or_none()
         if not user or not user.fcm_token:
             continue
+        # Master switch kontrolu
+        if not user.notifications_enabled:
+            continue
 
         if not data.hit_ceiling and not track.notified_ceiling_break:
             await notif_service.send_to_device(
@@ -1065,6 +1068,9 @@ async def send_realtime_notification(
         )
         user = user_result.scalar_one_or_none()
         if not user or not user.fcm_token:
+            continue
+        # Master switch kontrolu — tum bildirimler kapaliysa atla
+        if not user.notifications_enabled:
             continue
 
         try:

@@ -190,100 +190,35 @@ class NotificationService:
             return False
 
     # -------------------------------------------------------
-    # Halka Arz Bildirimleri
+    # Yardimci: Kullanici tercihine gore filtreleyip gonder
     # -------------------------------------------------------
 
-    async def notify_new_ipo(self, ipo) -> int:
-        """Yeni halka arz duyuruldugunda tum kullanicilara bildirim gonder."""
-        title = "🆕 Yeni Halka Arz"
-        body = f"{ipo.company_name}"
-        if ipo.ticker:
-            body += f" ({ipo.ticker})"
-        if ipo.ipo_price:
-            body += f" — {ipo.ipo_price} TL"
+    async def _send_filtered(
+        self,
+        preference_field: str,
+        title: str,
+        body: str,
+        data: dict,
+        log_label: str,
+    ) -> int:
+        """Belirli bildirim tercihini kontrol ederek sadece aktif kullanicilara gonderir.
 
-        data = {
-            "type": "new_ipo",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        await self.send_to_topic("ipo_all", title, body, data)
-        return 1
-
-    async def notify_ipo_subscription_start(self, ipo) -> int:
-        """Halka arz basvuru baslangicinda bildirim gonder."""
-        title = "📋 Başvuru Başladı"
-        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu başladı!"
-        if ipo.subscription_end:
-            body += f" Son gün: {ipo.subscription_end.strftime('%d.%m.%Y')}"
-
-        data = {
-            "type": "ipo_start",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        await self.send_to_topic("ipo_all", title, body, data)
-        return 1
-
-    async def notify_ipo_last_day(self, ipo) -> int:
-        """Halka arz son gun uyarisi."""
-        title = "⏰ Son Gün Uyarısı"
-        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu YARIN son gün!"
-
-        data = {
-            "type": "ipo_last_day",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        await self.send_to_topic("ipo_all", title, body, data)
-        # Ozel alert kurmus kullanicilara da gonder
-        await self.send_to_topic(f"ipo_{ipo.id}", title, body, data)
-        return 1
-
-    async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
-        """Tahsisat sonucu aciklandi bildirimi."""
-        title = "📊 Tahsisat Sonuçları"
-        body = f"{ipo.ticker or ipo.company_name} tahsisat sonuçları açıklandı!"
-        if total_applicants:
-            body += f" ({total_applicants:,} başvuru)"
-
-        data = {
-            "type": "ipo_result",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        await self.send_to_topic("ipo_all", title, body, data)
-        await self.send_to_topic(f"ipo_{ipo.id}", title, body, data)
-        return 1
-
-    async def notify_first_trading_day(self, ipo) -> int:
-        """Ilk islem gunu bildirimi — trading_start == bugun olan IPO'lar icin.
-
-        notify_first_trading_day = True olan kullanicilara gonderir.
-        Her IPO icin tek 1 bildirim (09:30'da).
+        - notifications_enabled = True (master switch)
+        - preference_field = True (ilgili bildirim tercihi)
+        - Push token mevcut
         """
         from app.models.user import User
 
-        title = "🔔 Bugün İşlem Görmeye Başlıyor"
-        body = f"{ipo.ticker or ipo.company_name} bugün borsada işlem görmeye başlıyor!"
-        if ipo.ipo_price:
-            body += f" (Halka arz fiyatı: {ipo.ipo_price} TL)"
+        pref_col = getattr(User, preference_field, None)
+        if pref_col is None:
+            logger.error("Gecersiz preference_field: %s", preference_field)
+            return 0
 
-        data = {
-            "type": "first_trading_day",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        # notify_first_trading_day = True olan kullanicilari bul
         users_result = await self.db.execute(
             select(User).where(
                 and_(
-                    User.notify_first_trading_day == True,
+                    User.notifications_enabled == True,
+                    pref_col == True,
                     or_(
                         User.expo_push_token.isnot(None),
                         User.fcm_token.isnot(None),
@@ -306,13 +241,107 @@ class NotificationService:
                 sent_count += 1
 
         logger.info(
-            "Ilk islem gunu bildirimi: %s — %d kullaniciya gonderildi",
-            ipo.ticker or ipo.company_name, sent_count,
+            "%s — %d kullaniciya gonderildi (filtre: %s)",
+            log_label, sent_count, preference_field,
         )
         return sent_count
 
+    # -------------------------------------------------------
+    # Halka Arz Bildirimleri
+    # -------------------------------------------------------
+
+    async def notify_new_ipo(self, ipo) -> int:
+        """Yeni halka arz bildirimi — notify_new_ipo = True olanlara."""
+        title = "🆕 Yeni Halka Arz"
+        body = f"{ipo.company_name}"
+        if ipo.ticker:
+            body += f" ({ipo.ticker})"
+        if ipo.ipo_price:
+            body += f" — {ipo.ipo_price} TL"
+
+        data = {
+            "type": "new_ipo",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_new_ipo", title, body, data,
+            f"Yeni halka arz: {ipo.ticker or ipo.company_name}",
+        )
+
+    async def notify_ipo_subscription_start(self, ipo) -> int:
+        """Basvuru baslangici bildirimi — notify_ipo_start = True olanlara."""
+        title = "📋 Başvuru Başladı"
+        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu başladı!"
+        if ipo.subscription_end:
+            body += f" Son gün: {ipo.subscription_end.strftime('%d.%m.%Y')}"
+
+        data = {
+            "type": "ipo_start",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_ipo_start", title, body, data,
+            f"Basvuru basladi: {ipo.ticker or ipo.company_name}",
+        )
+
+    async def notify_ipo_last_day(self, ipo) -> int:
+        """Son gun uyarisi — notify_ipo_last_day = True olanlara."""
+        title = "⏰ Son Gün Uyarısı"
+        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu YARIN son gün!"
+
+        data = {
+            "type": "ipo_last_day",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_ipo_last_day", title, body, data,
+            f"Son gun uyarisi: {ipo.ticker or ipo.company_name}",
+        )
+
+    async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
+        """Tahsisat sonucu bildirimi — notify_ipo_result = True olanlara."""
+        title = "📊 Tahsisat Sonuçları"
+        body = f"{ipo.ticker or ipo.company_name} tahsisat sonuçları açıklandı!"
+        if total_applicants:
+            body += f" ({total_applicants:,} başvuru)"
+
+        data = {
+            "type": "ipo_result",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_ipo_result", title, body, data,
+            f"Tahsisat sonucu: {ipo.ticker or ipo.company_name}",
+        )
+
+    async def notify_first_trading_day(self, ipo) -> int:
+        """Ilk islem gunu bildirimi — notify_first_trading_day = True olanlara."""
+        title = "🔔 Bugün İşlem Görmeye Başlıyor"
+        body = f"{ipo.ticker or ipo.company_name} bugün borsada işlem görmeye başlıyor!"
+        if ipo.ipo_price:
+            body += f" (Halka arz fiyatı: {ipo.ipo_price} TL)"
+
+        data = {
+            "type": "first_trading_day",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_first_trading_day", title, body, data,
+            f"Ilk islem gunu: {ipo.ticker or ipo.company_name}",
+        )
+
     async def notify_ceiling_broken(self, ipo) -> int:
-        """Tavan bozuldu bildirimi."""
+        """Tavan bozuldu bildirimi — notify_ceiling_break = True olanlara."""
         title = "🔓 Tavan Çözüldü"
         body = f"{ipo.ticker} tavan çözüldü!"
 
@@ -322,9 +351,10 @@ class NotificationService:
             "ticker": ipo.ticker or "",
         }
 
-        await self.send_to_topic("ipo_all", title, body, data)
-        await self.send_to_topic(f"ipo_{ipo.id}", title, body, data)
-        return 1
+        return await self._send_filtered(
+            "notify_ceiling_break", title, body, data,
+            f"Tavan bozuldu: {ipo.ticker}",
+        )
 
     # -------------------------------------------------------
     # KAP Haber Bildirimleri

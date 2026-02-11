@@ -295,7 +295,7 @@ async def check_reminders():
     - 4 saat oncesi
     """
     try:
-        from sqlalchemy import select, and_
+        from sqlalchemy import select, and_, or_
         from app.models.ipo import IPO
         from app.models.user import User
         from app.services.notification import NotificationService
@@ -343,8 +343,12 @@ async def check_reminders():
             users_result = await db.execute(
                 select(User).where(
                     and_(
+                        User.notifications_enabled == True,
                         getattr(User, reminder_check) == True,
-                        User.fcm_token.isnot(None),
+                        or_(
+                            User.expo_push_token.isnot(None),
+                            User.fcm_token.isnot(None),
+                        ),
                     )
                 )
             )

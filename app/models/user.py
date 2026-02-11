@@ -21,6 +21,9 @@ class User(Base):
     platform: Mapped[str | None] = mapped_column(String(10), comment="ios, android")
     app_version: Mapped[str | None] = mapped_column(String(20), comment="Uygulama versiyonu")
 
+    # Master bildirim switch — False ise HICBIR bildirim gitmez
+    notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tum bildirimleri ac/kapat")
+
     # Bildirim tercihleri
     notify_new_ipo: Mapped[bool] = mapped_column(Boolean, default=True, comment="Yeni halka arz bildirimi")
     notify_ipo_start: Mapped[bool] = mapped_column(Boolean, default=True, comment="Basvuru basladi bildirimi")

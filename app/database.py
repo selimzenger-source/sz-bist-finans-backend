@@ -104,3 +104,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v7 migration: users.notifications_enabled (master bildirim switch)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_enabled BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass

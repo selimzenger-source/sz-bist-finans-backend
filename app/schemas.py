@@ -287,6 +287,7 @@ class UserUpdate(BaseModel):
     fcm_token: Optional[str] = None
     expo_push_token: Optional[str] = None
     app_version: Optional[str] = None
+    notifications_enabled: Optional[bool] = None
     notify_new_ipo: Optional[bool] = None
     notify_ipo_start: Optional[bool] = None
     notify_ipo_last_day: Optional[bool] = None
@@ -312,6 +313,7 @@ class UserOut(BaseModel):
     id: int
     device_id: str
     platform: Optional[str] = None
+    notifications_enabled: bool = True
     notify_new_ipo: bool = True
     notify_ipo_start: bool = True
     notify_ipo_last_day: bool = True
