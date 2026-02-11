@@ -668,10 +668,10 @@ def _setup_scheduler_impl():
         next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS),
     )
 
-    # 5. HalkArz + Gedik — her 4 saatte bir
+    # 5. HalkArz + Gedik — her 2 saatte bir (trading_start hizli tespiti icin)
     scheduler.add_job(
         scrape_halkarz_gedik,
-        IntervalTrigger(hours=4),
+        IntervalTrigger(hours=2),
         id="halkarz_gedik_scraper",
         name="HalkArz + Gedik Scraper",
         replace_existing=True,
