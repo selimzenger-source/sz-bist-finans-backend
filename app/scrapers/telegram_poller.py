@@ -308,7 +308,13 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 if not matched_kw:
                     matched_kw = ticker or ""
 
-                news_type = "seans_ici" if message_type == "seans_ici_pozitif" else "seans_disi"
+                # 3 Tip: seans_ici, seans_disi, seans_disi_acilis
+                if message_type == "seans_ici_pozitif":
+                    news_type = "seans_ici"
+                elif message_type == "seans_disi_acilis":
+                    news_type = "seans_disi_acilis"
+                else:
+                    news_type = "seans_disi"
                 await notif.notify_kap_news(
                     ticker=ticker or "",
                     price=None,

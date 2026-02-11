@@ -380,9 +380,11 @@ class NotificationService:
         - Seans Disi Haber Yakalanan Hisse Acilisi (GAP bilgisi ile)
         """
         if news_type == "seans_ici":
-            title = f"Seans İçi Pozitif Haber Yakalandı - {ticker}"
+            title = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}"
+        elif news_type == "seans_disi_acilis":
+            title = f"📊 Seans Dışı Yakalanan Hisse Açılışı - {ticker}"
         else:
-            title = f"Seans Dışı Pozitif Haber Yakalandı - {ticker}"
+            title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}"
 
         # Fiyat bilgisi gonderilmez (veri ihlali)
         body = f"Sembol: {ticker}\n{matched_keyword}"

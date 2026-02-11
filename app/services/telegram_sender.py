@@ -50,16 +50,19 @@ def _format_telegram_message(
     """
     # Mesaj tipi baslik
     if news_type == "seans_ici" and sentiment == "positive":
-        header = "SEANS ICI POZITIF HABER"
+        header = "SEANS \u0130\u00c7\u0130 POZ\u0130T\u0130F HABER"
         emoji = "\u26a1"
     elif news_type == "seans_ici" and sentiment == "negative":
-        header = "SEANS ICI NEGATIF HABER"
+        header = "SEANS \u0130\u00c7\u0130 NEGAT\u0130F HABER"
         emoji = "\u26a0\ufe0f"
+    elif news_type == "seans_disi_acilis":
+        header = "SEANS DI\u015eI HABER YAKALANAN H\u0130SSE A\u00c7ILI\u015eI"
+        emoji = "\U0001f4ca"
     elif news_type == "seans_disi":
         header = "BORSA KAPALI - Haber Kaydedildi"
         emoji = "\U0001f512"
     else:
-        header = "SEANS ICI POZITIF HABER"
+        header = "SEANS \u0130\u00c7\u0130 POZ\u0130T\u0130F HABER"
         emoji = "\u26a1"
 
     lines = [
@@ -96,10 +99,10 @@ def _determine_message_type(news_type: str, sentiment: str) -> str:
 def _build_parsed_title(message_type: str, ticker: str) -> str:
     """Mesaj tipi ve ticker'dan baslik olustur."""
     type_labels = {
-        "seans_ici_pozitif": f"\U0001f4c8 Seans Ici Pozitif - {ticker}",
-        "seans_ici_negatif": f"\U0001f4c9 Seans Ici Negatif - {ticker}",
-        "borsa_kapali": f"\U0001f512 Borsa Kapali - {ticker}",
-        "seans_disi_acilis": f"\U0001f4ca Acilis Bilgileri - {ticker}",
+        "seans_ici_pozitif": f"\u26a1 Seans \u0130\u00e7i Pozitif Haber Yakaland\u0131 - {ticker}",
+        "seans_ici_negatif": f"\u26a0\ufe0f Seans \u0130\u00e7i Negatif - {ticker}",
+        "borsa_kapali": f"\U0001f319 Seans D\u0131\u015f\u0131 Pozitif Haber Yakaland\u0131 - {ticker}",
+        "seans_disi_acilis": f"\U0001f4ca Seans D\u0131\u015f\u0131 Haber Yakalanan Hisse A\u00e7\u0131l\u0131\u015f\u0131 - {ticker}",
     }
     return type_labels.get(message_type, f"Haber - {ticker}")
 
