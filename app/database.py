@@ -120,3 +120,25 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v9 migration: users.notify_kap_all (ucretli aboneler icin tum KAP bildirimi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_kap_all BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass
+
+        # v10 migration: Halka Arz ucretli bildirim tercihleri
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_taban_break BOOLEAN DEFAULT TRUE")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_daily_open_close BOOLEAN DEFAULT TRUE")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_percent_drop BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass

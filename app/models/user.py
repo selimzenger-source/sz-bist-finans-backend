@@ -32,6 +32,12 @@ class User(Base):
     notify_ceiling_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tavan bozuldu bildirimi")
     notify_first_trading_day: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ilk islem gunu bildirimi (ucretsiz)")
     notify_kap_bist30: Mapped[bool] = mapped_column(Boolean, default=True, comment="BIST 30 KAP ucretsiz bildirim")
+    notify_kap_all: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tum KAP haber bildirimi (ucretli aboneler)")
+
+    # Halka Arz ucretli bildirim tercihleri
+    notify_taban_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Taban acilinca bildirimi")
+    notify_daily_open_close: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunluk acilis kapanis bildirimi")
+    notify_percent_drop: Mapped[bool] = mapped_column(Boolean, default=True, comment="Yuzde dusus bildirimi")
 
     # Hatirlatma zamanlari (son gun icin)
     reminder_30min: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 30 dk kala")

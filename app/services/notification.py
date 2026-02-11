@@ -371,7 +371,7 @@ class NotificationService:
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
-        Ucretli aboneler: Firebase topic'lere (news_all, news_bist100, news_bist50)
+        Ucretli aboneler (ana_yildiz): Per-user bildirim — notify_kap_all kontrollu
         Ucretsiz BIST 30: Per-user push (_send_bist30_free) — ucretli aboneler haric (dedup)
 
         3 Tip Bildirim:
@@ -395,30 +395,73 @@ class NotificationService:
             "matched_keyword": matched_keyword,
         }
 
-        from app.services.news_service import (
-            BIST30_TICKERS, BIST50_TICKERS, BIST100_TICKERS
-        )
+        from app.services.news_service import BIST30_TICKERS
 
         sent = 0
         ticker_upper = ticker.upper()
 
-        # 1. Ucretli abonelere topic-based bildirim (mevcut mantik)
-        await self.send_to_topic("news_all", title, body, data)
-        sent += 1
-
-        if ticker_upper in BIST100_TICKERS:
-            await self.send_to_topic("news_bist100", title, body, data)
-            sent += 1
-
-        if ticker_upper in BIST50_TICKERS:
-            await self.send_to_topic("news_bist50", title, body, data)
-            sent += 1
+        # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
+        sent += await self._send_paid_kap_news(title, body, data, ticker_upper)
 
         # 2. BIST 30 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         if ticker_upper in BIST30_TICKERS:
             sent += await self._send_bist30_free(title, body, data, ticker_upper)
 
         return sent
+
+    async def _send_paid_kap_news(
+        self,
+        title: str,
+        body: str,
+        data: dict,
+        ticker: str,
+    ) -> int:
+        """Ucretli abonelere (ana_yildiz) per-user KAP haber bildirimi gonder.
+
+        notify_kap_all == True olan ucretli kullanicilara tek tek gonderir.
+        Bu sayede kullanici ayarlardan BIST Tum KAP Bildirimi'ni kapatabilir.
+        """
+        from app.models.user import User, UserSubscription
+
+        # Ucretli aboneler — notify_kap_all aktif olanlar
+        users_result = await self.db.execute(
+            select(User)
+            .join(UserSubscription, UserSubscription.user_id == User.id)
+            .where(
+                and_(
+                    UserSubscription.is_active == True,
+                    UserSubscription.package == "ana_yildiz",
+                    User.notifications_enabled == True,
+                    User.notify_kap_all == True,
+                    or_(
+                        User.expo_push_token.isnot(None),
+                        User.fcm_token.isnot(None),
+                    ),
+                )
+            )
+        )
+        users = list(users_result.scalars().all())
+
+        sent_count = 0
+        for user in users:
+            token = user.expo_push_token or user.fcm_token
+            if token:
+                try:
+                    await self.send_to_device(
+                        fcm_token=token,
+                        title=title,
+                        body=body,
+                        data=data,
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
+
+        logger.info(
+            "Ucretli KAP bildirim: %s — %d ucretli kullaniciya gonderildi",
+            ticker, sent_count,
+        )
+        return sent_count
 
     async def _send_bist30_free(
         self,
@@ -430,7 +473,7 @@ class NotificationService:
         """BIST 30 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
 
         Dedup: UserSubscription aktif ana_yildiz olan kullanicilar haric tutulur.
-        Onlar zaten topic uzerinden bildirimi aliyor.
+        Onlar zaten _send_paid_kap_news ile bildirimi aliyor.
         """
         from app.models.user import User, UserSubscription
 

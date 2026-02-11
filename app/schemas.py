@@ -295,6 +295,11 @@ class UserUpdate(BaseModel):
     notify_ceiling_break: Optional[bool] = None
     notify_first_trading_day: Optional[bool] = None
     notify_kap_bist30: Optional[bool] = None
+    notify_kap_all: Optional[bool] = None
+    # Halka Arz ucretli bildirim tercihleri
+    notify_taban_break: Optional[bool] = None
+    notify_daily_open_close: Optional[bool] = None
+    notify_percent_drop: Optional[bool] = None
     # Hatirlatma zamanları
     reminder_30min: Optional[bool] = None
     reminder_1h: Optional[bool] = None
@@ -322,6 +327,10 @@ class UserOut(BaseModel):
     notify_ceiling_break: bool = True
     notify_first_trading_day: bool = True
     notify_kap_bist30: bool = True
+    notify_kap_all: bool = True
+    notify_taban_break: bool = True
+    notify_daily_open_close: bool = True
+    notify_percent_drop: bool = True
     reminder_30min: bool = False
     reminder_1h: bool = True
     reminder_2h: bool = False
