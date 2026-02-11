@@ -13,8 +13,11 @@
 11. InfoYatirim: her 6 saatte bir (yedek veri kaynagi)
 12. Son Gun Uyarisi: her gun 09:00 ve 17:00
 13. Tavan Takip Gun Sonu: her gun 18:20 (UTC 15:20) Pzt-Cuma
+13b. Tavan Takip Retry: 18:30, 19:00, 20:00 ... 24:00 (basarisiz olursa)
 14. Sabah Scraper: her gun 09:00 (UTC 06:00) — tum scraper'lar + status update
 15. Ilk Islem Gunu Bildirimi: her gun 09:30 (UTC 06:30) — trading_start == bugun
+
+Admin Telegram bildirimleri: Tum kritik hatalar ve durum gecisleri admin'e bildirilir.
 """
 
 import logging
@@ -31,6 +34,9 @@ logger = logging.getLogger(__name__)
 
 # Startup'ta ilk calismadan once DB'nin hazir olmasini bekle
 _STARTUP_DELAY_SECONDS = 30
+
+# Ceiling update retry — basarisiz olursa saatte bir tekrar dene (24:00'a kadar)
+_ceiling_retry_pending = False
 
 scheduler = AsyncIOScheduler()
 
@@ -87,6 +93,11 @@ async def scrape_kap_ipo():
 
     except Exception as e:
         logger.error(f"SPK halka arz scraper hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK Halka Arz Scraper", str(e))
+        except Exception:
+            pass
 
 
 async def scrape_kap_news():
@@ -192,6 +203,11 @@ async def scrape_spk():
 
     except Exception as e:
         logger.error(f"SPK scraper hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK Basvuru Listesi", str(e))
+        except Exception:
+            pass
 
 
 async def check_spk_bulletins_job():
@@ -219,6 +235,11 @@ async def scrape_halkarz_gedik():
 
     except Exception as e:
         logger.error(f"HalkArz/Gedik scraper hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("HalkArz + Gedik Scraper", str(e))
+        except Exception:
+            pass
 
 
 async def poll_telegram_job():
@@ -482,6 +503,11 @@ async def check_spk_ihrac_data():
 
     except Exception as e:
         logger.error(f"SPK ihrac verileri hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK İhraç Verileri", str(e))
+        except Exception:
+            pass
 
 
 async def scrape_infoyatirim():
@@ -495,6 +521,11 @@ async def scrape_infoyatirim():
         await _run()
     except Exception as e:
         logger.error(f"InfoYatirim scraper hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("InfoYatirim Scraper", str(e))
+        except Exception:
+            pass
 
 
 async def send_last_day_warnings():
@@ -524,8 +555,9 @@ async def daily_ceiling_update():
 
     Borsa 18:00'de kapanir, 18:20'de kapanis verileri kesinlesir.
     Yahoo Finance'den gunluk OHLC verilerini cekip ipo_ceiling_tracks
-    tablosuna yazar.
+    tablosuna yazar. Basarisiz olursa retry mekanizmasi devreye girer.
     """
+    global _ceiling_retry_pending
     try:
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
@@ -547,6 +579,7 @@ async def daily_ceiling_update():
 
             if not active_ipos:
                 logger.info("Tavan takip: Aktif islem goren IPO yok")
+                _ceiling_retry_pending = False
                 return
 
             tickers = [ipo.ticker for ipo in active_ipos if ipo.ticker]
@@ -559,61 +592,73 @@ async def daily_ceiling_update():
             scraper = YahooFinanceScraper()
             ipo_service = IPOService(db)
 
+            success_count = 0
+            fail_count = 0
+            failed_tickers = []
+
             try:
                 for ipo in active_ipos:
                     if not ipo.ticker or not ipo.trading_start:
                         continue
 
-                    # Yahoo Finance'den OHLC verisi cek
-                    days_data = await scraper.fetch_ohlc_since_trading_start(
-                        ticker=ipo.ticker,
-                        trading_start=ipo.trading_start,
-                        max_days=25,
-                    )
-
-                    if not days_data:
-                        logger.warning("Tavan takip: %s icin veri cekilemedi", ipo.ticker)
-                        continue
-
-                    # Her gun icin ceiling track kaydi olustur/guncelle
-                    prev_close = ipo.ipo_price  # Ilk gun referansi
-
-                    for day in days_data:
-                        detection = detect_ceiling_floor(
-                            close_price=day["close"],
-                            prev_close=prev_close,
-                            high_price=day.get("high"),
-                            low_price=day.get("low"),
+                    try:
+                        # Yahoo Finance'den OHLC verisi cek
+                        days_data = await scraper.fetch_ohlc_since_trading_start(
+                            ticker=ipo.ticker,
+                            trading_start=ipo.trading_start,
+                            max_days=25,
                         )
 
-                        track = await ipo_service.update_ceiling_track(
-                            ipo_id=ipo.id,
-                            trading_day=day["trading_day"],
-                            trade_date=day["date"],
-                            close_price=day["close"],
-                            hit_ceiling=detection["hit_ceiling"],
-                            open_price=day.get("open"),
-                            high_price=day.get("high"),
-                            low_price=day.get("low"),
-                            hit_floor=detection["hit_floor"],
+                        if not days_data:
+                            logger.warning("Tavan takip: %s icin veri cekilemedi", ipo.ticker)
+                            fail_count += 1
+                            failed_tickers.append(ipo.ticker)
+                            continue
+
+                        # Her gun icin ceiling track kaydi olustur/guncelle
+                        prev_close = ipo.ipo_price  # Ilk gun referansi
+
+                        for day in days_data:
+                            detection = detect_ceiling_floor(
+                                close_price=day["close"],
+                                prev_close=prev_close,
+                                high_price=day.get("high"),
+                                low_price=day.get("low"),
+                            )
+
+                            track = await ipo_service.update_ceiling_track(
+                                ipo_id=ipo.id,
+                                trading_day=day["trading_day"],
+                                trade_date=day["date"],
+                                close_price=day["close"],
+                                hit_ceiling=detection["hit_ceiling"],
+                                open_price=day.get("open"),
+                                high_price=day.get("high"),
+                                low_price=day.get("low"),
+                                hit_floor=detection["hit_floor"],
+                            )
+
+                            if track:
+                                track.durum = detection["durum"]
+                                track.pct_change = detection["pct_change"]
+
+                            prev_close = day["close"]
+
+                        # trading_day_count guncelle
+                        ipo.trading_day_count = len(days_data)
+
+                        if days_data and not ipo.first_day_close_price:
+                            ipo.first_day_close_price = days_data[0]["close"]
+
+                        success_count += 1
+                        logger.info(
+                            "Tavan takip: %s — %d gun guncellendi",
+                            ipo.ticker, len(days_data),
                         )
-
-                        if track:
-                            track.durum = detection["durum"]
-                            track.pct_change = detection["pct_change"]
-
-                        prev_close = day["close"]
-
-                    # trading_day_count guncelle
-                    ipo.trading_day_count = len(days_data)
-
-                    if days_data and not ipo.first_day_close_price:
-                        ipo.first_day_close_price = days_data[0]["close"]
-
-                    logger.info(
-                        "Tavan takip: %s — %d gun guncellendi",
-                        ipo.ticker, len(days_data),
-                    )
+                    except Exception as ticker_err:
+                        logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
+                        fail_count += 1
+                        failed_tickers.append(ipo.ticker)
 
             finally:
                 await scraper.close()
@@ -621,8 +666,64 @@ async def daily_ceiling_update():
             await db.commit()
             logger.info("Tavan takip gun sonu tamamlandi — %d IPO islendi", len(active_ipos))
 
+            # Sonucu admin'e bildir
+            try:
+                from app.services.admin_telegram import notify_ceiling_update_result
+                await notify_ceiling_update_result(
+                    total=len(active_ipos),
+                    success=success_count,
+                    failed=fail_count,
+                    failed_tickers=failed_tickers if failed_tickers else None,
+                )
+            except Exception:
+                pass
+
+            # Retry gerekli mi?
+            if fail_count > 0:
+                _ceiling_retry_pending = True
+            else:
+                _ceiling_retry_pending = False
+
     except Exception as e:
         logger.error("Tavan takip gun sonu hatasi: %s", e)
+        _ceiling_retry_pending = True
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Tavan Takip Gün Sonu", str(e))
+        except Exception:
+            pass
+
+
+async def ceiling_update_retry():
+    """Tavan takip retry — basarisiz olursa saatte bir tekrar dene.
+
+    18:30, 19:00, 20:00, 21:00, 22:00, 23:00, 24:00 saatlerinde calisir.
+    _ceiling_retry_pending True ise daily_ceiling_update'i tekrar calistirir.
+    """
+    global _ceiling_retry_pending
+    if not _ceiling_retry_pending:
+        return
+
+    logger.info("Tavan takip RETRY calisiyor...")
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            "🔄 <b>Tavan Takip Retry</b>\nÖnceki güncelleme başarısız — tekrar deneniyor...",
+            silent=True,
+        )
+    except Exception:
+        pass
+
+    await daily_ceiling_update()
+
+    if not _ceiling_retry_pending:
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(
+                "✅ <b>Tavan Takip Retry Başarılı</b>\nGüncelleme tamamlandı.",
+            )
+        except Exception:
+            pass
 
 
 async def morning_scraper_run():
@@ -845,6 +946,27 @@ def _setup_scheduler_impl():
         name="Tavan Takip Gun Sonu (18:20)",
         replace_existing=True,
     )
+
+    # 13b. Tavan Takip Retry — basarisiz olursa saatte bir tekrar dene
+    # 18:30 (UTC 15:30), 19:00 (UTC 16:00), 20:00 (UTC 17:00), 21:00 (UTC 18:00),
+    # 22:00 (UTC 19:00), 23:00 (UTC 20:00), 24:00 (UTC 21:00)
+    retry_utc_hours = [
+        (15, 30),  # 18:30 TR
+        (16, 0),   # 19:00 TR
+        (17, 0),   # 20:00 TR
+        (18, 0),   # 21:00 TR
+        (19, 0),   # 22:00 TR
+        (20, 0),   # 23:00 TR
+        (21, 0),   # 24:00 TR
+    ]
+    for idx, (h, m) in enumerate(retry_utc_hours):
+        scheduler.add_job(
+            ceiling_update_retry,
+            CronTrigger(hour=h, minute=m, day_of_week="mon-fri"),
+            id=f"ceiling_retry_{idx}",
+            name=f"Tavan Takip Retry ({h+3:02d}:{m:02d} TR)",
+            replace_existing=True,
+        )
 
     # 14. Sabah Scraper — her gun 09:00 Turkiye (UTC 06:00) Pzt-Cuma
     # Borsa acilmadan once tum verileri guncellemek icin

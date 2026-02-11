@@ -408,6 +408,16 @@ async def check_spk_bulletins():
                 ).total_seconds() < 60:
                     await notif_service.notify_new_ipo(ipo)
 
+                    # Admin'e SPK onay bildirimi
+                    try:
+                        from app.services.admin_telegram import notify_spk_approval
+                        await notify_spk_approval(
+                            company_name=approval["company_name"],
+                            approval_type="SPK Bülten Onayı",
+                        )
+                    except Exception:
+                        pass  # Admin mesaj hatasi ana akisi bozmasin
+
                 # Bu URL'yi islenmis olarak isaretle
                 if approval.get("bulletin_url"):
                     processed_urls.add(approval["bulletin_url"])
@@ -420,5 +430,10 @@ async def check_spk_bulletins():
 
     except Exception as e:
         logger.error("SPK bulten scraper hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK Bülten Monitor", str(e))
+        except Exception:
+            pass
     finally:
         await scraper.close()

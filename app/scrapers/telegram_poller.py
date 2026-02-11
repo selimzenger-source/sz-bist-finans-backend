@@ -436,3 +436,11 @@ async def poll_telegram():
                 logger.info("Telegram: %d yeni mesaj islendi", count)
         except Exception as e:
             logger.error("Telegram poller hatasi: %s", e)
+            # Sadece 409 Conflict veya kritik hatalarda admin'e bildir
+            error_str = str(e)
+            if "409" in error_str or "Conflict" in error_str:
+                try:
+                    from app.services.admin_telegram import notify_scraper_error
+                    await notify_scraper_error("Telegram Poller (409 Conflict)", error_str)
+                except Exception:
+                    pass

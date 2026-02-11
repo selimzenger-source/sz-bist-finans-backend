@@ -399,6 +399,15 @@ class IPOService:
             ipo.status = "in_distribution"
             ipo.updated_at = datetime.utcnow()
             logger.info(f"IPO dagitim surecinde: {ipo.ticker or ipo.company_name}")
+            try:
+                from app.services.admin_telegram import notify_ipo_status_change
+                await notify_ipo_status_change(
+                    ipo.ticker, ipo.company_name,
+                    "newly_approved", "in_distribution",
+                    f"Basvuru: {ipo.subscription_start}" if ipo.subscription_start else "",
+                )
+            except Exception:
+                pass
 
         # ==========================================
         # 2. in_distribution → awaiting_trading
@@ -418,6 +427,14 @@ class IPOService:
             ipo.distribution_completed = True
             ipo.updated_at = datetime.utcnow()
             logger.info(f"IPO islem gunu bekliyor: {ipo.ticker or ipo.company_name}")
+            try:
+                from app.services.admin_telegram import notify_ipo_status_change
+                await notify_ipo_status_change(
+                    ipo.ticker, ipo.company_name,
+                    "in_distribution", "awaiting_trading",
+                )
+            except Exception:
+                pass
 
         # ==========================================
         # 3. awaiting_trading → trading
@@ -437,6 +454,15 @@ class IPOService:
             ipo.ceiling_tracking_active = True
             ipo.updated_at = datetime.utcnow()
             logger.info(f"IPO isleme basladi: {ipo.ticker or ipo.company_name}")
+            try:
+                from app.services.admin_telegram import notify_ipo_status_change
+                await notify_ipo_status_change(
+                    ipo.ticker, ipo.company_name,
+                    "awaiting_trading", "trading",
+                    f"Islem tarihi: {ipo.trading_start}" if ipo.trading_start else "",
+                )
+            except Exception:
+                pass
 
         await self.db.flush()
 

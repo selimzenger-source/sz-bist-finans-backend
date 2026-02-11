@@ -57,6 +57,18 @@ def _init_firebase():
         logger.info("Firebase Admin SDK baslatildi")
     except Exception as e:
         logger.error(f"Firebase baslatma hatasi: {e}")
+        # Firebase init hatasi kritik — admin'e bildir
+        try:
+            import asyncio
+            from app.services.admin_telegram import notify_scraper_error
+            # sync context'te async cagirmak icin
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(
+                    notify_scraper_error("Firebase Init", str(e))
+                )
+        except Exception:
+            pass
 
 
 def is_firebase_initialized() -> bool:

@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     # Admin paneli
     ADMIN_PASSWORD: str = "bist2026admin"
 
+    # Admin Telegram bot — hata/durum bildirimleri icin
+    ADMIN_TELEGRAM_BOT_TOKEN: str = "8379169811:AAGhLFFGy0qDHnY-GidgH_Zs28d4Wqf-Zr4"
+    ADMIN_TELEGRAM_CHAT_ID: str = "2023977970"
+
     # Scraping intervals (saniye)
     KAP_SCRAPE_INTERVAL_SECONDS: int = 1800   # 30 dakika — halka arz
     NEWS_SCRAPE_INTERVAL_SECONDS: int = 30     # 30 saniye — KAP haberler
