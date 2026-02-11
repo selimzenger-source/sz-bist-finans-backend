@@ -258,15 +258,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             sentiment = parse_sentiment(message_type)
             title = build_parsed_title(message_type, ticker)
 
-            # Mesaj tarihini al — Turkiye saat diliminde (UTC+3)
+            # Mesaj tarihini al — UTC olarak kaydet (PostgreSQL timezone=True icin)
+            # Telegram API unix timestamp UTC olarak verir
             msg_date_unix = message.get("date")
             msg_date = (
-                datetime.fromtimestamp(msg_date_unix, tz=TZ_TR).replace(tzinfo=None)
+                datetime.fromtimestamp(msg_date_unix, tz=timezone.utc)
                 if msg_date_unix else None
             )
 
+            # Matched keyword'u raw text'ten cikar (parsed_body icin de lazim)
+            matched_kw = ""
+            if kap_id:
+                detail_match = re.search(
+                    r"[İI]li[sş]kilendirilen\s+Haber\s+Detay[ıiİ]:\s*\n?(.+)",
+                    text, re.IGNORECASE
+                )
+                if detail_match:
+                    matched_kw = detail_match.group(1).strip()
+            if not matched_kw:
+                matched_kw = ticker or ""
+
             # Parsed body — fiyat bilgisi olmadan temiz format
             parsed_body = f"Sembol: {ticker or '???'}"
+            if matched_kw and matched_kw != ticker:
+                parsed_body += f"\n{matched_kw}"
             if message_type == "seans_disi_acilis" and gap is not None:
                 parsed_body += f"\nGap: %{gap}"
             elif message_type == "borsa_kapali" and expected_date:
@@ -293,20 +308,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             session.add(news)
             new_count += 1
 
-            # Hemen push bildirim gonder
+            # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
             try:
                 from app.services.notification import NotificationService
                 notif = NotificationService()
-                price_val = parse_price(text, "Fiyat")  # Gecici: sadece keyword icin parse
-                # Matched keyword'u raw text'ten cikar
-                matched_kw = ""
-                if kap_id:
-                    # "Iliskilendirilen Haber Detayi:" sonrasini al
-                    detail_match = re.search(r"[İI]lişkilendirilen\s+Haber\s+Detay[ıi]:\s*\n(.+)", text, re.IGNORECASE)
-                    if detail_match:
-                        matched_kw = detail_match.group(1).strip()
-                if not matched_kw:
-                    matched_kw = ticker or ""
 
                 # 3 Tip: seans_ici, seans_disi, seans_disi_acilis
                 if message_type == "seans_ici_pozitif":
