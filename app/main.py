@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import select, desc, and_, or_, func
+from sqlalchemy import select, delete, desc, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1889,6 +1889,76 @@ async def seed_ipos(request: Request, payload: dict, db: AsyncSession = Depends(
     return {
         "status": "ok",
         "created_ipos": created_ipos,
+        "created_allocations": created_allocs,
+    }
+
+
+@app.post("/api/v1/admin/bulk-allocations")
+@limiter.limit("10/minute")
+async def bulk_allocations(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Mevcut IPO'lara toplu tahsisat verisi ekler.
+
+    JSON:
+        {
+            "admin_password": "...",
+            "items": [
+                {
+                    "ipo_id": 9,
+                    "total_applicants": 431380,
+                    "groups": [
+                        {"group_name": "bireysel", "allocation_pct": 50, "allocated_lots": 42250000, "participant_count": 431279, "avg_lot_per_person": 98},
+                        {"group_name": "kurumsal_yurtici", "allocation_pct": 50, "allocated_lots": 42250000, "participant_count": 101}
+                    ]
+                }
+            ]
+        }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from decimal import Decimal as _Dec
+
+    items = payload.get("items", [])
+    updated_ipos = 0
+    created_allocs = 0
+
+    for item in items:
+        ipo_id = item.get("ipo_id")
+        if not ipo_id:
+            continue
+
+        ipo_result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = ipo_result.scalar_one_or_none()
+        if not ipo:
+            continue
+
+        # Mevcut allocation'lari sil (varsa)
+        await db.execute(
+            delete(IPOAllocation).where(IPOAllocation.ipo_id == ipo_id)
+        )
+
+        # Yeni allocation'lari ekle
+        for grp in item.get("groups", []):
+            alloc = IPOAllocation(
+                ipo_id=ipo_id,
+                group_name=grp.get("group_name", ""),
+                allocation_pct=_Dec(str(grp["allocation_pct"])) if grp.get("allocation_pct") is not None else None,
+                allocated_lots=grp.get("allocated_lots"),
+                participant_count=grp.get("participant_count"),
+                avg_lot_per_person=_Dec(str(grp["avg_lot_per_person"])) if grp.get("avg_lot_per_person") is not None else None,
+            )
+            db.add(alloc)
+            created_allocs += 1
+
+        # IPO guncelle
+        ipo.allocation_announced = True
+        ipo.total_applicants = item.get("total_applicants")
+        updated_ipos += 1
+
+    await db.flush()
+    return {
+        "status": "ok",
+        "updated_ipos": updated_ipos,
         "created_allocations": created_allocs,
     }
 
