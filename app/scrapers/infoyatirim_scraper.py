@@ -451,5 +451,10 @@ async def scrape_infoyatirim():
 
     except Exception as e:
         logger.error("InfoYatirim scraper hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("InfoYatirim Scraper", str(e))
+        except Exception:
+            pass
     finally:
         await scraper.close()

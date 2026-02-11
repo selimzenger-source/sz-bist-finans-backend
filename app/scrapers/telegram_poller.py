@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 _last_update_id: int | None = None
 _poll_lock = asyncio.Lock()  # Eszamanli getUpdates cagrilarini engelle
+_consecutive_errors = 0  # Ust uste hata sayaci — spam onleme
 
 
 async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> list[dict]:
@@ -431,16 +432,27 @@ async def poll_telegram():
             return
 
         try:
+            global _consecutive_errors
             count = await poll_telegram_messages(bot_token, chat_id)
             if count > 0:
                 logger.info("Telegram: %d yeni mesaj islendi", count)
+            # Basarili — hata sayaci sifirla
+            if _consecutive_errors > 0:
+                _consecutive_errors = 0
         except Exception as e:
             logger.error("Telegram poller hatasi: %s", e)
-            # Sadece 409 Conflict veya kritik hatalarda admin'e bildir
-            error_str = str(e)
-            if "409" in error_str or "Conflict" in error_str:
+            _consecutive_errors += 1
+            # Spam onleme: sadece ilk hata ve her 30 hatada bir bildir
+            # (10sn aralikla = ~5 dakikada bir bildirim)
+            if _consecutive_errors == 1 or _consecutive_errors % 30 == 0:
                 try:
                     from app.services.admin_telegram import notify_scraper_error
-                    await notify_scraper_error("Telegram Poller (409 Conflict)", error_str)
+                    error_str = str(e)
+                    label = "Telegram Poller"
+                    if "409" in error_str or "Conflict" in error_str:
+                        label = "Telegram Poller (409 Conflict)"
+                    if _consecutive_errors > 1:
+                        label += f" — {_consecutive_errors}. üst üste hata"
+                    await notify_scraper_error(label, error_str)
                 except Exception:
                     pass

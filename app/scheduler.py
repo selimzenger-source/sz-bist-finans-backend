@@ -217,6 +217,11 @@ async def check_spk_bulletins_job():
         await check_spk_bulletins()
     except Exception as e:
         logger.error(f"SPK bulten monitor hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK Bülten Monitor (Scheduler)", str(e))
+        except Exception:
+            pass
 
 
 async def scrape_halkarz_gedik():
@@ -249,6 +254,11 @@ async def poll_telegram_job():
         await poll_telegram()
     except Exception as e:
         logger.error(f"Telegram poller hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Telegram Poller (Scheduler)", str(e))
+        except Exception:
+            pass
 
 
 async def auto_update_ipo_statuses():
@@ -263,6 +273,11 @@ async def auto_update_ipo_statuses():
 
     except Exception as e:
         logger.error(f"IPO durum guncelleme hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("IPO Durum Güncelleme", str(e))
+        except Exception:
+            pass
 
 
 async def archive_old_ipos():
@@ -304,6 +319,11 @@ async def archive_old_ipos():
 
     except Exception as e:
         logger.error(f"IPO arsiv hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("IPO Arşiv", str(e))
+        except Exception:
+            pass
 
 
 async def check_reminders():
@@ -403,6 +423,11 @@ async def check_reminders():
 
     except Exception as e:
         logger.error(f"Hatirlatma kontrol hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Hatırlatma Kontrolü", str(e))
+        except Exception:
+            pass
 
 
 async def check_spk_ihrac_data():
@@ -548,6 +573,11 @@ async def send_last_day_warnings():
 
     except Exception as e:
         logger.error(f"Son gun uyarisi hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Son Gün Uyarısı", str(e))
+        except Exception:
+            pass
 
 
 async def daily_ceiling_update():
@@ -733,25 +763,43 @@ async def morning_scraper_run():
     Sirayla calistirir: HalkArz+Gedik → SPK Ihrac → InfoYatirim → Status Update
     """
     logger.info("=== SABAH SCRAPER BASLADI (09:00) ===")
+    errors = []
+
     try:
         await scrape_halkarz_gedik()
     except Exception as e:
         logger.error(f"Sabah scraper — HalkArz/Gedik hatasi: {e}")
+        errors.append(f"HalkArz/Gedik: {e}")
 
     try:
         await check_spk_ihrac_data()
     except Exception as e:
         logger.error(f"Sabah scraper — SPK ihrac hatasi: {e}")
+        errors.append(f"SPK İhraç: {e}")
 
     try:
         await scrape_infoyatirim()
     except Exception as e:
         logger.error(f"Sabah scraper — InfoYatirim hatasi: {e}")
+        errors.append(f"InfoYatirim: {e}")
 
     try:
         await auto_update_ipo_statuses()
     except Exception as e:
         logger.error(f"Sabah scraper — Status update hatasi: {e}")
+        errors.append(f"Status Update: {e}")
+
+    # Sabah scraper sonucu admin'e bildir
+    if errors:
+        try:
+            from app.services.admin_telegram import send_admin_message
+            error_text = "\n".join(f"• {e}" for e in errors)
+            await send_admin_message(
+                f"⚠️ <b>Sabah Scraper (09:00)</b>\n"
+                f"{len(errors)} hata oluştu:\n{error_text}"
+            )
+        except Exception:
+            pass
 
     logger.info("=== SABAH SCRAPER TAMAMLANDI ===")
 
@@ -804,6 +852,11 @@ async def send_first_trading_day_notifications():
 
     except Exception as e:
         logger.error(f"Ilk islem gunu bildirim hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("İlk İşlem Günü Bildirimi", str(e))
+        except Exception:
+            pass
 
 
 def setup_scheduler():

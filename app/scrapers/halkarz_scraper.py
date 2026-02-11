@@ -553,5 +553,10 @@ async def scrape_halkarz():
 
     except Exception as e:
         logger.error("HalkArz scraper hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("HalkArz Scraper", str(e))
+        except Exception:
+            pass
     finally:
         await scraper.close()
