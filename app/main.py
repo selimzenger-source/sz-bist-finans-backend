@@ -1255,8 +1255,18 @@ async def seed_bist30_news(
     if payload.get("admin_password") != admin_pw:
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
-    # Son 10 BIST 30 mesaji — 3 tip bildirim (fiyat yok, sadece GAP)
+    # BIST 30 seed mesajlari — 3 tip bildirim (fiyat yok, sadece GAP)
     seed_data = [
+        {
+            "telegram_message_id": 7200993,
+            "message_type": "seans_ici_pozitif",
+            "ticker": "SISE",
+            "parsed_title": "⚡ Seans İçi Pozitif Haber Yakalandı - SISE",
+            "parsed_body": "Sembol: SISE\nKonu: kaynak kullanımı",
+            "sentiment": "positive",
+            "kap_notification_id": "6200993",
+            "message_date": "2026-02-11T14:05:20",
+        },
         {
             "telegram_message_id": 7200349,
             "message_type": "seans_ici_pozitif",
