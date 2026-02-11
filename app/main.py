@@ -392,7 +392,7 @@ async def list_telegram_news(
     since = datetime.utcnow() - timedelta(days=days)
 
     if has_paid_sub:
-        # Ucretli abone (ana_yildiz): tum hisselerin son 20 haberi
+        # Ucretli abone (ana_yildiz): tum hisselerin haberleri (max 50, sayfa basi 25)
         query = (
             select(TelegramNews)
             .where(TelegramNews.created_at >= since)
@@ -406,7 +406,7 @@ async def list_telegram_news(
         if sentiment:
             query = query.where(TelegramNews.sentiment == sentiment)
 
-        query = query.limit(min(limit, 20)).offset(offset)
+        query = query.limit(min(limit, 50)).offset(offset)
     else:
         # Ucretsiz: BIST 30 hisselerinin son 10 haberi
         query = (
