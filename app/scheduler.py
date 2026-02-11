@@ -160,7 +160,7 @@ async def scrape_spk():
                             SPKApplication.company_name == company_name
                         )
                     )
-                    existing = result.scalar_one_or_none()
+                    existing = result.scalars().first()
 
                     if existing:
                         # Mevcut kaydi guncelle (tarih degismis olabilir)
