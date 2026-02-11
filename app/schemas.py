@@ -87,11 +87,13 @@ class IPOListOut(BaseModel):
 
 
 class IPOTradingOut(IPOListOut):
-    """Isleme baslayan IPO — ceiling_tracks ile birlikte.
+    """Isleme baslayan IPO — ceiling_tracks + allocations ile birlikte.
 
-    Sadece sections endpoint'in trading bolumunde kullanilir.
+    Sadece sections endpoint'in trading ve performance_archive bolumlerinde kullanilir.
     """
     ceiling_tracks: list[IPOCeilingTrackOut] = []
+    allocations: list[IPOAllocationOut] = []
+    allocation_announced: bool = False
 
 
 class IPODetailOut(BaseModel):

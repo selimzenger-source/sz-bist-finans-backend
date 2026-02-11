@@ -284,7 +284,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 IPO.trading_start >= calendar_cutoff,  # 25 takvim gunu icinde
             )
         )
-        .options(selectinload(IPO.ceiling_tracks))
+        .options(selectinload(IPO.ceiling_tracks), selectinload(IPO.allocations))
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(30)
     )
@@ -303,7 +303,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
                 ),
             )
         )
-        .options(selectinload(IPO.ceiling_tracks))
+        .options(selectinload(IPO.ceiling_tracks), selectinload(IPO.allocations))
         .order_by(IPO.trading_start.desc().nullslast())
         .limit(20)
     )
