@@ -33,6 +33,27 @@ def _normalize_company_name(name: str) -> str:
     # \n, \r, \t → bosluk, fazla bosluklari tek bosluga indir, strip, lowercase
     return re.sub(r"\s+", " ", name.strip()).lower()
 
+
+def _is_company_in_ipo(spk_name: str, ipo_names_normalized: set[str]) -> bool:
+    """SPK'daki sirket ismi IPO tablosundakilerden biriyle eslesiyor mu?
+
+    Birebir eslesme + kismi eslesme (contains) yapar.
+    SPK sitesi isimleri kisa yazabilir (orn: 'Ata Turizm Isletmecilik Madencilik San. ve Dis ...')
+    IPO'da tam isim olabilir (orn: 'Ata Turizm Isletmecilik Tasimacilık Madencilik Kuyumculuk San. ve Dis Ticaret A.S.')
+    """
+    name_norm = _normalize_company_name(spk_name)
+    if not name_norm:
+        return False
+    # Birebir eslesme
+    if name_norm in ipo_names_normalized:
+        return True
+    # Kismi eslesme — isimlerin ilk 30 karakteri ayni mi?
+    spk_prefix = name_norm[:30]
+    for ipo_n in ipo_names_normalized:
+        if ipo_n.startswith(spk_prefix) or name_norm.startswith(ipo_n[:30]):
+            return True
+    return False
+
 templates = Jinja2Templates(directory="app/templates")
 
 
@@ -698,8 +719,7 @@ async def cleanup_spk_duplicates(
             seen_names.add(name)
 
             # IPO tablosunda zaten var — atla
-            name_norm = _normalize_company_name(name)
-            if name_norm in ipo_names_normalized:
+            if _is_company_in_ipo(name, ipo_names_normalized):
                 skipped_ipo += 1
                 continue
 

@@ -137,6 +137,19 @@ async def scrape_spk():
             """Sirket ismini normalize et — bosluk/satir sonu/harf farklarini gider."""
             return re.sub(r"\s+", " ", name.strip()).lower() if name else ""
 
+        def _is_in_ipo(spk_name: str, ipo_set: set) -> bool:
+            """SPK ismi IPO tablosundakilerden biriyle eslesiyor mu? (birebir + kismi)"""
+            n = _normalize(spk_name)
+            if not n:
+                return False
+            if n in ipo_set:
+                return True
+            prefix = n[:30]
+            for ipo_n in ipo_set:
+                if ipo_n.startswith(prefix) or n.startswith(ipo_n[:30]):
+                    return True
+            return False
+
         scraper = SPKScraper()
         try:
             applications = await scraper.fetch_ipo_applications()
@@ -176,7 +189,7 @@ async def scrape_spk():
                     processed_names.add(company_name)
 
                     # IPO tablosunda zaten var — SPK'dan gecmis, pending'e ekleme
-                    if _normalize(company_name) in ipo_names_normalized:
+                    if _is_in_ipo(company_name, ipo_names_normalized):
                         skipped_ipo += 1
                         continue
 
