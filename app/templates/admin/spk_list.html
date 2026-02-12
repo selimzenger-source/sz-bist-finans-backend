@@ -13,6 +13,19 @@
 </div>
 {% endif %}
 
+<!-- Arama + Filtre -->
+<div class="flex gap-3 mb-4">
+    <input type="text" id="spkSearch" placeholder="Sirket ara..."
+           class="flex-1 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-indigo-500 placeholder-gray-500">
+    <select id="spkStatusFilter" class="bg-gray-700 border border-gray-600 text-gray-100 rounded-lg px-3 py-2 text-sm">
+        <option value="">Tumu</option>
+        <option value="pending" selected>Beklemede</option>
+        <option value="approved">Onaylandi</option>
+        <option value="rejected">Reddedildi</option>
+    </select>
+    <span id="spkCount" class="text-xs text-gray-500 self-center min-w-[60px]"></span>
+</div>
+
 <div class="bg-gray-800 rounded-xl shadow-sm overflow-hidden border border-gray-700">
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -28,9 +41,9 @@
                     <th class="px-4 py-2 text-center">Islem</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-700">
+            <tbody id="spkTableBody" class="divide-y divide-gray-700">
                 {% for app in applications %}
-                <tr class="hover:bg-gray-700/50 transition">
+                <tr class="hover:bg-gray-700/50 transition spk-row" data-name="{{ app.company_name|lower }}" data-status="{{ app.status }}">
                     <td class="px-4 py-2 text-gray-500">{{ app.id }}</td>
                     <td class="px-4 py-2 text-gray-200 max-w-xs truncate font-medium">{{ app.company_name }}</td>
                     <td class="px-4 py-2 text-right font-mono text-xs text-gray-400">
@@ -101,4 +114,36 @@
     Toplam {{ applications|length }} basvuru listeleniyor.
     Veri kaynagi: <a href="https://spk.gov.tr/istatistikler/basvurular/ilk-halka-arz-basvurusu" target="_blank" class="text-indigo-400 hover:underline">spk.gov.tr</a>
 </div>
+
+<script>
+(function() {
+    const search = document.getElementById('spkSearch');
+    const filter = document.getElementById('spkStatusFilter');
+    const counter = document.getElementById('spkCount');
+    const rows = document.querySelectorAll('.spk-row');
+
+    function applyFilter() {
+        const q = search.value.toLowerCase().trim();
+        const s = filter.value;
+        let visible = 0;
+        rows.forEach(row => {
+            const name = row.dataset.name;
+            const status = row.dataset.status;
+            const matchName = !q || name.includes(q);
+            const matchStatus = !s || status === s;
+            if (matchName && matchStatus) {
+                row.style.display = '';
+                visible++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+        counter.textContent = visible + ' sonuc';
+    }
+
+    search.addEventListener('input', applyFilter);
+    filter.addEventListener('change', applyFilter);
+    applyFilter();
+})();
+</script>
 {% endblock %}
