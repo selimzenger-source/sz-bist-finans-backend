@@ -1968,6 +1968,23 @@ async def bulk_allocations(request: Request, payload: dict, db: AsyncSession = D
         ipo.total_applicants = item.get("total_applicants")
         updated_ipos += 1
 
+        # Tweet #3: Kesinlesen Dagitim Sonuclari
+        try:
+            from app.services.twitter_service import tweet_allocation_results
+            # Allocation listesini dict formatinda gonder
+            alloc_dicts = []
+            for grp in item.get("groups", []):
+                alloc_dicts.append({
+                    "group_name": grp.get("group_name", ""),
+                    "allocation_pct": grp.get("allocation_pct"),
+                    "allocated_lots": grp.get("allocated_lots"),
+                    "participant_count": grp.get("participant_count"),
+                    "avg_lot_per_person": grp.get("avg_lot_per_person"),
+                })
+            tweet_allocation_results(ipo, alloc_dicts)
+        except Exception:
+            pass  # Tweet hatasi sistemi etkilemez
+
     await db.flush()
     return {
         "status": "ok",

@@ -6,7 +6,7 @@ Mevcut sistemi ASLA bozmamalı — tum cagrılar try/except ile korunur.
 Tweet Tipleri:
 1.  Yeni Halka Arz (SPK onayi)
 2.  Dagitima Cikis (in_distribution)
-3.  Tahmini Lot Sayisi
+3.  Kesinlesen Dagitim Sonuclari
 4.  Son 4 Saat Hatirlatma
 5.  Son 30 Dakika Hatirlatma
 6.  Ilk Islem Gunu (09:00 gong)
@@ -228,7 +228,7 @@ def tweet_new_ipo(ipo) -> bool:
 # 2. DAGITIMA CIKIS
 # ================================================================
 def tweet_distribution_start(ipo) -> bool:
-    """Dagitim sureci basladiginda tweet atar."""
+    """Dağıtım süreci başladığında tweet atar. Tahmini lot varsa ekler."""
     try:
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         end_date = ""
@@ -236,41 +236,109 @@ def tweet_distribution_start(ipo) -> bool:
             end_date = f"\n\U0001F4C5 Son başvuru: {ipo.subscription_end.strftime('%d.%m.%Y')}"
         price_text = f"\n\U0001F4B0 Fiyatı: {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
+        # Tahmini lot bilgisi varsa ekle (parantez içinde tahminidir notu)
+        lot_text = ""
+        if ipo.estimated_lots_per_person:
+            lot_text = f"\n\U0001F4CA Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
+
         text = (
             f"\U0001F4CB Halka Arz Başvuruları Başladı!\n\n"
             f"{ipo.company_name}{ticker_text} için talep toplama süreci başlamıştır."
-            f"{price_text}{end_date}\n\n"
-            f"📲 Detaylar ve anlık bildirimler için:\n"
-            f"{APP_LINK}\n\n"
+            f"{price_text}{end_date}{lot_text}\n\n"
+            f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
     except Exception as e:
-        logger.error(f"tweet_distribution_start hatasi: {e}")
+        logger.error(f"tweet_distribution_start hatası: {e}")
         return False
 
 
 # ================================================================
-# 3. TAHMINI LOT SAYISI
+# 3. KESİNLEŞEN DAĞITIM SONUÇLARI
 # ================================================================
-def tweet_estimated_lots(ipo) -> bool:
-    """Tahmini lot sayisi belli oldugunda tweet atar."""
+def tweet_allocation_results(ipo, allocations: list = None) -> bool:
+    """Kesinleşen dağıtım sonuçları tweet atar.
+
+    allocations: IPOAllocation listesi veya dict listesi
+      Her biri: group_name, allocation_pct, allocated_lots, participant_count, avg_lot_per_person
+    """
     try:
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
-        lots = ipo.estimated_lots_per_person or "?"
+
+        # Tahsisat tablosu — kurumsal yurt içi/dışı + bireysel
+        table_lines = []
+        bireysel_avg_lot = None
+        total_applicants = getattr(ipo, "total_applicants", None)
+
+        if allocations:
+            for a in allocations:
+                # dict veya ORM objesi destekle
+                if isinstance(a, dict):
+                    grp = a.get("group_name", "")
+                    pct = a.get("allocation_pct")
+                    lots = a.get("allocated_lots")
+                    participants = a.get("participant_count")
+                    avg_lot = a.get("avg_lot_per_person")
+                else:
+                    grp = a.group_name
+                    pct = a.allocation_pct
+                    lots = a.allocated_lots
+                    participants = a.participant_count
+                    avg_lot = a.avg_lot_per_person
+
+                # Grup adi Turkce
+                grp_labels = {
+                    "bireysel": "Bireysel",
+                    "yuksek_basvurulu": "Yüksek Başvurulu",
+                    "kurumsal_yurtici": "Kurumsal Yurt İçi",
+                    "kurumsal_yurtdisi": "Kurumsal Yurt Dışı",
+                }
+                label = grp_labels.get(grp, grp)
+
+                line = f"• {label}: %{float(pct):.0f}" if pct else f"• {label}"
+                table_lines.append(line)
+
+                # Bireysel yatırımcıya düşen ort lot
+                if grp == "bireysel" and avg_lot:
+                    bireysel_avg_lot = avg_lot
+
+        table_text = "\n".join(table_lines) if table_lines else ""
+
+        # Bireysel yatırımcı sonucu
+        bireysel_text = ""
+        if bireysel_avg_lot:
+            bireysel_text = f"\n\n👤 Bireysel yatırımcıya düşen: ~{int(float(bireysel_avg_lot))} lot/kişi"
+
+        # Toplam başvuran
+        applicant_text = ""
+        if total_applicants:
+            applicant_text = f"\n📊 Toplam başvuran: {int(total_applicants):,} kişi"
 
         text = (
-            f"\U0001F4CA Tahmini Dağıtım Bilgisi\n\n"
-            f"{ipo.company_name}{ticker_text}\n"
-            f"\u2022 Tahmini dağıtım: ~{lots} lot/kişi\n\n"
-            f"\u26A0\uFE0F Yurt içi bireysel yatırımcıya dağıtılan"
-            f" ortalama lot baz alınmıştır.\n\n"
+            f"✅ Kesinleşen Dağıtım Sonuçları\n\n"
+            f"{ipo.company_name}{ticker_text}\n\n"
+            f"{table_text}"
+            f"{bireysel_text}"
+            f"{applicant_text}\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
+
+        # 280 karakter limiti — gerekirse app linkini kaldır
+        if len(text) > 280:
+            text = (
+                f"✅ Kesinleşen Dağıtım Sonuçları\n\n"
+                f"{ipo.company_name}{ticker_text}\n\n"
+                f"{table_text}"
+                f"{bireysel_text}"
+                f"{applicant_text}\n\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
         return _safe_tweet(text)
     except Exception as e:
-        logger.error(f"tweet_estimated_lots hatasi: {e}")
+        logger.error(f"tweet_allocation_results hatası: {e}")
         return False
 
 

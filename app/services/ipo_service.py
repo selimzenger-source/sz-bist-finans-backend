@@ -116,23 +116,12 @@ class IPOService:
             # (auto_update_statuses zaten dogru statusu ayarlar)
             protected_fields = {"status", "id", "created_at", "archived", "archived_at"}
 
-            # Tweet #3 icin: estimated_lots_per_person ilk kez set edildi mi kontrol et
-            had_lots_before = existing.estimated_lots_per_person is not None
-
             for key, value in data.items():
                 if value is not None and hasattr(existing, key) and key not in protected_fields:
                     setattr(existing, key, value)
             existing.updated_at = datetime.utcnow()
             ipo = existing
             logger.info(f"IPO guncellendi: {ipo.ticker or ipo.company_name}")
-
-            # Tweet #3: Tahmini Lot Sayisi (ilk kez belli oldugunda)
-            if (not had_lots_before and ipo.estimated_lots_per_person is not None):
-                try:
-                    from app.services.twitter_service import tweet_estimated_lots
-                    tweet_estimated_lots(ipo)
-                except Exception:
-                    pass  # Tweet hatasi sistemi etkilemez
         else:
             if not allow_create:
                 # Yeni IPO olusturma izni yok — sadece SPK bulten ve admin yapabilir
@@ -230,6 +219,15 @@ class IPOService:
             ipo.updated_at = datetime.utcnow()
 
         await self.db.flush()
+
+        # Tweet #3: Kesinlesen Dagitim Sonuclari
+        if ipo:
+            try:
+                from app.services.twitter_service import tweet_allocation_results
+                tweet_allocation_results(ipo, new_allocations)
+            except Exception:
+                pass  # Tweet hatasi sistemi etkilemez
+
         return new_allocations
 
     # -------------------------------------------------------
