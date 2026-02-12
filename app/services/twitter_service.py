@@ -18,25 +18,36 @@ Tweet Tipleri:
 """
 
 import logging
+import time
+import hashlib
+import hmac
+import base64
+import urllib.parse
+import uuid
+import json
 from datetime import datetime, date
 from typing import Optional
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-# Tweepy lazy init — sadece ilk kullanımda import edilir
-_client = None
+# Twitter API v2 endpoint
+_TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
+
+# Credentials cache — lazy init
+_credentials = None
 _init_attempted = False
 
 
-def _init_twitter_client():
-    """Tweepy client'i baslatir (tek seferlik). Basarisiz olursa None doner."""
-    global _client, _init_attempted
+def _load_credentials() -> Optional[dict]:
+    """Twitter API anahtarlarini yukler (tek seferlik)."""
+    global _credentials, _init_attempted
     if _init_attempted:
-        return _client
+        return _credentials
     _init_attempted = True
 
     try:
-        import tweepy
         from app.config import get_settings
         settings = get_settings()
 
@@ -49,30 +60,99 @@ def _init_twitter_client():
             logger.warning("Twitter API anahtarlari eksik — tweet atma devre disi")
             return None
 
-        _client = tweepy.Client(
-            consumer_key=api_key,
-            consumer_secret=api_secret,
-            access_token=access_token,
-            access_token_secret=access_token_secret,
-        )
-        logger.info("Twitter client basariyla baslatildi (@SZAlgoFinans)")
-        return _client
+        _credentials = {
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "access_token": access_token,
+            "access_token_secret": access_token_secret,
+        }
+        logger.info("Twitter credentials yuklendi (@SZAlgoFinans)")
+        return _credentials
 
     except Exception as e:
-        logger.error(f"Twitter client baslatilamadi: {e}")
+        logger.error(f"Twitter credentials yuklenemedi: {e}")
         return None
+
+
+def _generate_oauth_signature(
+    method: str,
+    url: str,
+    oauth_params: dict,
+    consumer_secret: str,
+    token_secret: str,
+) -> str:
+    """OAuth 1.0a HMAC-SHA1 imza uretir."""
+    # Parameter string olustur (sirali)
+    sorted_params = sorted(oauth_params.items())
+    param_string = "&".join(
+        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
+        for k, v in sorted_params
+    )
+
+    # Base string
+    base_string = (
+        f"{method.upper()}&"
+        f"{urllib.parse.quote(url, safe='')}&"
+        f"{urllib.parse.quote(param_string, safe='')}"
+    )
+
+    # Signing key
+    signing_key = (
+        f"{urllib.parse.quote(consumer_secret, safe='')}&"
+        f"{urllib.parse.quote(token_secret, safe='')}"
+    )
+
+    # HMAC-SHA1
+    hashed = hmac.new(
+        signing_key.encode("utf-8"),
+        base_string.encode("utf-8"),
+        hashlib.sha1,
+    )
+    return base64.b64encode(hashed.digest()).decode("utf-8")
+
+
+def _build_oauth_header(creds: dict) -> str:
+    """OAuth 1.0a Authorization header olusturur."""
+    oauth_params = {
+        "oauth_consumer_key": creds["api_key"],
+        "oauth_nonce": uuid.uuid4().hex,
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": str(int(time.time())),
+        "oauth_token": creds["access_token"],
+        "oauth_version": "1.0",
+    }
+
+    # Imza olustur
+    signature = _generate_oauth_signature(
+        method="POST",
+        url=_TWITTER_TWEET_URL,
+        oauth_params=oauth_params,
+        consumer_secret=creds["api_secret"],
+        token_secret=creds["access_token_secret"],
+    )
+    oauth_params["oauth_signature"] = signature
+
+    # Header string
+    header_parts = ", ".join(
+        f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
+        for k, v in sorted(oauth_params.items())
+    )
+    return f"OAuth {header_parts}"
 
 
 def _safe_tweet(text: str) -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
+
+    httpx + OAuth 1.0a HMAC-SHA1 ile Twitter API v2 kullanir.
+    tweepy gerektirmez — Python 3.13 uyumlu.
 
     Returns:
         True: tweet basarili
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
-        client = _init_twitter_client()
-        if not client:
+        creds = _load_credentials()
+        if not creds:
             logger.info(f"[TWITTER-DRY-RUN] {text[:80]}...")
             return False
 
@@ -80,9 +160,28 @@ def _safe_tweet(text: str) -> bool:
         if len(text) > 280:
             text = text[:277] + "..."
 
-        response = client.create_tweet(text=text)
-        logger.info(f"Tweet basarili: {text[:60]}...")
-        return True
+        auth_header = _build_oauth_header(creds)
+
+        response = httpx.post(
+            _TWITTER_TWEET_URL,
+            json={"text": text},
+            headers={
+                "Authorization": auth_header,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+
+        if response.status_code in (200, 201):
+            tweet_id = response.json().get("data", {}).get("id", "?")
+            logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
+            return True
+        else:
+            logger.error(
+                "Tweet API hatasi (status=%d): %s",
+                response.status_code, response.text[:200],
+            )
+            return False
 
     except Exception as e:
         logger.error(f"Tweet hatasi (sistem etkilenmez): {e}")
