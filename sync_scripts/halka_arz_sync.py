@@ -180,6 +180,8 @@ class TrackingState:
     notified_ceiling_break: bool = False  # Tavan cozuldu bildirimi
     notified_ceiling_5min: bool = False   # 5dk gecti bildirimi
     notified_relock_ceiling: bool = False # Tekrar tavana kitledi bildirimi
+    last_ceiling_notif_at: Optional[dt.datetime] = None  # Son tavan bildirimi zamani (cooldown icin)
+    ceiling_5min_checked: bool = False  # 5dk kontrol yapildi mi?
 
     # --- Taban takibi ---
     was_floor_locked: bool = False
@@ -188,6 +190,8 @@ class TrackingState:
     notified_floor_break: bool = False
     notified_floor_5min: bool = False
     notified_relock_floor: bool = False
+    last_floor_notif_at: Optional[dt.datetime] = None  # Son taban bildirimi zamani (cooldown icin)
+    floor_5min_checked: bool = False  # 5dk kontrol yapildi mi?
 
     # --- %4/%7 dusus takibi ---
     day_high: float = 0.0               # Gunun en yuksek fiyati
@@ -542,11 +546,13 @@ def process_stock(stock: StockState, now: dt.datetime):
         )
         send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
         state.notified_ceiling_first_lock = True
+        state.last_ceiling_notif_at = now
         log(f"  >>> {ticker} TAVANA KITLENDI!")
 
     # Daha once tavana kilitliydi, simdi cozuldu
+    # Bildirim HEMEN gider, sonra 5dk bekleme baslar
     if state.was_ceiling_locked and not stock.is_ceiling_locked:
-        if not state.notified_ceiling_break:
+        if not state.ceiling_broke_at:  # Ilk cozulme
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="tavan_bozulma",
@@ -554,43 +560,39 @@ def process_stock(stock: StockState, now: dt.datetime):
                 body=f"{ticker} tavan cozuldu!",
             )
             send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
-            state.ceiling_broke_at = now
-            state.notified_ceiling_break = True
-            state.notified_ceiling_5min = False
-            state.notified_relock_ceiling = False
+            state.last_ceiling_notif_at = now
             log(f"  >>> {ticker} TAVAN COZULDU!")
+        state.ceiling_broke_at = now
+        state.ceiling_5min_checked = False
 
-    # Tavan cozuldukten 5 dakika gecti, hala kilitlemediyse
+    # Tavan cozuldukten 5dk gecti — duruma gore bildirim at
     if (state.ceiling_broke_at
-        and not stock.is_ceiling_locked
-        and not state.notified_ceiling_5min
+        and not state.ceiling_5min_checked
         and (now - state.ceiling_broke_at).total_seconds() >= RELOCK_WAIT_SECONDS):
-        send_notification_to_backend(
-            ticker=ticker,
-            notif_type="tavan_bozulma",
-            title=f"{ticker} 5dk gecti, tavana kilitleyemedi!",
-            body=f"{ticker} tavan cozuldukten 5 dakika gecti, tavana kilitleyemedi!",
-        )
-        state.notified_ceiling_5min = True
-        log(f"  >>> {ticker} 5DK GECTI, TAVANA KILITLEYEMEDI!")
-
-    # Tavan cozuldukten sonra tekrar tavana kitlendi
-    if (state.ceiling_broke_at
-        and stock.is_ceiling_locked
-        and not state.notified_relock_ceiling):
-        relock_seconds = (now - state.ceiling_broke_at).total_seconds()
-        send_notification_to_backend(
-            ticker=ticker,
-            notif_type="tavan_bozulma",
-            title=f"{ticker} TAVANA KİTLEDİ",
-            body=f"{ticker} tavana kitledi!",
-        )
-        send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
-        state.notified_relock_ceiling = True
-        state.ceiling_broke_at = None
-        state.notified_ceiling_break = False
-        state.notified_ceiling_5min = False
-        log(f"  >>> {ticker} TAVANA KİTLEDİ! ({int(relock_seconds)}sn sonra)")
+        state.ceiling_5min_checked = True
+        if stock.is_ceiling_locked:
+            # 5dk icinde tekrar tavana kitlemis
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="tavan_bozulma",
+                title=f"{ticker} Tavana Kitlendi!",
+                body=f"{ticker} tavana kitlendi!",
+            )
+            send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
+            state.last_ceiling_notif_at = now
+            state.ceiling_broke_at = None  # Yeni dongu icin sifirla
+            log(f"  >>> {ticker} TAVANA KİTLEDİ! (5dk kontrol)")
+        else:
+            # 5dk gecti hala kilitleyemedi
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="tavan_bozulma",
+                title=f"{ticker} 5dk gecti, tavana kilitleyemedi!",
+                body=f"{ticker} tavan cozuldukten 5 dakika gecti, tavana kilitleyemedi!",
+            )
+            state.last_ceiling_notif_at = now
+            state.ceiling_broke_at = None  # Yeni dongu icin sifirla
+            log(f"  >>> {ticker} 5DK GECTI, TAVANA KILITLEYEMEDI!")
 
     # =====================
     # TABAN TAKIBI
@@ -606,11 +608,13 @@ def process_stock(stock: StockState, now: dt.datetime):
         )
         send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
         state.notified_floor_first_lock = True
+        state.last_floor_notif_at = now
         log(f"  >>> {ticker} TABANA KITLENDI!")
 
     # Daha once tabana kilitliydi, simdi cozuldu
+    # Bildirim HEMEN gider, sonra 5dk bekleme baslar
     if state.was_floor_locked and not stock.is_floor_locked:
-        if not state.notified_floor_break:
+        if not state.floor_broke_at:  # Ilk cozulme
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="taban_acilma",
@@ -618,43 +622,39 @@ def process_stock(stock: StockState, now: dt.datetime):
                 body=f"{ticker} taban cozuldu!",
             )
             send_ceiling_data_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
-            state.floor_broke_at = now
-            state.notified_floor_break = True
-            state.notified_floor_5min = False
-            state.notified_relock_floor = False
+            state.last_floor_notif_at = now
             log(f"  >>> {ticker} TABAN COZULDU!")
+        state.floor_broke_at = now
+        state.floor_5min_checked = False
 
-    # Taban cozuldukten 5 dakika gecti
+    # Taban cozuldukten 5dk gecti — duruma gore bildirim at
     if (state.floor_broke_at
-        and not stock.is_floor_locked
-        and not state.notified_floor_5min
+        and not state.floor_5min_checked
         and (now - state.floor_broke_at).total_seconds() >= RELOCK_WAIT_SECONDS):
-        send_notification_to_backend(
-            ticker=ticker,
-            notif_type="taban_acilma",
-            title=f"{ticker} 5dk gecti, tabana kilitleyemedi!",
-            body=f"{ticker} taban cozuldukten 5 dakika gecti, tabana kilitleyemedi!",
-        )
-        state.notified_floor_5min = True
-        log(f"  >>> {ticker} 5DK GECTI, TABANA KILITLEYEMEDI!")
-
-    # Taban cozuldukten sonra tekrar tabana kitlendi
-    if (state.floor_broke_at
-        and stock.is_floor_locked
-        and not state.notified_relock_floor):
-        relock_seconds = (now - state.floor_broke_at).total_seconds()
-        send_notification_to_backend(
-            ticker=ticker,
-            notif_type="taban_acilma",
-            title=f"{ticker} TABANA KİTLENDİ",
-            body=f"{ticker} tabana kitlendi!",
-        )
-        send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
-        state.notified_relock_floor = True
-        state.floor_broke_at = None
-        state.notified_floor_break = False
-        state.notified_floor_5min = False
-        log(f"  >>> {ticker} TABANA KİTLENDİ! ({int(relock_seconds)}sn sonra)")
+        state.floor_5min_checked = True
+        if stock.is_floor_locked:
+            # 5dk icinde tekrar tabana kitlemis
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="taban_acilma",
+                title=f"{ticker} Tabana Kitlendi!",
+                body=f"{ticker} tabana kitlendi!",
+            )
+            send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
+            state.last_floor_notif_at = now
+            state.floor_broke_at = None  # Yeni dongu icin sifirla
+            log(f"  >>> {ticker} TABANA KİTLENDİ! (5dk kontrol)")
+        else:
+            # 5dk gecti hala kilitleyemedi
+            send_notification_to_backend(
+                ticker=ticker,
+                notif_type="taban_acilma",
+                title=f"{ticker} 5dk gecti, tabana kilitleyemedi!",
+                body=f"{ticker} taban cozuldukten 5 dakika gecti, tabana kilitleyemedi!",
+            )
+            state.last_floor_notif_at = now
+            state.floor_broke_at = None  # Yeni dongu icin sifirla
+            log(f"  >>> {ticker} 5DK GECTI, TABANA KILITLEYEMEDI!")
 
     # Mevcut durumu kaydet (bir sonraki tick icin)
     state.was_ceiling_locked = stock.is_ceiling_locked
@@ -696,10 +696,18 @@ def send_opening_notifications(stocks: list[StockState]):
         if stock.is_ceiling_locked:
             title = f"{ticker} Tavan Acti!"
             body = f"{ticker} tavan acti!"
+            # Acilista tavandaysa gun ici "tavana kitledi" bildirimi atma (zaten bildirdik)
+            state.notified_ceiling_first_lock = True
+            state.was_ceiling_locked = True
+            state.last_ceiling_notif_at = dt.datetime.now()
             log(f"  {ticker}: TAVAN ACTI!")
         elif stock.is_floor_locked:
             title = f"{ticker} Taban Acti!"
             body = f"{ticker} taban acti!"
+            # Acilista tabandaysa gun ici "tabana kitledi" bildirimi atma (zaten bildirdik)
+            state.notified_floor_first_lock = True
+            state.was_floor_locked = True
+            state.last_floor_notif_at = dt.datetime.now()
             log(f"  {ticker}: TABAN ACTI!")
         else:
             title = f"{ticker} Acilis"
