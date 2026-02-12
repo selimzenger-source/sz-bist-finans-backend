@@ -425,6 +425,13 @@ class NotificationService:
         if ticker_upper in BIST30_TICKERS:
             sent += await self._send_bist30_free(title, body, data, ticker_upper)
 
+            # Tweet #11: BIST 30 KAP Haberi — X'e de at
+            try:
+                from app.services.twitter_service import tweet_bist30_news
+                tweet_bist30_news(ticker_upper, matched_keyword, sentiment)
+            except Exception:
+                pass  # Tweet hatasi sistemi etkilemez
+
         return sent
 
     async def _send_paid_kap_news(

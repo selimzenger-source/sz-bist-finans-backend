@@ -418,6 +418,16 @@ async def check_reminders():
                         },
                     )
 
+                # Tweet at — Son 4 Saat veya Son 30 Dakika (her IPO icin bir kez)
+                try:
+                    from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
+                    if reminder_check == "reminder_4h":
+                        tweet_last_4_hours(ipo)
+                    elif reminder_check == "reminder_30min":
+                        tweet_last_30_min(ipo)
+                except Exception:
+                    pass  # Tweet hatasi sistemi etkilemez
+
             logger.info(f"Hatirlatma: {len(last_day_ipos)} IPO, {len(users)} kullanici")
 
     except Exception as e:
@@ -684,6 +694,72 @@ async def daily_ceiling_update():
                             "Tavan takip: %s — %d gun guncellendi",
                             ipo.ticker, len(days_data),
                         )
+
+                        # Tweet at — Gunluk Takip (tweet #8) ve 25 Gun Performans (tweet #9)
+                        try:
+                            from app.services.twitter_service import (
+                                tweet_daily_tracking, tweet_25_day_performance,
+                            )
+                            if days_data:
+                                last_day = days_data[-1]
+                                current_day = len(days_data)
+                                last_close = float(last_day["close"])
+
+                                # Gunluk % degisim hesapla
+                                if len(days_data) > 1:
+                                    prev_c = float(days_data[-2]["close"])
+                                else:
+                                    prev_c = float(ipo.ipo_price) if ipo.ipo_price else 0
+                                daily_pct = (
+                                    ((last_close - prev_c) / prev_c) * 100
+                                    if prev_c > 0 else 0
+                                )
+
+                                last_det = detect_ceiling_floor(
+                                    close_price=last_day["close"],
+                                    prev_close=prev_c,
+                                    high_price=last_day.get("high"),
+                                    low_price=last_day.get("low"),
+                                )
+
+                                # Tweet #8: Gunluk takip (her gun)
+                                tweet_daily_tracking(
+                                    ipo, current_day, last_close,
+                                    daily_pct, last_det["durum"],
+                                )
+
+                                # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)
+                                if current_day >= 25:
+                                    ipo_price_f = float(ipo.ipo_price) if ipo.ipo_price else 0
+                                    total_pct = (
+                                        ((last_close - ipo_price_f) / ipo_price_f) * 100
+                                        if ipo_price_f > 0 else 0
+                                    )
+                                    # Tavan/taban gun sayisi — days_data'dan hesapla
+                                    ceiling_d = 0
+                                    floor_d = 0
+                                    prev_close_calc = ipo_price_f
+                                    for d in days_data:
+                                        det = detect_ceiling_floor(
+                                            d["close"], prev_close_calc,
+                                            d.get("high"), d.get("low"),
+                                        )
+                                        if det["hit_ceiling"]:
+                                            ceiling_d += 1
+                                        if det["hit_floor"]:
+                                            floor_d += 1
+                                        prev_close_calc = float(d["close"])
+
+                                    avg_lot = (
+                                        float(ipo.estimated_lots_per_person)
+                                        if ipo.estimated_lots_per_person else None
+                                    )
+                                    tweet_25_day_performance(
+                                        ipo, last_close, total_pct,
+                                        ceiling_d, floor_d, avg_lot,
+                                    )
+                        except Exception as tweet_err:
+                            logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
                     except Exception as ticker_err:
                         logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
                         fail_count += 1
@@ -844,6 +920,13 @@ async def send_first_trading_day_notifications():
                     ipo.ticker or ipo.company_name, sent,
                 )
 
+                # Tweet at — Ilk Islem Gunu Gong (tweet #6)
+                try:
+                    from app.services.twitter_service import tweet_first_trading_day
+                    tweet_first_trading_day(ipo)
+                except Exception:
+                    pass  # Tweet hatasi sistemi etkilemez
+
             logger.info(
                 "Ilk islem gunu bildirimi tamamlandi: %d IPO, %d bildirim",
                 len(todays_ipos), total_sent,
@@ -856,6 +939,155 @@ async def send_first_trading_day_notifications():
             await notify_scraper_error("İlk İşlem Günü Bildirimi", str(e))
         except Exception:
             pass
+
+
+async def tweet_opening_price_job():
+    """Ilk islem gunu acilis fiyati tweeti — 09:56 (UTC 06:56).
+
+    Sadece bugun trading_start olan IPO'lar icin calisir.
+    Yahoo Finance'den acilis fiyatini cekip tweet atar.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper
+
+        async with async_session() as db:
+            today = date.today()
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.trading_start == today,
+                        IPO.ticker.isnot(None),
+                    )
+                )
+            )
+            todays_ipos = list(result.scalars().all())
+
+            if not todays_ipos:
+                return
+
+            scraper = YahooFinanceScraper()
+            try:
+                for ipo in todays_ipos:
+                    try:
+                        days_data = await scraper.fetch_ohlc_since_trading_start(
+                            ticker=ipo.ticker,
+                            trading_start=ipo.trading_start,
+                            max_days=1,
+                        )
+                        if days_data and days_data[0].get("open"):
+                            open_price = float(days_data[0]["open"])
+                            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                            pct_change = (
+                                ((open_price - ipo_price) / ipo_price) * 100
+                                if ipo_price > 0 else 0
+                            )
+                            from app.services.twitter_service import tweet_opening_price
+                            tweet_opening_price(ipo, open_price, pct_change)
+                    except Exception as e:
+                        logger.error("Acilis fiyati tweet hatasi %s: %s", ipo.ticker, e)
+            finally:
+                await scraper.close()
+
+    except Exception as e:
+        logger.error("Acilis fiyati tweet job hatasi: %s", e)
+
+
+async def monthly_yearly_summary_tweet():
+    """Aylik yillik halka arz ozeti tweeti — her ayin 1'i 20:00 (UTC 17:00).
+
+    Ocak haric (yil basinda veri yok).
+    O yilin tum 25 gunu tamamlanan halka arzlarinin performans ozetini tweet atar.
+    """
+    try:
+        now = datetime.now()
+        # Ocak ayinda tweet atma (yil basinda veri yok)
+        if now.month == 1:
+            logger.info("Yillik ozet: Ocak ayi — tweet atilmadi")
+            return
+
+        from sqlalchemy import select, and_, func
+        from app.models.ipo import IPO, IPOCeilingTrack
+
+        current_year = now.year
+
+        async with async_session() as db:
+            # Bu yil isleme baslayan ve 25 gunu tamamlayan IPO'lar
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.trading_start.isnot(None),
+                        IPO.trading_start >= date(current_year, 1, 1),
+                        IPO.trading_day_count >= 25,
+                        IPO.ipo_price.isnot(None),
+                        IPO.ipo_price > 0,
+                    )
+                )
+            )
+            completed_ipos = list(result.scalars().all())
+
+            # Bu yil toplam halka arz sayisi (tum statuslar)
+            total_result = await db.execute(
+                select(func.count(IPO.id)).where(
+                    and_(
+                        IPO.trading_start.isnot(None),
+                        IPO.trading_start >= date(current_year, 1, 1),
+                    )
+                )
+            )
+            total_ipos = total_result.scalar() or 0
+
+            if not completed_ipos:
+                logger.info("Yillik ozet: 25 gunu tamamlayan IPO yok")
+                return
+
+            # Her IPO icin 25. gun kapanis fiyati ve getiri hesapla
+            returns = []
+            for ipo in completed_ipos:
+                # 25. gun ceiling track kaydini bul
+                track_result = await db.execute(
+                    select(IPOCeilingTrack).where(
+                        and_(
+                            IPOCeilingTrack.ipo_id == ipo.id,
+                            IPOCeilingTrack.trading_day == 25,
+                        )
+                    )
+                )
+                track_25 = track_result.scalar_one_or_none()
+
+                if track_25 and track_25.close_price:
+                    ipo_price = float(ipo.ipo_price)
+                    close_25 = float(track_25.close_price)
+                    pct = ((close_25 - ipo_price) / ipo_price) * 100
+                    returns.append({
+                        "ticker": ipo.ticker or ipo.company_name,
+                        "pct": pct,
+                    })
+
+            if not returns:
+                return
+
+            avg_return = sum(r["pct"] for r in returns) / len(returns)
+            best = max(returns, key=lambda r: r["pct"])
+            worst = min(returns, key=lambda r: r["pct"])
+            positive_count = sum(1 for r in returns if r["pct"] > 0)
+
+            from app.services.twitter_service import tweet_yearly_summary
+            tweet_yearly_summary(
+                year=current_year,
+                total_ipos=total_ipos,
+                avg_return_pct=avg_return,
+                best_ticker=best["ticker"],
+                best_return_pct=best["pct"],
+                worst_ticker=worst["ticker"],
+                worst_return_pct=worst["pct"],
+                total_completed=len(returns),
+                positive_count=positive_count,
+            )
+
+    except Exception as e:
+        logger.error("Yillik ozet tweet hatasi: %s", e)
 
 
 def setup_scheduler():
@@ -1037,6 +1269,26 @@ def _setup_scheduler_impl():
         CronTrigger(hour=6, minute=30, day_of_week="mon-fri"),
         id="first_trading_day_notif",
         name="Ilk Islem Gunu Bildirimi (09:30 TR)",
+        replace_existing=True,
+    )
+
+    # 16. Acilis Fiyati Tweet — her gun 09:56 Turkiye (UTC 06:56) Pzt-Cuma
+    # Sadece ilk islem gunu olan IPO'lar icin acilis fiyati tweeti
+    scheduler.add_job(
+        tweet_opening_price_job,
+        CronTrigger(hour=6, minute=56, day_of_week="mon-fri"),
+        id="opening_price_tweet",
+        name="Acilis Fiyati Tweet (09:56 TR)",
+        replace_existing=True,
+    )
+
+    # 17. Aylik Yillik Ozet Tweet — her ayin 1'i 20:00 Turkiye (UTC 17:00)
+    # Ocak haric — yil basinda veri yok
+    scheduler.add_job(
+        monthly_yearly_summary_tweet,
+        CronTrigger(day=1, hour=17, minute=0),
+        id="monthly_yearly_summary_tweet",
+        name="Yillik Halka Arz Ozeti Tweet (Ayin 1'i 20:00 TR)",
         replace_existing=True,
     )
 

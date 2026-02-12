@@ -1,0 +1,443 @@
+"""X (Twitter) Otomatik Tweet Servisi — @SZAlgoFinans
+
+11 farkli tweet tipi ile halka arz ve KAP haberlerini X'e otomatik atar.
+Mevcut sistemi ASLA bozmamalı — tum cagrılar try/except ile korunur.
+
+Tweet Tipleri:
+1.  Yeni Halka Arz (SPK onayi)
+2.  Dagitima Cikis (in_distribution)
+3.  Tahmini Lot Sayisi
+4.  Son 4 Saat Hatirlatma
+5.  Son 30 Dakika Hatirlatma
+6.  Ilk Islem Gunu (09:00 gong)
+7.  Acilis Fiyati (09:56 sadece ilk islem gunu)
+8.  Gunluk Takip (18:20 her islem gunu)
+9.  25 Gun Performans Ozeti (25. gunde bir kez)
+10. Yillik Halka Arz Ozeti (her ayin 1'i 20:00, ocak haric)
+11. BIST 30 KAP Haberi (aninda)
+"""
+
+import logging
+from datetime import datetime, date
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+# Tweepy lazy init — sadece ilk kullanımda import edilir
+_client = None
+_init_attempted = False
+
+
+def _init_twitter_client():
+    """Tweepy client'i baslatir (tek seferlik). Basarisiz olursa None doner."""
+    global _client, _init_attempted
+    if _init_attempted:
+        return _client
+    _init_attempted = True
+
+    try:
+        import tweepy
+        from app.config import get_settings
+        settings = get_settings()
+
+        api_key = settings.X_API_KEY
+        api_secret = settings.X_API_SECRET
+        access_token = settings.X_ACCESS_TOKEN
+        access_token_secret = settings.X_ACCESS_TOKEN_SECRET
+
+        if not all([api_key, api_secret, access_token, access_token_secret]):
+            logger.warning("Twitter API anahtarlari eksik — tweet atma devre disi")
+            return None
+
+        _client = tweepy.Client(
+            consumer_key=api_key,
+            consumer_secret=api_secret,
+            access_token=access_token,
+            access_token_secret=access_token_secret,
+        )
+        logger.info("Twitter client basariyla baslatildi (@SZAlgoFinans)")
+        return _client
+
+    except Exception as e:
+        logger.error(f"Twitter client baslatilamadi: {e}")
+        return None
+
+
+def _safe_tweet(text: str) -> bool:
+    """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
+
+    Returns:
+        True: tweet basarili
+        False: tweet basarisiz (ama sistem etkilenmez)
+    """
+    try:
+        client = _init_twitter_client()
+        if not client:
+            logger.info(f"[TWITTER-DRY-RUN] {text[:80]}...")
+            return False
+
+        # Twitter karakter limiti: 280
+        if len(text) > 280:
+            text = text[:277] + "..."
+
+        response = client.create_tweet(text=text)
+        logger.info(f"Tweet basarili: {text[:60]}...")
+        return True
+
+    except Exception as e:
+        logger.error(f"Tweet hatasi (sistem etkilenmez): {e}")
+        return False
+
+
+# ================================================================
+# APP LINK — store'a yuklenince gercek link ile degistirilecek
+# ================================================================
+APP_LINK = "szalgo.net.tr"
+
+
+# ================================================================
+# 1. YENI HALKA ARZ (SPK Onayi)
+# ================================================================
+def tweet_new_ipo(ipo) -> bool:
+    """SPK'dan yeni halka arz onayi geldiginde tweet atar."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        price_text = f"\n\u2022 Halka Arz Fiyati: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+
+        text = (
+            f"\U0001F4E2 Yeni Halka Arz!\n\n"
+            f"{ipo.company_name}{ticker_text} SPK onayi aldi.\n"
+            f"{price_text}\n\n"
+            f"Detaylar ve bildirimler icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #BIST #Borsa"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_new_ipo hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 2. DAGITIMA CIKIS
+# ================================================================
+def tweet_distribution_start(ipo) -> bool:
+    """Dagitim sureci basladiginda tweet atar."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        end_date = ""
+        if ipo.subscription_end:
+            end_date = f"\n\u2022 Son Gun: {ipo.subscription_end.strftime('%d.%m.%Y')}"
+        price_text = f"\n\u2022 Fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+
+        text = (
+            f"\U0001F6A8 Dagitim Basladi!\n\n"
+            f"{ipo.company_name}{ticker_text} halka arz basvurulari basladi!"
+            f"{price_text}{end_date}\n\n"
+            f"Detaylar ve bildirimler icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_distribution_start hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 3. TAHMINI LOT SAYISI
+# ================================================================
+def tweet_estimated_lots(ipo) -> bool:
+    """Tahmini lot sayisi belli oldugunda tweet atar."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        lots = ipo.estimated_lots_per_person or "?"
+
+        text = (
+            f"\U0001F4CA Tahmini Lot Bilgisi\n\n"
+            f"{ipo.company_name}{ticker_text}\n"
+            f"\u2022 Tahmini Lot: ~{lots} lot/kisi\n\n"
+            f"\u26A0\uFE0F Yurt ici bireysel yatirimciya dagitilan "
+            f"ort. lot ile varsayilmistir.\n\n"
+            f"Detaylar icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_estimated_lots hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 4. SON 4 SAAT HATIRLATMA
+# ================================================================
+def tweet_last_4_hours(ipo) -> bool:
+    """Son 4 saat kala hatirlatma tweeti."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+
+        text = (
+            f"\u23F0 Son 4 Saat!\n\n"
+            f"{ipo.company_name}{ticker_text} icin basvuru kapanisina "
+            f"son 4 saat kaldi!\n\n"
+            f"Son saniyelerini kacirma!\n\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #SonGun #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_last_4_hours hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 5. SON 30 DAKIKA HATIRLATMA
+# ================================================================
+def tweet_last_30_min(ipo) -> bool:
+    """Son 30 dakika kala hatirlatma tweeti."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+
+        text = (
+            f"\U0001F6A8 Son 30 Dakika!\n\n"
+            f"{ipo.company_name}{ticker_text} basvurusu kapanmak uzere!\n\n"
+            f"Son saniyeler! Acele et!\n\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_last_30_min hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 6. ILK ISLEM GUNU (09:00 — Gong caliyor!)
+# ================================================================
+def tweet_first_trading_day(ipo) -> bool:
+    """Ilk islem gunu sabahi gong tweeti."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        price_text = f"\n\u2022 Halka Arz Fiyati: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+
+        text = (
+            f"\U0001F514 Gong Caliyor!\n\n"
+            f"{ipo.company_name}{ticker_text} icin ilk islem gunu basliyor!"
+            f"{price_text}\n\n"
+            f"Canli takip icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #BIST #IlkIslemGunu #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_first_trading_day hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 7. ACILIS FIYATI (09:56 — sadece ilk islem gunu)
+# ================================================================
+def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
+    """Ilk islem gunu acilis fiyati tweeti (09:56)."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+
+        # Durum belirle
+        if pct_change >= 9.5:
+            durum = "\U0001F7E2 Tavan Acti!"
+        elif pct_change > 0:
+            durum = f"\U0001F7E2 %{pct_change:+.2f}"
+        elif pct_change == 0:
+            durum = f"\U0001F7E1 Halka arz fiyatindan acildi"
+        else:
+            durum = f"\U0001F534 %{pct_change:+.2f}"
+
+        text = (
+            f"\U0001F4C8 Acilis Fiyati\n\n"
+            f"{ipo.company_name}{ticker_text}\n\n"
+            f"\u2022 Halka Arz: {ipo_price:.2f} TL\n"
+            f"\u2022 Acilis: {open_price:.2f} TL\n"
+            f"\u2022 {durum}\n\n"
+            f"25 gun takibi icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_opening_price hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 8. GUNLUK TAKIP (18:20 — her islem gunu)
+# ================================================================
+def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
+                         pct_change: float, durum: str) -> bool:
+    """Her islem gunu 18:20'de gunluk takip tweeti."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+
+        # Kumulatif degisim
+        if ipo_price > 0:
+            cum_change = ((close_price - ipo_price) / ipo_price) * 100
+        else:
+            cum_change = 0
+
+        # Durum emoji
+        durum_map = {
+            "tavan": "\U0001F7E2 Tavan",
+            "alici_kapatti": "\U0001F7E2 Alici",
+            "not_kapatti": "\U0001F7E1 Not",
+            "satici_kapatti": "\U0001F534 Satici",
+            "taban": "\U0001F534 Taban",
+        }
+        durum_text = durum_map.get(durum, durum)
+
+        text = (
+            f"\U0001F4CA {ipo.ticker or ipo.company_name} — Gun {trading_day}/25\n\n"
+            f"\u2022 Kapanis: {close_price:.2f} TL\n"
+            f"\u2022 Gunluk: %{pct_change:+.2f}\n"
+            f"\u2022 Toplam: %{cum_change:+.2f}\n"
+            f"\u2022 Durum: {durum_text}\n\n"
+            f"Detayli takip:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_daily_tracking hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 9. 25 GUN PERFORMANS OZETI (25. gun tamamlandiginda bir kez)
+# ================================================================
+def tweet_25_day_performance(
+    ipo,
+    close_price_25: float,
+    total_pct: float,
+    ceiling_days: int,
+    floor_days: int,
+    avg_lot: Optional[float] = None,
+) -> bool:
+    """25 islem gunu tamamlandiginda performans ozeti tweeti."""
+    try:
+        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+
+        # Lot kazanc hesabi
+        lot_text = ""
+        if avg_lot and ipo_price > 0:
+            lot_count = int(avg_lot)
+            profit_per_lot = (close_price_25 - ipo_price) * 100  # 1 lot = 100 hisse
+            total_profit = profit_per_lot * lot_count
+            if total_profit >= 0:
+                lot_text = f"\n\u2022 {lot_count} lot kazanc: +{total_profit:,.0f} TL"
+            else:
+                lot_text = f"\n\u2022 {lot_count} lot kayip: {total_profit:,.0f} TL"
+
+        # Performans emoji
+        if total_pct >= 50:
+            perf_emoji = "\U0001F525"  # ates
+        elif total_pct >= 0:
+            perf_emoji = "\U0001F7E2"
+        else:
+            perf_emoji = "\U0001F534"
+
+        text = (
+            f"{perf_emoji} 25 Gun Performansi\n\n"
+            f"{ipo.company_name}{ticker_text}\n\n"
+            f"\u2022 Halka Arz: {ipo_price:.2f} TL\n"
+            f"\u2022 25. Gun: {close_price_25:.2f} TL\n"
+            f"\u2022 Toplam Getiri: %{total_pct:+.2f}\n"
+            f"\u2022 Tavan: {ceiling_days} gun | Taban: {floor_days} gun"
+            f"{lot_text}\n\n"
+            f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir.\n\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_25_day_performance hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 10. YILLIK HALKA ARZ OZETI (Her ayin 1'i 20:00, Ocak haric)
+# ================================================================
+def tweet_yearly_summary(
+    year: int,
+    total_ipos: int,
+    avg_return_pct: float,
+    best_ticker: str,
+    best_return_pct: float,
+    worst_ticker: str,
+    worst_return_pct: float,
+    total_completed: int,
+    positive_count: int,
+) -> bool:
+    """Aylik yillik halka arz performans ozeti tweeti."""
+    try:
+        now = datetime.now()
+        month_name = _get_turkish_month(now.month)
+
+        text = (
+            f"\U0001F4CA {year} Halka Arz Ozeti\n"
+            f"({month_name} {now.day} itibariyla)\n\n"
+            f"\u2022 Toplam: {total_ipos} halka arz\n"
+            f"\u2022 25 gunu tamamlayan: {total_completed}\n"
+            f"\u2022 Pozitif getiri: {positive_count}/{total_completed}\n"
+            f"\u2022 Ort. Getiri: %{avg_return_pct:+.2f}\n"
+            f"\u2022 En Iyi: {best_ticker} (%{best_return_pct:+.1f})\n"
+            f"\u2022 En Kotu: {worst_ticker} (%{worst_return_pct:+.1f})\n\n"
+            f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir. "
+            f"Yurt ici bireysel yatirimciya dagitilan "
+            f"ort. lot ile varsayilmistir.\n\n"
+            f"\U0001F4F2 {APP_LINK}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_yearly_summary hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 11. BIST 30 KAP HABERI
+# ================================================================
+def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool:
+    """BIST 30 hissesi icin KAP haberi tweeti."""
+    try:
+        if sentiment == "positive":
+            emoji = "\U0001F7E2"
+        else:
+            emoji = "\U0001F534"
+
+        text = (
+            f"{emoji} {ticker} — KAP Haberi\n\n"
+            f"\u2022 {matched_keyword}\n\n"
+            f"350+ hisse senedini tarayan sistemimiz cok yakinda!\n\n"
+            f"Ucretsiz BIST 30 bildirimleri icin:\n"
+            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"#BIST30 #{ticker} #KAP #Borsa"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_bist30_news hatasi: {e}")
+        return False
+
+
+# ================================================================
+# YARDIMCI FONKSIYONLAR
+# ================================================================
+
+def _get_turkish_month(month: int) -> str:
+    """Ay numarasini Turkce ay adina cevirir."""
+    months = {
+        1: "Ocak", 2: "Subat", 3: "Mart", 4: "Nisan",
+        5: "Mayis", 6: "Haziran", 7: "Temmuz", 8: "Agustos",
+        9: "Eylul", 10: "Ekim", 11: "Kasim", 12: "Aralik",
+    }
+    return months.get(month, "")
