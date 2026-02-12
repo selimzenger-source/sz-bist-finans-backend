@@ -558,10 +558,11 @@ def tweet_25_day_performance(
 
 
 # ================================================================
-# 10. YILLIK HALKA ARZ OZETI (Her ayin 1'i 20:00, Ocak haric)
+# 10. AY SONU HALKA ARZ RAPORU (Her ayin son gunu gece yarisi)
 # ================================================================
 def tweet_yearly_summary(
     year: int,
+    month_name: str,
     total_ipos: int,
     avg_return_pct: float,
     best_ticker: str,
@@ -571,22 +572,27 @@ def tweet_yearly_summary(
     total_completed: int,
     positive_count: int,
 ) -> bool:
-    """Aylik yillik halka arz performans ozeti tweeti."""
+    """Ay sonu halka arz raporu tweeti — her ayin son gunu gece yarisi."""
     try:
-        now = datetime.now()
-        month_name = _get_turkish_month(now.month)
+        # Performans emoji
+        if avg_return_pct >= 10:
+            perf_emoji = "\U0001F525"
+        elif avg_return_pct >= 0:
+            perf_emoji = "\U0001F7E2"
+        else:
+            perf_emoji = "\U0001F534"
 
         text = (
-            f"\U0001F4CA {year} Yili Halka Arz Karnesi\n"
-            f"({month_name} {now.day} itibariyla)\n\n"
+            f"\U0001F4CA {year} Halka Arz \u2014 {month_name} Sonu Raporu\n\n"
             f"\u2022 Toplam halka arz: {total_ipos}\n"
-            f"\u2022 25 gunu tamamlayan: {total_completed}\n"
-            f"\u2022 Pozitif getirili: {positive_count}/{total_completed}\n"
-            f"\u2022 Ortalama getiri: %{avg_return_pct:+.2f}\n"
-            f"\u2022 En iyi: {best_ticker} (%{best_return_pct:+.1f})\n"
-            f"\u2022 En kotu: {worst_ticker} (%{worst_return_pct:+.1f})\n\n"
+            f"\u2022 25 gunu doldu: {total_completed}\n"
+            f"\u2022 Kar/zarar: {positive_count}/{total_completed}\n"
+            f"\u2022 Ort. getiri: {perf_emoji} %{avg_return_pct:+.1f}\n"
+            f"\u2022 En iyi: #{best_ticker} (%{best_return_pct:+.1f})\n"
+            f"\u2022 En kotu: #{worst_ticker} (%{worst_return_pct:+.1f})\n\n"
             f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir.\n\n"
-            f"\U0001F4F2 {APP_LINK}"
+            f"\U0001F4F2 {APP_LINK}\n"
+            f"#HalkaArz #BIST #AySonuRaporu"
         )
         return _safe_tweet(text)
     except Exception as e:

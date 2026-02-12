@@ -1033,30 +1033,42 @@ async def tweet_opening_price_job():
 
 
 async def monthly_yearly_summary_tweet():
-    """Aylik yillik halka arz ozeti tweeti — her ayin 1'i 20:00 (UTC 17:00).
+    """Ay sonu halka arz raporu — her ayin 1'i 00:00 TR (UTC 21:00 onceki gun).
 
-    Ocak haric (yil basinda veri yok).
+    Ayin son gunu gece yarisi calisir.
     O yilin tum 25 gunu tamamlanan halka arzlarinin performans ozetini tweet atar.
+    Ocak 1'de calisirsa onceki yilin verisini raporlar.
     """
     try:
-        now = datetime.now()
-        # Ocak ayinda tweet atma (yil basinda veri yok)
-        if now.month == 1:
-            logger.info("Yillik ozet: Ocak ayi — tweet atilmadi")
-            return
-
         from sqlalchemy import select, and_, func
         from app.models.ipo import IPO, IPOCeilingTrack
 
-        current_year = now.year
+        # TR saati gece yarisi = onceki ayin son gunu
+        # UTC 21:00 = TR 00:00 (ertesi gun)
+        # Rapor yili: Ocak 1 gece yarisi → onceki yil, diger aylar → bu yil
+        now = datetime.now()
+        # TR zamani = UTC + 3
+        tr_now = now + timedelta(hours=3)
+
+        if tr_now.month == 1 and tr_now.day == 1:
+            # Ocak 1 gece yarisi → Aralik sonu → onceki yilin raporu
+            report_year = tr_now.year - 1
+        else:
+            report_year = tr_now.year
+
+        # Onceki ayin adi (TR gece yarisi = yeni ay, rapor onceki ay icin)
+        prev_month = tr_now.month - 1 if tr_now.month > 1 else 12
+        from app.services.twitter_service import _get_turkish_month
+        month_name = _get_turkish_month(prev_month)
 
         async with async_session() as db:
-            # Bu yil isleme baslayan ve 25 gunu tamamlayan IPO'lar
+            # Rapor yilinda isleme baslayan ve 25 gunu tamamlayan IPO'lar
             result = await db.execute(
                 select(IPO).where(
                     and_(
                         IPO.trading_start.isnot(None),
-                        IPO.trading_start >= date(current_year, 1, 1),
+                        IPO.trading_start >= date(report_year, 1, 1),
+                        IPO.trading_start < date(report_year + 1, 1, 1),
                         IPO.trading_day_count >= 25,
                         IPO.ipo_price.isnot(None),
                         IPO.ipo_price > 0,
@@ -1065,25 +1077,25 @@ async def monthly_yearly_summary_tweet():
             )
             completed_ipos = list(result.scalars().all())
 
-            # Bu yil toplam halka arz sayisi (tum statuslar)
+            # Rapor yilinda toplam halka arz sayisi
             total_result = await db.execute(
                 select(func.count(IPO.id)).where(
                     and_(
                         IPO.trading_start.isnot(None),
-                        IPO.trading_start >= date(current_year, 1, 1),
+                        IPO.trading_start >= date(report_year, 1, 1),
+                        IPO.trading_start < date(report_year + 1, 1, 1),
                     )
                 )
             )
             total_ipos = total_result.scalar() or 0
 
             if not completed_ipos:
-                logger.info("Yillik ozet: 25 gunu tamamlayan IPO yok")
+                logger.info("Ay sonu raporu: 25 gunu tamamlayan IPO yok (%d)", report_year)
                 return
 
             # Her IPO icin 25. gun kapanis fiyati ve getiri hesapla
             returns = []
             for ipo in completed_ipos:
-                # 25. gun ceiling track kaydini bul
                 track_result = await db.execute(
                     select(IPOCeilingTrack).where(
                         and_(
@@ -1113,7 +1125,8 @@ async def monthly_yearly_summary_tweet():
 
             from app.services.twitter_service import tweet_yearly_summary
             tweet_yearly_summary(
-                year=current_year,
+                year=report_year,
+                month_name=month_name,
                 total_ipos=total_ipos,
                 avg_return_pct=avg_return,
                 best_ticker=best["ticker"],
@@ -1125,7 +1138,7 @@ async def monthly_yearly_summary_tweet():
             )
 
     except Exception as e:
-        logger.error("Yillik ozet tweet hatasi: %s", e)
+        logger.error("Ay sonu rapor tweet hatasi: %s", e)
 
 
 def setup_scheduler():
@@ -1328,13 +1341,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 17. Aylik Yillik Ozet Tweet — her ayin 1'i 20:00 Turkiye (UTC 17:00)
-    # Ocak haric — yil basinda veri yok
+    # 17. Ay Sonu Raporu Tweet — her ayin 1'i 00:00 Turkiye (UTC 21:00 onceki gun)
+    # Ayin son gunu gece yarisi = yeni ayin 1'i 00:00 TR
     scheduler.add_job(
         monthly_yearly_summary_tweet,
-        CronTrigger(day=1, hour=17, minute=0),
+        CronTrigger(day=1, hour=21, minute=0),
         id="monthly_yearly_summary_tweet",
-        name="Yillik Halka Arz Ozeti Tweet (Ayin 1'i 20:00 TR)",
+        name="Ay Sonu Halka Arz Raporu (Ayin 1'i 00:00 TR)",
         replace_existing=True,
     )
 
