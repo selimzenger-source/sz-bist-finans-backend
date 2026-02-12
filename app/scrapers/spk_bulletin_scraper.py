@@ -395,12 +395,12 @@ async def check_spk_bulletins():
             notif_service = NotificationService(db)
 
             for approval in approvals:
-                # IPO olustur veya guncelle
+                # IPO olustur veya guncelle — SPK bulten TEK yetkilendirilmis kaynak
                 ipo = await ipo_service.create_or_update_ipo({
                     "company_name": approval["company_name"],
                     "spk_bulletin_url": approval.get("bulletin_url"),
                     "status": "newly_approved",
-                })
+                }, allow_create=True)
 
                 # Yeni IPO ise bildirim gonder
                 if ipo and ipo.created_at and (

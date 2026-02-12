@@ -68,6 +68,8 @@ async def scrape_kap_ipo():
                 notif_service = NotificationService(db)
 
                 for item in all_data:
+                    # allow_create=False: SPK ihrac API sadece mevcut IPO'lari gunceller
+                    # Yeni IPO olusturma SADECE SPK bulten veya admin panelden yapilir
                     ipo = await ipo_service.create_or_update_ipo({
                         "company_name": item.get("company_name", ""),
                         "ticker": item.get("ticker"),
@@ -76,14 +78,10 @@ async def scrape_kap_ipo():
                         "market_segment": item.get("market_segment"),
                         "lead_broker": item.get("lead_broker"),
                         "offering_size_tl": item.get("offering_size_tl"),
-                        "status": "trading",
                     })
 
-                    # Yeni eklenen IPO ise bildirim gonder
-                    if ipo and ipo.created_at and (
-                        datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
-                    ).total_seconds() < 60:
-                        await notif_service.notify_new_ipo(ipo)
+                    if not ipo:
+                        continue  # DB'de eslesen IPO bulunamadi, atla
 
                 await db.commit()
 
@@ -301,7 +299,8 @@ async def archive_old_ipos():
                         IPO.archived == False,
                         IPO.trading_start.isnot(None),
                         IPO.trading_start <= cutoff,
-                        IPO.status.in_(["trading", "completed"]),  # geriye uyumluluk
+                        # trading_start 37+ gun gecmis olan TUM statuslardaki IPO'lar arsivlenmeli
+                        # (eski: sadece trading/completed — DMLKT gibi newly_approved'da takilanlar kaciriliyordu)
                     )
                 )
             )

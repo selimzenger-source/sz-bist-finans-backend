@@ -2364,3 +2364,93 @@ async def admin_fill_ceiling_data(request: Request, payload: dict, db: AsyncSess
         "ipos_updated": total_updated,
         "results": results_list,
     }
+
+
+# -------------------------------------------------------
+# Admin: Yeni IPO Ekle (newly_approved olarak)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/create-ipo")
+@limiter.limit("10/minute")
+async def admin_create_ipo(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin panelden yeni halka arz ekler — newly_approved olarak.
+
+    SPK bulteni haricinde yeni IPO eklemenin TEK yolu budur.
+    Gonderilen JSON:
+        {
+            "admin_password": "...",
+            "company_name": "Sirket Adi A.S.",
+            "ticker": "XXXX",        (opsiyonel)
+            "ipo_price": 10.50,       (opsiyonel)
+            "spk_bulletin_no": "2026/7"  (opsiyonel)
+            ... diger IPO alanlari
+        }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.services.ipo_service import IPOService
+
+    ipo_data = {k: v for k, v in payload.items() if k != "admin_password"}
+    ipo_data["status"] = "newly_approved"  # Admin her zaman newly_approved ekler
+
+    ipo_service = IPOService(db)
+    ipo = await ipo_service.create_or_update_ipo(ipo_data, allow_create=True)
+
+    if not ipo:
+        raise HTTPException(status_code=400, detail="IPO olusturulamadi")
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "ipo_id": ipo.id,
+        "ticker": ipo.ticker,
+        "company_name": ipo.company_name,
+        "status": ipo.status,
+    }
+
+
+# -------------------------------------------------------
+# Admin: IPO Sil
+# -------------------------------------------------------
+
+@app.delete("/api/v1/admin/delete-ipo/{ipo_id}")
+@limiter.limit("10/minute")
+async def admin_delete_ipo(request: Request, ipo_id: int, db: AsyncSession = Depends(get_db)):
+    """Admin panelden IPO siler.
+
+    Header'da X-Admin-Password gonderilmeli.
+    Iliskili tablolar (allocations, ceiling_tracks, brokers) da silinir.
+    """
+    admin_password = request.headers.get("X-Admin-Password", "")
+    if not _verify_admin_password(admin_password):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    # IPO var mi kontrol et
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    ticker = ipo.ticker
+    company = ipo.company_name
+
+    # Iliskili kayitlari sil
+    from sqlalchemy import delete
+    await db.execute(delete(IPOAllocation).where(IPOAllocation.ipo_id == ipo_id))
+    await db.execute(delete(IPOCeilingTrack).where(IPOCeilingTrack.ipo_id == ipo_id))
+    await db.execute(delete(IPOBroker).where(IPOBroker.ipo_id == ipo_id))
+
+    # IPO'yu sil
+    await db.delete(ipo)
+    await db.commit()
+
+    logger.info(f"Admin: IPO silindi — {ticker or company} (id={ipo_id})")
+
+    return {
+        "success": True,
+        "deleted_ipo_id": ipo_id,
+        "ticker": ticker,
+        "company_name": company,
+    }

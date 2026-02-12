@@ -77,8 +77,15 @@ class IPOService:
     # Olusturma & Guncelleme
     # -------------------------------------------------------
 
-    async def create_or_update_ipo(self, data: dict) -> IPO:
+    async def create_or_update_ipo(self, data: dict, allow_create: bool = False) -> IPO | None:
         """KAP/SPK verisinden halka arz olusturur veya gunceller.
+
+        ONEMLI: Yeni IPO olusturma SADECE iki kaynaktan yapilabilir:
+        1. SPK Bulten scraper (allow_create=True)
+        2. Admin panel (allow_create=True)
+
+        Diger scraper'lar (HalkArz, Gedik, InfoYatirim, SPK Ihrac) sadece
+        mevcut IPO'lari guncelleyebilir (allow_create=False).
 
         Eslestirme onceligi:
         1. ticker (hisse kodu)
@@ -115,7 +122,15 @@ class IPOService:
             ipo = existing
             logger.info(f"IPO guncellendi: {ipo.ticker or ipo.company_name}")
         else:
-            # Yeni olustur
+            if not allow_create:
+                # Yeni IPO olusturma izni yok — sadece SPK bulten ve admin yapabilir
+                logger.info(
+                    f"IPO bulunamadi, olusturma atlanıyor (allow_create=False): "
+                    f"{data.get('ticker') or data.get('company_name')}"
+                )
+                return None
+
+            # Yeni olustur — sadece SPK bulten veya admin kaynaklarından
             ipo = IPO(**{k: v for k, v in data.items() if hasattr(IPO, k) and v is not None})
             self.db.add(ipo)
             logger.info(f"Yeni IPO olusturuldu: {ipo.ticker or ipo.company_name}")
@@ -345,6 +360,66 @@ class IPOService:
         - completed → trading        (eger trading_start varsa, one-time migration)
         """
         today = date.today()
+
+        # ==========================================
+        # TUTARSIZLIK DUZELTME — status ile tarihler uyusmuyor
+        # Ornek: DMLKT → status=newly_approved ama trading_start=2025-08-11
+        # ==========================================
+
+        # trading_start doluysa VE status hala newly_approved/in_distribution/awaiting_trading ise
+        # → direkt trading'e tasi (tarih gercegi statustan oncelikli)
+        result = await self.db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
+                    IPO.trading_start.isnot(None),
+                    IPO.trading_start <= today,
+                    IPO.archived == False,
+                )
+            )
+        )
+        for ipo in result.scalars().all():
+            old_status = ipo.status
+            ipo.status = "trading"
+            ipo.distribution_completed = True
+            ipo.ceiling_tracking_active = True
+            ipo.updated_at = datetime.utcnow()
+            logger.info(
+                f"Tutarsizlik duzeltme: {ipo.ticker} {old_status} → trading "
+                f"(trading_start={ipo.trading_start})"
+            )
+
+        # subscription_end 90+ gun gecmis VE hala awaiting_trading'de takili kalanlar
+        # → trading_start yoksa arsivle (DNYVA gibi: sub_end=2025-01-24, trading_start=None)
+        stale_cutoff = today - timedelta(days=90)
+        result = await self.db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
+                    IPO.trading_start.is_(None),
+                    IPO.archived == False,
+                    or_(
+                        and_(IPO.subscription_end.isnot(None), IPO.subscription_end < stale_cutoff),
+                        and_(IPO.spk_approval_date.isnot(None), IPO.spk_approval_date < stale_cutoff),
+                        and_(
+                            IPO.subscription_end.is_(None),
+                            IPO.spk_approval_date.is_(None),
+                            IPO.created_at.isnot(None),
+                            IPO.created_at < datetime.utcnow() - timedelta(days=90),
+                        ),
+                    ),
+                )
+            )
+        )
+        for ipo in result.scalars().all():
+            old_status = ipo.status
+            ipo.archived = True
+            ipo.archived_at = datetime.utcnow()
+            ipo.updated_at = datetime.utcnow()
+            logger.info(
+                f"Eski IPO arsivlendi: {ipo.ticker} {old_status} → archived "
+                f"(sub_end={ipo.subscription_end}, spk_date={ipo.spk_approval_date})"
+            )
 
         # ==========================================
         # GERIYE DONUK UYUMLULUK — eski statuslari yeni sisteme tasi
