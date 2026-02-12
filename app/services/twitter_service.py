@@ -424,6 +424,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
         )
         footer = (
             f"\n\n{daily_emoji} Kapanis: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
+            f"\U0001F4F2 Detaylar icin: {APP_LINK}\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
@@ -431,17 +432,25 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
         # Twitter 280 karakter limiti kontrolu
         if len(text) > 280:
-            # Cok uzunsa ilk 2 + ... + son 8 gunu goster
+            # Cok uzunsa ilk 2 + ・・・ + son 8 gunu goster
             if days_data and len(days_data) > 10:
                 first_lines = table_lines[:2]
                 last_lines = table_lines[-8:]
-                table_text = "\n".join(first_lines) + "\n...\n" + "\n".join(last_lines)
+                table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
                 text = header + table_text + footer
 
-        # Hala 280'i asiyorsa — sadece son 6 gun
+        # Hala 280'i asiyorsa — noktalarla son 6 gun
         if len(text) > 280:
             last_6 = table_lines[-6:]
-            table_text = "...\n" + "\n".join(last_6)
+            table_text = "\u30FB\u30FB\u30FB\n" + "\n".join(last_6)
+            text = header + table_text + footer
+
+        # Son kurtarma — app linkini kaldir
+        if len(text) > 280:
+            footer = (
+                f"\n\n{daily_emoji} Kapanis: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
             text = header + table_text + footer
 
         return _safe_tweet(text)
