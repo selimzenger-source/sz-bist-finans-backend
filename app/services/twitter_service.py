@@ -392,7 +392,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
         }
         durum_text = durum_map.get(durum, durum)
 
-        # Kumulatif tablo olustur — her gun halka arz fiyatina gore toplam getiri
+        # Kumulatif performans tablosu — her gun halka arz fiyatina gore toplam getiri
         table_lines = []
         if days_data and ipo_price > 0:
             for d in days_data:
@@ -414,40 +414,35 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
         table_text = "\n".join(table_lines)
 
-        text = (
-            f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
-            f"{table_text}\n\n"
-            f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
-            f"\U0001F4F2 {APP_LINK}\n"
+        # Gunluk degisim emoji
+        daily_emoji = "\U0001F7E2" if pct_change >= 0 else "\U0001F534"
+
+        # Header + Kumulatif Toplam basligi + footer bugun detay
+        header = (
+            f"\U0001F4CA #{ipo.ticker or ipo.company_name} \u2014 {trading_day}. Gun Sonu\n\n"
+            f"Kumulatif Toplam:\n"
+        )
+        footer = (
+            f"\n\n{daily_emoji} Kapanis: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
+        text = header + table_text + footer
+
         # Twitter 280 karakter limiti kontrolu
         if len(text) > 280:
-            # Cok uzunsa son 10 gunu goster, oncesini "..." ile oetle
+            # Cok uzunsa ilk 2 + ... + son 8 gunu goster
             if days_data and len(days_data) > 10:
                 first_lines = table_lines[:2]
                 last_lines = table_lines[-8:]
                 table_text = "\n".join(first_lines) + "\n...\n" + "\n".join(last_lines)
-                text = (
-                    f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
-                    f"{table_text}\n\n"
-                    f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
-                    f"\U0001F4F2 {APP_LINK}\n"
-                    f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-                )
+                text = header + table_text + footer
 
-        # Hala 280'i asiyorsa son kurtarma — sadece son 6 gun
+        # Hala 280'i asiyorsa — sadece son 6 gun
         if len(text) > 280:
             last_6 = table_lines[-6:]
             table_text = "...\n" + "\n".join(last_6)
-            text = (
-                f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
-                f"{table_text}\n\n"
-                f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
-                f"\U0001F4F2 {APP_LINK}\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
+            text = header + table_text + footer
 
         return _safe_tweet(text)
     except Exception as e:
