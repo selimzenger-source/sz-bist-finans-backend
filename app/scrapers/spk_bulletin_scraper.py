@@ -613,6 +613,29 @@ async def check_spk_bulletins():
                         ipo_data, allow_create=True,
                     )
 
+                    # SPKApplication tablosunda varsa → approved yap
+                    try:
+                        from sqlalchemy import select as _sel, and_ as _and
+                        from app.models.spk_application import SPKApplication as _SPKApp
+                        _spk_result = await db.execute(
+                            _sel(_SPKApp).where(
+                                _and(
+                                    _SPKApp.status == "pending",
+                                    _SPKApp.company_name.ilike(
+                                        f"%{approval['company_name'][:30]}%"
+                                    ),
+                                )
+                            )
+                        )
+                        for _spk_app in _spk_result.scalars().all():
+                            _spk_app.status = "approved"
+                            logger.info(
+                                "SPKApplication approved: %s (id=%d)",
+                                _spk_app.company_name, _spk_app.id,
+                            )
+                    except Exception as _spk_err:
+                        logger.warning("SPKApplication guncelleme hatasi: %s", _spk_err)
+
                     if ipo and ipo.created_at and (
                         datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
                     ).total_seconds() < 60:

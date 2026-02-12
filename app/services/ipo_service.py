@@ -143,6 +143,26 @@ class IPOService:
             except Exception:
                 pass  # Tweet hatasi sistemi etkilemez
 
+            # SPKApplication tablosunda varsa → approved yap
+            try:
+                from sqlalchemy import and_ as _and
+                from app.models.spk_application import SPKApplication as _SPKApp
+                _spk_result = await self.db.execute(
+                    select(_SPKApp).where(
+                        _and(
+                            _SPKApp.status == "pending",
+                            _SPKApp.company_name.ilike(
+                                f"%{ipo.company_name[:30]}%"
+                            ),
+                        )
+                    )
+                )
+                for _spk_app in _spk_result.scalars().all():
+                    _spk_app.status = "approved"
+                    logger.info("SPKApplication approved: %s (id=%d)", _spk_app.company_name, _spk_app.id)
+            except Exception:
+                pass  # SPK listesi guncelleme hatasi sistemi etkilemez
+
         await self.db.flush()
         return ipo
 
