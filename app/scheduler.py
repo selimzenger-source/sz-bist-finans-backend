@@ -1188,12 +1188,12 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 4. SPK Onay Listesi — her 4 saatte bir + baslangicta kisa gecikme ile calistir
+    # 4. SPK Onay Listesi — 6 gunde bir (liste cok dinamik degil, bulten onayinda zaten approved yapiliyor)
     scheduler.add_job(
         scrape_spk,
-        IntervalTrigger(hours=4),
+        IntervalTrigger(days=6),
         id="spk_scraper",
-        name="SPK Onay Scraper (4 saatte bir)",
+        name="SPK Onay Scraper (6 gunde bir)",
         replace_existing=True,
         next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS),
     )
