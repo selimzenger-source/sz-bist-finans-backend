@@ -4,53 +4,53 @@
 {% block content %}
 <!-- Istatistikler -->
 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
-    <a href="/admin/" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if not current_status else '' }}">
-        <div class="text-2xl font-bold text-gray-800">{{ total_count }}</div>
-        <div class="text-xs text-gray-500 mt-1">Toplam</div>
+    <a href="/admin/" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if not current_status else '' }}">
+        <div class="text-2xl font-bold text-gray-100">{{ total_count }}</div>
+        <div class="text-xs text-gray-400 mt-1">Toplam</div>
     </a>
-    <a href="/admin/?status=newly_approved" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if current_status == 'newly_approved' else '' }}">
-        <div class="text-2xl font-bold text-blue-600">{{ status_counts.get('newly_approved', 0) }}</div>
-        <div class="text-xs text-gray-500 mt-1">SPK Onayli</div>
+    <a href="/admin/?status=newly_approved" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'newly_approved' else '' }}">
+        <div class="text-2xl font-bold text-blue-400">{{ status_counts.get('newly_approved', 0) }}</div>
+        <div class="text-xs text-gray-400 mt-1">SPK Onayli</div>
     </a>
-    <a href="/admin/?status=in_distribution" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if current_status == 'in_distribution' else '' }}">
-        <div class="text-2xl font-bold text-green-600">{{ status_counts.get('in_distribution', 0) }}</div>
-        <div class="text-xs text-gray-500 mt-1">Dagitimda</div>
+    <a href="/admin/?status=in_distribution" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'in_distribution' else '' }}">
+        <div class="text-2xl font-bold text-green-400">{{ status_counts.get('in_distribution', 0) }}</div>
+        <div class="text-xs text-gray-400 mt-1">Dagitimda</div>
     </a>
-    <a href="/admin/?status=awaiting_trading" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if current_status == 'awaiting_trading' else '' }}">
-        <div class="text-2xl font-bold text-orange-600">{{ status_counts.get('awaiting_trading', 0) }}</div>
-        <div class="text-xs text-gray-500 mt-1">Islem Bekliyor</div>
+    <a href="/admin/?status=awaiting_trading" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'awaiting_trading' else '' }}">
+        <div class="text-2xl font-bold text-orange-400">{{ status_counts.get('awaiting_trading', 0) }}</div>
+        <div class="text-xs text-gray-400 mt-1">Islem Bekliyor</div>
     </a>
-    <a href="/admin/?status=trading" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if current_status == 'trading' else '' }}">
-        <div class="text-2xl font-bold text-emerald-600">{{ status_counts.get('trading', 0) }}</div>
-        <div class="text-xs text-gray-500 mt-1">Islem Goruyor</div>
+    <a href="/admin/?status=trading" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'trading' else '' }}">
+        <div class="text-2xl font-bold text-emerald-400">{{ status_counts.get('trading', 0) }}</div>
+        <div class="text-xs text-gray-400 mt-1">Islem Goruyor</div>
     </a>
-    <a href="/admin/?status=archived" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center {{ 'ring-2 ring-indigo-500' if current_status == 'archived' else '' }}">
-        <div class="text-2xl font-bold text-gray-400">{{ status_counts.get('archived', 0) }}</div>
-        <div class="text-xs text-gray-500 mt-1">Arsiv</div>
+    <a href="/admin/?status=archived" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'archived' else '' }}">
+        <div class="text-2xl font-bold text-gray-500">{{ status_counts.get('archived', 0) }}</div>
+        <div class="text-xs text-gray-400 mt-1">Arsiv</div>
     </a>
-    <a href="/admin/spk" class="bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition text-center">
-        <div class="text-2xl font-bold text-yellow-600">{{ spk_count }}</div>
-        <div class="text-xs text-gray-500 mt-1">SPK Bekleyen</div>
+    <a href="/admin/spk" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700">
+        <div class="text-2xl font-bold text-yellow-400">{{ spk_count }}</div>
+        <div class="text-xs text-gray-400 mt-1">SPK Bekleyen</div>
     </a>
 </div>
 
 <!-- Tablo -->
-<div class="bg-white rounded-xl shadow-sm overflow-hidden">
-    <div class="px-4 py-3 border-b flex items-center justify-between">
-        <h2 class="font-semibold text-gray-700">
+<div class="bg-gray-800 rounded-xl shadow-sm overflow-hidden border border-gray-700">
+    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+        <h2 class="font-semibold text-gray-200">
             Halka Arz Listesi
             {% if current_status %}
-                <span class="text-sm font-normal text-gray-400">— {{ current_status }}</span>
+                <span class="text-sm font-normal text-gray-500">— {{ current_status }}</span>
             {% endif %}
         </h2>
-        <a href="/admin/ipo/new" class="bg-indigo-600 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-700 transition">
+        <a href="/admin/ipo/new" class="bg-indigo-500 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-600 transition">
             + Yeni IPO
         </a>
     </div>
 
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-600">
+            <thead class="bg-gray-750 text-gray-400 border-b border-gray-700">
                 <tr>
                     <th class="px-4 py-2 text-left">ID</th>
                     <th class="px-4 py-2 text-left">Ticker</th>
@@ -62,19 +62,19 @@
                     <th class="px-4 py-2 text-center">Islemler</th>
                 </tr>
             </thead>
-            <tbody class="divide-y divide-gray-100">
+            <tbody class="divide-y divide-gray-700">
                 {% for ipo in ipos %}
-                <tr class="hover:bg-gray-50 transition">
-                    <td class="px-4 py-2 text-gray-400">{{ ipo.id }}</td>
-                    <td class="px-4 py-2 font-mono font-bold text-indigo-700">{{ ipo.ticker or '-' }}</td>
-                    <td class="px-4 py-2 text-gray-800 max-w-xs truncate">{{ ipo.company_name }}</td>
+                <tr class="hover:bg-gray-700/50 transition">
+                    <td class="px-4 py-2 text-gray-500">{{ ipo.id }}</td>
+                    <td class="px-4 py-2 font-mono font-bold text-indigo-400">{{ ipo.ticker or '-' }}</td>
+                    <td class="px-4 py-2 text-gray-200 max-w-xs truncate">{{ ipo.company_name }}</td>
                     <td class="px-4 py-2 text-center">
                         {% set status_colors = {
-                            'newly_approved': 'bg-blue-100 text-blue-700',
-                            'in_distribution': 'bg-green-100 text-green-700',
-                            'awaiting_trading': 'bg-orange-100 text-orange-700',
-                            'trading': 'bg-emerald-100 text-emerald-700',
-                            'archived': 'bg-gray-100 text-gray-500',
+                            'newly_approved': 'bg-blue-900/50 text-blue-300 border border-blue-700',
+                            'in_distribution': 'bg-green-900/50 text-green-300 border border-green-700',
+                            'awaiting_trading': 'bg-orange-900/50 text-orange-300 border border-orange-700',
+                            'trading': 'bg-emerald-900/50 text-emerald-300 border border-emerald-700',
+                            'archived': 'bg-gray-700/50 text-gray-400 border border-gray-600',
                         } %}
                         {% set status_labels = {
                             'newly_approved': 'SPK Onayli',
@@ -83,34 +83,34 @@
                             'trading': 'Islem Goruyor',
                             'archived': 'Arsiv',
                         } %}
-                        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(ipo.status, 'bg-gray-100 text-gray-500') }}">
+                        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(ipo.status, 'bg-gray-700 text-gray-400') }}">
                             {{ status_labels.get(ipo.status, ipo.status) }}
                         </span>
                     </td>
-                    <td class="px-4 py-2 text-right font-mono">
+                    <td class="px-4 py-2 text-right font-mono text-gray-300">
                         {% if ipo.ipo_price %}{{ ipo.ipo_price }} TL{% else %}-{% endif %}
                     </td>
-                    <td class="px-4 py-2 text-center text-xs text-gray-500">
+                    <td class="px-4 py-2 text-center text-xs text-gray-400">
                         {% if ipo.subscription_start %}{{ ipo.subscription_start }}{% else %}-{% endif %}
                     </td>
-                    <td class="px-4 py-2 text-center text-xs text-gray-500">
+                    <td class="px-4 py-2 text-center text-xs text-gray-400">
                         {% if ipo.trading_start %}{{ ipo.trading_start }}{% else %}-{% endif %}
                     </td>
                     <td class="px-4 py-2 text-center">
                         <div class="flex items-center justify-center gap-1">
                             <a href="/admin/ipo/{{ ipo.id }}/edit"
-                               class="bg-indigo-50 text-indigo-700 px-2 py-1 rounded text-xs hover:bg-indigo-100 transition">
+                               class="bg-indigo-900/50 text-indigo-300 px-2 py-1 rounded text-xs hover:bg-indigo-800/50 transition border border-indigo-700">
                                 Duzenle
                             </a>
                             <a href="/admin/ipo/{{ ipo.id }}/allocations"
-                               class="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs hover:bg-emerald-100 transition">
+                               class="bg-emerald-900/50 text-emerald-300 px-2 py-1 rounded text-xs hover:bg-emerald-800/50 transition border border-emerald-700">
                                 Dagitim
                             </a>
                             <form method="post" action="/admin/ipo/{{ ipo.id }}/delete"
                                   onsubmit="return confirm('{{ ipo.company_name }} silinecek. Emin misiniz?');"
                                   class="inline">
                                 <button type="submit"
-                                        class="bg-red-50 text-red-700 px-2 py-1 rounded text-xs hover:bg-red-100 transition">
+                                        class="bg-red-900/50 text-red-300 px-2 py-1 rounded text-xs hover:bg-red-800/50 transition border border-red-700">
                                     Sil
                                 </button>
                             </form>
@@ -121,7 +121,7 @@
 
                 {% if not ipos %}
                 <tr>
-                    <td colspan="8" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="8" class="px-4 py-8 text-center text-gray-500">
                         Henuz kayitli halka arz yok.
                     </td>
                 </tr>

@@ -6,7 +6,7 @@
     <!-- Baslik -->
     <div class="flex items-center justify-between mb-6">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800">
+            <h1 class="text-2xl font-bold text-gray-100">
                 {% if is_new %}
                     Yeni Halka Arz Olustur
                 {% else %}
@@ -17,17 +17,17 @@
             <p class="text-sm text-gray-500 mt-1">ID: {{ ipo.id }} | Son guncelleme: {{ ipo.updated_at }}</p>
             {% endif %}
         </div>
-        <a href="/admin/" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Dashboard</a>
+        <a href="/admin/" class="text-sm text-indigo-400 hover:text-indigo-300">&larr; Dashboard</a>
     </div>
 
     <!-- Mesajlar -->
     {% if success %}
-    <div class="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg mb-4 text-sm">
+    <div class="bg-green-900/50 border border-green-700 text-green-300 px-4 py-3 rounded-lg mb-4 text-sm">
         {{ success }}
     </div>
     {% endif %}
     {% if error %}
-    <div class="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-4 text-sm">
+    <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg mb-4 text-sm">
         Hata: {{ error }}
     </div>
     {% endif %}
@@ -36,25 +36,25 @@
     <form method="post" action="{{ '/admin/ipo/new' if is_new else '/admin/ipo/' + (ipo.id|string) + '/edit' }}">
 
         <!-- ====== TEMEL BILGILER ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Temel Bilgiler</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Temel Bilgiler</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Sirket Adi *</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Sirket Adi *</label>
                     <input type="text" name="company_name" required
                            value="{{ ipo.company_name if ipo else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Ticker (Hisse Kodu)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Ticker (Hisse Kodu)</label>
                     <input type="text" name="ticker" maxlength="10" placeholder="ATATR"
                            value="{{ ipo.ticker if ipo and ipo.ticker else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono uppercase">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono uppercase placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Status</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Status</label>
                     <select name="status"
-                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         {% set statuses = [
                             ('newly_approved', 'SPK Onayli'),
                             ('in_distribution', 'Dagitimda'),
@@ -68,114 +68,114 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Logo URL</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Logo URL</label>
                     <input type="url" name="logo_url"
                            value="{{ ipo.logo_url if ipo and ipo.logo_url else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Sektor</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Sektor</label>
                     <input type="text" name="sector"
                            value="{{ ipo.sector if ipo and ipo.sector else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Konsorsiyum Lideri</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Konsorsiyum Lideri</label>
                     <input type="text" name="lead_broker"
                            value="{{ ipo.lead_broker if ipo and ipo.lead_broker else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
             </div>
         </div>
 
         <!-- ====== FIYAT & BUYUKLUK ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Fiyat & Buyukluk</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Fiyat & Buyukluk</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Halka Arz Fiyati (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Halka Arz Fiyati (TL)</label>
                     <input type="text" name="ipo_price" placeholder="11.20"
                            value="{{ ipo.ipo_price if ipo and ipo.ipo_price else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Toplam Lot</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Toplam Lot</label>
                     <input type="text" name="total_lots" placeholder="15000000"
                            value="{{ ipo.total_lots if ipo and ipo.total_lots else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Arz Buyuklugu (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Arz Buyuklugu (TL)</label>
                     <input type="text" name="offering_size_tl" placeholder="168000000"
                            value="{{ ipo.offering_size_tl if ipo and ipo.offering_size_tl else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Sermaye Artirimi (Lot)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Sermaye Artirimi (Lot)</label>
                     <input type="text" name="capital_increase_lots"
                            value="{{ ipo.capital_increase_lots if ipo and ipo.capital_increase_lots else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Ortak Satisi (Lot)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Ortak Satisi (Lot)</label>
                     <input type="text" name="partner_sale_lots"
                            value="{{ ipo.partner_sale_lots if ipo and ipo.partner_sale_lots else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
             </div>
         </div>
 
         <!-- ====== TARIHLER ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Tarihler</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Tarihler</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">SPK Onay Tarihi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">SPK Onay Tarihi</label>
                     <input type="date" name="spk_approval_date"
                            value="{{ ipo.spk_approval_date if ipo and ipo.spk_approval_date else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Basvuru Baslangic</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Baslangic</label>
                     <input type="date" name="subscription_start"
                            value="{{ ipo.subscription_start if ipo and ipo.subscription_start else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Basvuru Bitis</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Bitis</label>
                     <input type="date" name="subscription_end"
                            value="{{ ipo.subscription_end if ipo and ipo.subscription_end else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Basvuru Saatleri</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Saatleri</label>
                     <input type="text" name="subscription_hours" placeholder="09:00-17:00"
                            value="{{ ipo.subscription_hours if ipo and ipo.subscription_hours else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Islem Baslangic</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Islem Baslangic</label>
                     <input type="date" name="trading_start"
                            value="{{ ipo.trading_start if ipo and ipo.trading_start else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Beklenen Islem Tarihi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Beklenen Islem Tarihi</label>
                     <input type="date" name="expected_trading_date"
                            value="{{ ipo.expected_trading_date if ipo and ipo.expected_trading_date else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
             </div>
         </div>
 
         <!-- ====== DAGITIM & KATILIM ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Dagitim & Katilim</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Dagitim & Katilim</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Dagitim Yontemi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Dagitim Yontemi</label>
                     <select name="distribution_method"
-                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         <option value="">Seciniz</option>
                         {% set dist_methods = [
                             ('esit', 'Esit Dagitim'),
@@ -190,9 +190,9 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Katilim Yontemi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Katilim Yontemi</label>
                     <select name="participation_method"
-                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         <option value="">Seciniz</option>
                         {% set part_methods = [
                             ('talep_toplama', 'Talep Toplama'),
@@ -204,9 +204,9 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Pazar Segmenti</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Pazar Segmenti</label>
                     <select name="market_segment"
-                            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                         <option value="">Seciniz</option>
                         {% set markets = [
                             ('yildiz_pazar', 'Yildiz Pazar'),
@@ -219,34 +219,34 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Tahmini Kisi Basi Lot</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Tahmini Kisi Basi Lot</label>
                     <input type="text" name="estimated_lots_per_person"
                            value="{{ ipo.estimated_lots_per_person if ipo and ipo.estimated_lots_per_person else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Halka Aciklik (%)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Halka Aciklik (%)</label>
                     <input type="text" name="public_float_pct" placeholder="25.50"
                            value="{{ ipo.public_float_pct if ipo and ipo.public_float_pct else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Iskonto (%)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Iskonto (%)</label>
                     <input type="text" name="discount_pct" placeholder="15.00"
                            value="{{ ipo.discount_pct if ipo and ipo.discount_pct else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
                 </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Dagitim Aciklamasi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Dagitim Aciklamasi</label>
                     <textarea name="distribution_description" rows="2"
-                              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.distribution_description if ipo and ipo.distribution_description else '' }}</textarea>
+                              class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.distribution_description if ipo and ipo.distribution_description else '' }}</textarea>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Katilim Aciklamasi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Katilim Aciklamasi</label>
                     <textarea name="participation_description" rows="2"
-                              class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.participation_description if ipo and ipo.participation_description else '' }}</textarea>
+                              class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.participation_description if ipo and ipo.participation_description else '' }}</textarea>
                 </div>
             </div>
 
@@ -254,156 +254,156 @@
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="distribution_completed" value="on"
                            {{ 'checked' if ipo and ipo.distribution_completed else '' }}
-                           class="w-4 h-4 text-indigo-600 rounded">
-                    <span class="text-sm text-gray-700">Dagitim tamamlandi</span>
+                           class="w-4 h-4 text-indigo-600 rounded bg-gray-700 border-gray-600">
+                    <span class="text-sm text-gray-300">Dagitim tamamlandi</span>
                 </label>
             </div>
         </div>
 
         <!-- ====== EK BILGILER ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Ek Bilgiler</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Ek Bilgiler</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">SPK Bulten No</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">SPK Bulten No</label>
                     <input type="text" name="spk_bulletin_no" placeholder="2026/5"
                            value="{{ ipo.spk_bulletin_no if ipo and ipo.spk_bulletin_no else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Lock-up (gun)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Lock-up (gun)</label>
                     <input type="text" name="lock_up_period_days"
                            value="{{ ipo.lock_up_period_days if ipo and ipo.lock_up_period_days else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Fiyat Istikrari (gun)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Fiyat Istikrari (gun)</label>
                     <input type="text" name="price_stability_days"
                            value="{{ ipo.price_stability_days if ipo and ipo.price_stability_days else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Min Basvuru Lot</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Min Basvuru Lot</label>
                     <input type="text" name="min_application_lot"
                            value="{{ ipo.min_application_lot if ipo and ipo.min_application_lot else '1' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
             </div>
         </div>
 
         <!-- ====== SIRKET BILGILERI ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Sirket Bilgileri</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Sirket Bilgileri</h2>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-600 mb-1">Sirket Aciklamasi</label>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Sirket Aciklamasi</label>
                 <textarea name="company_description" rows="3"
-                          class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.company_description if ipo and ipo.company_description else '' }}</textarea>
+                          class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.company_description if ipo and ipo.company_description else '' }}</textarea>
             </div>
             <div class="mb-4">
-                <label class="block text-sm font-medium text-gray-600 mb-1">Fon Kullanim Hedefleri</label>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Fon Kullanim Hedefleri</label>
                 <textarea name="fund_usage" rows="2"
-                          class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.fund_usage if ipo and ipo.fund_usage else '' }}</textarea>
+                          class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">{{ ipo.fund_usage if ipo and ipo.fund_usage else '' }}</textarea>
             </div>
         </div>
 
         <!-- ====== MALI VERILER ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Mali Veriler</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Mali Veriler</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Guncel Yil Hasilat (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Guncel Yil Hasilat (TL)</label>
                     <input type="text" name="revenue_current_year"
                            value="{{ ipo.revenue_current_year if ipo and ipo.revenue_current_year else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Onceki Yil Hasilat (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Onceki Yil Hasilat (TL)</label>
                     <input type="text" name="revenue_previous_year"
                            value="{{ ipo.revenue_previous_year if ipo and ipo.revenue_previous_year else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Brut Kar (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Brut Kar (TL)</label>
                     <input type="text" name="gross_profit"
                            value="{{ ipo.gross_profit if ipo and ipo.gross_profit else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
             </div>
         </div>
 
         <!-- ====== LINKLER ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Linkler</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Linkler</h2>
             <div class="grid grid-cols-1 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">KAP Bildirim URL</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">KAP Bildirim URL</label>
                     <input type="url" name="kap_notification_url"
                            value="{{ ipo.kap_notification_url if ipo and ipo.kap_notification_url else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Izahname PDF URL</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Izahname PDF URL</label>
                     <input type="url" name="prospectus_url"
                            value="{{ ipo.prospectus_url if ipo and ipo.prospectus_url else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">SPK Bulten URL</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">SPK Bulten URL</label>
                     <input type="url" name="spk_bulletin_url"
                            value="{{ ipo.spk_bulletin_url if ipo and ipo.spk_bulletin_url else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
                 </div>
             </div>
         </div>
 
         <!-- ====== TAKIP & ARSIV ====== -->
-        <div class="bg-white rounded-xl shadow-sm p-6 mb-4">
-            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Takip & Arsiv</h2>
+        <div class="bg-gray-800 rounded-xl shadow-sm p-6 mb-4 border border-gray-700">
+            <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Takip & Arsiv</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Toplam Basvuran</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Toplam Basvuran</label>
                     <input type="text" name="total_applicants"
                            value="{{ ipo.total_applicants if ipo and ipo.total_applicants else '' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-600 mb-1">Islem Gunu Sayaci</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Islem Gunu Sayaci</label>
                     <input type="text" name="trading_day_count"
                            value="{{ ipo.trading_day_count if ipo else '0' }}"
-                           class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
                 </div>
             </div>
             <div class="flex flex-wrap items-center gap-6">
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="allocation_announced" value="on"
                            {{ 'checked' if ipo and ipo.allocation_announced else '' }}
-                           class="w-4 h-4 text-indigo-600 rounded">
-                    <span class="text-sm text-gray-700">Dagitim sonucu aciklandi</span>
+                           class="w-4 h-4 text-indigo-600 rounded bg-gray-700 border-gray-600">
+                    <span class="text-sm text-gray-300">Dagitim sonucu aciklandi</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="ceiling_tracking_active" value="on"
                            {{ 'checked' if ipo and ipo.ceiling_tracking_active else '' }}
-                           class="w-4 h-4 text-indigo-600 rounded">
-                    <span class="text-sm text-gray-700">Tavan takip aktif</span>
+                           class="w-4 h-4 text-indigo-600 rounded bg-gray-700 border-gray-600">
+                    <span class="text-sm text-gray-300">Tavan takip aktif</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="ceiling_broken" value="on"
                            {{ 'checked' if ipo and ipo.ceiling_broken else '' }}
-                           class="w-4 h-4 text-indigo-600 rounded">
-                    <span class="text-sm text-gray-700">Tavan kirildi</span>
+                           class="w-4 h-4 text-indigo-600 rounded bg-gray-700 border-gray-600">
+                    <span class="text-sm text-gray-300">Tavan kirildi</span>
                 </label>
                 <label class="flex items-center gap-2 cursor-pointer">
                     <input type="checkbox" name="archived" value="on"
                            {{ 'checked' if ipo and ipo.archived else '' }}
-                           class="w-4 h-4 text-indigo-600 rounded">
-                    <span class="text-sm text-gray-700">Arsivlenmis</span>
+                           class="w-4 h-4 text-indigo-600 rounded bg-gray-700 border-gray-600">
+                    <span class="text-sm text-gray-300">Arsivlenmis</span>
                 </label>
             </div>
         </div>
 
         <!-- ====== KAYDET ====== -->
         <div class="flex items-center justify-between mt-6 mb-8">
-            <a href="/admin/" class="text-gray-500 hover:text-gray-700 text-sm">Iptal</a>
+            <a href="/admin/" class="text-gray-500 hover:text-gray-300 text-sm">Iptal</a>
             <div class="flex items-center gap-3">
                 {% if not is_new %}
                 <a href="/admin/ipo/{{ ipo.id }}/allocations"
@@ -412,7 +412,7 @@
                 </a>
                 {% endif %}
                 <button type="submit"
-                        class="bg-indigo-600 text-white px-8 py-2 rounded-lg font-medium hover:bg-indigo-700 transition">
+                        class="bg-indigo-500 text-white px-8 py-2 rounded-lg font-medium hover:bg-indigo-600 transition">
                     {{ 'Olustur' if is_new else 'Kaydet' }}
                 </button>
             </div>

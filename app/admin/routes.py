@@ -137,7 +137,11 @@ async def dashboard(
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
-    query = select(IPO).order_by(desc(IPO.updated_at))
+    # En son halka arz en ustte — subscription_start NULL olanlari sona at
+    query = select(IPO).order_by(
+        IPO.subscription_start.is_(None),  # NULL'lar sona
+        desc(IPO.subscription_start),      # en yeni tarih en ustte
+    )
 
     if status:
         query = query.where(IPO.status == status)
