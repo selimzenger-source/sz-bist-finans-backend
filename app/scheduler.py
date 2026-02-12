@@ -127,10 +127,15 @@ async def scrape_spk():
     """
     logger.info("SPK scraper calisiyor...")
     try:
+        import re
         from app.scrapers.spk_scraper import SPKScraper
         from app.models.spk_application import SPKApplication
         from app.models.ipo import IPO
         from sqlalchemy import select
+
+        def _normalize(name: str) -> str:
+            """Sirket ismini normalize et — bosluk/satir sonu/harf farklarini gider."""
+            return re.sub(r"\s+", " ", name.strip()).lower() if name else ""
 
         scraper = SPKScraper()
         try:
@@ -152,16 +157,12 @@ async def scrape_spk():
                 skipped_ipo = 0
                 processed_names = set()  # Ayni scrape icinde duplike onle
 
-                # IPO tablosundaki aktif sirketleri al (bunlar SPK'dan gecmis, tekrar eklenmemeli)
-                ipo_result = await db.execute(
-                    select(IPO.company_name).where(
-                        IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"])
-                    )
-                )
-                ipo_names = set()
+                # IPO tablosundaki TUM sirketleri al (SPK'dan gecmis, tekrar eklenmemeli)
+                ipo_result = await db.execute(select(IPO.company_name))
+                ipo_names_normalized = set()
                 for (name,) in ipo_result.all():
                     if name:
-                        ipo_names.add(name.strip().replace("\n", " "))
+                        ipo_names_normalized.add(_normalize(name))
 
                 # 1. Yeni ekle + mevcut guncelle
                 for app_data in applications:
@@ -175,8 +176,7 @@ async def scrape_spk():
                     processed_names.add(company_name)
 
                     # IPO tablosunda zaten var — SPK'dan gecmis, pending'e ekleme
-                    name_clean = company_name.replace("\n", " ")
-                    if any(name_clean in ipo_n or ipo_n in name_clean for ipo_n in ipo_names):
+                    if _normalize(company_name) in ipo_names_normalized:
                         skipped_ipo += 1
                         continue
 

@@ -1,6 +1,7 @@
 """Admin panel route'lari — IPO CRUD + Dagitim Sonuclari + SPK Yonetimi."""
 
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -23,6 +24,14 @@ from app.admin.auth import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _normalize_company_name(name: str) -> str:
+    """Sirket ismini normalize eder — bosluk, satir sonu, buyuk/kucuk harf farklarini giderir."""
+    if not name:
+        return ""
+    # \n, \r, \t → bosluk, fazla bosluklari tek bosluga indir, strip, lowercase
+    return re.sub(r"\s+", " ", name.strip()).lower()
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -655,16 +664,12 @@ async def cleanup_spk_duplicates(
         return RedirectResponse(url="/admin/login", status_code=303)
 
     try:
-        # 1. IPO tablosundaki sirketleri al (zaten onaylanmis/dagitimda — SPK'dan gecmis)
-        ipo_result = await db.execute(
-            select(IPO.company_name).where(
-                IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"])
-            )
-        )
-        ipo_names = set()
+        # 1. IPO tablosundaki TUM sirketleri al (SPK'dan gecmis — tekrar eklenmemeli)
+        ipo_result = await db.execute(select(IPO.company_name))
+        ipo_names_normalized = set()
         for (name,) in ipo_result.all():
             if name:
-                ipo_names.add(name.strip().replace("\n", " "))
+                ipo_names_normalized.add(_normalize_company_name(name))
 
         # 2. Tum SPK kayitlarini sil
         result = await db.execute(select(SPKApplication))
@@ -692,9 +697,9 @@ async def cleanup_spk_duplicates(
                 continue
             seen_names.add(name)
 
-            # IPO tablosunda zaten var (onaylanmis/dagitimda) — atla
-            name_clean = name.replace("\n", " ")
-            if any(name_clean in ipo_n or ipo_n in name_clean for ipo_n in ipo_names):
+            # IPO tablosunda zaten var — atla
+            name_norm = _normalize_company_name(name)
+            if name_norm in ipo_names_normalized:
                 skipped_ipo += 1
                 continue
 
