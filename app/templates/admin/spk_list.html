@@ -6,10 +6,10 @@
     <h1 class="text-2xl font-bold text-gray-100">SPK Onayi Beklenen Basvurular</h1>
     <div class="flex gap-3 items-center">
         <form method="post" action="/admin/spk/cleanup-duplicates"
-              onsubmit="return confirm('Duplike kayitlar silinsin mi? (ayni isimde birden fazla varsa eski olan silinir)')">
+              onsubmit="return confirm('Tum liste silinip SPK sitesinden taze veri cekilecek. Onayliyor musun?')">
             <button type="submit"
                     class="bg-amber-900/50 text-amber-300 px-3 py-1 rounded-lg text-xs hover:bg-amber-800/50 transition border border-amber-700">
-                Duplikeleri Temizle
+                Sifirla + Taze Cek
             </button>
         </form>
         <a href="/admin/" class="text-sm text-indigo-400 hover:text-indigo-300">&larr; Dashboard</a>

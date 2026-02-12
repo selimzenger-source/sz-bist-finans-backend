@@ -646,43 +646,60 @@ async def cleanup_spk_duplicates(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """SPK duplike kayitlari temizler — ayni isimde birden fazla varsa eski olani siler."""
+    """Tum SPK tablosunu siler ve SPK sitesinden taze veri ceker (full resync).
+
+    1. Tum kayitlari sil
+    2. SPK sitesinden guncel listeyi cek
+    3. Benzersiz kayitlari ekle (duplike olmaz)
+    """
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
-    # Tum kayitlari cek
-    result = await db.execute(
-        select(SPKApplication).order_by(SPKApplication.id)
-    )
-    all_apps = list(result.scalars().all())
+    try:
+        # 1. Tum kayitlari sil
+        result = await db.execute(select(SPKApplication))
+        all_apps = list(result.scalars().all())
+        old_count = len(all_apps)
+        for app in all_apps:
+            await db.delete(app)
+        await db.flush()
 
-    seen = {}  # company_name -> en yuksek id (en yeni kayit)
-    to_delete = []
+        # 2. SPK sitesinden taze veri cek
+        from app.scrapers.spk_scraper import SPKScraper
+        scraper = SPKScraper()
+        try:
+            applications = await scraper.fetch_ipo_applications()
+        finally:
+            await scraper.close()
 
-    for app in all_apps:
-        name = app.company_name.strip()
-        if name in seen:
-            # Duplike: eski olani sil (dusuk id)
-            old_id, old_app = seen[name]
-            if app.id > old_id:
-                # Yeni kayit daha buyuk id — eski olani sil
-                to_delete.append(old_app)
-                seen[name] = (app.id, app)
-            else:
-                # Eski kayit daha buyuk id — bu yeniyi sil
-                to_delete.append(app)
-        else:
-            seen[name] = (app.id, app)
+        # 3. Benzersiz kayitlari ekle
+        seen_names = set()
+        new_count = 0
+        for app_data in applications:
+            name = app_data.get("company_name", "").strip()
+            if not name or name in seen_names:
+                continue
+            seen_names.add(name)
 
-    deleted_count = 0
-    for dup in to_delete:
-        await db.delete(dup)
-        deleted_count += 1
+            db.add(SPKApplication(
+                company_name=name,
+                application_date=app_data.get("application_date"),
+                status="pending",
+            ))
+            new_count += 1
 
-    await db.flush()
-    logger.info(f"Admin: SPK duplike temizligi — {deleted_count} kayit silindi")
+        await db.flush()
+        msg = f"{old_count} eski silindi, {new_count} taze yuklendi"
+        logger.info(f"Admin: SPK full resync — {msg}")
 
-    return RedirectResponse(
-        url=f"/admin/spk?success={deleted_count}+duplike+silindi",
-        status_code=303,
-    )
+        return RedirectResponse(
+            url=f"/admin/spk?success={msg}",
+            status_code=303,
+        )
+
+    except Exception as e:
+        logger.error(f"Admin: SPK resync hatasi — {e}")
+        return RedirectResponse(
+            url=f"/admin/spk?success=Hata: {str(e)[:80]}",
+            status_code=303,
+        )
