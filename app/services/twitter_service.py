@@ -193,6 +193,11 @@ def _safe_tweet(text: str) -> bool:
 # ================================================================
 APP_LINK = "szalgo.net.tr"
 
+# Standart footer — slogan + yasal uyari
+SLOGAN = "\U0001F514 İlk bilen siz olun!"
+DISCLAIMER = "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."
+DISCLAIMER_SHORT = "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."
+
 
 # ================================================================
 # 1. YENI HALKA ARZ (SPK Onayi)
@@ -206,11 +211,11 @@ def tweet_new_ipo(ipo) -> bool:
             price_text = f"\n\U0001F4B0 Halka arz fiyatı: {ipo.ipo_price} TL"
 
         text = (
-            f"\U0001F6A8 SPK B\u00fclteni Yay\u0131mland\u0131!\n\n"
-            f"{ipo.company_name}{ticker_text} i\u00e7in halka arz ba\u015fvurusu SPK taraf\u0131ndan onayland\u0131."
+            f"\U0001F6A8 SPK Bülteni Yayımlandı!\n\n"
+            f"{ipo.company_name}{ticker_text} için halka arz başvurusu SPK tarafından onaylandı."
             f"{price_text}\n\n"
-            f"\U0001F4F2 Bilgiler geldik\u00e7e bildirim g\u00f6nderece\u011fiz.\n"
-            f"Detaylar i\u00e7in: {APP_LINK}\n\n"
+            f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
+            f"Detaylar için: {APP_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
         return _safe_tweet(text)
@@ -235,7 +240,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"\U0001F4CB Halka Arz Başvuruları Başladı!\n\n"
             f"{ipo.company_name}{ticker_text} için talep toplama süreci başlamıştır."
             f"{price_text}{end_date}\n\n"
-            f"\U0001F4F2 Detaylar ve anlık bildirimler için:\n"
+            f"📲 Detaylar ve anlık bildirimler için:\n"
             f"{APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
@@ -260,7 +265,7 @@ def tweet_estimated_lots(ipo) -> bool:
             f"\u2022 Tahmini dağıtım: ~{lots} lot/kişi\n\n"
             f"\u26A0\uFE0F Yurt içi bireysel yatırımcıya dağıtılan"
             f" ortalama lot baz alınmıştır.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
@@ -282,8 +287,8 @@ def tweet_last_4_hours(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} halka arz başvurusu için"
             f" kapanışa son 4 saat kaldı!\n\n"
             f"Başvurunuzu yapmayı unutmayın.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
-            f"#HalkaArz #SonGun #{ipo.ticker or 'Borsa'}"
+            f"📲 {APP_LINK}\n\n"
+            f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
     except Exception as e:
@@ -303,7 +308,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"\U0001F6A8 Son 30 Dakika!\n\n"
             f"{ipo.company_name}{ticker_text} halka arz başvurusu kapanmak üzere!\n\n"
             f"Başvuru yapmak isteyenler acele etsin.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
@@ -328,7 +333,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} bugün borsada işleme başlıyor!"
             f"{price_text}\n\n"
             f"25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
@@ -362,8 +367,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"\u2022 Halka arz fiyatı: {ipo_price:.2f} TL\n"
             f"\u2022 Açılış fiyatı: {open_price:.2f} TL\n"
             f"\u2022 {durum}\n\n"
-            f"25 günlük takip için:\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
@@ -612,10 +616,10 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
             emoji = "\U0001F534"
 
         text = (
-            f"{emoji} #{ticker} — KAP Bildirimi\n\n"
+            f"{emoji} #{ticker} \u2014 KAP Bildirimi\n\n"
             f"\u2022 {matched_keyword}\n\n"
-            f"350+ hisse senedini tarayan sistemimiz çok yakında!\n\n"
-            f"Ücretsiz BIST 30 bildirimleri için:\n"
+            f"\u26A0\uFE0F KAP haberleri şu an BİST 30 ile sınırlıdır.\n"
+            f"350+ hisse için anlık bildirimler yakında!\n\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#BIST30 #{ticker} #KAP #Borsa"
         )
