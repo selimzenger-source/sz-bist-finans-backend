@@ -9,7 +9,7 @@
 
 {% if success %}
 <div class="bg-green-900/50 border border-green-700 text-green-300 px-4 py-3 rounded-lg mb-4 text-sm">
-    {{ success }}
+    {% if success == 'deleted' %}Basvuru silindi!{% elif success == 'updated' %}SPK basvurusu guncellendi!{% else %}{{ success }}{% endif %}
 </div>
 {% endif %}
 
@@ -61,17 +61,26 @@
                         </span>
                     </td>
                     <td class="px-4 py-2 text-center">
-                        <form method="post" action="/admin/spk/{{ app.id }}/status" class="inline-flex gap-1">
-                            <select name="status" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-0.5">
-                                <option value="pending" {{ 'selected' if app.status == 'pending' else '' }}>Beklemede</option>
-                                <option value="approved" {{ 'selected' if app.status == 'approved' else '' }}>Onaylandi</option>
-                                <option value="rejected" {{ 'selected' if app.status == 'rejected' else '' }}>Reddedildi</option>
-                            </select>
-                            <button type="submit"
-                                    class="bg-indigo-900/50 text-indigo-300 px-2 py-0.5 rounded text-xs hover:bg-indigo-800/50 transition border border-indigo-700">
-                                Kaydet
-                            </button>
-                        </form>
+                        <div class="inline-flex gap-1 items-center">
+                            <form method="post" action="/admin/spk/{{ app.id }}/status" class="inline-flex gap-1">
+                                <select name="status" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-0.5">
+                                    <option value="pending" {{ 'selected' if app.status == 'pending' else '' }}>Beklemede</option>
+                                    <option value="approved" {{ 'selected' if app.status == 'approved' else '' }}>Onaylandi</option>
+                                    <option value="rejected" {{ 'selected' if app.status == 'rejected' else '' }}>Reddedildi</option>
+                                </select>
+                                <button type="submit"
+                                        class="bg-indigo-900/50 text-indigo-300 px-2 py-0.5 rounded text-xs hover:bg-indigo-800/50 transition border border-indigo-700">
+                                    Kaydet
+                                </button>
+                            </form>
+                            <form method="post" action="/admin/spk/{{ app.id }}/delete"
+                                  onsubmit="return confirm('{{ app.company_name }} silinsin mi?')">
+                                <button type="submit"
+                                        class="bg-red-900/50 text-red-300 px-2 py-0.5 rounded text-xs hover:bg-red-800/50 transition border border-red-700">
+                                    Sil
+                                </button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}

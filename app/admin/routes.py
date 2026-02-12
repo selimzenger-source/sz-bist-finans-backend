@@ -583,7 +583,7 @@ async def spk_list(
     return templates.TemplateResponse("admin/spk_list.html", {
         "request": request,
         "applications": applications,
-        "success": "SPK basvurusu guncellendi!" if success == "updated" else None,
+        "success": success,
     })
 
 
@@ -612,3 +612,28 @@ async def update_spk_status(
     logger.info(f"Admin: SPK basvuru status guncellendi — {app.company_name} -> {new_status}")
 
     return RedirectResponse(url="/admin/spk?success=updated", status_code=303)
+
+
+@router.post("/spk/{app_id}/delete")
+async def delete_spk_application(
+    request: Request,
+    app_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK basvuruyu siler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    result = await db.execute(
+        select(SPKApplication).where(SPKApplication.id == app_id)
+    )
+    app = result.scalar_one_or_none()
+    if not app:
+        return RedirectResponse(url="/admin/spk?error=not_found", status_code=303)
+
+    company_name = app.company_name
+    await db.delete(app)
+    await db.flush()
+    logger.info(f"Admin: SPK basvuru silindi — {company_name} (id={app_id})")
+
+    return RedirectResponse(url="/admin/spk?success=deleted", status_code=303)
