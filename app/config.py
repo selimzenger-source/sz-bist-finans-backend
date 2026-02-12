@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ADMIN_TELEGRAM_BOT_TOKEN: str = ""
     ADMIN_TELEGRAM_CHAT_ID: str = ""
 
+    # RevenueCat webhook dogrulama
+    REVENUECAT_WEBHOOK_SECRET: str = ""
+
     # X (Twitter) API — @SZAlgoFinans otomatik tweet
     X_API_KEY: str = ""
     X_API_SECRET: str = ""

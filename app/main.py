@@ -480,14 +480,18 @@ async def list_telegram_news(
 
 @app.post("/api/v1/telegram-news/test-send")
 async def test_send_telegram_news(
+    request: Request,
     ticker: str = Query("TEST", description="Hisse kodu"),
     sentiment: str = Query("positive", description="positive veya negative"),
     db: AsyncSession = Depends(get_db),
 ):
     """Test icin Telegram kanalina mesaj gonder + DB'ye kaydet.
 
-    Sadece development/test icin. Production'da kapatilabilir.
+    Admin sifresi gerektirir — spam onleme.
     """
+    admin_pw = request.headers.get("X-Admin-Password", "")
+    if not _verify_admin_password(admin_pw):
+        raise HTTPException(status_code=401, detail="Admin sifresi gerekli (X-Admin-Password header)")
     from app.services.telegram_sender import send_and_save_kap_news
 
     success = await send_and_save_kap_news(
@@ -1619,6 +1623,15 @@ async def list_user_ceiling_subscriptions(
 @limiter.limit("30/minute")
 async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """RevenueCat webhook — abonelik olaylari."""
+    # Webhook imza dogrulama — sahte istekleri engelle
+    rc_secret = settings.REVENUECAT_WEBHOOK_SECRET
+    if rc_secret:
+        auth_header = request.headers.get("Authorization", "")
+        expected = f"Bearer {rc_secret}"
+        if not hmac.compare_digest(auth_header.encode(), expected.encode()):
+            logger.warning("RevenueCat webhook: gecersiz Authorization header")
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
     event = payload.get("event", {})
     event_type = event.get("type", "")
     app_user_id = event.get("app_user_id", "")
