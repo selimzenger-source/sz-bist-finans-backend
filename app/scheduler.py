@@ -739,10 +739,11 @@ async def daily_ceiling_update():
                                     logger.info("Tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
                                     await asyncio.sleep(jitter)
 
-                                # Tweet #8: Gunluk takip (her gun)
+                                # Tweet #8: Gunluk takip (her gun) — kumulatif tablo ile
                                 tweet_daily_tracking(
                                     ipo, current_day, last_close,
                                     daily_pct, last_det["durum"],
+                                    days_data=days_data,
                                 )
 
                                 # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)

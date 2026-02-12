@@ -376,17 +376,11 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
 # 8. GUNLUK TAKIP (18:20 — her islem gunu)
 # ================================================================
 def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
-                         pct_change: float, durum: str) -> bool:
-    """Her islem gunu 18:20'de gunluk takip tweeti."""
+                         pct_change: float, durum: str,
+                         days_data: list = None) -> bool:
+    """Her islem gunu 18:20'de kumulatif tablo seklinde gunluk takip tweeti."""
     try:
-        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-
-        # Kumulatif degisim
-        if ipo_price > 0:
-            cum_change = ((close_price - ipo_price) / ipo_price) * 100
-        else:
-            cum_change = 0
 
         # Durum emoji
         durum_map = {
@@ -398,16 +392,63 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
         }
         durum_text = durum_map.get(durum, durum)
 
+        # Kumulatif tablo olustur — her gun halka arz fiyatina gore toplam getiri
+        table_lines = []
+        if days_data and ipo_price > 0:
+            for d in days_data:
+                day_num = d["trading_day"]
+                day_close = float(d["close"])
+                cum_pct = ((day_close - ipo_price) / ipo_price) * 100
+                emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
+                if day_num == trading_day:
+                    table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f} \u25C0")
+                else:
+                    table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
+        else:
+            # days_data yoksa eski formatta tek satir yaz
+            if ipo_price > 0:
+                cum_change = ((close_price - ipo_price) / ipo_price) * 100
+            else:
+                cum_change = 0
+            table_lines.append(f"{trading_day}. %{cum_change:+.1f}")
+
+        table_text = "\n".join(table_lines)
+
         text = (
-            f"\U0001F4CA {ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
-            f"\u2022 Kapanis: {close_price:.2f} TL\n"
-            f"\u2022 Gunluk degisim: %{pct_change:+.2f}\n"
-            f"\u2022 Toplam getiri: %{cum_change:+.2f}\n"
-            f"\u2022 Durum: {durum_text}\n\n"
-            f"Detayli takip icin:\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
+            f"{table_text}\n\n"
+            f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
+            f"\U0001F4F2 {APP_LINK}\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
+
+        # Twitter 280 karakter limiti kontrolu
+        if len(text) > 280:
+            # Cok uzunsa son 10 gunu goster, oncesini "..." ile oetle
+            if days_data and len(days_data) > 10:
+                first_lines = table_lines[:2]
+                last_lines = table_lines[-8:]
+                table_text = "\n".join(first_lines) + "\n...\n" + "\n".join(last_lines)
+                text = (
+                    f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
+                    f"{table_text}\n\n"
+                    f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
+                    f"\U0001F4F2 {APP_LINK}\n"
+                    f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+                )
+
+        # Hala 280'i asiyorsa son kurtarma — sadece son 6 gun
+        if len(text) > 280:
+            last_6 = table_lines[-6:]
+            table_text = "...\n" + "\n".join(last_6)
+            text = (
+                f"\U0001F4CA #{ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
+                f"{table_text}\n\n"
+                f"Kapanis: {close_price:.2f} TL | {durum_text}\n\n"
+                f"\U0001F4F2 {APP_LINK}\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
         return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_daily_tracking hatasi: {e}")
