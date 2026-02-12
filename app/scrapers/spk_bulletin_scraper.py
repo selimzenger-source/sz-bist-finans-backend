@@ -21,6 +21,8 @@ Kaynak: https://spk.gov.tr/spk-bultenleri/{yil}-yili-spk-bultenleri
 import io
 import re
 import json
+import random
+import asyncio
 import logging
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -138,6 +140,11 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
     | Ortaklik | Mevcut Sermaye | Yeni Sermaye | Sermaye Artirimi Bedelli | Bedelsiz |
     | Mevcut Pay Satisi | Ek Pay Satisi | Satis Fiyati |
 
+    ONEMLI AYRIM:
+    - "1. Ilk Halka Arzlar" tablosu → header'da "Satis Fiyati" / "fiyat" bulunur
+    - "2. Halka Acik Ortakliklarin Pay Ihraclari" → header'da "Satis Turu" / "tur" bulunur
+    Sadece "Satis Fiyati" iceren tablo = gercek Ilk Halka Arz tablosu.
+
     Returns:
         [{"company_name", "existing_capital", "new_capital",
           "sale_price"}, ...]
@@ -150,22 +157,61 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
 
         # Header satirini bul — "Ortaklik" veya "Mevcut Sermaye" iceren satir
         header_idx = None
+        header_row_text = ""
         for i, row in enumerate(table):
             row_text = " ".join(str(c or "") for c in row).lower()
             if "ortakl" in row_text and ("sermaye" in row_text or "mevcut" in row_text):
                 header_idx = i
+                header_row_text = row_text
                 break
 
         if header_idx is None:
             continue
 
-        # Bu tablo "Ilk Halka Arz" mi kontrol et —
-        # header'dan once veya text'te "ilk halka arz" olacak
-        context_text = ""
-        for i in range(max(0, header_idx - 2), header_idx):
-            if i < len(table):
-                context_text += " ".join(str(c or "") for c in table[i]) + " "
-        context_lower = context_text.lower() + full_text.lower()
+        # ============================================================
+        # KRITIK AYRIM: Ilk Halka Arz mi, Sermaye Artirimi mi?
+        # Ilk Halka Arz tablosu header'inda "fiyat" (Satis Fiyati) vardir.
+        # Sermaye Artirimi tablosu header'inda "tur" / "tür" (Satis Turu) vardir.
+        # Eger header'da "tür" veya "tur" varsa → bu sermaye artirimi, ATLA!
+        # Eger header'da "fiyat" varsa → bu gercek halka arz tablosu.
+        # ============================================================
+
+        # Bazen tablo header'i birden fazla satira yayilir — header_idx ve
+        # komsu satirlari da kontrol et
+        expanded_header = header_row_text
+        for offset in range(1, 3):
+            check_idx = header_idx + offset
+            if check_idx < len(table) and table[check_idx]:
+                extra_text = " ".join(str(c or "") for c in table[check_idx]).lower()
+                # Eger bu satir hala header gibi gorunuyorsa (sayi icermeyen)
+                if any(kw in extra_text for kw in ["fiyat", "tür", "tur", "sat", "pay"]):
+                    expanded_header += " " + extra_text
+
+        # Onceki satirlari da kontrol et (bazen tablo basligi ayri satirda)
+        for offset in range(1, 3):
+            check_idx = header_idx - offset
+            if check_idx >= 0 and check_idx < len(table) and table[check_idx]:
+                extra_text = " ".join(str(c or "") for c in table[check_idx]).lower()
+                expanded_header += " " + extra_text
+
+        # "Satis Turu" iceriyorsa → Sermaye Artirimi tablosu, atla
+        if ("tür" in expanded_header or "tur" in expanded_header) and "fiyat" not in expanded_header:
+            logger.info(
+                "SPK PDF: Sermaye Artirimi tablosu tespit edildi (Satis Turu), atlaniyor"
+            )
+            continue
+
+        # "Satis Fiyati" / "fiyat" kontrolu — en azindan full_text'te olmali
+        has_fiyat_in_header = "fiyat" in expanded_header
+        has_fiyat_in_context = "fiyat" in full_text.lower()
+
+        if not has_fiyat_in_header and not has_fiyat_in_context:
+            logger.info(
+                "SPK PDF: Tabloda 'fiyat' bulunamadi, Ilk Halka Arz degil, atlaniyor"
+            )
+            continue
+
+        logger.info("SPK PDF: Ilk Halka Arz tablosu tespit edildi (Satis Fiyati mevcut)")
 
         # Header'dan sonraki satirlar = veri
         for row in table[header_idx + 1:]:
@@ -182,6 +228,11 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
 
             # "Ortaklik" header kelimesini atla
             if "ortakl" in company_name.lower():
+                continue
+
+            # "Kaynak", "Not", dipnot satirlarini atla
+            lower_name = company_name.lower()
+            if any(skip in lower_name for skip in ["kaynak", "(1)", "(2)", "not:", "toplam"]):
                 continue
 
             existing_capital = None
@@ -210,7 +261,7 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
             })
 
             logger.info(
-                "SPK PDF tablo: %s — Mevcut: %s, Yeni: %s, Fiyat: %s",
+                "SPK PDF Ilk Halka Arz: %s — Mevcut: %s, Yeni: %s, Fiyat: %s",
                 company_name, existing_capital, new_capital, sale_price,
             )
 
@@ -382,13 +433,13 @@ class SPKBulletinScraper:
             logger.warning("SPK bulten %s: PDF bos veya okunamadi", bno_str)
             return []
 
-        # 3. Ilk Halka Arzlar tablosu
+        # 3. SADECE Ilk Halka Arzlar tablosu — sermaye artirimi tablolari atlanir
         ipo_approvals = find_ilk_halka_arz_table(tables, full_text)
 
-        # 4. Halka Acik Pay Ihraclari tablosundaki "Halka Arz" satirlari
-        secondary_approvals = find_halka_acik_pay_ihraclari(tables)
+        # NOT: find_halka_acik_pay_ihraclari() artik kullanilmiyor.
+        # Sermaye artirimi verileri ileride ayri bir islevle islenecek.
 
-        all_approvals = ipo_approvals + secondary_approvals
+        all_approvals = ipo_approvals
 
         # Meta bilgi ekle
         for approval in all_approvals:
@@ -529,6 +580,7 @@ async def check_spk_bulletins():
             total_approvals = 0
             highest_no = last_no
 
+            _tweet_idx = 0  # Jitter icin sayac — ilk tweet aninda, sonrakiler bekler
             for bulletin in sorted(new_bulletins, key=lambda x: x["bulletin_no"]):
                 bno = bulletin["bulletin_no"]
                 bno_str_val = bulletin_no_str(*bno)
@@ -538,6 +590,15 @@ async def check_spk_bulletins():
                 )
 
                 for approval in approvals:
+                    # Birden fazla onay varsa tweetler arasi 50-55 sn bekle (spam onleme)
+                    if _tweet_idx > 0:
+                        jitter = random.uniform(50, 55)
+                        logger.info(
+                            "SPK tweet jitter: %.1f sn bekleniyor (%s)",
+                            jitter, approval["company_name"],
+                        )
+                        await asyncio.sleep(jitter)
+
                     ipo_data = {
                         "company_name": approval["company_name"],
                         "spk_bulletin_url": approval.get("bulletin_url"),
@@ -556,6 +617,7 @@ async def check_spk_bulletins():
                         datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
                     ).total_seconds() < 60:
                         await notif_service.notify_new_ipo(ipo)
+                        _tweet_idx += 1
                         try:
                             from app.services.admin_telegram import notify_spk_approval
                             await notify_spk_approval(

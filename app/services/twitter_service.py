@@ -200,15 +200,17 @@ APP_LINK = "szalgo.net.tr"
 def tweet_new_ipo(ipo) -> bool:
     """SPK'dan yeni halka arz onayi geldiginde tweet atar."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
-        price_text = f"\n\u2022 Halka Arz Fiyati: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
+        price_text = ""
+        if ipo.ipo_price:
+            price_text = f"\n\U0001F4B0 Halka arz fiyati: {ipo.ipo_price} TL"
 
         text = (
-            f"\U0001F4E2 Yeni Halka Arz!\n\n"
-            f"{ipo.company_name}{ticker_text} SPK onayi aldi.\n"
+            f"\U0001F6A8 SPK Bulteni Yayimlandi!\n\n"
+            f"{ipo.company_name}{ticker_text} icin halka arz basvurusu SPK tarafindan onaylandi."
             f"{price_text}\n\n"
-            f"Detaylar ve bildirimler icin:\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"\U0001F4F2 Bilgiler geldikce bildirim gonderecegiz.\n"
+            f"Detaylar icin: {APP_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
         return _safe_tweet(text)
@@ -223,18 +225,18 @@ def tweet_new_ipo(ipo) -> bool:
 def tweet_distribution_start(ipo) -> bool:
     """Dagitim sureci basladiginda tweet atar."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         end_date = ""
         if ipo.subscription_end:
-            end_date = f"\n\u2022 Son Gun: {ipo.subscription_end.strftime('%d.%m.%Y')}"
-        price_text = f"\n\u2022 Fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+            end_date = f"\n\U0001F4C5 Son basvuru: {ipo.subscription_end.strftime('%d.%m.%Y')}"
+        price_text = f"\n\U0001F4B0 Fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
         text = (
-            f"\U0001F6A8 Dagitim Basladi!\n\n"
-            f"{ipo.company_name}{ticker_text} halka arz basvurulari basladi!"
+            f"\U0001F4CB Halka Arz Basvurulari Basladi!\n\n"
+            f"{ipo.company_name}{ticker_text} icin talep toplama sureci baslamistir."
             f"{price_text}{end_date}\n\n"
-            f"Detaylar ve bildirimler icin:\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"\U0001F4F2 Detaylar ve anlik bildirimler icin:\n"
+            f"{APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
@@ -249,16 +251,15 @@ def tweet_distribution_start(ipo) -> bool:
 def tweet_estimated_lots(ipo) -> bool:
     """Tahmini lot sayisi belli oldugunda tweet atar."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         lots = ipo.estimated_lots_per_person or "?"
 
         text = (
-            f"\U0001F4CA Tahmini Lot Bilgisi\n\n"
+            f"\U0001F4CA Tahmini Dagitim Bilgisi\n\n"
             f"{ipo.company_name}{ticker_text}\n"
-            f"\u2022 Tahmini Lot: ~{lots} lot/kisi\n\n"
+            f"\u2022 Tahmini dagitim: ~{lots} lot/kisi\n\n"
             f"\u26A0\uFE0F Yurt ici bireysel yatirimciya dagitilan "
-            f"ort. lot ile varsayilmistir.\n\n"
-            f"Detaylar icin:\n"
+            f"ortalama lot baz alinmistir.\n\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
@@ -274,13 +275,13 @@ def tweet_estimated_lots(ipo) -> bool:
 def tweet_last_4_hours(ipo) -> bool:
     """Son 4 saat kala hatirlatma tweeti."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         text = (
             f"\u23F0 Son 4 Saat!\n\n"
-            f"{ipo.company_name}{ticker_text} icin basvuru kapanisina "
-            f"son 4 saat kaldi!\n\n"
-            f"Son saniyelerini kacirma!\n\n"
+            f"{ipo.company_name}{ticker_text} halka arz basvurusu icin "
+            f"kapanisa son 4 saat kaldi!\n\n"
+            f"Basvurunuzu yapmayi unutmayin.\n\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#HalkaArz #SonGun #{ipo.ticker or 'Borsa'}"
         )
@@ -296,12 +297,12 @@ def tweet_last_4_hours(ipo) -> bool:
 def tweet_last_30_min(ipo) -> bool:
     """Son 30 dakika kala hatirlatma tweeti."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         text = (
             f"\U0001F6A8 Son 30 Dakika!\n\n"
-            f"{ipo.company_name}{ticker_text} basvurusu kapanmak uzere!\n\n"
-            f"Son saniyeler! Acele et!\n\n"
+            f"{ipo.company_name}{ticker_text} halka arz basvurusu kapanmak uzere!\n\n"
+            f"Basvuru yapmak isteyenler acele etsin.\n\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
         )
@@ -317,16 +318,18 @@ def tweet_last_30_min(ipo) -> bool:
 def tweet_first_trading_day(ipo) -> bool:
     """Ilk islem gunu sabahi gong tweeti."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
-        price_text = f"\n\u2022 Halka Arz Fiyati: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
+        price_text = ""
+        if ipo.ipo_price:
+            price_text = f"\n\U0001F4B0 Halka arz fiyati: {ipo.ipo_price} TL"
 
         text = (
             f"\U0001F514 Gong Caliyor!\n\n"
-            f"{ipo.company_name}{ticker_text} icin ilk islem gunu basliyor!"
+            f"{ipo.company_name}{ticker_text} bugun borsada isleme basliyor!"
             f"{price_text}\n\n"
-            f"Canli takip icin:\n"
+            f"25 gunluk tavan/taban takibini uygulamamizdan yapabilirsiniz.\n\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
-            f"#HalkaArz #BIST #IlkIslemGunu #{ipo.ticker or 'Borsa'}"
+            f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet(text)
     except Exception as e:
@@ -340,26 +343,26 @@ def tweet_first_trading_day(ipo) -> bool:
 def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
     """Ilk islem gunu acilis fiyati tweeti (09:56)."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
 
         # Durum belirle
         if pct_change >= 9.5:
-            durum = "\U0001F7E2 Tavan Acti!"
+            durum = "\U0001F7E2 Tavandan acildi!"
         elif pct_change > 0:
-            durum = f"\U0001F7E2 %{pct_change:+.2f}"
+            durum = f"\U0001F7E2 %{pct_change:+.2f} yukselisle acildi"
         elif pct_change == 0:
             durum = f"\U0001F7E1 Halka arz fiyatindan acildi"
         else:
-            durum = f"\U0001F534 %{pct_change:+.2f}"
+            durum = f"\U0001F534 %{pct_change:+.2f} dususle acildi"
 
         text = (
-            f"\U0001F4C8 Acilis Fiyati\n\n"
+            f"\U0001F4C8 Acilis Fiyati Belli Oldu!\n\n"
             f"{ipo.company_name}{ticker_text}\n\n"
-            f"\u2022 Halka Arz: {ipo_price:.2f} TL\n"
-            f"\u2022 Acilis: {open_price:.2f} TL\n"
+            f"\u2022 Halka arz fiyati: {ipo_price:.2f} TL\n"
+            f"\u2022 Acilis fiyati: {open_price:.2f} TL\n"
             f"\u2022 {durum}\n\n"
-            f"25 gun takibi icin:\n"
+            f"25 gunluk takip icin:\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
@@ -376,7 +379,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                          pct_change: float, durum: str) -> bool:
     """Her islem gunu 18:20'de gunluk takip tweeti."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
 
         # Kumulatif degisim
@@ -388,20 +391,20 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
         # Durum emoji
         durum_map = {
             "tavan": "\U0001F7E2 Tavan",
-            "alici_kapatti": "\U0001F7E2 Alici",
-            "not_kapatti": "\U0001F7E1 Not",
-            "satici_kapatti": "\U0001F534 Satici",
+            "alici_kapatti": "\U0001F7E2 Alici kapatti",
+            "not_kapatti": "\U0001F7E1 Not kapatti",
+            "satici_kapatti": "\U0001F534 Satici kapatti",
             "taban": "\U0001F534 Taban",
         }
         durum_text = durum_map.get(durum, durum)
 
         text = (
-            f"\U0001F4CA {ipo.ticker or ipo.company_name} — Gun {trading_day}/25\n\n"
+            f"\U0001F4CA {ipo.ticker or ipo.company_name} — {trading_day}. Gun / 25\n\n"
             f"\u2022 Kapanis: {close_price:.2f} TL\n"
-            f"\u2022 Gunluk: %{pct_change:+.2f}\n"
-            f"\u2022 Toplam: %{cum_change:+.2f}\n"
+            f"\u2022 Gunluk degisim: %{pct_change:+.2f}\n"
+            f"\u2022 Toplam getiri: %{cum_change:+.2f}\n"
             f"\u2022 Durum: {durum_text}\n\n"
-            f"Detayli takip:\n"
+            f"Detayli takip icin:\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
@@ -424,7 +427,7 @@ def tweet_25_day_performance(
 ) -> bool:
     """25 islem gunu tamamlandiginda performans ozeti tweeti."""
     try:
-        ticker_text = f" ({ipo.ticker})" if ipo.ticker else ""
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
 
         # Lot kazanc hesabi
@@ -436,7 +439,7 @@ def tweet_25_day_performance(
             if total_profit >= 0:
                 lot_text = f"\n\u2022 {lot_count} lot kazanc: +{total_profit:,.0f} TL"
             else:
-                lot_text = f"\n\u2022 {lot_count} lot kayip: {total_profit:,.0f} TL"
+                lot_text = f"\n\u2022 {lot_count} lot zarar: {total_profit:,.0f} TL"
 
         # Performans emoji
         if total_pct >= 50:
@@ -447,11 +450,11 @@ def tweet_25_day_performance(
             perf_emoji = "\U0001F534"
 
         text = (
-            f"{perf_emoji} 25 Gun Performansi\n\n"
+            f"{perf_emoji} 25 Gunluk Performans Ozeti\n\n"
             f"{ipo.company_name}{ticker_text}\n\n"
-            f"\u2022 Halka Arz: {ipo_price:.2f} TL\n"
-            f"\u2022 25. Gun: {close_price_25:.2f} TL\n"
-            f"\u2022 Toplam Getiri: %{total_pct:+.2f}\n"
+            f"\u2022 Halka arz fiyati: {ipo_price:.2f} TL\n"
+            f"\u2022 25. gun kapanis: {close_price_25:.2f} TL\n"
+            f"\u2022 Toplam getiri: %{total_pct:+.2f}\n"
             f"\u2022 Tavan: {ceiling_days} gun | Taban: {floor_days} gun"
             f"{lot_text}\n\n"
             f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir.\n\n"
@@ -484,17 +487,15 @@ def tweet_yearly_summary(
         month_name = _get_turkish_month(now.month)
 
         text = (
-            f"\U0001F4CA {year} Halka Arz Ozeti\n"
+            f"\U0001F4CA {year} Yili Halka Arz Karnesi\n"
             f"({month_name} {now.day} itibariyla)\n\n"
-            f"\u2022 Toplam: {total_ipos} halka arz\n"
+            f"\u2022 Toplam halka arz: {total_ipos}\n"
             f"\u2022 25 gunu tamamlayan: {total_completed}\n"
-            f"\u2022 Pozitif getiri: {positive_count}/{total_completed}\n"
-            f"\u2022 Ort. Getiri: %{avg_return_pct:+.2f}\n"
-            f"\u2022 En Iyi: {best_ticker} (%{best_return_pct:+.1f})\n"
-            f"\u2022 En Kotu: {worst_ticker} (%{worst_return_pct:+.1f})\n\n"
-            f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir. "
-            f"Yurt ici bireysel yatirimciya dagitilan "
-            f"ort. lot ile varsayilmistir.\n\n"
+            f"\u2022 Pozitif getirili: {positive_count}/{total_completed}\n"
+            f"\u2022 Ortalama getiri: %{avg_return_pct:+.2f}\n"
+            f"\u2022 En iyi: {best_ticker} (%{best_return_pct:+.1f})\n"
+            f"\u2022 En kotu: {worst_ticker} (%{worst_return_pct:+.1f})\n\n"
+            f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir.\n\n"
             f"\U0001F4F2 {APP_LINK}"
         )
         return _safe_tweet(text)
@@ -515,7 +516,7 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
             emoji = "\U0001F534"
 
         text = (
-            f"{emoji} {ticker} — KAP Haberi\n\n"
+            f"{emoji} #{ticker} — KAP Bildirimi\n\n"
             f"\u2022 {matched_keyword}\n\n"
             f"350+ hisse senedini tarayan sistemimiz cok yakinda!\n\n"
             f"Ucretsiz BIST 30 bildirimleri icin:\n"
@@ -540,3 +541,19 @@ def _get_turkish_month(month: int) -> str:
         9: "Eylul", 10: "Ekim", 11: "Kasim", 12: "Aralik",
     }
     return months.get(month, "")
+
+
+# ================================================================
+# Telegram Mesaj Sablonu — SPK Onayi (admin_telegram'dan cagrilir)
+# ================================================================
+def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str = "") -> str:
+    """SPK onayi icin Telegram mesaj sablonu."""
+    price_line = f"\n💰 Halka arz fiyati: {price} TL" if price else ""
+    return (
+        f"🚨 <b>SPK Bulteni Yayimlandi!</b>\n\n"
+        f"<b>{company_name}</b> icin halka arz basvurusu SPK tarafindan onaylandi."
+        f"{price_line}\n\n"
+        f"📋 Bulten No: {bulletin_no}\n\n"
+        f"📲 Bilgiler geldikce bildirim gonderecegiz.\n"
+        f"Detaylar icin: {APP_LINK}"
+    )
