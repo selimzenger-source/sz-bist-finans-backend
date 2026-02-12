@@ -576,7 +576,9 @@ async def spk_list(
         return RedirectResponse(url="/admin/login", status_code=303)
 
     result = await db.execute(
-        select(SPKApplication).order_by(desc(SPKApplication.created_at))
+        select(SPKApplication)
+        .where(SPKApplication.status != "deleted")
+        .order_by(desc(SPKApplication.created_at))
     )
     applications = list(result.scalars().all())
 
@@ -632,8 +634,8 @@ async def delete_spk_application(
         return RedirectResponse(url="/admin/spk?error=not_found", status_code=303)
 
     company_name = app.company_name
-    await db.delete(app)
+    app.status = "deleted"
     await db.flush()
-    logger.info(f"Admin: SPK basvuru silindi — {company_name} (id={app_id})")
+    logger.info(f"Admin: SPK basvuru silindi (soft) — {company_name} (id={app_id})")
 
     return RedirectResponse(url="/admin/spk?success=deleted", status_code=303)

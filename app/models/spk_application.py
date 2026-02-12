@@ -69,7 +69,7 @@ class SPKApplication(Base):
     # Durum
     status: Mapped[str] = mapped_column(
         String(20), default="pending",
-        comment="pending: onay bekliyor, approved: onaylandi, rejected: reddedildi"
+        comment="pending: onay bekliyor, approved: onaylandi, rejected: reddedildi, deleted: admin sildi (tekrar eklenmez)"
     )
 
     # Zaman damgasi

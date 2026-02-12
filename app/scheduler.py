@@ -163,13 +163,16 @@ async def scrape_spk():
                     existing = result.scalars().first()
 
                     if existing:
+                        # Admin tarafindan silinen kayitlari tekrar ekleme
+                        if existing.status == "deleted":
+                            continue
                         # Mevcut kaydi guncelle (tarih degismis olabilir)
                         new_date = app_data.get("application_date")
                         if new_date and existing.application_date != new_date:
                             existing.application_date = new_date
                             updated_count += 1
                         # Daha once approved/rejected olmus ama tekrar listede ise pending'e cevir
-                        if existing.status != "pending":
+                        if existing.status not in ("pending", "deleted"):
                             existing.status = "pending"
                             updated_count += 1
                     else:
