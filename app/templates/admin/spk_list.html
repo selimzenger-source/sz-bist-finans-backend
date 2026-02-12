@@ -4,7 +4,16 @@
 {% block content %}
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-gray-100">SPK Onayi Beklenen Basvurular</h1>
-    <a href="/admin/" class="text-sm text-indigo-400 hover:text-indigo-300">&larr; Dashboard</a>
+    <div class="flex gap-3 items-center">
+        <form method="post" action="/admin/spk/cleanup-duplicates"
+              onsubmit="return confirm('Duplike kayitlar silinsin mi? (ayni isimde birden fazla varsa eski olan silinir)')">
+            <button type="submit"
+                    class="bg-amber-900/50 text-amber-300 px-3 py-1 rounded-lg text-xs hover:bg-amber-800/50 transition border border-amber-700">
+                Duplikeleri Temizle
+            </button>
+        </form>
+        <a href="/admin/" class="text-sm text-indigo-400 hover:text-indigo-300">&larr; Dashboard</a>
+    </div>
 </div>
 
 {% if success %}
