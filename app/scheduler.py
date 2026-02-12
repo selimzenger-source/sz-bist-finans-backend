@@ -138,15 +138,20 @@ async def scrape_spk():
             return re.sub(r"\s+", " ", name.strip()).lower() if name else ""
 
         def _is_in_ipo(spk_name: str, ipo_set: set) -> bool:
-            """SPK ismi IPO tablosundakilerden biriyle eslesiyor mu? (birebir + kismi)"""
+            """SPK ismi IPO tablosundakilerden biriyle eslesiyor mu? (birebir + ilk 3 kelime)"""
             n = _normalize(spk_name)
             if not n:
                 return False
             if n in ipo_set:
                 return True
-            prefix = n[:30]
+            skip = {"a.ş.", "a.s.", "aş", "as", "san.", "tic.", "ve", "ve/veya", "ltd.", "şti.", "sti."}
+            spk_words = [w for w in n.split() if w not in skip][:3]
+            if len(spk_words) < 2:
+                return False
+            spk_key = " ".join(spk_words)
             for ipo_n in ipo_set:
-                if ipo_n.startswith(prefix) or n.startswith(ipo_n[:30]):
+                ipo_words = [w for w in ipo_n.split() if w not in skip][:3]
+                if " ".join(ipo_words) == spk_key:
                     return True
             return False
 

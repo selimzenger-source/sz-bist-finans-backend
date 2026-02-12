@@ -37,20 +37,29 @@ def _normalize_company_name(name: str) -> str:
 def _is_company_in_ipo(spk_name: str, ipo_names_normalized: set[str]) -> bool:
     """SPK'daki sirket ismi IPO tablosundakilerden biriyle eslesiyor mu?
 
-    Birebir eslesme + kismi eslesme (contains) yapar.
-    SPK sitesi isimleri kisa yazabilir (orn: 'Ata Turizm Isletmecilik Madencilik San. ve Dis ...')
-    IPO'da tam isim olabilir (orn: 'Ata Turizm Isletmecilik Tasimacilık Madencilik Kuyumculuk San. ve Dis Ticaret A.S.')
+    SPK sitesi uzun isimleri kirpabilir veya farkli siralayabilir.
+    Ornek:
+      SPK:  'Ata Turizm Isletmecilik Madencilik San. ve Dis ...'
+      IPO:  'Ata Turizm Isletmecilik Tasimacilık Madencilik Kuyumculuk San. ve Dis Ticaret A.S.'
+
+    Cozum: Ilk 3 anlamli kelimeyi (A.S., San., ve, gibi kisa kelimeleri atlayarak) karsilastir.
     """
     name_norm = _normalize_company_name(spk_name)
     if not name_norm:
         return False
-    # Birebir eslesme
+    # 1. Birebir eslesme
     if name_norm in ipo_names_normalized:
         return True
-    # Kismi eslesme — isimlerin ilk 30 karakteri ayni mi?
-    spk_prefix = name_norm[:30]
+    # 2. Ilk 3 anlamli kelime eslesmesi
+    skip_words = {"a.ş.", "a.s.", "aş", "as", "san.", "tic.", "ve", "ve/veya", "ltd.", "şti.", "sti."}
+    spk_words = [w for w in name_norm.split() if w not in skip_words][:3]
+    if len(spk_words) < 2:
+        return False
+    spk_key = " ".join(spk_words)
     for ipo_n in ipo_names_normalized:
-        if ipo_n.startswith(spk_prefix) or name_norm.startswith(ipo_n[:30]):
+        ipo_words = [w for w in ipo_n.split() if w not in skip_words][:3]
+        ipo_key = " ".join(ipo_words)
+        if spk_key == ipo_key:
             return True
     return False
 
