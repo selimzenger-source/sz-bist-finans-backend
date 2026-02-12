@@ -129,6 +129,7 @@ async def scrape_spk():
     try:
         from app.scrapers.spk_scraper import SPKScraper
         from app.models.spk_application import SPKApplication
+        from app.models.ipo import IPO
         from sqlalchemy import select
 
         scraper = SPKScraper()
@@ -148,7 +149,19 @@ async def scrape_spk():
                 new_count = 0
                 updated_count = 0
                 removed_count = 0
+                skipped_ipo = 0
                 processed_names = set()  # Ayni scrape icinde duplike onle
+
+                # IPO tablosundaki aktif sirketleri al (bunlar SPK'dan gecmis, tekrar eklenmemeli)
+                ipo_result = await db.execute(
+                    select(IPO.company_name).where(
+                        IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"])
+                    )
+                )
+                ipo_names = set()
+                for (name,) in ipo_result.all():
+                    if name:
+                        ipo_names.add(name.strip().replace("\n", " "))
 
                 # 1. Yeni ekle + mevcut guncelle
                 for app_data in applications:
@@ -161,6 +174,12 @@ async def scrape_spk():
                         continue
                     processed_names.add(company_name)
 
+                    # IPO tablosunda zaten var — SPK'dan gecmis, pending'e ekleme
+                    name_clean = company_name.replace("\n", " ")
+                    if any(name_clean in ipo_n or ipo_n in name_clean for ipo_n in ipo_names):
+                        skipped_ipo += 1
+                        continue
+
                     result = await db.execute(
                         select(SPKApplication).where(
                             SPKApplication.company_name == company_name
@@ -169,16 +188,13 @@ async def scrape_spk():
                     existing = result.scalars().first()
 
                     if existing:
-                        # Admin tarafindan silinen kayitlari tekrar ekleme
-                        if existing.status == "deleted":
-                            continue
                         # Mevcut kaydi guncelle (tarih degismis olabilir)
                         new_date = app_data.get("application_date")
                         if new_date and existing.application_date != new_date:
                             existing.application_date = new_date
                             updated_count += 1
                         # Daha once approved/rejected olmus ama tekrar listede ise pending'e cevir
-                        if existing.status not in ("pending", "deleted"):
+                        if existing.status not in ("pending",):
                             existing.status = "pending"
                             updated_count += 1
                     else:
@@ -204,8 +220,8 @@ async def scrape_spk():
                 await db.commit()
 
             logger.info(
-                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d onaylandi (listeden cikti)",
-                len(applications), new_count, updated_count, removed_count,
+                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d onaylandi (listeden cikti), %d IPO'da mevcut (atlandi)",
+                len(applications), new_count, updated_count, removed_count, skipped_ipo,
             )
         finally:
             await scraper.close()
@@ -1197,12 +1213,12 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 4. SPK Onay Listesi — 6 gunde bir (liste cok dinamik degil, bulten onayinda zaten approved yapiliyor)
+    # 4. SPK Onay Listesi — 6 saatte bir (IPO'daki sirketler otomatik atlanir)
     scheduler.add_job(
         scrape_spk,
-        IntervalTrigger(days=6),
+        IntervalTrigger(hours=6),
         id="spk_scraper",
-        name="SPK Onay Scraper (6 gunde bir)",
+        name="SPK Onay Scraper (6 saatte bir)",
         replace_existing=True,
         next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS),
     )

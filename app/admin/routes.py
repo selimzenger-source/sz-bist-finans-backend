@@ -577,7 +577,6 @@ async def spk_list(
 
     result = await db.execute(
         select(SPKApplication)
-        .where(SPKApplication.status != "deleted")
         .order_by(desc(SPKApplication.created_at))
     )
     applications = list(result.scalars().all())
@@ -634,9 +633,9 @@ async def delete_spk_application(
         return RedirectResponse(url="/admin/spk?error=not_found", status_code=303)
 
     company_name = app.company_name
-    app.status = "deleted"
+    await db.delete(app)
     await db.flush()
-    logger.info(f"Admin: SPK basvuru silindi (soft) — {company_name} (id={app_id})")
+    logger.info(f"Admin: SPK basvuru silindi — {company_name} (id={app_id})")
 
     return RedirectResponse(url="/admin/spk?success=deleted", status_code=303)
 
@@ -656,7 +655,18 @@ async def cleanup_spk_duplicates(
         return RedirectResponse(url="/admin/login", status_code=303)
 
     try:
-        # 1. Tum kayitlari sil
+        # 1. IPO tablosundaki sirketleri al (zaten onaylanmis/dagitimda — SPK'dan gecmis)
+        ipo_result = await db.execute(
+            select(IPO.company_name).where(
+                IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"])
+            )
+        )
+        ipo_names = set()
+        for (name,) in ipo_result.all():
+            if name:
+                ipo_names.add(name.strip().replace("\n", " "))
+
+        # 2. Tum SPK kayitlarini sil
         result = await db.execute(select(SPKApplication))
         all_apps = list(result.scalars().all())
         old_count = len(all_apps)
@@ -664,7 +674,7 @@ async def cleanup_spk_duplicates(
             await db.delete(app)
         await db.flush()
 
-        # 2. SPK sitesinden taze veri cek
+        # 3. SPK sitesinden taze veri cek
         from app.scrapers.spk_scraper import SPKScraper
         scraper = SPKScraper()
         try:
@@ -672,14 +682,21 @@ async def cleanup_spk_duplicates(
         finally:
             await scraper.close()
 
-        # 3. Benzersiz kayitlari ekle
+        # 4. Benzersiz kayitlari ekle (IPO'daki sirketleri atla)
         seen_names = set()
         new_count = 0
+        skipped_ipo = 0
         for app_data in applications:
             name = app_data.get("company_name", "").strip()
             if not name or name in seen_names:
                 continue
             seen_names.add(name)
+
+            # IPO tablosunda zaten var (onaylanmis/dagitimda) — atla
+            name_clean = name.replace("\n", " ")
+            if any(name_clean in ipo_n or ipo_n in name_clean for ipo_n in ipo_names):
+                skipped_ipo += 1
+                continue
 
             db.add(SPKApplication(
                 company_name=name,
@@ -689,7 +706,7 @@ async def cleanup_spk_duplicates(
             new_count += 1
 
         await db.flush()
-        msg = f"{old_count} eski silindi, {new_count} taze yuklendi"
+        msg = f"{old_count} eski silindi, {new_count} taze yuklendi, {skipped_ipo} zaten IPO'da"
         logger.info(f"Admin: SPK full resync — {msg}")
 
         return RedirectResponse(
