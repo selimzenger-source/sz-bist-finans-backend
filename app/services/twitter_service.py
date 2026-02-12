@@ -469,22 +469,11 @@ def tweet_25_day_performance(
     ceiling_days: int,
     floor_days: int,
     avg_lot: Optional[float] = None,
+    days_data: list = None,
 ) -> bool:
-    """25 islem gunu tamamlandiginda performans ozeti tweeti."""
+    """25 islem gunu tamamlandiginda kumulatif tablo + performans ozeti tweeti."""
     try:
-        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-
-        # Lot kazanc hesabi
-        lot_text = ""
-        if avg_lot and ipo_price > 0:
-            lot_count = int(avg_lot)
-            profit_per_lot = (close_price_25 - ipo_price) * 100  # 1 lot = 100 hisse
-            total_profit = profit_per_lot * lot_count
-            if total_profit >= 0:
-                lot_text = f"\n\u2022 {lot_count} lot kazanc: +{total_profit:,.0f} TL"
-            else:
-                lot_text = f"\n\u2022 {lot_count} lot zarar: {total_profit:,.0f} TL"
 
         # Performans emoji
         if total_pct >= 50:
@@ -494,18 +483,74 @@ def tweet_25_day_performance(
         else:
             perf_emoji = "\U0001F534"
 
-        text = (
-            f"{perf_emoji} 25 Gunluk Performans Ozeti\n\n"
-            f"{ipo.company_name}{ticker_text}\n\n"
-            f"\u2022 Halka arz fiyati: {ipo_price:.2f} TL\n"
-            f"\u2022 25. gun kapanis: {close_price_25:.2f} TL\n"
-            f"\u2022 Toplam getiri: %{total_pct:+.2f}\n"
-            f"\u2022 Tavan: {ceiling_days} gun | Taban: {floor_days} gun"
+        # Lot kazanc hesabi
+        lot_text = ""
+        if avg_lot and ipo_price > 0:
+            lot_count = int(avg_lot)
+            profit_per_lot = (close_price_25 - ipo_price) * 100  # 1 lot = 100 hisse
+            total_profit = profit_per_lot * lot_count
+            if total_profit >= 0:
+                lot_text = f"\n{lot_count} lot kazanc: +{total_profit:,.0f} TL"
+            else:
+                lot_text = f"\n{lot_count} lot zarar: {total_profit:,.0f} TL"
+
+        # Kumulatif performans tablosu
+        table_lines = []
+        if days_data and ipo_price > 0:
+            for d in days_data:
+                day_num = d["trading_day"]
+                day_close = float(d["close"])
+                cum_pct = ((day_close - ipo_price) / ipo_price) * 100
+                emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
+                table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
+
+        header = (
+            f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gun Performans\n\n"
+            f"Kumulatif Toplam:\n"
+        )
+        footer = (
+            f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
+            f"Tavan: {ceiling_days} | Taban: {floor_days}"
             f"{lot_text}\n\n"
-            f"\u26A0\uFE0F Ilk 25 islem gunu baz alinmistir.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"\U0001F4F2 {APP_LINK}\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
+
+        if table_lines:
+            # Ilk 2 + ・・・ + son 8 (25 gun sigmiyor)
+            first_lines = table_lines[:2]
+            last_lines = table_lines[-8:]
+            table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
+            text = header + table_text + footer
+
+            # Hala sigmazsa son 6
+            if len(text) > 280:
+                last_6 = table_lines[-6:]
+                table_text = "\u30FB\u30FB\u30FB\n" + "\n".join(last_6)
+                text = header + table_text + footer
+
+            # Son kurtarma — app linkini kaldir
+            if len(text) > 280:
+                footer = (
+                    f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
+                    f"Tavan: {ceiling_days} | Taban: {floor_days}"
+                    f"{lot_text}\n\n"
+                    f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+                )
+                text = header + table_text + footer
+        else:
+            # days_data yoksa eski ozet formati
+            text = (
+                f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gun Performans\n\n"
+                f"\u2022 Halka arz: {ipo_price:.2f} TL\n"
+                f"\u2022 25. gun: {close_price_25:.2f} TL\n"
+                f"\u2022 Toplam: %{total_pct:+.2f}\n"
+                f"\u2022 Tavan: {ceiling_days} | Taban: {floor_days}"
+                f"{lot_text}\n\n"
+                f"\U0001F4F2 {APP_LINK}\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
         return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_25_day_performance hatasi: {e}")

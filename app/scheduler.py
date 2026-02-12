@@ -780,6 +780,7 @@ async def daily_ceiling_update():
                                     tweet_25_day_performance(
                                         ipo, last_close, total_pct,
                                         ceiling_d, floor_d, avg_lot,
+                                        days_data=days_data,
                                     )
                         except Exception as tweet_err:
                             logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
