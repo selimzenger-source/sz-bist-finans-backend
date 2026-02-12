@@ -2,7 +2,7 @@
 
 1. SPK Halka Arz (eski KAP): her 30 dakikada bir — SPK ihrac API
 2. KAP Haberler: DEVRE DISI (KAP API bozuk, 404)
-3. SPK Bulten Monitor: 21:00-03:00 TR her 1 dk, 03:00-08:00 TR her 2 dk
+3. SPK Bulten Monitor: 21:00-03:00 TR her 1 dk, 03:00-08:00 TR her 5 dk
 4. SPK Basvuru Listesi: gunluk 08:00 (SPKApplication tablosuna)
 5. HalkArz + Gedik: her 2 saatte bir
 6. Telegram Poller: her 10 saniyede bir
@@ -1164,10 +1164,10 @@ def _setup_scheduler_impl():
         name="SPK Bulten Monitor (Yogun)",
         replace_existing=True,
     )
-    # 3b. SPK Bulten Monitor — GECE: her 2 dk (00:00-05:00 UTC = 03:00-08:00 TR)
+    # 3b. SPK Bulten Monitor — GECE: her 5 dk (00:00-05:00 UTC = 03:00-08:00 TR)
     scheduler.add_job(
         check_spk_bulletins_job,
-        CronTrigger(minute="*/2", hour="0-4"),
+        CronTrigger(minute="*/5", hour="0-4"),
         id="spk_bulletin_monitor_night",
         name="SPK Bulten Monitor (Gece)",
         replace_existing=True,
