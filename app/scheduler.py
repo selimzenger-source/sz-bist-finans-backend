@@ -148,12 +148,18 @@ async def scrape_spk():
                 new_count = 0
                 updated_count = 0
                 removed_count = 0
+                processed_names = set()  # Ayni scrape icinde duplike onle
 
                 # 1. Yeni ekle + mevcut guncelle
                 for app_data in applications:
-                    company_name = app_data.get("company_name")
+                    company_name = app_data.get("company_name", "").strip()
                     if not company_name:
                         continue
+
+                    # Ayni scrape icinde ayni ismi tekrar isleme
+                    if company_name in processed_names:
+                        continue
+                    processed_names.add(company_name)
 
                     result = await db.execute(
                         select(SPKApplication).where(

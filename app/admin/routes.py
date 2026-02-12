@@ -639,3 +639,50 @@ async def delete_spk_application(
     logger.info(f"Admin: SPK basvuru silindi (soft) — {company_name} (id={app_id})")
 
     return RedirectResponse(url="/admin/spk?success=deleted", status_code=303)
+
+
+@router.post("/spk/cleanup-duplicates")
+async def cleanup_spk_duplicates(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK duplike kayitlari temizler — ayni isimde birden fazla varsa eski olani siler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    # Tum kayitlari cek
+    result = await db.execute(
+        select(SPKApplication).order_by(SPKApplication.id)
+    )
+    all_apps = list(result.scalars().all())
+
+    seen = {}  # company_name -> en yuksek id (en yeni kayit)
+    to_delete = []
+
+    for app in all_apps:
+        name = app.company_name.strip()
+        if name in seen:
+            # Duplike: eski olani sil (dusuk id)
+            old_id, old_app = seen[name]
+            if app.id > old_id:
+                # Yeni kayit daha buyuk id — eski olani sil
+                to_delete.append(old_app)
+                seen[name] = (app.id, app)
+            else:
+                # Eski kayit daha buyuk id — bu yeniyi sil
+                to_delete.append(app)
+        else:
+            seen[name] = (app.id, app)
+
+    deleted_count = 0
+    for dup in to_delete:
+        await db.delete(dup)
+        deleted_count += 1
+
+    await db.flush()
+    logger.info(f"Admin: SPK duplike temizligi — {deleted_count} kayit silindi")
+
+    return RedirectResponse(
+        url=f"/admin/spk?success={deleted_count}+duplike+silindi",
+        status_code=303,
+    )
