@@ -20,7 +20,9 @@
 Admin Telegram bildirimleri: Tum kritik hatalar ve durum gecisleri admin'e bildirilir.
 """
 
+import asyncio
 import logging
+import random
 from datetime import datetime, date, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -405,6 +407,7 @@ async def check_reminders():
             }
             time_label = time_labels.get(reminder_check, "")
 
+            _r_tweet_idx = 0
             for ipo in last_day_ipos:
                 for user in users:
                     await notif_service.send_to_device(
@@ -419,12 +422,19 @@ async def check_reminders():
                     )
 
                 # Tweet at — Son 4 Saat veya Son 30 Dakika (her IPO icin bir kez)
+                # Jitter — ilk IPO haric 50-55 sn bekle
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
+                    if _r_tweet_idx > 0:
+                        jitter = random.uniform(50, 55)
+                        logger.info("Hatirlatma tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker or ipo.company_name)
+                        await asyncio.sleep(jitter)
                     if reminder_check == "reminder_4h":
                         tweet_last_4_hours(ipo)
+                        _r_tweet_idx += 1
                     elif reminder_check == "reminder_30min":
                         tweet_last_30_min(ipo)
+                        _r_tweet_idx += 1
                 except Exception:
                     pass  # Tweet hatasi sistemi etkilemez
 
@@ -696,6 +706,7 @@ async def daily_ceiling_update():
                         )
 
                         # Tweet at — Gunluk Takip (tweet #8) ve 25 Gun Performans (tweet #9)
+                        # Jitter: birden fazla IPO varsa tweetler arasi 50-55 sn bekle
                         try:
                             from app.services.twitter_service import (
                                 tweet_daily_tracking, tweet_25_day_performance,
@@ -722,6 +733,12 @@ async def daily_ceiling_update():
                                     low_price=last_day.get("low"),
                                 )
 
+                                # Jitter — ilk IPO haric tweetler arasi 50-55 sn bekle
+                                if success_count > 1:
+                                    jitter = random.uniform(50, 55)
+                                    logger.info("Tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
+                                    await asyncio.sleep(jitter)
+
                                 # Tweet #8: Gunluk takip (her gun)
                                 tweet_daily_tracking(
                                     ipo, current_day, last_close,
@@ -730,6 +747,11 @@ async def daily_ceiling_update():
 
                                 # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)
                                 if current_day >= 25:
+                                    # 25 gun tweeti icin de jitter bekle
+                                    jitter9 = random.uniform(50, 55)
+                                    logger.info("Tweet #9 jitter: %.1f sn bekleniyor (%s)", jitter9, ipo.ticker)
+                                    await asyncio.sleep(jitter9)
+
                                     ipo_price_f = float(ipo.ipo_price) if ipo.ipo_price else 0
                                     total_pct = (
                                         ((last_close - ipo_price_f) / ipo_price_f) * 100
@@ -912,6 +934,7 @@ async def send_first_trading_day_notifications():
             notif_service = NotificationService(db)
 
             total_sent = 0
+            _ft_tweet_idx = 0
             for ipo in todays_ipos:
                 sent = await notif_service.notify_first_trading_day(ipo)
                 total_sent += sent
@@ -921,9 +944,15 @@ async def send_first_trading_day_notifications():
                 )
 
                 # Tweet at — Ilk Islem Gunu Gong (tweet #6)
+                # Jitter — ilk IPO haric 50-55 sn bekle
                 try:
                     from app.services.twitter_service import tweet_first_trading_day
+                    if _ft_tweet_idx > 0:
+                        jitter = random.uniform(50, 55)
+                        logger.info("Ilk islem tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker or ipo.company_name)
+                        await asyncio.sleep(jitter)
                     tweet_first_trading_day(ipo)
+                    _ft_tweet_idx += 1
                 except Exception:
                     pass  # Tweet hatasi sistemi etkilemez
 
@@ -969,6 +998,7 @@ async def tweet_opening_price_job():
 
             scraper = YahooFinanceScraper()
             try:
+                _tweet_idx = 0
                 for ipo in todays_ipos:
                     try:
                         days_data = await scraper.fetch_ohlc_since_trading_start(
@@ -983,8 +1013,14 @@ async def tweet_opening_price_job():
                                 ((open_price - ipo_price) / ipo_price) * 100
                                 if ipo_price > 0 else 0
                             )
+                            # Jitter — ilk tweet haric 50-55 sn bekle
+                            if _tweet_idx > 0:
+                                jitter = random.uniform(50, 55)
+                                logger.info("Acilis tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
+                                await asyncio.sleep(jitter)
                             from app.services.twitter_service import tweet_opening_price
                             tweet_opening_price(ipo, open_price, pct_change)
+                            _tweet_idx += 1
                     except Exception as e:
                         logger.error("Acilis fiyati tweet hatasi %s: %s", ipo.ticker, e)
             finally:
