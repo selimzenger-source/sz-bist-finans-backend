@@ -648,29 +648,33 @@ async def send_last_day_warnings():
 
 
 async def tweet_spk_approval_intro_job():
-    """SPK onayi geldikten sonra ertesi sabah 06:00'da sirket tanitim tweeti.
+    """SPK onayi geldikten 13 saat sonra sirket tanitim tweeti.
 
-    Dun newly_approved'a gecen (created_at == dun) IPO'lar icin
-    halka_arz_hakkinda_banner.png gorseli ile tweet atar.
-    Gece 23:00'te veya 01:00'de SPK onayi gelse bile sabah 06:00'da atar.
+    Her saat calisir. created_at + 13 saat gecmis ama henuz tweet atilmamis
+    newly_approved IPO'lar icin halka_arz_hakkinda_banner.png gorseli ile tweet atar.
+
+    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 12:00'de tweet atar.
+    SPK onayi 01:00'da gelirse → ayni gun 14:00'de tweet atar.
+
+    Duplicate koruma: _is_duplicate_tweet + intro_tweeted flag.
     """
     try:
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
         from datetime import timedelta
 
-        async with async_session() as db:
-            yesterday = date.today() - timedelta(days=1)
-            today = date.today()
+        DELAY_HOURS = 13  # Sisteme eklenme saatinden 13 saat sonra
 
-            # Dun veya bugun newly_approved'a gecen IPO'lar
+        async with async_session() as db:
+            now = datetime.utcnow()
+
+            # newly_approved ve son 48 saat icinde olusturulmus IPO'lar
+            cutoff = now - timedelta(hours=48)
             result = await db.execute(
                 select(IPO).where(
                     and_(
                         IPO.status == "newly_approved",
-                        # created_at dunun baslangici ile bugunun baslangici arasinda
-                        IPO.created_at >= datetime.combine(yesterday, datetime.min.time()),
-                        IPO.created_at < datetime.combine(today, datetime.min.time()) + timedelta(days=1),
+                        IPO.created_at >= cutoff,
                     )
                 )
             )
@@ -681,12 +685,31 @@ async def tweet_spk_approval_intro_job():
 
             from app.services.twitter_service import tweet_company_intro
             import asyncio
-            for idx, ipo in enumerate(new_ipos):
-                if idx > 0:
-                    await asyncio.sleep(random.uniform(50, 55))
-                tweet_company_intro(ipo)
 
-            logger.info(f"SPK onay tanitim tweeti: {len(new_ipos)} IPO")
+            tweeted = 0
+            for ipo in new_ipos:
+                if not ipo.created_at:
+                    continue
+
+                # 13 saat gecti mi?
+                tweet_time = ipo.created_at + timedelta(hours=DELAY_HOURS)
+                if now < tweet_time:
+                    # Henuz 13 saat olmamis, atlanir
+                    continue
+
+                # Cok gec olmasin — 48 saatten eski ise atla
+                if now > ipo.created_at + timedelta(hours=48):
+                    continue
+
+                if tweeted > 0:
+                    await asyncio.sleep(random.uniform(50, 55))
+
+                success = tweet_company_intro(ipo)
+                if success:
+                    tweeted += 1
+
+            if tweeted > 0:
+                logger.info(f"SPK onay tanitim tweeti: {tweeted} IPO")
 
     except Exception as e:
         logger.error(f"SPK onay tanitim tweet hatasi: {e}")
@@ -1565,13 +1588,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 18. SPK Onay Tanitim Tweeti — her gun 06:00 Turkiye (UTC 03:00)
-    # Dun SPK onayi alan IPO'lar icin sirket tanitim tweeti (gorselli)
+    # 18. SPK Onay Tanitim Tweeti — her saat kontrol (created_at + 13 saat sonra)
+    # SPK onayi gece gelse bile 13 saat sonra tweet atar (duplicate korumali)
     scheduler.add_job(
         tweet_spk_approval_intro_job,
-        CronTrigger(hour=3, minute=0),
+        IntervalTrigger(hours=1),
         id="spk_approval_intro_tweet",
-        name="SPK Onay Tanitim Tweet (06:00 TR)",
+        name="SPK Onay Tanitim Tweet (created_at + 13h)",
         replace_existing=True,
     )
 
