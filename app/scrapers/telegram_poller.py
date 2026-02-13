@@ -256,7 +256,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
     global _last_update_id
 
     try:
-        updates = await fetch_telegram_updates(bot_token, offset=_last_update_id)
+        # Eger offset henuz yoksa (ilk baslangic), son 20 mesaji iste (-20).
+        # Bu sayede restart/deploy sirasinda kacirilan mesajlar yakalanir (catch-up).
+        req_offset = _last_update_id if _last_update_id is not None else -20
+        updates = await fetch_telegram_updates(bot_token, offset=req_offset)
     except Exception as e:
         logger.error("Telegram API baglanamadi: %s", e)
         return 0
@@ -398,6 +401,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 "Telegram haber kaydedildi: [%s] %s — %s",
                 message_type, ticker or "???", title,
             )
+
+            # ----------------------------------------------------------------
+            # TWITTER ENTEGRASYONU (Sadece BIST 30)
+            # ----------------------------------------------------------------
+            try:
+                # BIST 30 kontrolu icin import — lazy import (dongu icinde ama performans sorunu olmaz)
+                from app.services.news_service import BIST30_TICKERS
+                from app.services.twitter_service import tweet_bist30_news
+
+                if ticker and ticker.upper() in BIST30_TICKERS:
+                    # Tweet metni icin keyword temizligi
+                    tweet_kw = matched_kw
+                    if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
+                        tweet_kw = "Yeni KAP Bildirimi"
+                    
+                    # Sentiment hep positive kabul ediliyor bu poller'da
+                    # Arka planda tweet at (await etme, poller'i bloke etmesin)
+                    # Ancak tweet_bist30_news senkron bir fonksiyon (httpx sync kullaniyor _safe_tweet icinde)
+                    # Bu yuzden direkt cagiriyoruz, _safe_tweet zaten exception yutar.
+                    tweet_bist30_news(ticker, tweet_kw, "positive")
+                    logger.info("Twitter BIST30 tweet atildi: %s", ticker)
+
+            except Exception as tw_err:
+                logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)
 
         if new_count > 0:
             await session.commit()

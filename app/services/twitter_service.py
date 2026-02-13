@@ -789,20 +789,38 @@ def tweet_yearly_summary(
 def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool:
     """BIST 30 hissesi icin KAP haberi tweeti."""
     try:
+        # Görsel yolu
+        img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
+        if not os.path.exists(img_path):
+            img_path = None  # Gorsel yoksa sadece text at
+
+        # Anlik zaman (TS: saniyesine kadar)
+        now_str = datetime.now().strftime("%H:%M:%S")
+
         if sentiment == "positive":
-            emoji = "\U0001F7E2"
+            emoji = "\U0001F7E2"  # Yesil top
         else:
-            emoji = "\U0001F534"
+            emoji = "\U0001F534"  # Kirmizi top
+
+        # Keyword temizligi (Haber Detayı Bulunamadı vb.)
+        clean_kw = matched_keyword
+        if not clean_kw or "BULUNAMADI" in clean_kw.upper() or clean_kw == ticker:
+            clean_kw = "Yeni KAP Bildirimi"
 
         text = (
-            f"{emoji} #{ticker} \u2014 KAP Bildirimi\n\n"
-            f"\u2022 {matched_keyword}\n\n"
-            f"\u26A0\uFE0F KAP haberleri şu an BİST 30 ile sınırlıdır.\n"
-            f"350+ hisse için anlık bildirimler yakında!\n\n"
+            f"{emoji} #{ticker} \u2014 Haber Bildirimi\n\n"
+            f"Anlık Haber Yakalandı {now_str}\n\n"
+            f"İlişkili Kelime : {clean_kw}\n\n"
+            f"350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!\n\n"
+            f"Ücretsiz BIST 30 bildirimleri için:\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#BIST30 #{ticker} #KAP #Borsa"
         )
-        return _safe_tweet(text)
+        
+        if img_path:
+            return _safe_tweet_with_media(text, img_path)
+        else:
+            return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_bist30_news hatasi: {e}")
         return False
@@ -895,20 +913,29 @@ def tweet_company_intro(ipo) -> bool:
                 first_para = full_desc[:200]
 
             # Max karakter limiti (tweet icinde ~130 char yer var)
+            # Max karakter limiti (tweet icinde ~130 char yer var)
             max_desc_len = 130
-            if len(first_para) > max_desc_len:
-                # Cumle bazli kirpma — son tam cumleyi bul
-                sentences = first_para.replace(".", ".|").replace("!", "!|").replace("?", "?|").split("|")
-                trimmed = ""
-                for s in sentences:
-                    s = s.strip()
-                    if not s:
-                        continue
-                    if len(trimmed) + len(s) + 1 <= max_desc_len:
-                        trimmed = f"{trimmed} {s}".strip() if trimmed else s
-                    else:
-                        break
-                first_para = trimmed if trimmed else first_para[:max_desc_len - 3] + "..."
+            
+            # Cumle bazli net kirpma
+            sentences = first_para.replace(".", ".|").replace("!", "!|").replace("?", "?|").split("|")
+            trimmed = ""
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                
+                # Eger mevcut metin + yeni cumle limiti asiyorsa DUR.
+                # Boylece cumle ortasinda kesilmez.
+                if len(trimmed) + len(s) + 1 <= max_desc_len:
+                    trimmed = f"{trimmed} {s}".strip() if trimmed else s
+                else:
+                    break
+            
+            # Eger hicbir cumle sigmazsa (cok uzun ilk cumle), mecbur karakter bazli kes ama ... ekle
+            if not trimmed and len(first_para) > max_desc_len:
+                 trimmed = first_para[:max_desc_len - 3] + "..."
+            
+            first_para = trimmed
 
             desc_text = f"\n\n{first_para}"
 
