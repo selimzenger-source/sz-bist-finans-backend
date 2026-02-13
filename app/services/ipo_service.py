@@ -152,6 +152,25 @@ class IPOService:
                 if value is not None and hasattr(existing, key) and key not in protected_fields:
                     setattr(existing, key, value)
             existing.updated_at = datetime.utcnow()
+
+            # ONEMLI: Arsivlenmis bir IPO'ya yeni veriler (subscription_start, ticker vb.)
+            # geliyorsa → arsivden cikar. Scraper yeni bilgi getirdiyse IPO hala aktif demektir.
+            if existing.archived:
+                new_has_dates = data.get("subscription_start") or data.get("subscription_end") or data.get("trading_start")
+                new_has_ticker = data.get("ticker")
+                if new_has_dates or new_has_ticker:
+                    existing.archived = False
+                    existing.archived_at = None
+                    logger.info(
+                        "IPO arsivden cikarildi (yeni veri geldi): %s — ticker=%s, sub_start=%s",
+                        existing.company_name, data.get("ticker"), data.get("subscription_start"),
+                    )
+                    # Arsivden cikinca status'u da kontrol et
+                    # subscription_start varsa ve bugun veya gecmisse → in_distribution
+                    # yoksa → newly_approved'a geri al
+                    if not existing.status or existing.status in ("archived",):
+                        existing.status = "newly_approved"
+
             ipo = existing
             logger.info(f"IPO guncellendi: {ipo.ticker or ipo.company_name}")
         else:
@@ -460,6 +479,7 @@ class IPOService:
 
         # subscription_end 90+ gun gecmis VE hala awaiting_trading'de takili kalanlar
         # → trading_start yoksa arsivle (DNYVA gibi: sub_end=2025-01-24, trading_start=None)
+        # DIKKAT: subscription_start gelecekte olan IPO'lari arsivleme! (henuz dagitim baslamadi)
         stale_cutoff = today - timedelta(days=90)
         result = await self.db.execute(
             select(IPO).where(
@@ -467,6 +487,11 @@ class IPOService:
                     IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
                     IPO.trading_start.is_(None),
                     IPO.archived == False,
+                    # subscription_start gelecekte ise arsivleme — dagitim henuz baslamadi
+                    or_(
+                        IPO.subscription_start.is_(None),
+                        IPO.subscription_start < today,
+                    ),
                     or_(
                         and_(IPO.subscription_end.isnot(None), IPO.subscription_end < stale_cutoff),
                         and_(IPO.spk_approval_date.isnot(None), IPO.spk_approval_date < stale_cutoff),
@@ -481,6 +506,13 @@ class IPOService:
             )
         )
         for ipo in result.scalars().all():
+            # Son guvenlik kontrolu: subscription_start veya subscription_end
+            # gelecekte ise bu IPO hala aktif, arsivleme
+            if ipo.subscription_start and ipo.subscription_start >= today:
+                continue
+            if ipo.subscription_end and ipo.subscription_end >= today:
+                continue
+
             old_status = ipo.status
             ipo.archived = True
             ipo.archived_at = datetime.utcnow()
@@ -489,6 +521,14 @@ class IPOService:
                 f"Eski IPO arsivlendi: {ipo.ticker} {old_status} → archived "
                 f"(sub_end={ipo.subscription_end}, spk_date={ipo.spk_approval_date})"
             )
+            try:
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error(
+                    "IPO Arşivlendi",
+                    f"{ipo.ticker or ipo.company_name} — {old_status} → archived"
+                )
+            except Exception:
+                pass
 
         # ==========================================
         # GERIYE DONUK UYUMLULUK — eski statuslari yeni sisteme tasi

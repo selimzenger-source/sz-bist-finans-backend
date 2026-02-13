@@ -430,17 +430,6 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
-        # 280 karakter limiti — gerekirse app linkini kaldır
-        if len(text) > 280:
-            text = (
-                f"✅ Kesinleşen Dağıtım Sonuçları\n\n"
-                f"{ipo.company_name}{ticker_text}\n\n"
-                f"{table_text}"
-                f"{bireysel_text}"
-                f"{applicant_text}\n\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
-
         return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_allocation_results hatası: {e}")
@@ -895,35 +884,6 @@ def tweet_company_intro(ipo) -> bool:
             f"📲 Detaylar: {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
-
-        # 280 karakter limiti — gerekirse desc kisalt
-        if len(text) > 280 and desc_text:
-            # Daha da kisalt — sadece ilk cumle
-            if ipo.company_description:
-                full = str(ipo.company_description).strip().split("\n")[0]
-                first_sentence = full.split(".")[0].strip()
-                if first_sentence and len(first_sentence) < 120:
-                    desc_text = f"\n\n{first_sentence}."
-                else:
-                    desc_text = ""
-            text = (
-                f"📋 Halka Arz Hakkında\n\n"
-                f"{clean_name}{ticker_text}"
-                f"{spk_text}{sector_text}{price_text}"
-                f"{desc_text}\n\n"
-                f"📲 {APP_LINK}\n\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
-
-        # Hala sigmazsa desc kaldir
-        if len(text) > 280:
-            text = (
-                f"📋 Halka Arz Hakkında\n\n"
-                f"{clean_name}{ticker_text}"
-                f"{spk_text}{sector_text}{price_text}\n\n"
-                f"📲 {APP_LINK}\n\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
 
         return _safe_tweet_with_media(text, BANNER_HALKA_ARZ_HAKKINDA)
     except Exception as e:
