@@ -647,8 +647,58 @@ async def send_last_day_warnings():
             pass
 
 
+async def tweet_spk_approval_intro_job():
+    """SPK onayi geldikten sonra ertesi sabah 06:00'da sirket tanitim tweeti.
+
+    Dun newly_approved'a gecen (created_at == dun) IPO'lar icin
+    halka_arz_hakkinda_banner.png gorseli ile tweet atar.
+    Gece 23:00'te veya 01:00'de SPK onayi gelse bile sabah 06:00'da atar.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from datetime import timedelta
+
+        async with async_session() as db:
+            yesterday = date.today() - timedelta(days=1)
+            today = date.today()
+
+            # Dun veya bugun newly_approved'a gecen IPO'lar
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status == "newly_approved",
+                        # created_at dunun baslangici ile bugunun baslangici arasinda
+                        IPO.created_at >= datetime.combine(yesterday, datetime.min.time()),
+                        IPO.created_at < datetime.combine(today, datetime.min.time()) + timedelta(days=1),
+                    )
+                )
+            )
+            new_ipos = list(result.scalars().all())
+
+            if not new_ipos:
+                return
+
+            from app.services.twitter_service import tweet_company_intro
+            import asyncio
+            for idx, ipo in enumerate(new_ipos):
+                if idx > 0:
+                    await asyncio.sleep(random.uniform(50, 55))
+                tweet_company_intro(ipo)
+
+            logger.info(f"SPK onay tanitim tweeti: {len(new_ipos)} IPO")
+
+    except Exception as e:
+        logger.error(f"SPK onay tanitim tweet hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("SPK Onay Tanıtım Tweet", str(e))
+        except Exception:
+            pass
+
+
 async def tweet_last_day_morning_job():
-    """Son gun sabahi 07:30'da tweet — hafif uyari tonu.
+    """Son gun sabahi 05:00'da tweet — hafif uyari tonu.
 
     Bugun subscription_end olan in_distribution IPO'lar icin tweet atar.
     """
@@ -1515,7 +1565,17 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 18. Son Gun Sabah Tweeti — her gun 05:00 Turkiye (UTC 02:00)
+    # 18. SPK Onay Tanitim Tweeti — her gun 06:00 Turkiye (UTC 03:00)
+    # Dun SPK onayi alan IPO'lar icin sirket tanitim tweeti (gorselli)
+    scheduler.add_job(
+        tweet_spk_approval_intro_job,
+        CronTrigger(hour=3, minute=0),
+        id="spk_approval_intro_tweet",
+        name="SPK Onay Tanitim Tweet (06:00 TR)",
+        replace_existing=True,
+    )
+
+    # 19. Son Gun Sabah Tweeti — her gun 05:00 Turkiye (UTC 02:00)
     # Bugun subscription_end olan IPO'lar icin hafif uyari tonu tweet
     scheduler.add_job(
         tweet_last_day_morning_job,
@@ -1525,7 +1585,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 19. Sirket Tanitim Tweeti — her gun 12:00 Turkiye (UTC 09:00)
+    # 20. Sirket Tanitim Tweeti — her gun 12:00 Turkiye (UTC 09:00)
     # Dun dagitima cikan IPO icin ogle vakti sirket tanitimi
     scheduler.add_job(
         tweet_company_intro_job,
@@ -1535,7 +1595,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 20. SPK Bekleyenler Gorselli Tweet — her ayin 1'i 20:00 TR (UTC 17:00)
+    # 21. SPK Bekleyenler Gorselli Tweet — her ayin 1'i 20:00 TR (UTC 17:00)
     scheduler.add_job(
         tweet_spk_pending_monthly_job,
         CronTrigger(day=1, hour=17, minute=0),

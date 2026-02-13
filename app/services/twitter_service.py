@@ -83,6 +83,41 @@ def _mark_tweet_sent(text: str):
     _tweet_sent_cache[text_hash] = _time.time()
 
 
+def _validate_ipo_for_tweet(ipo, required_fields: list[str], tweet_type: str) -> bool:
+    """IPO verisinin tweet icin yeterli olup olmadigini kontrol eder.
+
+    Eksik veri varsa tweet ATILMAZ, Telegram'a raporlanir.
+
+    Args:
+        ipo: IPO model instance
+        required_fields: Zorunlu alan listesi (orn: ["company_name", "ticker"])
+        tweet_type: Tweet tipi adi (orn: "Son Gun Sabah")
+
+    Returns:
+        True: veri yeterli, tweet atilabilir
+        False: veri eksik, tweet atilmaz
+    """
+    missing = []
+    for field in required_fields:
+        val = getattr(ipo, field, None)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            missing.append(field)
+
+    if missing:
+        ipo_name = getattr(ipo, "company_name", "?") or "?"
+        msg = (
+            f"Tweet ATILMADI — eksik veri!\n\n"
+            f"Tweet tipi: {tweet_type}\n"
+            f"IPO: {ipo_name}\n"
+            f"Eksik alanlar: {', '.join(missing)}"
+        )
+        logger.warning(msg)
+        _notify_tweet_failure(f"[{tweet_type}] {ipo_name}", f"Eksik veri: {', '.join(missing)}")
+        return False
+
+    return True
+
+
 def _load_credentials() -> Optional[dict]:
     """Twitter API anahtarlarini yukler (tek seferlik)."""
     global _credentials, _init_attempted
@@ -271,6 +306,8 @@ DISCLAIMER_SHORT = "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavs
 def tweet_new_ipo(ipo) -> bool:
     """SPK'dan yeni halka arz onayi geldiginde tweet atar."""
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Yeni Halka Arz"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         price_text = ""
         if ipo.ipo_price:
@@ -296,6 +333,8 @@ def tweet_new_ipo(ipo) -> bool:
 def tweet_distribution_start(ipo) -> bool:
     """Dağıtım süreci başladığında tweet atar. Tahmini lot varsa ekler."""
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Dağıtıma Çıkış"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         end_date = ""
         if ipo.subscription_end:
@@ -414,6 +453,8 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
 def tweet_last_4_hours(ipo) -> bool:
     """Son 4 saat kala hatirlatma tweeti."""
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Son 4 Saat"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         text = (
@@ -436,6 +477,8 @@ def tweet_last_4_hours(ipo) -> bool:
 def tweet_last_30_min(ipo) -> bool:
     """Son 30 dakika kala hatirlatma tweeti."""
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Son 30 Dakika"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         text = (
@@ -457,6 +500,8 @@ def tweet_last_30_min(ipo) -> bool:
 def tweet_first_trading_day(ipo) -> bool:
     """Ilk islem gunu sabahi gong tweeti."""
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "İlk İşlem Günü"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         price_text = ""
         if ipo.ipo_price:
@@ -773,6 +818,8 @@ def tweet_last_day_morning(ipo) -> bool:
     Son 30 dk kala hatirlatma atilacagini da belirtir.
     """
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Son Gün Sabah"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         # Bitis saatini belirle
@@ -810,6 +857,8 @@ def tweet_company_intro(ipo) -> bool:
     Cok uzunsa son cumleyi kirpar (cumle bazli truncation).
     """
     try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "Şirket Tanıtım"):
+            return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         # Sektor bilgisi
