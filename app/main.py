@@ -835,6 +835,48 @@ async def update_user(
     return user
 
 
+@app.delete("/api/v1/users/{device_id}")
+async def delete_user_account(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanici hesabini ve tum verilerini kalici olarak siler.
+
+    Silinen veriler:
+      - Kullanici profili ve bildirim tercihleri
+      - Abonelik bilgileri (UserSubscription)
+      - IPO bildirim tercihleri (UserIPOAlert)
+      - Tavan takip abonelikleri (CeilingTrackSubscription)
+      - Hisse bildirim abonelikleri (StockNotificationSubscription)
+
+    Bu islem geri alinamaz.
+    Abonelikler App Store / Google Play uzerinden ayrica iptal edilmelidir.
+    """
+    result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    # Abonelik kaydini da sil (cascade ile gitmeyebilir — ayri tablo)
+    sub_result = await db.execute(
+        select(UserSubscription).where(UserSubscription.user_id == user.id)
+    )
+    sub = sub_result.scalar_one_or_none()
+    if sub:
+        await db.delete(sub)
+
+    # Kullaniciyi sil — cascade ile tum iliskili veriler silinir
+    await db.delete(user)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "message": "Hesabiniz ve tum verileriniz kalici olarak silindi.",
+    }
+
+
 @app.put("/api/v1/users/{device_id}/reminder-settings", response_model=UserOut)
 async def update_reminder_settings(
     device_id: str,
