@@ -256,9 +256,9 @@ def _safe_tweet(text: str) -> bool:
             logger.info(f"[TWITTER-DRY-RUN] {text[:80]}...")
             return False
 
-        # Twitter karakter limiti: 280
-        if len(text) > 280:
-            text = text[:277] + "..."
+        # Twitter karakter limiti: 4000 (Blue Tick)
+        if len(text) > 4000:
+            text = text[:3997] + "..."
 
         auth_header = _build_oauth_header(creds)
 
@@ -613,28 +613,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
         text = header + table_text + footer
 
-        # Twitter 280 karakter limiti kontrolu
-        if len(text) > 280:
-            # Cok uzunsa ilk 2 + ・・・ + son 8 gunu goster
-            if days_data and len(days_data) > 10:
-                first_lines = table_lines[:2]
-                last_lines = table_lines[-8:]
-                table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
-                text = header + table_text + footer
 
-        # Hala 280'i asiyorsa — noktalarla son 6 gun
-        if len(text) > 280:
-            last_6 = table_lines[-6:]
-            table_text = "\u30FB\u30FB\u30FB\n" + "\n".join(last_6)
-            text = header + table_text + footer
-
-        # Son kurtarma — app linkini kaldir
-        if len(text) > 280:
-            footer = (
-                f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
-            text = header + table_text + footer
 
         return _safe_tweet(text)
     except Exception as e:
@@ -699,28 +678,6 @@ def tweet_25_day_performance(
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
-        if table_lines:
-            # Ilk 2 + ・・・ + son 8 (25 gun sigmiyor)
-            first_lines = table_lines[:2]
-            last_lines = table_lines[-8:]
-            table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
-            text = header + table_text + footer
-
-            # Hala sigmazsa son 6
-            if len(text) > 280:
-                last_6 = table_lines[-6:]
-                table_text = "\u30FB\u30FB\u30FB\n" + "\n".join(last_6)
-                text = header + table_text + footer
-
-            # Son kurtarma — app linkini kaldir
-            if len(text) > 280:
-                footer = (
-                    f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
-                    f"Tavan: {ceiling_days} | Taban: {floor_days}"
-                    f"{lot_text}\n\n"
-                    f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-                )
-                text = header + table_text + footer
         else:
             # days_data yoksa eski ozet formati
             text = (
@@ -913,30 +870,12 @@ def tweet_company_intro(ipo) -> bool:
                 first_para = full_desc[:200]
 
             # Max karakter limiti (tweet icinde ~130 char yer var)
-            # Max karakter limiti (tweet icinde ~130 char yer var)
-            max_desc_len = 130
+            # Max karakter limiti (tweet icinde ~3000 char yer var)
+            max_desc_len = 3000
             
-            # Cumle bazli net kirpma
-            sentences = first_para.replace(".", ".|").replace("!", "!|").replace("?", "?|").split("|")
-            trimmed = ""
-            for s in sentences:
-                s = s.strip()
-                if not s:
-                    continue
-                
-                # Eger mevcut metin + yeni cumle limiti asiyorsa DUR.
-                # Boylece cumle ortasinda kesilmez.
-                if len(trimmed) + len(s) + 1 <= max_desc_len:
-                    trimmed = f"{trimmed} {s}".strip() if trimmed else s
-                else:
-                    break
+            if len(first_para) > max_desc_len:
+                first_para = first_para[:max_desc_len - 3] + "..."
             
-            # Eger hicbir cumle sigmazsa (cok uzun ilk cumle), mecbur karakter bazli kes ama ... ekle
-            if not trimmed and len(first_para) > max_desc_len:
-                 trimmed = first_para[:max_desc_len - 3] + "..."
-            
-            first_para = trimmed
-
             desc_text = f"\n\n{first_para}"
 
         price_text = ""
@@ -1077,8 +1016,8 @@ def _safe_tweet_with_media(text: str, image_path: str) -> bool:
         logger.info(f"Media upload basarili: media_id={media_id}")
 
         # 2. Tweet at — media_ids ile
-        if len(text) > 280:
-            text = text[:277] + "..."
+        if len(text) > 4000:
+            text = text[:3997] + "..."
 
         tweet_auth = _build_oauth_header(creds)
         tweet_resp = httpx.post(
