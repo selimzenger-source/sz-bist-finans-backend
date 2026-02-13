@@ -45,6 +45,10 @@ class User(Base):
     reminder_2h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 2 saat kala")
     reminder_4h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 4 saat kala")
 
+    # Hesap silme (soft-delete — Google Play zorunlulugu)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, comment="Kullanici hesabini sildi")
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Silme talep tarihi")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

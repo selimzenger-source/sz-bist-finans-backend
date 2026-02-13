@@ -143,6 +143,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v12 migration: users.deleted + deleted_at (Google Play hesap silme zorunlulugu)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted BOOLEAN DEFAULT FALSE")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

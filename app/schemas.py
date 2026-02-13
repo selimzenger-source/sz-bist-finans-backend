@@ -308,6 +308,8 @@ class UserUpdate(BaseModel):
     reminder_1h: Optional[bool] = None
     reminder_2h: Optional[bool] = None
     reminder_4h: Optional[bool] = None
+    # Hesap silme
+    deleted: Optional[bool] = None
 
 
 class ReminderSettingsUpdate(BaseModel):
@@ -338,6 +340,7 @@ class UserOut(BaseModel):
     reminder_1h: bool = True
     reminder_2h: bool = False
     reminder_4h: bool = False
+    deleted: bool = False
     subscription_package: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)

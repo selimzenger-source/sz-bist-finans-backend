@@ -11,7 +11,7 @@ Servisler:
 
 import logging
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 import hmac
@@ -816,6 +816,17 @@ async def update_user(
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # Hesap silme talebi — soft-delete: bildirimleri kapat, tokenlari temizle
+    if update_data.get("deleted") is True:
+        user.deleted = True
+        user.deleted_at = datetime.now(timezone.utc)
+        user.notifications_enabled = False
+        user.fcm_token = None
+        user.expo_push_token = None
+        await db.flush()
+        return user
+
     for key, value in update_data.items():
         if hasattr(user, key):
             setattr(user, key, value)
