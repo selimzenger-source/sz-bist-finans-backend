@@ -859,12 +859,31 @@ def tweet_company_intro(ipo) -> bool:
     try:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "Şirket Tanıtım"):
             return False
+
+        # Sirket bilgisi yoksa tweet atma — bos tweet atmanin anlami yok
+        if not ipo.company_description and not ipo.sector and not ipo.ipo_price:
+            logger.info(
+                "tweet_company_intro ATLANDI: %s — sirket bilgisi (description/sector/price) henuz yok",
+                ipo.company_name,
+            )
+            return False
+
+        # company_name temizligi — SPK bultenden gelen \n ve fazla bosluklari temizle
+        clean_name = " ".join(ipo.company_name.replace("\n", " ").replace("\r", " ").split())
+
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
         # Sektor bilgisi
         sector_text = ""
         if ipo.sector:
             sector_text = f"\n🏭 Sektör: {ipo.sector}"
+
+        # SPK onay bilgisi (sektor/fiyat yoksa en azindan bu bilgiyi gosterelim)
+        spk_text = ""
+        if ipo.spk_approval_date and not ipo.sector and not ipo.ipo_price:
+            spk_text = f"\n📅 SPK Onay: {ipo.spk_approval_date.strftime('%d.%m.%Y') if hasattr(ipo.spk_approval_date, 'strftime') else ipo.spk_approval_date}"
+            if ipo.spk_bulletin_no:
+                spk_text += f" (Bülten {ipo.spk_bulletin_no})"
 
         # Sirket aciklamasi — ilk paragraf, cumle bazli kisaltma
         desc_text = ""
@@ -899,8 +918,8 @@ def tweet_company_intro(ipo) -> bool:
 
         text = (
             f"📋 Halka Arz Hakkında\n\n"
-            f"{ipo.company_name}{ticker_text}"
-            f"{sector_text}{price_text}"
+            f"{clean_name}{ticker_text}"
+            f"{spk_text}{sector_text}{price_text}"
             f"{desc_text}\n\n"
             f"📲 Detaylar: {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
@@ -918,8 +937,8 @@ def tweet_company_intro(ipo) -> bool:
                     desc_text = ""
             text = (
                 f"📋 Halka Arz Hakkında\n\n"
-                f"{ipo.company_name}{ticker_text}"
-                f"{sector_text}{price_text}"
+                f"{clean_name}{ticker_text}"
+                f"{spk_text}{sector_text}{price_text}"
                 f"{desc_text}\n\n"
                 f"📲 {APP_LINK}\n\n"
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
@@ -929,8 +948,8 @@ def tweet_company_intro(ipo) -> bool:
         if len(text) > 280:
             text = (
                 f"📋 Halka Arz Hakkında\n\n"
-                f"{ipo.company_name}{ticker_text}"
-                f"{sector_text}{price_text}\n\n"
+                f"{clean_name}{ticker_text}"
+                f"{spk_text}{sector_text}{price_text}\n\n"
                 f"📲 {APP_LINK}\n\n"
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )

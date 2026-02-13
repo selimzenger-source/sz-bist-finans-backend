@@ -648,13 +648,16 @@ async def send_last_day_warnings():
 
 
 async def tweet_spk_approval_intro_job():
-    """SPK onayi geldikten 14 saat sonra sirket tanitim tweeti.
+    """SPK onayi geldikten 15 saat sonra sirket tanitim tweeti.
 
-    Her saat calisir. created_at + 14 saat gecmis ama henuz tweet atilmamis
+    Her saat calisir. created_at + 15 saat gecmis ama henuz tweet atilmamis
     newly_approved IPO'lar icin halka_arz_hakkinda_banner.png gorseli ile tweet atar.
 
-    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 13:00'de tweet atar.
-    SPK onayi 01:00'da gelirse → ayni gun 15:00'de tweet atar.
+    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 14:00'de tweet atar.
+    SPK onayi 01:00'da gelirse → ayni gun 16:00'da tweet atar.
+
+    ONEMLI: tweet_company_intro sirket bilgisi (description/sector/price) yoksa
+    tweet atmaz — scraper'larin bilgiyi doldurmasi beklenir (72 saate kadar).
 
     Duplicate koruma: _is_duplicate_tweet + intro_tweeted flag.
     """
@@ -663,13 +666,13 @@ async def tweet_spk_approval_intro_job():
         from app.models.ipo import IPO
         from datetime import timedelta
 
-        DELAY_HOURS = 14  # Sisteme eklenme saatinden 14 saat sonra
+        DELAY_HOURS = 15  # Sisteme eklenme saatinden 15 saat sonra (scraper'larin sirket bilgisini doldurmasini bekle)
 
         async with async_session() as db:
             now = datetime.now(timezone.utc)
 
             # newly_approved ve son 48 saat icinde olusturulmus IPO'lar
-            cutoff = now - timedelta(hours=48)
+            cutoff = now - timedelta(hours=72)
             result = await db.execute(
                 select(IPO).where(
                     and_(
@@ -697,8 +700,8 @@ async def tweet_spk_approval_intro_job():
                     # Henuz 13 saat olmamis, atlanir
                     continue
 
-                # Cok gec olmasin — 48 saatten eski ise atla
-                if now > ipo.created_at + timedelta(hours=48):
+                # Cok gec olmasin — 72 saatten eski ise atla
+                if now > ipo.created_at + timedelta(hours=72):
                     continue
 
                 if tweeted > 0:

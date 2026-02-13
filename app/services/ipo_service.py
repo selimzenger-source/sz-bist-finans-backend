@@ -104,11 +104,43 @@ class IPOService:
             existing = result.scalar_one_or_none()
 
         # company_name ile de eslestir — duplikat onleme
+        # Oncelik 1: birebir eslestir
+        # Oncelik 2: normalize edilmis fuzzy eslestirme (\n, kisaltmalar, bosluklar)
         if not existing and data.get("company_name"):
             result = await self.db.execute(
                 select(IPO).where(IPO.company_name == data["company_name"])
             )
             existing = result.scalar_one_or_none()
+
+            # Fuzzy eslestirme — \n temizligi, kisaltma farkliliklari
+            if not existing:
+                import re
+                def _norm(n: str) -> str:
+                    """Sirket adini normalize et: kucuk harf, \n temizle, kisaltmalari ac."""
+                    n = n.replace("\n", " ").replace("\r", " ")
+                    n = re.sub(r"\s+", " ", n).strip().lower()
+                    # Yaygin kisaltmalari kaldir (eslesme kolayligi)
+                    for abbr in ["a.ş.", "aş", "a.s.", "san.", "tic.", "ve", "ltd.", "şti."]:
+                        n = n.replace(abbr, "")
+                    return re.sub(r"\s+", " ", n).strip()
+
+                incoming_norm = _norm(data["company_name"])
+                if len(incoming_norm) >= 4:  # Cok kisa isimlerde false match onle
+                    all_ipos_result = await self.db.execute(select(IPO))
+                    for ipo_row in all_ipos_result.scalars().all():
+                        db_norm = _norm(ipo_row.company_name or "")
+                        if not db_norm:
+                            continue
+                        # Birebir normalize eslestirme veya biri digerini iceriyor
+                        if (db_norm == incoming_norm
+                            or incoming_norm.startswith(db_norm[:15])
+                            or db_norm.startswith(incoming_norm[:15])):
+                            existing = ipo_row
+                            logger.info(
+                                "IPO fuzzy eslesti: '%s' → '%s'",
+                                data["company_name"], ipo_row.company_name,
+                            )
+                            break
 
         if existing:
             # Guncelle — sadece None olmayan alanlari

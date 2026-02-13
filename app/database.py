@@ -154,6 +154,15 @@ async def init_db():
         except Exception:
             pass
 
+        # v13 migration: ipos.company_name'deki \n karakterlerini temizle
+        # SPK bultenden gelen sirket isimlerinde \n olabiliyor (tweet'lerde bozuk gorunuyor)
+        try:
+            await conn.execute(
+                text("UPDATE ipos SET company_name = REPLACE(REPLACE(company_name, E'\\n', ' '), E'\\r', ' ') WHERE company_name LIKE E'%\\n%' OR company_name LIKE E'%\\r%'")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.
