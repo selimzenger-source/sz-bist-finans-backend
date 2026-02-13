@@ -328,6 +328,57 @@ async def auto_update_ipo_statuses():
             pass
 
 
+async def tweet_distribution_morning_job():
+    """Dagitim gunu sabahi 08:00 (TR) — tweet #2 tekrar at.
+
+    subscription_start == bugun olan IPO'lar icin dagitim tweeti atar.
+    Gece yarisi auto_update_statuses zaten newly_approved → in_distribution
+    gecisini yapar ve tweet atar ama o gece yarisi olur.
+    Bu job sabah 08:00'de dagitim bilgisi netlestikten sonra tekrar atar.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+
+        today = date.today()
+
+        async with async_session() as db:
+            # Bugun dagitima baslayan IPO'lar (subscription_start == today)
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status == "in_distribution",
+                        IPO.subscription_start == today,
+                        IPO.archived == False,
+                    )
+                )
+            )
+            ipos = list(result.scalars().all())
+
+            if not ipos:
+                return
+
+            from app.services.twitter_service import tweet_distribution_start
+
+            for ipo in ipos:
+                try:
+                    tweet_distribution_start(ipo)
+                    logger.info("Dagitim sabah tweeti: %s", ipo.ticker or ipo.company_name)
+                except Exception as e:
+                    logger.error("Dagitim sabah tweet hatasi (%s): %s", ipo.ticker, e)
+
+                if len(ipos) > 1:
+                    await asyncio.sleep(random.uniform(50, 55))
+
+    except Exception as e:
+        logger.error(f"Dagitim sabah tweet job hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Dagitim Sabah Tweet", str(e))
+        except Exception:
+            pass
+
+
 async def archive_old_ipos():
     """25 is gunu gecen halka arzlari arsivler.
 
@@ -1466,6 +1517,24 @@ def _setup_scheduler_impl():
         IntervalTrigger(hours=1),
         id="ipo_status_updater",
         name="IPO Durum Guncelleyici",
+        replace_existing=True,
+    )
+
+    # 7b. IPO Durum Guncelleme — gece yarisi 00:05 (subscription_start gunu aninda gecis)
+    scheduler.add_job(
+        auto_update_ipo_statuses,
+        CronTrigger(hour=21, minute=5),  # UTC 21:05 = TR 00:05
+        id="ipo_status_midnight",
+        name="IPO Durum Gece Yarisi (Dagitim Gecis)",
+        replace_existing=True,
+    )
+
+    # 7c. Dagitim gunu sabah tweeti — 08:00 TR (UTC 05:00)
+    scheduler.add_job(
+        tweet_distribution_morning_job,
+        CronTrigger(hour=5, minute=0),  # UTC 05:00 = TR 08:00
+        id="distribution_morning_tweet",
+        name="Dagitim Sabah Tweeti (08:00)",
         replace_existing=True,
     )
 
