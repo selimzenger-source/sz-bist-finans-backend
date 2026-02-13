@@ -64,6 +64,7 @@ class IPOListOut(BaseModel):
     offering_size_tl: Optional[Decimal] = None
     subscription_start: Optional[date] = None
     subscription_end: Optional[date] = None
+    subscription_hours: Optional[str] = None
     trading_start: Optional[date] = None
     distribution_method: Optional[str] = None
     participation_method: Optional[str] = None
