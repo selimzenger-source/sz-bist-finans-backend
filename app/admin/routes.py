@@ -37,12 +37,17 @@ def _normalize_company_name(name: str) -> str:
 def _is_company_in_ipo(spk_name: str, ipo_names_normalized: set[str]) -> bool:
     """SPK'daki sirket ismi IPO tablosundakilerden biriyle eslesiyor mu?
 
-    SPK sitesi uzun isimleri kirpabilir veya farkli siralayabilir.
-    Ornek:
-      SPK:  'Ata Turizm Isletmecilik Madencilik San. ve Dis ...'
-      IPO:  'Ata Turizm Isletmecilik Tasimacilık Madencilik Kuyumculuk San. ve Dis Ticaret A.S.'
+    SPK sitesi uzun isimleri kirpabilir, IPO tablosunda kisa isim olabilir.
+    Ornekler:
+      SPK:  'ata turizm isletmecilik madencilik san. ve dis tic. as'
+      IPO:  'ata turizm'   (kisa isim)
+      IPO:  'empa elektronik sanayi ve ticaret as'
 
-    Cozum: Ilk 3 anlamli kelimeyi (A.S., San., ve, gibi kisa kelimeleri atlayarak) karsilastir.
+    Cozum:
+      1. Birebir eslesme
+      2. IPO ismi SPK isminin basinda mi? (startswith)  — kisa isimler icin
+      3. SPK ismi IPO isminin basinda mi? (startswith)  — SPK kirpmasi icin
+      4. Ilk 3 anlamli kelime eslesmesi
     """
     name_norm = _normalize_company_name(spk_name)
     if not name_norm:
@@ -50,7 +55,11 @@ def _is_company_in_ipo(spk_name: str, ipo_names_normalized: set[str]) -> bool:
     # 1. Birebir eslesme
     if name_norm in ipo_names_normalized:
         return True
-    # 2. Ilk 3 anlamli kelime eslesmesi
+    for ipo_n in ipo_names_normalized:
+        # 2. IPO ismi kisa olabilir: SPK ismi IPO ismiyle basliyor mu?
+        if name_norm.startswith(ipo_n) or ipo_n.startswith(name_norm):
+            return True
+    # 3. Ilk 3 anlamli kelime eslesmesi
     skip_words = {"a.ş.", "a.s.", "aş", "as", "san.", "tic.", "ve", "ve/veya", "ltd.", "şti.", "sti."}
     spk_words = [w for w in name_norm.split() if w not in skip_words][:3]
     if len(spk_words) < 2:
