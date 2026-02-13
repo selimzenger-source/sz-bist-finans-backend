@@ -23,7 +23,7 @@ Admin Telegram bildirimleri: Tum kritik hatalar ve durum gecisleri admin'e bildi
 import asyncio
 import logging
 import random
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -358,7 +358,7 @@ async def archive_old_ipos():
             archived_count = 0
             for ipo in result.scalars().all():
                 ipo.archived = True
-                ipo.archived_at = datetime.utcnow()
+                ipo.archived_at = datetime.now(timezone.utc)
                 archived_count += 1
                 logger.info(f"IPO arsivlendi: {ipo.ticker or ipo.company_name}")
 
@@ -648,13 +648,13 @@ async def send_last_day_warnings():
 
 
 async def tweet_spk_approval_intro_job():
-    """SPK onayi geldikten 13 saat sonra sirket tanitim tweeti.
+    """SPK onayi geldikten 14 saat sonra sirket tanitim tweeti.
 
-    Her saat calisir. created_at + 13 saat gecmis ama henuz tweet atilmamis
+    Her saat calisir. created_at + 14 saat gecmis ama henuz tweet atilmamis
     newly_approved IPO'lar icin halka_arz_hakkinda_banner.png gorseli ile tweet atar.
 
-    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 12:00'de tweet atar.
-    SPK onayi 01:00'da gelirse → ayni gun 14:00'de tweet atar.
+    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 13:00'de tweet atar.
+    SPK onayi 01:00'da gelirse → ayni gun 15:00'de tweet atar.
 
     Duplicate koruma: _is_duplicate_tweet + intro_tweeted flag.
     """
@@ -663,10 +663,10 @@ async def tweet_spk_approval_intro_job():
         from app.models.ipo import IPO
         from datetime import timedelta
 
-        DELAY_HOURS = 13  # Sisteme eklenme saatinden 13 saat sonra
+        DELAY_HOURS = 14  # Sisteme eklenme saatinden 14 saat sonra
 
         async with async_session() as db:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             # newly_approved ve son 48 saat icinde olusturulmus IPO'lar
             cutoff = now - timedelta(hours=48)
