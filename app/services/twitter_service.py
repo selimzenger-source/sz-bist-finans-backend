@@ -613,8 +613,6 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
         text = header + table_text + footer
 
-
-
         return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_daily_tracking hatasi: {e}")
@@ -666,17 +664,24 @@ def tweet_25_day_performance(
                 emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
                 table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
 
-        header = (
-            f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gün Performans\n\n"
-            f"Kümülatif Toplam:\n"
-        )
-        footer = (
-            f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
-            f"Tavan: {ceiling_days} | Taban: {floor_days}"
-            f"{lot_text}\n\n"
-            f"\U0001F4F2 {APP_LINK}\n"
-            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-        )
+        if table_lines:
+            header = (
+                f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gün Performans\n\n"
+                f"Kümülatif Toplam:\n"
+            )
+            footer = (
+                f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
+                f"Tavan: {ceiling_days} | Taban: {floor_days}"
+                f"{lot_text}\n\n"
+                f"\U0001F4F2 {APP_LINK}\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
+            # Ilk 2 + ・・・ + son 8 (25 gun sigmiyor)
+            first_lines = table_lines[:2]
+            last_lines = table_lines[-8:]
+            table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
+            text = header + table_text + footer
 
         else:
             # days_data yoksa eski ozet formati
