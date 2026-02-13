@@ -1515,13 +1515,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 18. Son Gun Sabah Tweeti — her gun 07:30 Turkiye (UTC 04:30)
+    # 18. Son Gun Sabah Tweeti — her gun 05:00 Turkiye (UTC 02:00)
     # Bugun subscription_end olan IPO'lar icin hafif uyari tonu tweet
     scheduler.add_job(
         tweet_last_day_morning_job,
-        CronTrigger(hour=4, minute=30),
+        CronTrigger(hour=2, minute=0),
         id="last_day_morning_tweet",
-        name="Son Gun Sabah Tweet (07:30 TR)",
+        name="Son Gun Sabah Tweet (05:00 TR)",
         replace_existing=True,
     )
 

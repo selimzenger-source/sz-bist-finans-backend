@@ -31,6 +31,7 @@ import json
 from datetime import datetime, date
 from typing import Optional
 
+import os
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -38,9 +39,48 @@ logger = logging.getLogger(__name__)
 # Twitter API v2 endpoint
 _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
 
+# Banner gorsel yollari — static/img/ altinda
+_IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+BANNER_SPK_BEKLEYENLER = os.path.join(_IMG_DIR, "spk_bekleyenler_banner.png")
+BANNER_SON_BASVURU_GUNU = os.path.join(_IMG_DIR, "son_basvuru_gunu_banner.png")
+BANNER_SON_4_SAAT = os.path.join(_IMG_DIR, "son_4_saat_banner.png")
+BANNER_HALKA_ARZ_HAKKINDA = os.path.join(_IMG_DIR, "halka_arz_hakkinda_banner.png")
+
 # Credentials cache — lazy init
 _credentials = None
 _init_attempted = False
+
+# Duplicate tweet korumasi — ayni tweeti tekrar atmamak icin
+# Key: tweet text hash, Value: timestamp (unix)
+# 24 saat icinde ayni tweet atilmaz
+_tweet_sent_cache: dict[str, float] = {}
+_TWEET_DEDUP_HOURS = 24
+
+
+def _is_duplicate_tweet(text: str) -> bool:
+    """Ayni tweet son 24 saat icinde atildiysa True doner."""
+    import time as _time
+    text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    now = _time.time()
+
+    # Eski kayitlari temizle (24 saatten eski)
+    expired = [k for k, v in _tweet_sent_cache.items() if now - v > _TWEET_DEDUP_HOURS * 3600]
+    for k in expired:
+        del _tweet_sent_cache[k]
+
+    if text_hash in _tweet_sent_cache:
+        age_min = (now - _tweet_sent_cache[text_hash]) / 60
+        logger.warning(f"DUPLICATE tweet engellendi (%.0f dk once atildi): {text[:60]}...", age_min)
+        return True
+
+    return False
+
+
+def _mark_tweet_sent(text: str):
+    """Basarili tweet'i cache'e kaydet."""
+    import time as _time
+    text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    _tweet_sent_cache[text_hash] = _time.time()
 
 
 def _load_credentials() -> Optional[dict]:
@@ -172,6 +212,10 @@ def _safe_tweet(text: str) -> bool:
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
+        # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
+        if _is_duplicate_tweet(text):
+            return False
+
         creds = _load_credentials()
         if not creds:
             logger.info(f"[TWITTER-DRY-RUN] {text[:80]}...")
@@ -196,6 +240,7 @@ def _safe_tweet(text: str) -> bool:
         if response.status_code in (200, 201):
             tweet_id = response.json().get("data", {}).get("id", "?")
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
+            _mark_tweet_sent(text)
             return True
         else:
             error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
@@ -379,7 +424,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_SON_4_SAAT)
     except Exception as e:
         logger.error(f"tweet_last_4_hours hatasi: {e}")
         return False
@@ -719,10 +764,10 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
 
 
 # ================================================================
-# 12. SON GUN SABAH TWEETI (07:30 — hafif uyari tonu)
+# 12. SON GUN SABAH TWEETI (05:00 — hafif uyari tonu)
 # ================================================================
 def tweet_last_day_morning(ipo) -> bool:
-    """Son gun sabahi 07:30'da hafif uyari tonunda tweet.
+    """Son gun sabahi 05:00'da hafif uyari tonunda tweet.
 
     Kirmizi degil, turuncu/sari uyari tonu — bilgilendirici.
     Son 30 dk kala hatirlatma atilacagini da belirtir.
@@ -748,7 +793,7 @@ def tweet_last_day_morning(ipo) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU)
     except Exception as e:
         logger.error(f"tweet_last_day_morning hatasi: {e}")
         return False
@@ -841,7 +886,7 @@ def tweet_company_intro(ipo) -> bool:
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
 
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_HALKA_ARZ_HAKKINDA)
     except Exception as e:
         logger.error(f"tweet_company_intro hatasi: {e}")
         return False
@@ -880,7 +925,10 @@ def _safe_tweet_with_media(text: str, image_path: str) -> bool:
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
     try:
-        import os
+        # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
+        if _is_duplicate_tweet(text):
+            return False
+
         creds = _load_credentials()
         if not creds:
             logger.info(f"[TWITTER-DRY-RUN-MEDIA] {text[:60]}... (image={image_path})")
@@ -954,6 +1002,7 @@ def _safe_tweet_with_media(text: str, image_path: str) -> bool:
         if tweet_resp.status_code in (200, 201):
             tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
             logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
+            _mark_tweet_sent(text)
             return True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
