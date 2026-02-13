@@ -647,6 +647,122 @@ async def send_last_day_warnings():
             pass
 
 
+async def tweet_last_day_morning_job():
+    """Son gun sabahi 07:30'da tweet — hafif uyari tonu.
+
+    Bugun subscription_end olan in_distribution IPO'lar icin tweet atar.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+
+        async with async_session() as db:
+            today = date.today()
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status.in_(["in_distribution", "active"]),
+                        IPO.subscription_end == today,
+                    )
+                )
+            )
+            last_day_ipos = list(result.scalars().all())
+
+            if not last_day_ipos:
+                return
+
+            from app.services.twitter_service import tweet_last_day_morning
+            for idx, ipo in enumerate(last_day_ipos):
+                if idx > 0:
+                    import asyncio
+                    await asyncio.sleep(random.uniform(50, 55))  # Jitter
+                tweet_last_day_morning(ipo)
+
+            logger.info(f"Son gun sabah tweeti: {len(last_day_ipos)} IPO")
+
+    except Exception as e:
+        logger.error(f"Son gun sabah tweet hatasi: {e}")
+
+
+async def tweet_company_intro_job():
+    """Dagitima cikan IPO'lar icin ertesi gun 20:00'de sirket tanitim tweeti.
+
+    Dun in_distribution'a gecen (subscription_start == dun) IPO'lar icin tweet atar.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from datetime import timedelta
+
+        async with async_session() as db:
+            yesterday = date.today() - timedelta(days=1)
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status.in_(["in_distribution", "active", "newly_approved"]),
+                        IPO.subscription_start == yesterday,
+                    )
+                )
+            )
+            new_ipos = list(result.scalars().all())
+
+            if not new_ipos:
+                return
+
+            from app.services.twitter_service import tweet_company_intro
+            for idx, ipo in enumerate(new_ipos):
+                if idx > 0:
+                    import asyncio
+                    await asyncio.sleep(random.uniform(50, 55))
+                tweet_company_intro(ipo)
+
+            logger.info(f"Sirket tanitim tweeti: {len(new_ipos)} IPO")
+
+    except Exception as e:
+        logger.error(f"Sirket tanitim tweet hatasi: {e}")
+
+
+async def tweet_spk_pending_monthly_job():
+    """Her ayin 1'inde SPK onayi bekleyenler gorselli tweet.
+
+    static/img/spk_bekleyenler_banner.png gorselini kullanir.
+    """
+    try:
+        import os
+        from sqlalchemy import select, func
+        from app.models.spk_application import SPKApplication
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(func.count()).select_from(SPKApplication).where(
+                    SPKApplication.status == "pending"
+                )
+            )
+            pending_count = result.scalar() or 0
+
+            if pending_count == 0:
+                return
+
+            # Gorsel yolu — Render'da cwd app/
+            image_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "app", "static", "img", "spk_bekleyenler_banner.png"
+            )
+            # Alternatif yol
+            if not os.path.exists(image_path):
+                image_path = os.path.join("app", "static", "img", "spk_bekleyenler_banner.png")
+            if not os.path.exists(image_path):
+                image_path = None  # Gorsel bulunamazsa sadece metin
+
+            from app.services.twitter_service import tweet_spk_pending_with_image
+            tweet_spk_pending_with_image(pending_count, image_path)
+
+            logger.info(f"SPK bekleyenler aylik tweet: {pending_count} basvuru")
+
+    except Exception as e:
+        logger.error(f"SPK bekleyenler tweet hatasi: {e}")
+
+
 async def daily_ceiling_update():
     """Gun sonu tavan takip guncellemesi — 18:20 (UTC 15:20).
 
@@ -1396,6 +1512,35 @@ def _setup_scheduler_impl():
         CronTrigger(day=1, hour=21, minute=0),
         id="monthly_yearly_summary_tweet",
         name="Ay Sonu Halka Arz Raporu (Ayin 1'i 00:00 TR)",
+        replace_existing=True,
+    )
+
+    # 18. Son Gun Sabah Tweeti — her gun 07:30 Turkiye (UTC 04:30)
+    # Bugun subscription_end olan IPO'lar icin hafif uyari tonu tweet
+    scheduler.add_job(
+        tweet_last_day_morning_job,
+        CronTrigger(hour=4, minute=30),
+        id="last_day_morning_tweet",
+        name="Son Gun Sabah Tweet (07:30 TR)",
+        replace_existing=True,
+    )
+
+    # 19. Sirket Tanitim Tweeti — her gun 12:00 Turkiye (UTC 09:00)
+    # Dun dagitima cikan IPO icin ogle vakti sirket tanitimi
+    scheduler.add_job(
+        tweet_company_intro_job,
+        CronTrigger(hour=9, minute=0),
+        id="company_intro_tweet",
+        name="Sirket Tanitim Tweet (12:00 TR)",
+        replace_existing=True,
+    )
+
+    # 20. SPK Bekleyenler Gorselli Tweet — her ayin 1'i 20:00 TR (UTC 17:00)
+    scheduler.add_job(
+        tweet_spk_pending_monthly_job,
+        CronTrigger(day=1, hour=17, minute=0),
+        id="spk_pending_monthly_tweet",
+        name="SPK Bekleyenler Aylik Tweet (Ayin 1'i 20:00 TR)",
         replace_existing=True,
     )
 

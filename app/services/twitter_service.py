@@ -1,6 +1,6 @@
 """X (Twitter) Otomatik Tweet Servisi — @SZAlgoFinans
 
-11 farkli tweet tipi ile halka arz ve KAP haberlerini X'e otomatik atar.
+14 farkli tweet tipi ile halka arz ve KAP haberlerini X'e otomatik atar.
 Mevcut sistemi ASLA bozmamalı — tum cagrılar try/except ile korunur.
 
 Tweet Tipleri:
@@ -15,6 +15,9 @@ Tweet Tipleri:
 9.  25 Gün Performans Ozeti (25. gunde bir kez)
 10. Yillik Halka Arz Ozeti (her ayin 1'i 20:00, ocak haric)
 11. BIST 30 KAP Haberi (aninda)
+12. Son Gun Sabah Tweeti (07:30 — hafif uyari tonu)
+13. Sirket Tanitim Tweeti (ertesi gun 20:00 — izahname sonrasi)
+14. SPK Bekleyenler Gorselli Tweet (her ayin 1'i — gorsel ile)
 """
 
 import logging
@@ -140,8 +143,26 @@ def _build_oauth_header(creds: dict) -> str:
     return f"OAuth {header_parts}"
 
 
+def _notify_tweet_failure(text: str, error_detail: str):
+    """Tweet basarisiz olunca Telegram'a bildirim gonder."""
+    try:
+        from app.services.admin_telegram import notify_scraper_error
+        import asyncio
+        msg = f"Tweet atilamadi!\n\nTweet: {text[:100]}...\n\nHata: {error_detail[:200]}"
+        # sync context'te async fonksiyon cagirmak icin
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(notify_scraper_error("Twitter Tweet Hatası", msg))
+        except RuntimeError:
+            # Event loop yoksa yeni olustur
+            asyncio.run(notify_scraper_error("Twitter Tweet Hatası", msg))
+    except Exception:
+        pass  # Telegram bildirimi de basarisiz olursa sessizce gec
+
+
 def _safe_tweet(text: str) -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
+    Basarisiz olursa Telegram'a bildirim gonderir.
 
     httpx + OAuth 1.0a HMAC-SHA1 ile Twitter API v2 kullanir.
     tweepy gerektirmez — Python 3.13 uyumlu.
@@ -177,14 +198,14 @@ def _safe_tweet(text: str) -> bool:
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
             return True
         else:
-            logger.error(
-                "Tweet API hatasi (status=%d): %s",
-                response.status_code, response.text[:200],
-            )
+            error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+            logger.error("Tweet API hatasi: %s", error_msg)
+            _notify_tweet_failure(text, error_msg)
             return False
 
     except Exception as e:
         logger.error(f"Tweet hatasi (sistem etkilenmez): {e}")
+        _notify_tweet_failure(text, str(e))
         return False
 
 
@@ -694,6 +715,255 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
         return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_bist30_news hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 12. SON GUN SABAH TWEETI (07:30 — hafif uyari tonu)
+# ================================================================
+def tweet_last_day_morning(ipo) -> bool:
+    """Son gun sabahi 07:30'da hafif uyari tonunda tweet.
+
+    Kirmizi degil, turuncu/sari uyari tonu — bilgilendirici.
+    Son 30 dk kala hatirlatma atilacagini da belirtir.
+    """
+    try:
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
+
+        # Bitis saatini belirle
+        end_hour = "17:00"
+        if ipo.subscription_hours:
+            parts = str(ipo.subscription_hours).split("-")
+            if len(parts) >= 2:
+                end_hour = parts[-1].strip()
+
+        price_text = f"\n💰 Fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+
+        text = (
+            f"📢 Son Başvuru Günü!\n\n"
+            f"{ipo.company_name}{ticker_text} için halka arz başvuruları"
+            f" bugün saat {end_hour}'a kadar devam ediyor."
+            f"{price_text}\n\n"
+            f"⏰ Son anlara kadar hatırlatma yapacağız.\n\n"
+            f"📲 {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_last_day_morning hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 13. SIRKET TANITIM TWEETI (ertesi gun 20:00 — izahname sonrasi)
+# ================================================================
+def tweet_company_intro(ipo) -> bool:
+    """Taslak izahname aciklandiktan sonra ertesi gun 20:00'de
+    sirket tanitim tweeti — samimi, bilgilendirici ton.
+
+    IPO.company_description'dan ilk paragrafı alir.
+    Cok uzunsa son cumleyi kirpar (cumle bazli truncation).
+    """
+    try:
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
+
+        # Sektor bilgisi
+        sector_text = ""
+        if ipo.sector:
+            sector_text = f"\n🏭 Sektör: {ipo.sector}"
+
+        # Sirket aciklamasi — ilk paragraf, cumle bazli kisaltma
+        desc_text = ""
+        if ipo.company_description:
+            full_desc = str(ipo.company_description).strip()
+            # Ilk paragrafi al (ilk bos satira kadar)
+            first_para = full_desc.split("\n")[0].strip()
+            if not first_para:
+                first_para = full_desc[:200]
+
+            # Max karakter limiti (tweet icinde ~130 char yer var)
+            max_desc_len = 130
+            if len(first_para) > max_desc_len:
+                # Cumle bazli kirpma — son tam cumleyi bul
+                sentences = first_para.replace(".", ".|").replace("!", "!|").replace("?", "?|").split("|")
+                trimmed = ""
+                for s in sentences:
+                    s = s.strip()
+                    if not s:
+                        continue
+                    if len(trimmed) + len(s) + 1 <= max_desc_len:
+                        trimmed = f"{trimmed} {s}".strip() if trimmed else s
+                    else:
+                        break
+                first_para = trimmed if trimmed else first_para[:max_desc_len - 3] + "..."
+
+            desc_text = f"\n\n{first_para}"
+
+        price_text = ""
+        if ipo.ipo_price:
+            price_text = f"\n💰 Halka arz fiyatı: {ipo.ipo_price} TL"
+
+        text = (
+            f"📋 Halka Arz Hakkında\n\n"
+            f"{ipo.company_name}{ticker_text}"
+            f"{sector_text}{price_text}"
+            f"{desc_text}\n\n"
+            f"📲 Detaylar: {APP_LINK}\n\n"
+            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+        )
+
+        # 280 karakter limiti — gerekirse desc kisalt
+        if len(text) > 280 and desc_text:
+            # Daha da kisalt — sadece ilk cumle
+            if ipo.company_description:
+                full = str(ipo.company_description).strip().split("\n")[0]
+                first_sentence = full.split(".")[0].strip()
+                if first_sentence and len(first_sentence) < 120:
+                    desc_text = f"\n\n{first_sentence}."
+                else:
+                    desc_text = ""
+            text = (
+                f"📋 Halka Arz Hakkında\n\n"
+                f"{ipo.company_name}{ticker_text}"
+                f"{sector_text}{price_text}"
+                f"{desc_text}\n\n"
+                f"📲 {APP_LINK}\n\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
+        # Hala sigmazsa desc kaldir
+        if len(text) > 280:
+            text = (
+                f"📋 Halka Arz Hakkında\n\n"
+                f"{ipo.company_name}{ticker_text}"
+                f"{sector_text}{price_text}\n\n"
+                f"📲 {APP_LINK}\n\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_company_intro hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 14. SPK BEKLEYENLER GORSELLI TWEET (her ayin 1'i)
+# ================================================================
+def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> bool:
+    """Her ayin 1'inde SPK onayi bekleyenler gorselli tweet.
+
+    image_path: Yerel gorsel dosya yolu (opsiyonel).
+    Gorsel varsa media upload yapilir, yoksa sadece metin atilir.
+    """
+    try:
+        text = (
+            f"📊 SPK Onay Bekleyenler\n\n"
+            f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
+            f"Güncel listeyi uygulamamızdan takip edebilirsiniz.\n\n"
+            f"📲 {APP_LINK}\n\n"
+            f"#HalkaArz #SPK #BIST #Borsa"
+        )
+
+        if image_path:
+            return _safe_tweet_with_media(text, image_path)
+        return _safe_tweet(text)
+    except Exception as e:
+        logger.error(f"tweet_spk_pending_with_image hatasi: {e}")
+        return False
+
+
+def _safe_tweet_with_media(text: str, image_path: str) -> bool:
+    """Gorsel + metin tweeti atar.
+
+    1. Twitter v1.1 media/upload ile gorseli yukle → media_id al
+    2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
+    """
+    try:
+        import os
+        creds = _load_credentials()
+        if not creds:
+            logger.info(f"[TWITTER-DRY-RUN-MEDIA] {text[:60]}... (image={image_path})")
+            return False
+
+        if not os.path.exists(image_path):
+            logger.warning(f"Gorsel bulunamadi: {image_path}, sadece metin atiliyor")
+            return _safe_tweet(text)
+
+        # 1. Media Upload (v1.1 — multipart/form-data)
+        upload_url = "https://upload.twitter.com/1.1/media/upload.json"
+
+        # OAuth header — upload icin ozel
+        oauth_params = {
+            "oauth_consumer_key": creds["api_key"],
+            "oauth_nonce": uuid.uuid4().hex,
+            "oauth_signature_method": "HMAC-SHA1",
+            "oauth_timestamp": str(int(time.time())),
+            "oauth_token": creds["access_token"],
+            "oauth_version": "1.0",
+        }
+        signature = _generate_oauth_signature(
+            "POST", upload_url, oauth_params,
+            creds["api_secret"], creds["access_token_secret"],
+        )
+        oauth_params["oauth_signature"] = signature
+        header_parts = ", ".join(
+            f'{k}="{urllib.parse.quote(v, safe="")}"'
+            for k, v in sorted(oauth_params.items())
+        )
+        auth_header = f"OAuth {header_parts}"
+
+        with open(image_path, "rb") as f:
+            files = {"media": ("image.png", f, "image/png")}
+            upload_resp = httpx.post(
+                upload_url,
+                files=files,
+                headers={"Authorization": auth_header},
+                timeout=30.0,
+            )
+
+        if upload_resp.status_code not in (200, 201):
+            logger.error(f"Media upload hatasi ({upload_resp.status_code}): {upload_resp.text[:200]}")
+            return _safe_tweet(text)  # Gorsel basarisiz → sadece metin at
+
+        media_id = upload_resp.json().get("media_id_string")
+        if not media_id:
+            logger.error("Media upload: media_id alinamadi")
+            return _safe_tweet(text)
+
+        logger.info(f"Media upload basarili: media_id={media_id}")
+
+        # 2. Tweet at — media_ids ile
+        if len(text) > 280:
+            text = text[:277] + "..."
+
+        tweet_auth = _build_oauth_header(creds)
+        tweet_resp = httpx.post(
+            _TWITTER_TWEET_URL,
+            json={
+                "text": text,
+                "media": {"media_ids": [media_id]},
+            },
+            headers={
+                "Authorization": tweet_auth,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+
+        if tweet_resp.status_code in (200, 201):
+            tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
+            logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
+            return True
+        else:
+            error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
+            logger.error(f"Gorselli tweet hatasi: {error_msg}")
+            _notify_tweet_failure(text, f"[MEDIA] {error_msg}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Gorselli tweet hatasi (sistem etkilenmez): {e}")
+        _notify_tweet_failure(text, f"[MEDIA] {str(e)}")
         return False
 
 
