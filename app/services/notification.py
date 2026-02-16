@@ -121,7 +121,7 @@ class NotificationService:
                     priority="high",
                     notification=messaging.AndroidNotification(
                         sound="default",
-                        channel_id="kap_news",
+                        channel_id="kap_news_v2",
                         default_vibrate_timings=True,
                         notification_priority="PRIORITY_MAX",
                         visibility="PUBLIC",
@@ -185,7 +185,7 @@ class NotificationService:
                     priority="high",
                     notification=messaging.AndroidNotification(
                         sound="default",
-                        channel_id="bist_finans_channel",
+                        channel_id="default_v2",
                     ),
                 ),
                 apns=messaging.APNSConfig(

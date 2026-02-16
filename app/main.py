@@ -1077,7 +1077,7 @@ async def admin_test_notification(
                 priority="high",
                 notification=messaging.AndroidNotification(
                     sound="default",
-                    channel_id="kap_news",
+                    channel_id="kap_news_v2",
                 ),
             ),
         )
@@ -2615,7 +2615,7 @@ async def test_notification(request: Request, payload: dict):
                 priority="high",
                 notification=messaging.AndroidNotification(
                     sound="default",
-                    channel_id="bist_finans_channel",
+                    channel_id="default_v2",
                 ),
             ),
             apns=messaging.APNSConfig(
