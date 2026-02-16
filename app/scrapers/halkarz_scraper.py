@@ -69,7 +69,7 @@ class HalkArzDetailParser:
         self._parse_header()
         self._parse_main_table()
         self._parse_results_table()
-        self._parse_financial_table()
+        # Finansal tablo (fs-extra) kasitli olarak atlanıyor — kullanilmiyor.
         self._parse_sections()
         self._parse_pdf_links()
         self._parse_brokers()
@@ -302,29 +302,19 @@ class HalkArzDetailParser:
                 self.data["prospectus_url"] = full_url
                 break
 
-    # --- Basvuru Yerleri (Broker listesi) ---
+    # --- Basvuru Yerleri (Sadece REJECTED broker listesi) ---
     def _parse_brokers(self):
-        """details.acc > Basvuru Yerleri → allowed/rejected broker listesi.
+        """details.acc > Basvuru Yerleri → SADECE basvurulamaz broker'lari topla.
 
-        HTML yapisi:
-          <details class="acc">
-            <summary class="acc-header">Başvuru Yerleri</summary>
-            <div class="acc-body">
-              <ul>
-                <li>Temiz Broker A.S.</li>                     → allowed
-                <li class="unlist">Ustu Cizili A.S.</li>       → rejected
-                <li class="konsorsiyum">Lider Broker A.S.</li> → konsorsiyum
-              </ul>
-            </div>
-          </details>
+        Amac: Kullaniciya "buradan basvuramazsin" bilgisi vermek.
+        Temiz (allowed) broker'lar kaydedilMEZ — sadece rejected olanlar saklanir.
 
-        Rejected tespiti (kullanicinin istegi):
+        Rejected tespiti:
         - class="unlist" → rejected
         - <s> etiketi icinde → rejected
         - style="text-decoration: line-through" → rejected
         - class="cross" veya icinde <i> carpi ikonu → rejected
         """
-        allowed_list: list[dict] = []
         rejected_list: list[dict] = []
 
         for details in self.soup.find_all("details", class_="acc"):
@@ -358,32 +348,27 @@ class HalkArzDetailParser:
                     or has_cross_icon
                 )
 
+                if not is_rejected:
+                    continue  # Temiz broker'lari kaydetmiyoruz
+
                 # Broker tipi tespit
                 broker_type = "araci_kurum"
-                if "konsorsiyum" in cls_str:
-                    broker_type = "konsorsiyum"
-                elif any(kw in name.lower() for kw in ["bank", "banka"]):
+                if any(kw in name.lower() for kw in ["bank", "banka"]):
                     broker_type = "banka"
 
-                entry = {
+                rejected_list.append({
                     "name": name,
                     "type": broker_type,
-                    "is_rejected": is_rejected,
-                }
-
-                if is_rejected:
-                    rejected_list.append(entry)
-                else:
-                    allowed_list.append(entry)
+                    "is_rejected": True,
+                })
 
             break  # Sadece ilk Basvuru Yerleri accordion'u
 
-        if allowed_list or rejected_list:
-            self.data["brokers_allowed"] = allowed_list
+        if rejected_list:
             self.data["brokers_rejected"] = rejected_list
             logger.info(
-                "Basvuru Yerleri: %d basvurulabilir, %d basvurulamaz",
-                len(allowed_list), len(rejected_list),
+                "Basvuru Yerleri: %d basvurulamaz broker tespit edildi",
+                len(rejected_list),
             )
 
     # ============================================================
@@ -764,8 +749,7 @@ async def scrape_halkarz():
                     "lock_up_period_days": "lock_up_period_days",
                     "prospectus_url": "prospectus_url",
                     "total_applicants": "total_applicants",
-                    "revenue_current_year": "revenue_current_year",
-                    "gross_profit": "gross_profit",
+                    # Finansal veriler (revenue, gross_profit) kasitli olarak atlanıyor.
                     "fund_usage": "fund_usage",
                     "katilim_endeksi": None,  # DB'de yok, logla
                 }
@@ -791,29 +775,29 @@ async def scrape_halkarz():
                         list(update_fields.keys()),
                     )
 
-                # 7. Broker listesini senkronize et (admin kilidi: "brokers")
+                # 7. Rejected broker listesini senkronize et (admin kilidi: "brokers")
+                # Sadece basvurulamaz broker'lar kaydedilir (kullaniciya uyari icin)
                 if "brokers" not in manual:
-                    all_brokers = (
-                        detail.get("brokers_allowed", [])
-                        + detail.get("brokers_rejected", [])
-                    )
-                    if all_brokers:
-                        # Mevcut brokerlari sil ve yeniden yaz
+                    rejected_brokers = detail.get("brokers_rejected", [])
+                    if rejected_brokers:
+                        # Mevcut rejected brokerlari sil ve yeniden yaz
                         await db.execute(
-                            delete(IPOBroker).where(IPOBroker.ipo_id == ipo.id)
+                            delete(IPOBroker).where(
+                                IPOBroker.ipo_id == ipo.id,
+                                IPOBroker.is_rejected == True,
+                            )
                         )
-                        for b in all_brokers:
+                        for b in rejected_brokers:
                             db.add(IPOBroker(
                                 ipo_id=ipo.id,
                                 broker_name=b["name"],
                                 broker_type=b["type"],
-                                is_rejected=b["is_rejected"],
+                                is_rejected=True,
                             ))
                         logger.info(
-                            "HalkArz: %s broker sync — %d allowed, %d rejected",
+                            "HalkArz: %s — %d basvurulamaz broker kaydedildi",
                             ipo.ticker or ipo.company_name,
-                            len(detail.get("brokers_allowed", [])),
-                            len(detail.get("brokers_rejected", [])),
+                            len(rejected_brokers),
                         )
 
             await db.commit()
