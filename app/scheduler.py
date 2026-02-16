@@ -459,7 +459,7 @@ async def archive_old_ipos():
                                     if ipo.estimated_lots_per_person else None
                                 )
 
-                                tweet_25_day_performance(
+                                tweet_ok = tweet_25_day_performance(
                                     ipo, last_close, total_pct,
                                     ceiling_d, floor_d, avg_lot,
                                     days_data=days_data,
@@ -468,6 +468,18 @@ async def archive_old_ipos():
                                     "Arsiv: %s — 25/25 performans tweeti atildi",
                                     ipo.ticker,
                                 )
+
+                                # Admin Telegram bildirim
+                                try:
+                                    from app.services.admin_telegram import notify_tweet_sent
+                                    await notify_tweet_sent(
+                                        "25_gun_performans",
+                                        ipo.ticker,
+                                        tweet_ok,
+                                        f"Toplam: %{total_pct:+.1f} | Tavan: {ceiling_d} | Taban: {floor_d}",
+                                    )
+                                except Exception:
+                                    pass
 
                                 # Tweetler arasi jitter
                                 await asyncio.sleep(random.uniform(50, 55))
@@ -1114,11 +1126,22 @@ async def daily_ceiling_update():
                             # 25. gun ve sonrasi icin gunluk tweet ATMA
                             # 25/25 performans tweeti gece 00:00 arsivleme sirasinda atilir
                             if current_day < 25:
-                                tweet_daily_tracking(
+                                tweet_ok = tweet_daily_tracking(
                                     ipo, current_day, last_close,
                                     daily_pct, last_det["durum"],
                                     days_data=days_data,
                                 )
+                                # Admin Telegram bildirim
+                                try:
+                                    from app.services.admin_telegram import notify_tweet_sent
+                                    await notify_tweet_sent(
+                                        "gunluk_takip",
+                                        ipo.ticker,
+                                        tweet_ok,
+                                        f"Gun: {current_day}/25 | %{daily_pct:+.2f} | {last_det['durum']}",
+                                    )
+                                except Exception:
+                                    pass
                             else:
                                 logger.info(
                                     "Tavan takip: %s — %d. gun, gunluk tweet atlaniyor (25/25 gece atilacak)",

@@ -142,3 +142,30 @@ async def notify_spk_approval(company_name: str, approval_type: str):
         f"{company_name}\n"
         f"Onay tipi: {approval_type}"
     )
+
+
+async def notify_tweet_sent(tweet_type: str, ticker: str, success: bool, detail: str = ""):
+    """Tweet atildiginda admin Telegram'a bildirim gonder.
+
+    Args:
+        tweet_type: Tweet tipi (gunluk_takip, 25_gun, dagitim, spk_onayi vs.)
+        ticker: Hisse kodu
+        success: Tweet basarili mi
+        detail: Ek bilgi (gun sayisi, hata mesaji vs.)
+    """
+    if success:
+        emoji = "✅"
+        status = "basarili"
+    else:
+        emoji = "❌"
+        status = "BASARISIZ"
+
+    text = (
+        f"{emoji} <b>Tweet {status}</b>\n"
+        f"Tip: {tweet_type}\n"
+        f"Ticker: #{ticker}"
+    )
+    if detail:
+        text += f"\n{detail}"
+
+    await send_admin_message(text, silent=success)
