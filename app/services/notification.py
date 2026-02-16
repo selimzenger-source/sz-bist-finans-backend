@@ -145,6 +145,8 @@ class NotificationService:
 
         except Exception as e:
             logger.error(f"Push bildirim hatasi: {e}")
+            # Hata detayini attribute olarak sakla — test endpoint'ten okunabilir
+            self._last_send_error = str(e)
             return False
 
     async def send_to_topic(

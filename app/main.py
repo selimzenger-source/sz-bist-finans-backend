@@ -1072,6 +1072,7 @@ async def admin_test_notification(
             data={"type": "test", "ticker": "TEST"},
             delay=False,
         )
+        last_err = getattr(notif, "_last_send_error", None)
         if success:
             return {
                 "status": "ok",
@@ -1081,7 +1082,7 @@ async def admin_test_notification(
         else:
             return {
                 "status": "error",
-                "message": "send_to_device False dondu — log'larda detay var",
+                "message": f"send_to_device False dondu: {last_err or 'bilinmeyen hata'}",
                 "token_info": token_info,
             }
     except Exception as e:
