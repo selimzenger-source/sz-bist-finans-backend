@@ -904,6 +904,33 @@ async def scrape_halkarz():
                             len(allocation_groups),
                         )
 
+                        # DB'ye flush — tweet ve bildirim icin guncel veri lazim
+                        await db.flush()
+
+                        # Tweet #3: Dagitim sonuclari tweeti
+                        try:
+                            from app.services.twitter_service import tweet_allocation_results
+                            # IPOAllocation nesnelerini yeniden cek (flush sonrasi)
+                            alloc_result = await db.execute(
+                                select(IPOAllocation).where(IPOAllocation.ipo_id == ipo.id)
+                            )
+                            alloc_list = alloc_result.scalars().all()
+                            tweet_allocation_results(ipo, alloc_list)
+                            logger.info("HalkArz: %s — dagitim sonucu tweeti atildi", ipo.ticker or ipo.company_name)
+                        except Exception as tweet_err:
+                            logger.warning("HalkArz: %s — tweet hatasi: %s", ipo.ticker or ipo.company_name, tweet_err)
+
+                        # Bildirim: Dagitim sonucu bildirimi (notify_ipo_result = True olanlara)
+                        try:
+                            from app.services.notification import NotificationService
+                            notif_service = NotificationService(db)
+                            sent_count = await notif_service.notify_allocation_result(
+                                ipo, total_applicants=safe_data.get("total_applicants", 0)
+                            )
+                            logger.info("HalkArz: %s — dagitim bildirimi %d kullaniciya gonderildi", ipo.ticker or ipo.company_name, sent_count)
+                        except Exception as notif_err:
+                            logger.warning("HalkArz: %s — bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
+
             await db.commit()
             logger.info("HalkArz: %d IPO guncellendi", updated_count)
 
