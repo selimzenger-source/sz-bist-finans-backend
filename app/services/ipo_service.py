@@ -487,10 +487,14 @@ class IPOService:
                     IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
                     IPO.trading_start.is_(None),
                     IPO.archived == False,
-                    # subscription_start gelecekte ise arsivleme — dagitim henuz baslamadi
+                    # subscription_start veya subscription_end gelecekte ise arsivleme
                     or_(
                         IPO.subscription_start.is_(None),
                         IPO.subscription_start < today,
+                    ),
+                    or_(
+                        IPO.subscription_end.is_(None),
+                        IPO.subscription_end < today,
                     ),
                     or_(
                         and_(IPO.subscription_end.isnot(None), IPO.subscription_end < stale_cutoff),
@@ -574,6 +578,7 @@ class IPOService:
             select(IPO).where(
                 and_(
                     IPO.status == "newly_approved",
+                    IPO.archived == False,
                     IPO.subscription_start.isnot(None),
                     IPO.subscription_start <= today,
                 )
@@ -607,6 +612,7 @@ class IPOService:
             select(IPO).where(
                 and_(
                     IPO.status == "in_distribution",
+                    IPO.archived == False,
                     IPO.subscription_end.isnot(None),
                     IPO.subscription_end < today,
                 )
@@ -634,6 +640,7 @@ class IPOService:
             select(IPO).where(
                 and_(
                     IPO.status == "awaiting_trading",
+                    IPO.archived == False,
                     IPO.trading_start.isnot(None),
                     IPO.trading_start <= today,
                 )
