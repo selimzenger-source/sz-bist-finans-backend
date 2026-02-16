@@ -291,6 +291,21 @@ class HalkArzDetailParser:
         if fund_usage:
             self.data["fund_usage"] = json.dumps(fund_usage, ensure_ascii=False)
 
+        # Sirket Hakkinda — accordion icinden en uzun <p> paragrafini al
+        # (ilk <p> bazen sadece sirket adi olabiliyor)
+        for summary_el in self.soup.find_all("summary", class_="acc-header"):
+            if "irket" in summary_el.get_text() and "akkında" in summary_el.get_text():
+                acc_body = summary_el.find_next_sibling("div", class_="acc-body")
+                if acc_body:
+                    best = ""
+                    for p in acc_body.find_all("p"):
+                        txt = p.get_text(strip=True)
+                        if len(txt) > len(best):
+                            best = txt
+                    if len(best) > 50:
+                        self.data["company_description"] = best
+                break
+
     # --- PDF Linkleri ---
     def _parse_pdf_links(self):
         """Izahname ve diger PDF linklerini cikar."""
@@ -751,6 +766,7 @@ async def scrape_halkarz():
                     "total_applicants": "total_applicants",
                     # Finansal veriler (revenue, gross_profit) kasitli olarak atlanıyor.
                     "fund_usage": "fund_usage",
+                    "company_description": "company_description",
                     "katilim_endeksi": None,  # DB'de yok, logla
                 }
 
