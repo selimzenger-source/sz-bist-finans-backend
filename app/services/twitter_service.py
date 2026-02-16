@@ -34,10 +34,47 @@ from typing import Optional
 import os
 import httpx
 
+import asyncio
+
 logger = logging.getLogger(__name__)
 
 # Twitter API v2 endpoint
 _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
+
+
+def _queue_tweet(text: str, image_path: str | None = None, source: str = "unknown") -> bool:
+    """Tweet'i kuyruğa ekler (DB'ye PendingTweet kaydeder).
+
+    TWITTER_AUTO_SEND=False iken tum tweetler buraya yonlendirilir.
+    Admin panelinden onaylaninca atilir.
+    """
+    try:
+        from app.database import async_session
+        from app.models.pending_tweet import PendingTweet
+
+        async def _save():
+            async with async_session() as db:
+                tweet = PendingTweet(
+                    text=text,
+                    image_path=image_path,
+                    source=source,
+                    status="pending",
+                )
+                db.add(tweet)
+                await db.commit()
+                logger.info("[TWEET-KUYRUK] Kuyruğa eklendi (%s): %s", source, text[:60])
+
+        # Event loop'a gore calistir
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_save())
+        except RuntimeError:
+            asyncio.run(_save())
+
+        return True
+    except Exception as e:
+        logger.error("[TWEET-KUYRUK] Kuyruğa eklenemedi: %s", e)
+        return False
 
 # Banner gorsel yollari — static/img/ altinda
 _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
@@ -244,18 +281,28 @@ def _notify_tweet_failure(text: str, error_detail: str):
         pass  # Telegram bildirimi de basarisiz olursa sessizce gec
 
 
-def _safe_tweet(text: str) -> bool:
+def _safe_tweet(text: str, source: str = "unknown") -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
     Basarisiz olursa Telegram'a bildirim gonderir.
+
+    TWITTER_AUTO_SEND=False iken tweet kuyruğa eklenir (admin onay bekler).
 
     httpx + OAuth 1.0a HMAC-SHA1 ile Twitter API v2 kullanir.
     tweepy gerektirmez — Python 3.13 uyumlu.
 
     Returns:
-        True: tweet basarili
+        True: tweet basarili / kuyruğa eklendi
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
+        # Onay modu — kuyruğa ekle, direkt atma
+        from app.config import get_settings
+        if not get_settings().TWITTER_AUTO_SEND:
+            # Caller fonksiyon adini otomatik tespit et
+            import inspect
+            caller = inspect.stack()[1].function if source == "unknown" else source
+            return _queue_tweet(text, image_path=None, source=caller)
+
         # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
         if _is_duplicate_tweet(text):
             return False
@@ -929,13 +976,22 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         return False
 
 
-def _safe_tweet_with_media(text: str, image_path: str) -> bool:
+def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown") -> bool:
     """Gorsel + metin tweeti atar.
+
+    TWITTER_AUTO_SEND=False iken tweet kuyruğa eklenir (admin onay bekler).
 
     1. Twitter v1.1 media/upload ile gorseli yukle → media_id al
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
     try:
+        # Onay modu — kuyruğa ekle, direkt atma
+        from app.config import get_settings
+        if not get_settings().TWITTER_AUTO_SEND:
+            import inspect
+            caller = inspect.stack()[1].function if source == "unknown" else source
+            return _queue_tweet(text, image_path=image_path, source=caller)
+
         # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
         if _is_duplicate_tweet(text):
             return False

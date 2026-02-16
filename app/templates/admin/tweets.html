@@ -1,0 +1,106 @@
+{% extends "admin/base.html" %}
+{% block title %}Tweetler{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold flex items-center gap-2">
+            🐦 Bekleyen Tweetler
+            {% if pending_count > 0 %}
+            <span class="bg-yellow-500 text-black text-sm font-bold px-2 py-1 rounded-full">{{ pending_count }}</span>
+            {% endif %}
+        </h1>
+        <div class="flex gap-2 text-sm">
+            <a href="?status=pending" class="px-3 py-1 rounded {{ 'bg-yellow-600' if current_status == 'pending' else 'bg-gray-700 hover:bg-gray-600' }}">
+                Bekleyen ({{ pending_count }})
+            </a>
+            <a href="?status=sent" class="px-3 py-1 rounded {{ 'bg-green-600' if current_status == 'sent' else 'bg-gray-700 hover:bg-gray-600' }}">
+                Gönderilen
+            </a>
+            <a href="?status=rejected" class="px-3 py-1 rounded {{ 'bg-red-600' if current_status == 'rejected' else 'bg-gray-700 hover:bg-gray-600' }}">
+                Reddedilen
+            </a>
+            <a href="?status=all" class="px-3 py-1 rounded {{ 'bg-indigo-600' if current_status == 'all' else 'bg-gray-700 hover:bg-gray-600' }}">
+                Tümü
+            </a>
+        </div>
+    </div>
+
+    {% if tweets|length == 0 %}
+    <div class="bg-gray-800 rounded-lg p-8 text-center text-gray-400">
+        <p class="text-lg">Bekleyen tweet yok 🎉</p>
+        <p class="text-sm mt-2">Yeni tweet gelince burada görünecek.</p>
+    </div>
+    {% endif %}
+
+    {% for tweet in tweets %}
+    <div class="bg-gray-800 rounded-lg border {{ 'border-yellow-600' if tweet.status == 'pending' else 'border-green-700' if tweet.status == 'sent' else 'border-red-700' if tweet.status == 'rejected' else 'border-gray-700' }} overflow-hidden">
+        <!-- Header -->
+        <div class="px-4 py-2 flex items-center justify-between bg-gray-750 border-b border-gray-700">
+            <div class="flex items-center gap-3">
+                <span class="text-xs px-2 py-0.5 rounded font-mono
+                    {{ 'bg-yellow-900 text-yellow-300' if tweet.status == 'pending' else 'bg-green-900 text-green-300' if tweet.status == 'sent' else 'bg-red-900 text-red-300' if tweet.status == 'rejected' else 'bg-gray-700 text-gray-300' }}">
+                    {{ tweet.status|upper }}
+                </span>
+                <span class="text-xs text-gray-400">{{ tweet.source }}</span>
+                {% if tweet.image_path %}
+                <span class="text-xs text-blue-400">📷 Görselli</span>
+                {% endif %}
+            </div>
+            <span class="text-xs text-gray-500">
+                {{ tweet.created_at.strftime('%d.%m.%Y %H:%M') if tweet.created_at else '?' }}
+            </span>
+        </div>
+
+        <!-- Tweet metni -->
+        <div class="px-4 py-3">
+            <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed">{{ tweet.text }}</pre>
+        </div>
+
+        <!-- Karakter sayısı -->
+        <div class="px-4 pb-2">
+            <span class="text-xs text-gray-500">{{ tweet.text|length }} karakter</span>
+        </div>
+
+        <!-- Aksiyonlar -->
+        {% if tweet.status == 'pending' %}
+        <div class="px-4 py-3 border-t border-gray-700 flex items-center gap-2">
+            <!-- Kopyala butonu -->
+            <button onclick="navigator.clipboard.writeText(document.getElementById('tweet-text-{{ tweet.id }}').innerText); this.innerText='✓ Kopyalandı'; setTimeout(() => this.innerText='📋 Kopyala', 2000)"
+                    class="bg-gray-600 hover:bg-gray-500 text-white text-sm px-3 py-1.5 rounded transition">
+                📋 Kopyala
+            </button>
+            <span id="tweet-text-{{ tweet.id }}" class="hidden">{{ tweet.text }}</span>
+
+            <!-- Onayla (tweet at) -->
+            <form method="post" action="/admin/tweets/{{ tweet.id }}/approve" style="display:inline">
+                <button type="submit" class="bg-green-600 hover:bg-green-500 text-white text-sm px-3 py-1.5 rounded transition"
+                        onclick="return confirm('Bu tweet X\'e gönderilsin mi?')">
+                    ✅ Onayla & Gönder
+                </button>
+            </form>
+
+            <!-- Reddet -->
+            <form method="post" action="/admin/tweets/{{ tweet.id }}/reject" style="display:inline">
+                <button type="submit" class="bg-red-600 hover:bg-red-500 text-white text-sm px-3 py-1.5 rounded transition">
+                    ❌ Reddet
+                </button>
+            </form>
+        </div>
+        {% elif tweet.status == 'sent' %}
+        <div class="px-4 py-2 border-t border-gray-700 text-xs text-green-400">
+            ✅ Gönderildi: {{ tweet.sent_at.strftime('%d.%m.%Y %H:%M') if tweet.sent_at else '?' }}
+        </div>
+        {% elif tweet.status == 'rejected' %}
+        <div class="px-4 py-2 border-t border-gray-700 text-xs text-red-400">
+            ❌ Reddedildi: {{ tweet.reviewed_at.strftime('%d.%m.%Y %H:%M') if tweet.reviewed_at else '?' }}
+        </div>
+        {% elif tweet.status == 'failed' %}
+        <div class="px-4 py-2 border-t border-gray-700 text-xs text-red-400">
+            ⚠️ Hata: {{ tweet.error_message or 'Bilinmeyen hata' }}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

@@ -13,6 +13,7 @@ from app.models.user import (
 from app.models.dividend import Dividend, DividendHistory
 from app.models.telegram_news import TelegramNews
 from app.models.scraper_state import ScraperState
+from app.models.pending_tweet import PendingTweet
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack",
@@ -28,4 +29,5 @@ __all__ = [
     "Dividend", "DividendHistory",
     "TelegramNews",
     "ScraperState",
+    "PendingTweet",
 ]

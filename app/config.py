@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     X_ACCESS_TOKEN: str = ""
     X_ACCESS_TOKEN_SECRET: str = ""
 
+    # Tweet onay modu — False iken tweetler kuyruğa girer, admin onaylar
+    # True yapilinca otomatik atilir (sistem oturunca)
+    TWITTER_AUTO_SEND: bool = False
+
     # Scraping intervals (saniye)
     KAP_SCRAPE_INTERVAL_SECONDS: int = 1800   # 30 dakika — halka arz
     NEWS_SCRAPE_INTERVAL_SECONDS: int = 30     # 30 saniye — KAP haberler

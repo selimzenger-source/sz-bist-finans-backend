@@ -782,3 +782,122 @@ async def run_halkarz_scraper(request: Request):
     except Exception as e:
         logger.error(f"Admin: HalkArz scraper tetikleme hatasi — {e}")
         return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
+
+
+# -------------------------------------------------------
+# TWEET KUYRUGU — Bekleyen Tweetler
+# -------------------------------------------------------
+
+@router.get("/tweets", response_class=HTMLResponse)
+async def tweets_page(
+    request: Request,
+    status: str = "pending",
+    db: AsyncSession = Depends(get_db),
+):
+    """Bekleyen tweetleri listeler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.pending_tweet import PendingTweet
+
+    # Pending sayisi (badge icin)
+    pending_result = await db.execute(
+        select(sa_func.count(PendingTweet.id)).where(PendingTweet.status == "pending")
+    )
+    pending_count = pending_result.scalar() or 0
+
+    # Filtreli liste
+    query = select(PendingTweet)
+    if status != "all":
+        query = query.where(PendingTweet.status == status)
+    query = query.order_by(desc(PendingTweet.created_at)).limit(50)
+
+    result = await db.execute(query)
+    tweets = list(result.scalars().all())
+
+    return templates.TemplateResponse("admin/tweets.html", {
+        "request": request,
+        "tweets": tweets,
+        "pending_count": pending_count,
+        "current_status": status,
+    })
+
+
+@router.post("/tweets/{tweet_id}/approve")
+async def approve_tweet(
+    request: Request,
+    tweet_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet'i onayla ve X'e gonder."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from datetime import datetime, timezone
+    from app.models.pending_tweet import PendingTweet
+
+    result = await db.execute(
+        select(PendingTweet).where(PendingTweet.id == tweet_id)
+    )
+    tweet = result.scalar_one_or_none()
+    if not tweet or tweet.status != "pending":
+        return RedirectResponse(url="/admin/tweets", status_code=303)
+
+    # Tweet'i gercekten at
+    from app.services.twitter_service import _safe_tweet as real_tweet, _safe_tweet_with_media as real_tweet_media
+    from app.config import get_settings
+
+    # Gecici olarak auto_send'i True yap (bu tek tweet icin)
+    settings = get_settings()
+    original_val = settings.TWITTER_AUTO_SEND
+    try:
+        settings.TWITTER_AUTO_SEND = True
+
+        if tweet.image_path:
+            success = real_tweet_media(tweet.text, tweet.image_path, source="admin_approve")
+        else:
+            success = real_tweet(tweet.text, source="admin_approve")
+
+        if success:
+            tweet.status = "sent"
+            tweet.sent_at = datetime.now(timezone.utc)
+        else:
+            tweet.status = "failed"
+            tweet.error_message = "Tweet gonderilemedi"
+    except Exception as e:
+        tweet.status = "failed"
+        tweet.error_message = str(e)[:500]
+    finally:
+        settings.TWITTER_AUTO_SEND = original_val
+
+    tweet.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return RedirectResponse(url="/admin/tweets", status_code=303)
+
+
+@router.post("/tweets/{tweet_id}/reject")
+async def reject_tweet(
+    request: Request,
+    tweet_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet'i reddet."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from datetime import datetime, timezone
+    from app.models.pending_tweet import PendingTweet
+
+    result = await db.execute(
+        select(PendingTweet).where(PendingTweet.id == tweet_id)
+    )
+    tweet = result.scalar_one_or_none()
+    if not tweet or tweet.status != "pending":
+        return RedirectResponse(url="/admin/tweets", status_code=303)
+
+    tweet.status = "rejected"
+    tweet.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return RedirectResponse(url="/admin/tweets", status_code=303)
