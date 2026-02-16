@@ -383,11 +383,12 @@ async def archive_old_ipos():
     """25 is gunu gecen halka arzlari arsivler.
 
     Her gece 00:00'da calisir.
-    trading_start tarihi ~37 takvim gunu oncesinde olan
-    ve archived=False olan IPO'lari arsivler.
+    Iki kosuldan biri yeterlii:
+      1) trading_start tarihi ~37 takvim gunu oncesinde olan
+      2) trading_day_count >= 25 olan (DB'de ceiling track verisi ile doldurulur)
     """
     try:
-        from sqlalchemy import select, and_
+        from sqlalchemy import select, and_, or_
         from app.models.ipo import IPO
 
         async with async_session() as db:
@@ -398,10 +399,18 @@ async def archive_old_ipos():
                 select(IPO).where(
                     and_(
                         IPO.archived == False,
-                        IPO.trading_start.isnot(None),
-                        IPO.trading_start <= cutoff,
-                        # trading_start 37+ gun gecmis olan TUM statuslardaki IPO'lar arsivlenmeli
-                        # (eski: sadece trading/completed — DMLKT gibi newly_approved'da takilanlar kaciriliyordu)
+                        or_(
+                            # Kosul 1: trading_start 37+ takvim gunu gecmis
+                            and_(
+                                IPO.trading_start.isnot(None),
+                                IPO.trading_start <= cutoff,
+                            ),
+                            # Kosul 2: 25 islem gunu tamamlanmis (DB ceiling track verisi)
+                            and_(
+                                IPO.trading_day_count.isnot(None),
+                                IPO.trading_day_count >= 25,
+                            ),
+                        ),
                     )
                 )
             )
@@ -416,6 +425,8 @@ async def archive_old_ipos():
             if archived_count > 0:
                 await db.commit()
                 logger.info(f"Arsiv: {archived_count} IPO arsivlendi")
+            else:
+                logger.info("Arsiv: Arsivlenecek IPO yok")
 
     except Exception as e:
         logger.error(f"IPO arsiv hatasi: {e}")
