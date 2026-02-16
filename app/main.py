@@ -963,6 +963,58 @@ async def get_subscription(device_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # -------------------------------------------------------
+# ADMIN: Subscription Elle Aktiflestirilmesi
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/activate-news-subscription/{device_id}")
+async def admin_activate_news_subscription(
+    device_id: str,
+    days: int = Query(30, description="Kac gun aktif olacak"),
+    password: str = Query(..., description="Admin sifresi"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Kullanicinin haber paketini elle aktiflestirir."""
+    if password != "SzBist2026Admin!":
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    _now = datetime.now(timezone.utc)
+    sub_result = await db.execute(
+        select(UserSubscription).where(UserSubscription.user_id == user.id)
+    )
+    existing_sub = sub_result.scalar_one_or_none()
+    if existing_sub:
+        existing_sub.package = "ana_yildiz"
+        existing_sub.is_active = True
+        existing_sub.store = "wallet"
+        existing_sub.product_id = "admin_manual_activation"
+        existing_sub.started_at = _now
+        existing_sub.expires_at = _now + timedelta(days=days)
+    else:
+        new_sub = UserSubscription(
+            user_id=user.id,
+            package="ana_yildiz",
+            is_active=True,
+            store="wallet",
+            product_id="admin_manual_activation",
+            revenue_cat_id=None,
+            started_at=_now,
+            expires_at=_now + timedelta(days=days),
+        )
+        db.add(new_sub)
+
+    await db.flush()
+    logger.info("Admin: Haber paketi elle aktif edildi: user_id=%s, %s gun", user.id, days)
+    return {"status": "ok", "user_id": user.id, "package": "ana_yildiz", "days": days}
+
+
+# -------------------------------------------------------
 # CUZDAN (WALLET) ENDPOINTS
 # -------------------------------------------------------
 
@@ -1105,6 +1157,67 @@ async def wallet_spend(
     )
     db.add(tx)
     await db.flush()
+
+    # ---- Puan ile Haber Paketi alimi → UserSubscription olustur ----
+    if data.spend_type == "spend_news":
+        _now = datetime.now(timezone.utc)
+        sub_result = await db.execute(
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
+        )
+        existing_sub = sub_result.scalar_one_or_none()
+        if existing_sub:
+            existing_sub.package = "ana_yildiz"
+            existing_sub.is_active = True
+            existing_sub.store = "wallet"
+            existing_sub.product_id = "wallet_spend_news"
+            existing_sub.started_at = _now
+            existing_sub.expires_at = _now + timedelta(days=30)
+        else:
+            new_sub = UserSubscription(
+                user_id=user.id,
+                package="ana_yildiz",
+                is_active=True,
+                store="wallet",
+                product_id="wallet_spend_news",
+                revenue_cat_id=None,
+                started_at=_now,
+                expires_at=_now + timedelta(days=30),
+            )
+            db.add(new_sub)
+        await db.flush()
+        logger.info("Puan ile haber paketi aktif edildi: user_id=%s, 30 gun", user.id)
+
+    # ---- Puan ile Halka Arz Paketi (3 Aylik) alimi → StockNotificationSubscription olustur ----
+    if data.spend_type == "spend_ipo":
+        _now = datetime.now(timezone.utc)
+        # Mevcut aktif yillik/quarterly bundle var mi?
+        existing_bundle = await db.execute(
+            select(StockNotificationSubscription).where(
+                and_(
+                    StockNotificationSubscription.user_id == user.id,
+                    StockNotificationSubscription.is_annual_bundle == True,
+                    StockNotificationSubscription.is_active == True,
+                )
+            )
+        )
+        if not existing_bundle.scalar_one_or_none():
+            quarterly_sub = StockNotificationSubscription(
+                user_id=user.id,
+                ipo_id=None,
+                notification_type="all",
+                is_annual_bundle=True,
+                price_paid_tl=0,  # Puan ile alindi
+                is_active=True,
+            )
+            db.add(quarterly_sub)
+            await db.flush()
+            logger.info("Puan ile 3 aylik halka arz paketi aktif edildi: user_id=%s", user.id)
+        else:
+            logger.info("Kullanicinin zaten aktif bundle'i var: user_id=%s", user.id)
+
+    # ---- Puan ile Bildirim Paketi alimi — log ----
+    if data.spend_type == "spend_notif":
+        logger.info("Puan ile bildirim paketi alindi: user_id=%s, amount=%s", user.id, data.amount)
 
     _check_daily_reset(user)
     cooldown = _get_wallet_cooldown(user)
