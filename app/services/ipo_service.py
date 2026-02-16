@@ -451,31 +451,66 @@ class IPOService:
 
         # ==========================================
         # TUTARSIZLIK DUZELTME — status ile tarihler uyusmuyor
-        # Ornek: DMLKT → status=newly_approved ama trading_start=2025-08-11
+        # KURAL: Adim atlamak YASAK! Her gecis onceki adimdaki tarihi gerektirir.
+        # newly_approved → in_distribution: subscription_start <= today
+        # in_distribution → awaiting_trading: subscription_end < today
+        # awaiting_trading → trading: trading_start <= today
         # ==========================================
 
-        # trading_start doluysa VE status hala newly_approved/in_distribution/awaiting_trading ise
-        # → direkt trading'e tasi (tarih gercegi statustan oncelikli)
+        # Tutarsiz IPO'lari bul (tarihler status'un ilerisinde)
         result = await self.db.execute(
             select(IPO).where(
                 and_(
                     IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
-                    IPO.trading_start.isnot(None),
-                    IPO.trading_start <= today,
                     IPO.archived == False,
                 )
             )
         )
         for ipo in result.scalars().all():
             old_status = ipo.status
-            ipo.status = "trading"
-            ipo.distribution_completed = True
-            ipo.ceiling_tracking_active = True
-            ipo.updated_at = datetime.utcnow()
-            logger.info(
-                f"Tutarsizlik duzeltme: {ipo.ticker} {old_status} → trading "
-                f"(trading_start={ipo.trading_start})"
-            )
+            new_status = old_status
+
+            # Adim 1: newly_approved → in_distribution
+            # SADECE subscription_start gelmisse
+            if new_status == "newly_approved":
+                if ipo.subscription_start and ipo.subscription_start <= today:
+                    new_status = "in_distribution"
+                else:
+                    continue  # subscription_start gelmeden hicbir yere gidemez
+
+            # Adim 2: in_distribution → awaiting_trading
+            # SADECE subscription_end gecmisse
+            if new_status == "in_distribution":
+                if ipo.subscription_end and ipo.subscription_end < today:
+                    new_status = "awaiting_trading"
+                    ipo.distribution_completed = True
+                else:
+                    # Henuz dagitim bitmedi, bu adimda kal
+                    if new_status != old_status:
+                        # Sadece 1. adimda ilerleme olduysa kaydet
+                        ipo.status = new_status
+                        ipo.updated_at = datetime.utcnow()
+                        logger.info(
+                            f"Tutarsizlik duzeltme: {ipo.ticker} {old_status} → {new_status}"
+                        )
+                    continue
+
+            # Adim 3: awaiting_trading → trading
+            # SADECE trading_start gelmisse
+            if new_status == "awaiting_trading":
+                if ipo.trading_start and ipo.trading_start <= today:
+                    new_status = "trading"
+                    ipo.ceiling_tracking_active = True
+
+            # Degisiklik varsa kaydet
+            if new_status != old_status:
+                ipo.status = new_status
+                ipo.updated_at = datetime.utcnow()
+                logger.info(
+                    f"Tutarsizlik duzeltme: {ipo.ticker} {old_status} → {new_status} "
+                    f"(sub_start={ipo.subscription_start}, sub_end={ipo.subscription_end}, "
+                    f"trading_start={ipo.trading_start})"
+                )
 
         # subscription_end 90+ gun gecmis VE hala awaiting_trading'de takili kalanlar
         # → trading_start yoksa arsivle (DNYVA gibi: sub_end=2025-01-24, trading_start=None)
