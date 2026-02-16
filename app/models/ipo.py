@@ -109,6 +109,8 @@ class IPO(Base):
     # --- Tahsisat Sonuclari (completed sonrasi) ---
     allocation_announced: Mapped[bool] = mapped_column(Boolean, default=False)
     total_applicants: Mapped[int | None] = mapped_column(Integer, comment="Toplam basvuran sayisi")
+    result_bireysel_kisi: Mapped[int | None] = mapped_column(Integer, comment="Yurt ici bireysel basvuran sayisi")
+    result_bireysel_lot: Mapped[int | None] = mapped_column(BigInteger, comment="Yurt ici bireysel dagitilan lot")
 
     # --- Tavan Takip ---
     ceiling_tracking_active: Mapped[bool] = mapped_column(Boolean, default=False)

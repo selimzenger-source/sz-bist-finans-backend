@@ -204,6 +204,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v18 migration: ipos.result_bireysel_kisi + result_bireysel_lot (dagitim sonuclari)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS result_bireysel_kisi INTEGER")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS result_bireysel_lot BIGINT")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

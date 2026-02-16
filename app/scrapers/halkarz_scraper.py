@@ -811,6 +811,8 @@ async def scrape_halkarz():
                     "lock_up_period_days": "lock_up_period_days",
                     "prospectus_url": "prospectus_url",
                     "total_applicants": "total_applicants",
+                    "result_bireysel_kisi": "result_bireysel_kisi",
+                    "result_bireysel_lot": "result_bireysel_lot",
                     # Finansal veriler (revenue, gross_profit) kasitli olarak atlanıyor.
                     "fund_usage": "fund_usage",
                     "company_description": "company_description",
