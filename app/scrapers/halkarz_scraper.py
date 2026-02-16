@@ -164,12 +164,18 @@ class HalkArzDetailParser:
 
     # --- BOLUM 3: Sonuc Tablosu (as-table) ---
     def _parse_results_table(self):
-        """table.as-table → Halka arz sonuclari."""
+        """table.as-table → Halka arz sonuclari (dagitim sonuclari).
+
+        Tablo yapisi: Grup | Kisi Sayisi | Lot Miktari
+        Satirlar: Yurt Ici Bireysel, Yuksek Basvurulu, Kurumsal Yurt Ici,
+                  Kurumsal Yurt Disi, Toplam
+        """
         table = self.soup.select_one("table.as-table")
         if not table:
             return
 
         self.data["has_results"] = True
+        self.data["allocation_groups"] = []  # Grup bazli sonuclar
         rows = table.find_all("tr")
 
         for row in rows:
@@ -178,16 +184,57 @@ class HalkArzDetailParser:
                 continue
 
             label = cells[0].get_text(strip=True).lower()
+            kisi = self._parse_number(cells[1].get_text(strip=True))
+            lot = self._parse_number(cells[2].get_text(strip=True))
+
+            # Oran (varsa — 4. sutun)
+            oran = None
+            if len(cells) >= 4:
+                oran = self._parse_pct(cells[3].get_text(strip=True))
 
             # Yurt Ici Bireysel
-            if "yurt içi bireysel" in label or "yurt ici bireysel" in label:
-                self.data["result_bireysel_kisi"] = self._parse_number(cells[1].get_text(strip=True))
-                self.data["result_bireysel_lot"] = self._parse_number(cells[2].get_text(strip=True))
+            if "yurt içi bireysel" in label or "yurt ici bireysel" in label or ("bireysel" in label and "yüksek" not in label):
+                self.data["result_bireysel_kisi"] = kisi
+                self.data["result_bireysel_lot"] = lot
+                self.data["allocation_groups"].append({
+                    "group": "bireysel",
+                    "participant_count": kisi,
+                    "allocated_lots": lot,
+                    "allocation_pct": oran,
+                })
+
+            # Yuksek Basvurulu Bireysel
+            elif "yüksek başvurulu" in label or "yuksek basvurulu" in label or "yüksek" in label:
+                self.data["allocation_groups"].append({
+                    "group": "yuksek_basvurulu",
+                    "participant_count": kisi,
+                    "allocated_lots": lot,
+                    "allocation_pct": oran,
+                })
+
+            # Kurumsal Yurt Ici
+            elif "kurumsal" in label and ("yurt içi" in label or "yurt ici" in label or "yurtiçi" in label or ("yurt" not in label and "dış" not in label and "disi" not in label)):
+                # "Yurt İçi Kurumsal" veya sadece "Kurumsal" (yurtdisi olmayan)
+                self.data["allocation_groups"].append({
+                    "group": "kurumsal_yurtici",
+                    "participant_count": kisi,
+                    "allocated_lots": lot,
+                    "allocation_pct": oran,
+                })
+
+            # Kurumsal Yurt Disi
+            elif "kurumsal" in label and ("yurt dışı" in label or "yurt disi" in label or "yurtdışı" in label or "dış" in label):
+                self.data["allocation_groups"].append({
+                    "group": "kurumsal_yurtdisi",
+                    "participant_count": kisi,
+                    "allocated_lots": lot,
+                    "allocation_pct": oran,
+                })
 
             # Toplam
             elif "toplam" in label:
-                self.data["total_applicants"] = self._parse_number(cells[1].get_text(strip=True))
-                self.data["result_toplam_lot"] = self._parse_number(cells[2].get_text(strip=True))
+                self.data["total_applicants"] = kisi
+                self.data["result_toplam_lot"] = lot
 
     # --- BOLUM 4: Finansal Tablo (fs-extra) ---
     def _parse_financial_table(self):
@@ -702,13 +749,13 @@ async def scrape_halkarz():
         async with async_session() as db:
             ipo_service = IPOService(db)
 
-            # Sadece trading_start gelmemis (islem baslamadan onceki) IPO'lari cek.
-            # trading_start gelince bilgi cekmeye gerek yok — veri tamamlanmis demektir.
+            # Aktif IPO'lari cek — trading olanlar da dahil (dagitim sonuclari icin)
+            # allocation_announced=False olan trading IPO'lari da taranir
             result = await db.execute(
                 select(IPO).where(
                     and_(
                         IPO.archived == False,
-                        IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
+                        IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"]),
                     )
                 )
             )
@@ -814,6 +861,45 @@ async def scrape_halkarz():
                             "HalkArz: %s — %d basvurulamaz broker kaydedildi",
                             ipo.ticker or ipo.company_name,
                             len(rejected_brokers),
+                        )
+
+                # 8. Dagitim sonuclari → IPOAllocation tablosuna otomatik kayit
+                # has_results varsa ve allocation_announced degilse → sonuclari kaydet
+                if detail.get("has_results") and "allocations" not in manual:
+                    allocation_groups = detail.get("allocation_groups", [])
+                    if allocation_groups and not ipo.allocation_announced:
+                        # Onceki scraper kayitlarini temizle (varsa)
+                        from app.models.ipo import IPOAllocation
+                        await db.execute(
+                            delete(IPOAllocation).where(
+                                IPOAllocation.ipo_id == ipo.id,
+                            )
+                        )
+
+                        for grp in allocation_groups:
+                            if grp.get("participant_count") or grp.get("allocated_lots"):
+                                alloc = IPOAllocation(
+                                    ipo_id=ipo.id,
+                                    group_name=grp["group"],
+                                    participant_count=grp.get("participant_count"),
+                                    allocated_lots=grp.get("allocated_lots"),
+                                    allocation_pct=grp.get("allocation_pct"),
+                                )
+                                # Kisi basi ortalama lot hesapla
+                                if grp.get("participant_count") and grp.get("allocated_lots") and grp["participant_count"] > 0:
+                                    from decimal import Decimal
+                                    alloc.avg_lot_per_person = Decimal(str(
+                                        round(grp["allocated_lots"] / grp["participant_count"], 2)
+                                    ))
+                                db.add(alloc)
+
+                        # allocation_announced flag'ini otomatik True yap
+                        ipo.allocation_announced = True
+                        ipo.updated_at = datetime.utcnow()
+                        logger.info(
+                            "HalkArz: %s — dagitim sonuclari otomatik kaydedildi (%d grup)",
+                            ipo.ticker or ipo.company_name,
+                            len(allocation_groups),
                         )
 
             await db.commit()
