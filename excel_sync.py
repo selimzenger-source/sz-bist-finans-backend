@@ -97,6 +97,22 @@ def parse_date_cell(val):
     return None
 
 
+def _count_business_days(start_date, end_date):
+    """Iki tarih arasindaki is gunu sayisini hesapla (her ikisi dahil)."""
+    if isinstance(start_date, str):
+        start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+    if isinstance(end_date, str):
+        end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+    count = 0
+    current = start_date
+    from datetime import timedelta as td
+    while current <= end_date:
+        if current.weekday() < 5:  # Pazartesi=0 ... Cuma=4
+            count += 1
+        current += td(days=1)
+    return count
+
+
 def read_matriks_excel(filepath):
     """
     Matriks Excel formatini oku.
@@ -172,16 +188,27 @@ def get_active_trading_ipos():
             if not ticker:
                 continue
             tracks = ipo.get("ceiling_tracks", [])
-            max_day = max((t["trading_day"] for t in tracks), default=0) if tracks else 0
+            max_day_from_tracks = max((t["trading_day"] for t in tracks), default=0) if tracks else 0
+
+            # DB'deki resmi trading_day_count degerini de al
+            # (scheduler tarafindan guncellenir — ceiling_tracks bos olsa bile dogru degeri verir)
+            db_day_count = ipo.get("trading_day_count") or 0
+
+            # En yuksek degeri kullan — her iki kaynak da dogru olabilir
+            effective_day = max(max_day_from_tracks, db_day_count)
+
             result[ticker] = {
                 "ipo_id": ipo["id"],
                 "ipo_price": parse_price(ipo.get("ipo_price")),
-                "trading_day_count": max_day,
+                "trading_day_count": effective_day,
+                "trading_start": ipo.get("trading_start"),
                 "last_close": None,
             }
             if tracks:
                 last_track = max(tracks, key=lambda t: t["trading_day"])
                 result[ticker]["last_close"] = parse_price(last_track.get("close_price"))
+
+            log(f"  API: {ticker} — ceiling_tracks max={max_day_from_tracks}, db_count={db_day_count} → effective={effective_day}")
         return result
     except Exception as e:
         log(f"HATA: API baglantisi basarisiz: {e}")
@@ -294,9 +321,17 @@ def main():
         ipo_info = active_ipos.get(ticker)
         if ipo_info:
             next_day = ipo_info["trading_day_count"] + 1
+            # Guvenlik: trading_start'tan hesaplanan is gunu ile karsilastir
+            trading_start = ipo_info.get("trading_start")
+            if trading_start and next_day == 1:
+                # ceiling_tracks ve trading_day_count ikisi de 0 → trading_start'tan hesapla
+                from_start = _count_business_days(trading_start, today)
+                if from_start > 1:
+                    log(f"  UYARI: {ticker} — DB'de track/count yok ama trading_start'tan {from_start} is gunu gecmis → gun {from_start} kullaniliyor")
+                    next_day = from_start
         else:
-            log(f"  UYARI: {ticker} API'de trading bolumunde bulunamadi — gun 1 kabul ediliyor")
-            next_day = 1
+            log(f"  UYARI: {ticker} API'de trading bolumunde bulunamadi — ATLANIYOR")
+            continue
 
         status = "TAVAN" if hit_ceiling else ("TABAN" if hit_floor else "NORMAL")
 
