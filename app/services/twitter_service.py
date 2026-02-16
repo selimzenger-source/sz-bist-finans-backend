@@ -666,10 +666,8 @@ def tweet_25_day_performance(
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
 
-            # Ilk 2 + ・・・ + son 8 (25 gun sigmiyor)
-            first_lines = table_lines[:2]
-            last_lines = table_lines[-8:]
-            table_text = "\n".join(first_lines) + "\n\u30FB\u30FB\u30FB\n" + "\n".join(last_lines)
+            # Premium hesap — 4000 karakter limiti, tam tablo sigdiriyoruz
+            table_text = "\n".join(table_lines)
             text = header + table_text + footer
 
         else:
