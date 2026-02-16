@@ -419,75 +419,85 @@ async def archive_old_ipos():
             )
 
             archived_count = 0
+            # Eski IPO filtresi: 40 takvim gunundan once baslayanlar "eski" sayilir
+            fresh_cutoff = date.today() - timedelta(days=40)
+
             for ipo in result.scalars().all():
                 # --- 25/25 Performans Tweeti (arsivlemeden once) ---
                 # Sadece tam 25 gun tamamlayanlar icin at (eskileri atlamak icin)
                 if ipo.trading_day_count and ipo.trading_day_count == 25 and ipo.ticker:
-                    try:
-                        from app.services.twitter_service import tweet_25_day_performance
-
-                        # Ceiling track verilerini oku
-                        track_result = await db.execute(
-                            select(IPOCeilingTrack)
-                            .where(IPOCeilingTrack.ipo_id == ipo.id)
-                            .order_by(IPOCeilingTrack.trading_day.asc())
-                            .limit(25)
+                    # Ek guvenlik: cok eski IPO'lara tweet ATMA
+                    if not ipo.trading_start or ipo.trading_start < fresh_cutoff:
+                        logger.info(
+                            "Arsiv: %s — eski IPO (trading_start=%s), 25/25 tweet atlaniyor",
+                            ipo.ticker, ipo.trading_start,
                         )
-                        tracks = track_result.scalars().all()
+                    else:
+                        try:
+                            from app.services.twitter_service import tweet_25_day_performance
 
-                        if tracks:
-                            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-                            days_data = []
-                            for t in tracks:
-                                days_data.append({
-                                    "trading_day": t.trading_day,
-                                    "date": t.trade_date,
-                                    "open": t.open_price or t.close_price,
-                                    "high": t.high_price or t.close_price,
-                                    "low": t.low_price or t.close_price,
-                                    "close": t.close_price,
-                                    "volume": 0,
-                                })
+                            # Ceiling track verilerini oku
+                            track_result = await db.execute(
+                                select(IPOCeilingTrack)
+                                .where(IPOCeilingTrack.ipo_id == ipo.id)
+                                .order_by(IPOCeilingTrack.trading_day.asc())
+                                .limit(25)
+                            )
+                            tracks = track_result.scalars().all()
 
-                            if days_data and ipo_price > 0:
-                                last_close = float(days_data[-1]["close"])
-                                total_pct = ((last_close - ipo_price) / ipo_price) * 100
-                                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
-                                floor_d = sum(1 for t in tracks if t.hit_floor)
-                                avg_lot = (
-                                    float(ipo.estimated_lots_per_person)
-                                    if ipo.estimated_lots_per_person else None
-                                )
+                            if tracks:
+                                ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                                days_data = []
+                                for t in tracks:
+                                    days_data.append({
+                                        "trading_day": t.trading_day,
+                                        "date": t.trade_date,
+                                        "open": t.open_price or t.close_price,
+                                        "high": t.high_price or t.close_price,
+                                        "low": t.low_price or t.close_price,
+                                        "close": t.close_price,
+                                        "volume": 0,
+                                    })
 
-                                tweet_ok = tweet_25_day_performance(
-                                    ipo, last_close, total_pct,
-                                    ceiling_d, floor_d, avg_lot,
-                                    days_data=days_data,
-                                )
-                                logger.info(
-                                    "Arsiv: %s — 25/25 performans tweeti atildi",
-                                    ipo.ticker,
-                                )
-
-                                # Admin Telegram bildirim
-                                try:
-                                    from app.services.admin_telegram import notify_tweet_sent
-                                    await notify_tweet_sent(
-                                        "25_gun_performans",
-                                        ipo.ticker,
-                                        tweet_ok,
-                                        f"Toplam: %{total_pct:+.1f} | Tavan: {ceiling_d} | Taban: {floor_d}",
+                                if days_data and ipo_price > 0:
+                                    last_close = float(days_data[-1]["close"])
+                                    total_pct = ((last_close - ipo_price) / ipo_price) * 100
+                                    ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+                                    floor_d = sum(1 for t in tracks if t.hit_floor)
+                                    avg_lot = (
+                                        float(ipo.estimated_lots_per_person)
+                                        if ipo.estimated_lots_per_person else None
                                     )
-                                except Exception:
-                                    pass
 
-                                # Tweetler arasi jitter
-                                await asyncio.sleep(random.uniform(50, 55))
-                    except Exception as tweet_err:
-                        logger.warning(
-                            "Arsiv: %s — 25/25 tweet hatasi: %s",
-                            ipo.ticker, tweet_err,
-                        )
+                                    tweet_ok = tweet_25_day_performance(
+                                        ipo, last_close, total_pct,
+                                        ceiling_d, floor_d, avg_lot,
+                                        days_data=days_data,
+                                    )
+                                    logger.info(
+                                        "Arsiv: %s — 25/25 performans tweeti atildi",
+                                        ipo.ticker,
+                                    )
+
+                                    # Admin Telegram bildirim
+                                    try:
+                                        from app.services.admin_telegram import notify_tweet_sent
+                                        await notify_tweet_sent(
+                                            "25_gun_performans",
+                                            ipo.ticker,
+                                            tweet_ok,
+                                            f"Toplam: %{total_pct:+.1f} | Tavan: {ceiling_d} | Taban: {floor_d}",
+                                        )
+                                    except Exception:
+                                        pass
+
+                                    # Tweetler arasi jitter
+                                    await asyncio.sleep(random.uniform(50, 55))
+                        except Exception as tweet_err:
+                            logger.warning(
+                                "Arsiv: %s — 25/25 tweet hatasi: %s",
+                                ipo.ticker, tweet_err,
+                            )
 
                 # --- Arsivle ---
                 ipo.archived = True

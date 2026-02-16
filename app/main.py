@@ -2750,6 +2750,52 @@ async def admin_create_ipo(request: Request, payload: dict, db: AsyncSession = D
 
 
 # -------------------------------------------------------
+# Admin: Bulk Archive IPO
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/bulk-archive-ipos")
+@limiter.limit("5/minute")
+async def admin_bulk_archive_ipos(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Belirtilen IPO ID'lerini arsivler ve trading_day_count gunceller.
+
+    {
+        "admin_password": "...",
+        "ipo_ids": [6, 27, 26, ...],
+        "set_day_count": 26          // opsiyonel, varsayilan: degistirme
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_ids = payload.get("ipo_ids", [])
+    set_day_count = payload.get("set_day_count")
+
+    if not ipo_ids:
+        return {"success": False, "message": "ipo_ids bos", "archived": 0}
+
+    result = await db.execute(
+        select(IPO).where(IPO.id.in_(ipo_ids))
+    )
+    ipos = result.scalars().all()
+
+    archived_count = 0
+    for ipo in ipos:
+        ipo.archived = True
+        ipo.archived_at = datetime.now(timezone.utc)
+        if set_day_count is not None:
+            ipo.trading_day_count = set_day_count
+        archived_count += 1
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "archived": archived_count,
+        "ipo_ids": [ipo.id for ipo in ipos],
+    }
+
+
+# -------------------------------------------------------
 # Admin: IPO Sil
 # -------------------------------------------------------
 
