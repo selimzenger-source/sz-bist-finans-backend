@@ -1056,26 +1056,40 @@ async def admin_test_notification(
             "token_info": token_info,
         }
 
+    # Firebase init durumu
+    from app.services.notification import is_firebase_initialized, NotificationService
+    token_info["firebase_initialized"] = is_firebase_initialized()
+
     # Test bildirimi gonder
     try:
-        from app.services.notification import NotificationService
         notif = NotificationService(db=db)
-        await notif.send_to_device(
+        token_info["firebase_initialized_after"] = is_firebase_initialized()
+
+        success = await notif.send_to_device(
             fcm_token=effective_token,
             title="🔔 Test Bildirimi",
             body="Bu bir test bildirimidir. Push bildirim sistemi calisiyor!",
             data={"type": "test", "ticker": "TEST"},
             delay=False,
         )
-        return {
-            "status": "ok",
-            "message": "Test bildirimi gonderildi!",
-            "token_info": token_info,
-        }
+        if success:
+            return {
+                "status": "ok",
+                "message": "Test bildirimi gonderildi!",
+                "token_info": token_info,
+            }
+        else:
+            return {
+                "status": "error",
+                "message": "send_to_device False dondu — log'larda detay var",
+                "token_info": token_info,
+            }
     except Exception as e:
+        import traceback
         return {
             "status": "error",
             "message": f"Bildirim gonderme hatasi: {str(e)}",
+            "traceback": traceback.format_exc()[-500:],
             "token_info": token_info,
         }
 
