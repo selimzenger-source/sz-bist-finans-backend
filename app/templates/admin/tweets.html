@@ -3,6 +3,34 @@
 
 {% block content %}
 <div class="space-y-6">
+    <!-- AUTO SEND TOGGLE -->
+    <div class="bg-gray-800 rounded-lg border {{ 'border-green-600' if auto_send else 'border-yellow-600' }} p-4 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl">{{ '🟢' if auto_send else '🟡' }}</span>
+            <div>
+                <h3 class="font-bold text-lg {{ 'text-green-400' if auto_send else 'text-yellow-400' }}">
+                    {{ 'OTOMATİK MOD — Tweetler direkt atılıyor' if auto_send else 'ONAY MODU — Tweetler kuyruğa düşüyor' }}
+                </h3>
+                <p class="text-xs text-gray-400 mt-1">
+                    {{ 'Tüm 14 tweet tipi otomatik X\'e gönderilir. Admin onayı gerekmez.' if auto_send else 'Tweetler admin panelde bekler, sen onayla butonuna basınca atılır.' }}
+                </p>
+            </div>
+        </div>
+        <form method="post" action="/admin/tweets/toggle-auto-send">
+            {% if auto_send %}
+            <button type="submit" class="bg-yellow-600 hover:bg-yellow-500 text-black font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('Otomatik modu KAPATMAK istediğinize emin misiniz?\n\nTweetler tekrar kuyruğa düşecek.')">
+                ⏸ Onay Moduna Geç
+            </button>
+            {% else %}
+            <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('Otomatik modu AÇMAK istediğinize emin misiniz?\n\nTüm tweetler admin onayı olmadan direkt X\'e atılacak!')">
+                ▶ Otomatik Moda Geç
+            </button>
+            {% endif %}
+        </form>
+    </div>
+
     <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold flex items-center gap-2">
             🐦 Bekleyen Tweetler

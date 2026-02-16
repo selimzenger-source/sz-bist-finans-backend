@@ -820,11 +820,16 @@ async def tweets_page(
     result = await db.execute(query)
     tweets = list(result.scalars().all())
 
+    # Auto-send durumu
+    from app.config import get_settings
+    auto_send = get_settings().TWITTER_AUTO_SEND
+
     return templates.TemplateResponse("admin/tweets.html", {
         "request": request,
         "tweets": tweets,
         "pending_count": pending_count,
         "current_status": status,
+        "auto_send": auto_send,
     })
 
 
@@ -904,5 +909,29 @@ async def reject_tweet(
     tweet.status = "rejected"
     tweet.reviewed_at = datetime.now(timezone.utc)
     await db.commit()
+
+    return RedirectResponse(url="/admin/tweets", status_code=303)
+
+
+@router.post("/tweets/toggle-auto-send")
+async def toggle_auto_send(request: Request):
+    """TWITTER_AUTO_SEND toggle — runtime'da degistirir.
+
+    True  → Otomatik mod (tweetler direkt X'e atilir)
+    False → Onay modu (tweetler kuyruğa düşer, admin onaylar)
+
+    NOT: Render restart olunca .env'deki değere döner.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.config import get_settings
+    settings = get_settings()
+    settings.TWITTER_AUTO_SEND = not settings.TWITTER_AUTO_SEND
+
+    logger.info(
+        "[ADMIN] TWITTER_AUTO_SEND -> %s (admin tarafından değiştirildi)",
+        settings.TWITTER_AUTO_SEND,
+    )
 
     return RedirectResponse(url="/admin/tweets", status_code=303)
