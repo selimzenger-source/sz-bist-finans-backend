@@ -177,24 +177,37 @@ def read_matriks_excel(filepath):
 
 
 def get_active_trading_ipos():
-    """API'den aktif islem goren halka arzlari getir — her biri icin son trading_day."""
+    """API'den aktif islem goren halka arzlari getir — her biri icin son trading_day.
+
+    Sections endpoint'inin hem 'trading' hem 'performance_archive' bolumlerini okur.
+    Boylece 25 takvim gunu filtresi nedeniyle trading'den dusen IPO'lar da yakalanir.
+    """
     try:
         resp = requests.get(f"{API_URL}/api/v1/ipos/sections", timeout=60)
         resp.raise_for_status()
         data = resp.json()
         result = {}
-        for ipo in data.get("trading", []):
+
+        # Hem trading hem performance_archive bolumlerini tara
+        all_ipos = []
+        all_ipos.extend(data.get("trading", []))
+        all_ipos.extend(data.get("performance_archive", []))
+
+        for ipo in all_ipos:
             ticker = ipo.get("ticker")
             if not ticker:
                 continue
+            # Arsivlenmis olanlari atla — sadece aktif trading olanlari al
+            if ipo.get("archived"):
+                continue
+
             tracks = ipo.get("ceiling_tracks", [])
             max_day_from_tracks = max((t["trading_day"] for t in tracks), default=0) if tracks else 0
 
             # DB'deki resmi trading_day_count degerini de al
-            # (scheduler tarafindan guncellenir — ceiling_tracks bos olsa bile dogru degeri verir)
             db_day_count = ipo.get("trading_day_count") or 0
 
-            # En yuksek degeri kullan — her iki kaynak da dogru olabilir
+            # En yuksek degeri kullan
             effective_day = max(max_day_from_tracks, db_day_count)
 
             result[ticker] = {
@@ -208,7 +221,7 @@ def get_active_trading_ipos():
                 last_track = max(tracks, key=lambda t: t["trading_day"])
                 result[ticker]["last_close"] = parse_price(last_track.get("close_price"))
 
-            log(f"  API: {ticker} — ceiling_tracks max={max_day_from_tracks}, db_count={db_day_count} → effective={effective_day}")
+            log(f"  API: {ticker} — tracks_max={max_day_from_tracks}, db_count={db_day_count} → effective={effective_day}")
         return result
     except Exception as e:
         log(f"HATA: API baglantisi basarisiz: {e}")
