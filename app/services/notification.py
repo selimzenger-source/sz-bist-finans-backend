@@ -13,7 +13,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Bildirimler arasi bekleme suresi (saniye) — seri bildirim onleme
-NOTIFICATION_DELAY_SECONDS = 5
+NOTIFICATION_DELAY_SECONDS = 2
 
 logger = logging.getLogger(__name__)
 

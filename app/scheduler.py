@@ -1587,7 +1587,7 @@ def _setup_scheduler_impl():
     # Ek olarak telegram_poller.py icinde asyncio.Lock koruması var
     scheduler.add_job(
         poll_telegram_job,
-        IntervalTrigger(seconds=10),
+        IntervalTrigger(seconds=5),
         id="telegram_poller",
         name="Telegram Kanal Poller",
         replace_existing=True,
