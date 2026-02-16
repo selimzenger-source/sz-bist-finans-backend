@@ -1080,9 +1080,7 @@ async def daily_ceiling_update():
                     # Tweet at — Gunluk Takip (tweet #8) ve 25 Gun Performans (tweet #9)
                     # Jitter: birden fazla IPO varsa tweetler arasi 50-55 sn bekle
                     try:
-                        from app.services.twitter_service import (
-                            tweet_daily_tracking, tweet_25_day_performance,
-                        )
+                        from app.services.twitter_service import tweet_daily_tracking
                         if days_data:
                             last_day = days_data[-1]
                             current_day = len(days_data)
@@ -1113,12 +1111,19 @@ async def daily_ceiling_update():
                                 await asyncio.sleep(jitter)
 
                             # Tweet #8: Gunluk takip (1/25 — 24/25 arasi)
-                            # NOT: 25/25 performans tweeti gece 00:00 arsivleme sirasinda atilir
-                            tweet_daily_tracking(
-                                ipo, current_day, last_close,
-                                daily_pct, last_det["durum"],
-                                days_data=days_data,
-                            )
+                            # 25. gun ve sonrasi icin gunluk tweet ATMA
+                            # 25/25 performans tweeti gece 00:00 arsivleme sirasinda atilir
+                            if current_day < 25:
+                                tweet_daily_tracking(
+                                    ipo, current_day, last_close,
+                                    daily_pct, last_det["durum"],
+                                    days_data=days_data,
+                                )
+                            else:
+                                logger.info(
+                                    "Tavan takip: %s — %d. gun, gunluk tweet atlaniyor (25/25 gece atilacak)",
+                                    ipo.ticker, current_day,
+                                )
                     except Exception as tweet_err:
                         logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
                 except Exception as ticker_err:
