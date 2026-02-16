@@ -993,6 +993,7 @@ async def get_wallet(device_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
     _check_daily_reset(user)
+    await db.flush()  # Gunluk reset degisikligini DB'ye yaz
     cooldown = _get_wallet_cooldown(user)
 
     return WalletBalanceOut(
@@ -1013,7 +1014,9 @@ async def wallet_earn(
     db: AsyncSession = Depends(get_db),
 ):
     """Reklam izleme sonrasi puan kazanimi — sunucu tarafinda kontrol."""
-    result = await db.execute(select(User).where(User.device_id == device_id))
+    result = await db.execute(
+        select(User).where(User.device_id == device_id).with_for_update()
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
@@ -1063,13 +1066,17 @@ async def wallet_earn(
 
 
 @app.post("/api/v1/users/{device_id}/wallet/spend", response_model=WalletBalanceOut)
+@limiter.limit("20/minute")
 async def wallet_spend(
+    request: Request,
     device_id: str,
     data: WalletSpendRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """Puan harcama — paket satin alma oncesi bakiye kontrolu."""
-    result = await db.execute(select(User).where(User.device_id == device_id))
+    result = await db.execute(
+        select(User).where(User.device_id == device_id).with_for_update()
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
@@ -1119,7 +1126,9 @@ async def wallet_redeem_coupon(
     db: AsyncSession = Depends(get_db),
 ):
     """Kupon kodu ile puan ekleme — sunucu tarafinda dogrulama."""
-    result = await db.execute(select(User).where(User.device_id == device_id))
+    result = await db.execute(
+        select(User).where(User.device_id == device_id).with_for_update()
+    )
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
