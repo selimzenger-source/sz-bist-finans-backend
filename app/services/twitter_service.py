@@ -457,14 +457,27 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
                 }
                 label = grp_labels.get(grp, grp)
 
-                line = f"• {label}: %{float(pct):.0f}" if pct else f"• {label}"
+                # Her grup icin detayli bilgi: Kisi, Lot, Oran
+                line = f"📌 {label}"
+                details = []
+                if participants:
+                    details.append(f"Kişi: {int(participants):,}".replace(",", "."))
+                if lots:
+                    details.append(f"Lot: {int(lots):,}".replace(",", "."))
+                if pct:
+                    details.append(f"Oran: %{float(pct):.0f}")
+                if details:
+                    line += "\n" + " | ".join(details)
                 table_lines.append(line)
 
                 # Bireysel yatırımcıya düşen ort lot
-                if grp == "bireysel" and avg_lot:
-                    bireysel_avg_lot = avg_lot
+                if grp == "bireysel":
+                    if avg_lot:
+                        bireysel_avg_lot = avg_lot
+                    elif lots and participants and int(participants) > 0:
+                        bireysel_avg_lot = int(lots) / int(participants)
 
-        table_text = "\n".join(table_lines) if table_lines else ""
+        table_text = "\n\n".join(table_lines) if table_lines else ""
 
         # Bireysel yatırımcı sonucu
         bireysel_text = ""
@@ -474,7 +487,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
         # Toplam başvuran
         applicant_text = ""
         if total_applicants:
-            applicant_text = f"\n📊 Toplam başvuran: {int(total_applicants):,} kişi"
+            applicant_text = f"\n📊 Toplam başvuran: {int(total_applicants):,}".replace(",", ".") + " kişi"
 
         text = (
             f"✅ Kesinleşen Dağıtım Sonuçları\n\n"

@@ -571,6 +571,11 @@ async def save_allocations(
             participants = parse_int(form.get(f"{group}_participants"))
             avg_lot = parse_decimal(form.get(f"{group}_avg_lot"))
 
+            # Ortalama lot otomatik hesapla (bos ise)
+            if avg_lot is None and lots and participants and participants > 0:
+                avg_lot = Decimal(str(lots)) / Decimal(str(participants))
+                avg_lot = avg_lot.quantize(Decimal("0.01"))
+
             # En az bir alan dolu olmali
             if any(v is not None for v in [pct, lots, participants, avg_lot]):
                 alloc = IPOAllocation(
