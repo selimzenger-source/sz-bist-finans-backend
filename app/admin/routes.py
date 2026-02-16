@@ -763,3 +763,22 @@ async def cleanup_spk_duplicates(
             url=f"/admin/spk?success=Hata: {str(e)[:80]}",
             status_code=303,
         )
+
+
+# ============================================================
+# SCRAPER TETIKLEME
+# ============================================================
+
+@router.post("/run-scraper/halkarz")
+async def run_halkarz_scraper(request: Request):
+    """HalkArz scraper'ini admin panelden manuel tetikle."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.scrapers.halkarz_scraper import scrape_halkarz
+        await scrape_halkarz()
+        return RedirectResponse(url="/admin/?success=HalkArz scraper basariyla calisti!", status_code=303)
+    except Exception as e:
+        logger.error(f"Admin: HalkArz scraper tetikleme hatasi — {e}")
+        return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
