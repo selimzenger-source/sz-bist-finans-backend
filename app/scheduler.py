@@ -947,6 +947,14 @@ async def daily_ceiling_update():
                 if not ipo.ticker or not ipo.trading_start:
                     continue
 
+                # 25 gun tamamlanan IPO'lar icin tweet ATMA (sadece 1-25 arasi)
+                if ipo.trading_day_count and ipo.trading_day_count >= 25:
+                    logger.info(
+                        "Tavan takip: %s — %d gun (>=25), gunluk tweet atlaniyor",
+                        ipo.ticker, ipo.trading_day_count,
+                    )
+                    continue
+
                 try:
                     # DB'den ceiling track verilerini oku (Excel sync ile doldurulmus)
                     track_result = await db.execute(
@@ -1039,8 +1047,8 @@ async def daily_ceiling_update():
                                 days_data=days_data,
                             )
 
-                            # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)
-                            if current_day >= 25:
+                            # Tweet #9: 25 gun performans (SADECE 25. gunde — bir kez)
+                            if current_day == 25:
                                 # 25 gun tweeti icin de jitter bekle
                                 jitter9 = random.uniform(50, 55)
                                 logger.info("Tweet #9 jitter: %.1f sn bekleniyor (%s)", jitter9, ipo.ticker)
