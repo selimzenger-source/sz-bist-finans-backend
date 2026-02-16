@@ -163,6 +163,22 @@ async def init_db():
         except Exception:
             pass
 
+        # v14 migration: ipos.manual_fields (admin koruma — scraper bu alanlari ezmez)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS manual_fields TEXT")
+            )
+        except Exception:
+            pass
+
+        # v15 migration: ipo_brokers.is_rejected (basvurulamaz broker tespiti)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipo_brokers ADD COLUMN IF NOT EXISTS is_rejected BOOLEAN DEFAULT FALSE")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

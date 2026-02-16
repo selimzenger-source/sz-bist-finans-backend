@@ -143,13 +143,40 @@ class IPOService:
                             break
 
         if existing:
+            # GUARD: trading durumundaki IPO'lari scraper'lar guncelleyemez.
+            # Islem basladiktan sonra bilgi cekmeye gerek yok — veri tamamlanmis.
+            # Sadece admin (allow_create=True) bu korumayı bypass edebilir.
+            if (
+                not allow_create
+                and existing.status == "trading"
+                and existing.trading_start is not None
+            ):
+                logger.debug(
+                    "IPO trading durumunda, guncelleme atlanıyor: %s",
+                    existing.ticker or existing.company_name,
+                )
+                return existing
+
             # Guncelle — sadece None olmayan alanlari
             # status alanini scraper'dan gelen veriyle GERI almayiz
             # (auto_update_statuses zaten dogru statusu ayarlar)
             protected_fields = {"status", "id", "created_at", "archived", "archived_at"}
 
+            # Admin korumasi: manual_fields'ta listelenen alanlar scraper tarafindan ezilemez
+            manual_locked = set()
+            if not allow_create and existing.manual_fields:
+                try:
+                    import json as _json
+                    fields = _json.loads(existing.manual_fields)
+                    if isinstance(fields, list):
+                        manual_locked = set(fields)
+                except (ValueError, TypeError):
+                    pass
+
             for key, value in data.items():
                 if value is not None and hasattr(existing, key) and key not in protected_fields:
+                    if key in manual_locked:
+                        continue  # Admin kilidi — dokunma
                     setattr(existing, key, value)
             existing.updated_at = datetime.utcnow()
 

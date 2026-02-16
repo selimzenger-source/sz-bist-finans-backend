@@ -14,6 +14,7 @@ class IPOBrokerOut(BaseModel):
     id: int
     broker_name: str
     broker_type: Optional[str] = None
+    is_rejected: bool = False
     application_url: Optional[str] = None
     phone: Optional[str] = None
 

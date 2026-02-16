@@ -124,6 +124,11 @@ class IPO(Base):
         Numeric(12, 2), comment="Islem basindan bu yana en yuksek fiyat (%4 dusus hesabi icin)"
     )
 
+    # --- Admin Koruma ---
+    manual_fields: Mapped[str | None] = mapped_column(
+        Text, comment="Admin tarafindan elle duzenlenen alanlar (JSON list). Bot bu alanlari ezmez."
+    )
+
     # --- Zaman damgalari ---
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -153,7 +158,10 @@ class IPOBroker(Base):
     ipo_id: Mapped[int] = mapped_column(ForeignKey("ipos.id", ondelete="CASCADE"))
     broker_name: Mapped[str] = mapped_column(Text, nullable=False)
     broker_type: Mapped[str | None] = mapped_column(
-        String(20), comment="banka, araci_kurum"
+        String(20), comment="banka, araci_kurum, konsorsiyum"
+    )
+    is_rejected: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="True = basvurulamaz (ustu cizili)"
     )
     application_url: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(String(30))
