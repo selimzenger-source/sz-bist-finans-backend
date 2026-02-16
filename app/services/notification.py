@@ -441,15 +441,18 @@ class NotificationService:
         data: dict,
         ticker: str,
     ) -> int:
-        """Ucretli abonelere (ana_yildiz) per-user KAP haber bildirimi gonder.
+        """Ucretli abonelere KAP haber bildirimi gonder.
+
+        2 kaynak:
+        1. ana_yildiz KAP haber aboneleri (UserSubscription)
+        2. 3 aylik / yillik hisse bildirim paketi sahipleri (StockNotificationSubscription)
 
         notify_kap_all == True olan ucretli kullanicilara tek tek gonderir.
-        Bu sayede kullanici ayarlardan BIST Tum KAP Bildirimi'ni kapatabilir.
         """
-        from app.models.user import User, UserSubscription
+        from app.models.user import User, UserSubscription, StockNotificationSubscription
 
-        # Ucretli aboneler — notify_kap_all aktif olanlar
-        users_result = await self.db.execute(
+        # 1) ana_yildiz KAP haber aboneleri
+        kap_sub_result = await self.db.execute(
             select(User)
             .join(UserSubscription, UserSubscription.user_id == User.id)
             .where(
@@ -465,10 +468,40 @@ class NotificationService:
                 )
             )
         )
-        users = list(users_result.scalars().all())
+        kap_users = list(kap_sub_result.scalars().all())
+
+        # 2) 3 aylik / yillik hisse bildirim paketi sahipleri
+        stock_bundle_result = await self.db.execute(
+            select(User)
+            .join(
+                StockNotificationSubscription,
+                StockNotificationSubscription.user_id == User.id,
+            )
+            .where(
+                and_(
+                    StockNotificationSubscription.is_active == True,
+                    StockNotificationSubscription.is_annual_bundle == True,
+                    User.notifications_enabled == True,
+                    User.notify_kap_all == True,
+                    or_(
+                        User.expo_push_token.isnot(None),
+                        User.fcm_token.isnot(None),
+                    ),
+                )
+            )
+        )
+        stock_users = list(stock_bundle_result.scalars().all())
+
+        # Dedup — ayni kullaniciya 2 kere gonderme
+        seen_ids: set[int] = set()
+        all_users: list = []
+        for u in kap_users + stock_users:
+            if u.id not in seen_ids:
+                seen_ids.add(u.id)
+                all_users.append(u)
 
         sent_count = 0
-        for user in users:
+        for user in all_users:
             token = user.expo_push_token or user.fcm_token
             if token:
                 try:
@@ -483,8 +516,8 @@ class NotificationService:
                     logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "Ucretli KAP bildirim: %s — %d ucretli kullaniciya gonderildi",
-            ticker, sent_count,
+            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap=%d, stock_bundle=%d)",
+            ticker, sent_count, len(kap_users), len(stock_users),
         )
         return sent_count
 
@@ -497,18 +530,28 @@ class NotificationService:
     ) -> int:
         """BIST 30 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
 
-        Dedup: UserSubscription aktif ana_yildiz olan kullanicilar haric tutulur.
-        Onlar zaten _send_paid_kap_news ile bildirimi aliyor.
+        Dedup: _send_paid_kap_news ile zaten bildirim alan kullanicilar haric tutulur:
+        - UserSubscription aktif ana_yildiz olanlar
+        - StockNotificationSubscription aktif bundle olanlar
         """
-        from app.models.user import User, UserSubscription
+        from app.models.user import User, UserSubscription, StockNotificationSubscription
 
         # Ucretli abonelerin user_id'leri (haric tutulacak)
-        paid_user_ids = (
+        paid_kap_ids = (
             select(UserSubscription.user_id)
             .where(
                 and_(
                     UserSubscription.is_active == True,
                     UserSubscription.package == "ana_yildiz",
+                )
+            )
+        )
+        paid_bundle_ids = (
+            select(StockNotificationSubscription.user_id)
+            .where(
+                and_(
+                    StockNotificationSubscription.is_active == True,
+                    StockNotificationSubscription.is_annual_bundle == True,
                 )
             )
         )
@@ -522,7 +565,8 @@ class NotificationService:
                         User.expo_push_token.isnot(None),
                         User.fcm_token.isnot(None),
                     ),
-                    User.id.notin_(paid_user_ids),
+                    User.id.notin_(paid_kap_ids),
+                    User.id.notin_(paid_bundle_ids),
                 )
             )
         )

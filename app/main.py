@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from sqlalchemy import select, delete, desc, and_, or_, func
+from sqlalchemy import select, delete, update, desc, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -702,6 +702,38 @@ async def list_stock_notifications(
     query = query.order_by(desc(StockNotificationSubscription.purchased_at))
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+@app.patch("/api/v1/users/{device_id}/stock-notifications/deactivate-all")
+async def deactivate_all_stock_notifications(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin TUM aktif hisse bildirim aboneliklerini iptal et.
+
+    3 aylik veya yillik paket alindiginda, mevcut tekil abonelikler
+    otomatik olarak deaktif edilir.
+    """
+    user_result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    result = await db.execute(
+        update(StockNotificationSubscription)
+        .where(
+            and_(
+                StockNotificationSubscription.user_id == user.id,
+                StockNotificationSubscription.is_active == True,
+            )
+        )
+        .values(is_active=False)
+    )
+    count = result.rowcount
+    await db.commit()
+    return {"message": f"{count} abonelik iptal edildi", "deactivated_count": count}
 
 
 @app.patch("/api/v1/users/{device_id}/stock-notifications/{sub_id}/mute")

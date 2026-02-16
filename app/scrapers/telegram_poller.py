@@ -267,7 +267,13 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
     if not updates:
         return 0
 
+    logger.info("Telegram: %d update geldi (offset=%s)", len(updates), req_offset)
+
     new_count = 0
+    skipped_chat = 0
+    skipped_notext = 0
+    skipped_unknown_type = 0
+    skipped_duplicate = 0
 
     async with async_session() as session:
         for update in updates:
@@ -283,14 +289,17 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             msg_chat_id = str(message.get("chat", {}).get("id", ""))
             if msg_chat_id != chat_id:
+                skipped_chat += 1
                 continue
 
             text = message.get("text", "")
             if not text:
+                skipped_notext += 1
                 continue
 
             telegram_message_id = message.get("message_id")
             if not telegram_message_id:
+                skipped_notext += 1
                 continue
 
             # Daha once kaydedilmis mi kontrol et
@@ -300,12 +309,17 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 )
             )
             if existing.scalar_one_or_none():
+                skipped_duplicate += 1
                 continue
 
             # Mesaj tipini tespit et
             message_type = detect_message_type(text)
             if not message_type:
-                logger.debug("Bilinmeyen mesaj tipi, atlandi: %s", text[:80])
+                skipped_unknown_type += 1
+                logger.info(
+                    "Telegram: bilinmeyen mesaj tipi, atlandi (msg_id=%s): %.120s",
+                    telegram_message_id, text.replace("\n", " "),
+                )
                 continue
 
             # Parse
@@ -375,7 +389,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
             try:
                 from app.services.notification import NotificationService
-                notif = NotificationService()
+                notif = NotificationService(db=session)
 
                 # 3 Tip: seans_ici, seans_disi, seans_disi_acilis
                 if message_type == "seans_ici_pozitif":
@@ -428,6 +442,15 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
         if new_count > 0:
             await session.commit()
+            logger.info(
+                "Telegram: %d yeni mesaj kaydedildi (DB commit basarili)",
+                new_count,
+            )
+        else:
+            logger.debug(
+                "Telegram: yeni mesaj yok (chat_skip=%d, notext=%d, dup=%d, unknown_type=%d)",
+                skipped_chat, skipped_notext, skipped_duplicate, skipped_unknown_type,
+            )
 
     return new_count
 
