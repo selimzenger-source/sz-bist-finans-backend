@@ -826,6 +826,11 @@ def tweet_company_intro(ipo) -> bool:
     Cok uzunsa son cumleyi kirpar (cumle bazli truncation).
     """
     try:
+        # DB flag kontrolu — zaten atilmissa tekrar atma
+        if getattr(ipo, "intro_tweeted", False):
+            logger.debug("tweet_company_intro ATLANDI: %s — zaten atilmis (intro_tweeted=True)", getattr(ipo, "company_name", "?"))
+            return False
+
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "Şirket Tanıtım"):
             return False
 

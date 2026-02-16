@@ -699,36 +699,37 @@ async def send_last_day_warnings():
 
 
 async def tweet_spk_approval_intro_job():
-    """SPK onayi geldikten 15 saat sonra sirket tanitim tweeti.
+    """SPK onayi geldikten 12 saat sonra sirket tanitim tweeti.
 
-    Her saat calisir. created_at + 15 saat gecmis ama henuz tweet atilmamis
+    Her saat calisir. created_at + 12 saat gecmis ama henuz tweet atilmamis
     newly_approved IPO'lar icin halka_arz_hakkinda_banner.png gorseli ile tweet atar.
 
-    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 14:00'de tweet atar.
-    SPK onayi 01:00'da gelirse → ayni gun 16:00'da tweet atar.
+    Ornek: SPK onayi 23:00'te gelirse → ertesi gun 11:00'de tweet atar.
+    SPK onayi 01:00'da gelirse → ayni gun 13:00'da tweet atar.
 
     ONEMLI: tweet_company_intro sirket bilgisi (description/sector/price) yoksa
     tweet atmaz — scraper'larin bilgiyi doldurmasi beklenir (72 saate kadar).
 
-    Duplicate koruma: _is_duplicate_tweet + intro_tweeted flag.
+    Duplicate koruma: DB'de intro_tweeted flag + _is_duplicate_tweet cache.
     """
     try:
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
         from datetime import timedelta
 
-        DELAY_HOURS = 15  # Sisteme eklenme saatinden 15 saat sonra (scraper'larin sirket bilgisini doldurmasini bekle)
+        DELAY_HOURS = 12  # Sisteme eklenme saatinden 12 saat sonra
 
         async with async_session() as db:
             now = datetime.now(timezone.utc)
 
-            # newly_approved ve son 48 saat icinde olusturulmus IPO'lar
+            # newly_approved, son 72 saat icinde olusturulmus, henuz tweet atilmamis
             cutoff = now - timedelta(hours=72)
             result = await db.execute(
                 select(IPO).where(
                     and_(
                         IPO.status == "newly_approved",
                         IPO.created_at >= cutoff,
+                        IPO.intro_tweeted == False,
                     )
                 )
             )
@@ -745,10 +746,9 @@ async def tweet_spk_approval_intro_job():
                 if not ipo.created_at:
                     continue
 
-                # 13 saat gecti mi?
+                # 12 saat gecti mi?
                 tweet_time = ipo.created_at + timedelta(hours=DELAY_HOURS)
                 if now < tweet_time:
-                    # Henuz 13 saat olmamis, atlanir
                     continue
 
                 # Cok gec olmasin — 72 saatten eski ise atla
@@ -760,6 +760,8 @@ async def tweet_spk_approval_intro_job():
 
                 success = tweet_company_intro(ipo)
                 if success:
+                    ipo.intro_tweeted = True
+                    await db.commit()
                     tweeted += 1
 
             if tweeted > 0:
@@ -815,6 +817,7 @@ async def tweet_company_intro_job():
     """Dagitima cikan IPO'lar icin ertesi gun 20:00'de sirket tanitim tweeti.
 
     Dun in_distribution'a gecen (subscription_start == dun) IPO'lar icin tweet atar.
+    intro_tweeted flag ile duplicate koruma saglanir.
     """
     try:
         from sqlalchemy import select, and_
@@ -828,6 +831,7 @@ async def tweet_company_intro_job():
                     and_(
                         IPO.status.in_(["in_distribution", "active", "newly_approved"]),
                         IPO.subscription_start == yesterday,
+                        IPO.intro_tweeted == False,
                     )
                 )
             )
@@ -837,13 +841,18 @@ async def tweet_company_intro_job():
                 return
 
             from app.services.twitter_service import tweet_company_intro
+            tweeted = 0
             for idx, ipo in enumerate(new_ipos):
                 if idx > 0:
                     import asyncio
                     await asyncio.sleep(random.uniform(50, 55))
-                tweet_company_intro(ipo)
+                success = tweet_company_intro(ipo)
+                if success:
+                    ipo.intro_tweeted = True
+                    await db.commit()
+                    tweeted += 1
 
-            logger.info(f"Sirket tanitim tweeti: {len(new_ipos)} IPO")
+            logger.info(f"Sirket tanitim tweeti: {tweeted}/{len(new_ipos)} IPO")
 
     except Exception as e:
         logger.error(f"Sirket tanitim tweet hatasi: {e}")

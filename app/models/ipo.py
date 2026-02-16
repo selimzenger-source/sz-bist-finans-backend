@@ -124,6 +124,11 @@ class IPO(Base):
         Numeric(12, 2), comment="Islem basindan bu yana en yuksek fiyat (%4 dusus hesabi icin)"
     )
 
+    # --- Tweet Tracking ---
+    intro_tweeted: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="Sirket tanitim tweeti atildi mi"
+    )
+
     # --- Admin Koruma ---
     manual_fields: Mapped[str | None] = mapped_column(
         Text, comment="Admin tarafindan elle duzenlenen alanlar (JSON list). Bot bu alanlari ezmez."
