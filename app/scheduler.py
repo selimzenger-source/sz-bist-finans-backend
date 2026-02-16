@@ -900,18 +900,19 @@ async def tweet_spk_pending_monthly_job():
 
 
 async def daily_ceiling_update():
-    """Gun sonu tavan takip guncellemesi — 18:20 (UTC 15:20).
+    """Gun sonu tavan takip tweet — 18:20 (UTC 15:20).
 
     Borsa 18:00'de kapanir, 18:20'de kapanis verileri kesinlesir.
-    Yahoo Finance'den gunluk OHLC verilerini cekip ipo_ceiling_tracks
-    tablosuna yazar. Basarisiz olursa retry mekanizmasi devreye girer.
+    Excel sync ile ipo_ceiling_tracks tablosuna yazilmis veriyi okuyarak
+    gunluk takip ve 25 gun performans tweetlerini atar.
+    Yahoo Finance KULLANILMAZ — veri kaynagi yerel DB (Matriks Excel sync).
     """
     global _ceiling_retry_pending
     try:
         from sqlalchemy import select, and_
-        from app.models.ipo import IPO
-        from app.services.ipo_service import IPOService
-        from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper, detect_ceiling_floor
+        from decimal import Decimal
+        from app.models.ipo import IPO, IPOCeilingTrack
+        from app.scrapers.yahoo_finance_scraper import detect_ceiling_floor
 
         async with async_session() as db:
             # Isleme baslayan ve henuz arsivlenmemis IPO'lari bul
@@ -938,159 +939,137 @@ async def daily_ceiling_update():
                 ", ".join(tickers),
             )
 
-            scraper = YahooFinanceScraper()
-            ipo_service = IPOService(db)
-
             success_count = 0
             fail_count = 0
             failed_tickers = []
 
-            try:
-                for ipo in active_ipos:
-                    if not ipo.ticker or not ipo.trading_start:
-                        continue
+            for ipo in active_ipos:
+                if not ipo.ticker or not ipo.trading_start:
+                    continue
 
-                    try:
-                        # Yahoo Finance'den OHLC verisi cek
-                        days_data = await scraper.fetch_ohlc_since_trading_start(
-                            ticker=ipo.ticker,
-                            trading_start=ipo.trading_start,
-                            max_days=25,
+                try:
+                    # DB'den ceiling track verilerini oku (Excel sync ile doldurulmus)
+                    track_result = await db.execute(
+                        select(IPOCeilingTrack)
+                        .where(IPOCeilingTrack.ipo_id == ipo.id)
+                        .order_by(IPOCeilingTrack.trading_day.asc())
+                        .limit(25)
+                    )
+                    tracks = track_result.scalars().all()
+
+                    if not tracks:
+                        logger.warning(
+                            "Tavan takip: %s icin DB'de ceiling track verisi yok (Excel sync bekleniyor)",
+                            ipo.ticker,
                         )
-
-                        if not days_data:
-                            logger.warning("Tavan takip: %s icin veri cekilemedi", ipo.ticker)
-                            fail_count += 1
-                            failed_tickers.append(ipo.ticker)
-                            continue
-
-                        # Her gun icin ceiling track kaydi olustur/guncelle
-                        prev_close = ipo.ipo_price  # Ilk gun referansi
-
-                        for day in days_data:
-                            detection = detect_ceiling_floor(
-                                close_price=day["close"],
-                                prev_close=prev_close,
-                                high_price=day.get("high"),
-                                low_price=day.get("low"),
-                            )
-
-                            track = await ipo_service.update_ceiling_track(
-                                ipo_id=ipo.id,
-                                trading_day=day["trading_day"],
-                                trade_date=day["date"],
-                                close_price=day["close"],
-                                hit_ceiling=detection["hit_ceiling"],
-                                open_price=day.get("open"),
-                                high_price=day.get("high"),
-                                low_price=day.get("low"),
-                                hit_floor=detection["hit_floor"],
-                            )
-
-                            if track:
-                                track.durum = detection["durum"]
-                                track.pct_change = detection["pct_change"]
-
-                            prev_close = day["close"]
-
-                        # trading_day_count guncelle
-                        ipo.trading_day_count = len(days_data)
-
-                        if days_data and not ipo.first_day_close_price:
-                            ipo.first_day_close_price = days_data[0]["close"]
-
-                        success_count += 1
-                        logger.info(
-                            "Tavan takip: %s — %d gun guncellendi",
-                            ipo.ticker, len(days_data),
-                        )
-
-                        # Tweet at — Gunluk Takip (tweet #8) ve 25 Gun Performans (tweet #9)
-                        # Jitter: birden fazla IPO varsa tweetler arasi 50-55 sn bekle
-                        try:
-                            from app.services.twitter_service import (
-                                tweet_daily_tracking, tweet_25_day_performance,
-                            )
-                            if days_data:
-                                last_day = days_data[-1]
-                                current_day = len(days_data)
-                                last_close = float(last_day["close"])
-
-                                # Gunluk % degisim hesapla
-                                if len(days_data) > 1:
-                                    prev_c = float(days_data[-2]["close"])
-                                else:
-                                    prev_c = float(ipo.ipo_price) if ipo.ipo_price else 0
-                                daily_pct = (
-                                    ((last_close - prev_c) / prev_c) * 100
-                                    if prev_c > 0 else 0
-                                )
-
-                                last_det = detect_ceiling_floor(
-                                    close_price=last_day["close"],
-                                    prev_close=prev_c,
-                                    high_price=last_day.get("high"),
-                                    low_price=last_day.get("low"),
-                                )
-
-                                # Jitter — ilk IPO haric tweetler arasi 50-55 sn bekle
-                                if success_count > 1:
-                                    jitter = random.uniform(50, 55)
-                                    logger.info("Tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
-                                    await asyncio.sleep(jitter)
-
-                                # Tweet #8: Gunluk takip (her gun) — kumulatif tablo ile
-                                tweet_daily_tracking(
-                                    ipo, current_day, last_close,
-                                    daily_pct, last_det["durum"],
-                                    days_data=days_data,
-                                )
-
-                                # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)
-                                if current_day >= 25:
-                                    # 25 gun tweeti icin de jitter bekle
-                                    jitter9 = random.uniform(50, 55)
-                                    logger.info("Tweet #9 jitter: %.1f sn bekleniyor (%s)", jitter9, ipo.ticker)
-                                    await asyncio.sleep(jitter9)
-
-                                    ipo_price_f = float(ipo.ipo_price) if ipo.ipo_price else 0
-                                    total_pct = (
-                                        ((last_close - ipo_price_f) / ipo_price_f) * 100
-                                        if ipo_price_f > 0 else 0
-                                    )
-                                    # Tavan/taban gun sayisi — days_data'dan hesapla
-                                    ceiling_d = 0
-                                    floor_d = 0
-                                    prev_close_calc = ipo_price_f
-                                    for d in days_data:
-                                        det = detect_ceiling_floor(
-                                            d["close"], prev_close_calc,
-                                            d.get("high"), d.get("low"),
-                                        )
-                                        if det["hit_ceiling"]:
-                                            ceiling_d += 1
-                                        if det["hit_floor"]:
-                                            floor_d += 1
-                                        prev_close_calc = float(d["close"])
-
-                                    avg_lot = (
-                                        float(ipo.estimated_lots_per_person)
-                                        if ipo.estimated_lots_per_person else None
-                                    )
-                                    tweet_25_day_performance(
-                                        ipo, last_close, total_pct,
-                                        ceiling_d, floor_d, avg_lot,
-                                        days_data=days_data,
-                                    )
-                        except Exception as tweet_err:
-                            logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
-                    except Exception as ticker_err:
-                        logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
                         fail_count += 1
                         failed_tickers.append(ipo.ticker)
+                        continue
 
-            finally:
-                await scraper.close()
+                    # Track'leri days_data formatina donustur (tweet fonksiyonlari bu formati bekliyor)
+                    days_data = []
+                    for t in tracks:
+                        days_data.append({
+                            "trading_day": t.trading_day,
+                            "date": t.trade_date,
+                            "open": t.open_price if t.open_price is not None else t.close_price,
+                            "high": t.high_price if t.high_price is not None else t.close_price,
+                            "low": t.low_price if t.low_price is not None else t.close_price,
+                            "close": t.close_price,
+                            "volume": 0,
+                        })
+
+                    if not days_data:
+                        logger.warning("Tavan takip: %s — days_data bos", ipo.ticker)
+                        fail_count += 1
+                        failed_tickers.append(ipo.ticker)
+                        continue
+
+                    # trading_day_count guncelle
+                    ipo.trading_day_count = len(days_data)
+
+                    if days_data and not ipo.first_day_close_price:
+                        ipo.first_day_close_price = days_data[0]["close"]
+
+                    success_count += 1
+                    logger.info(
+                        "Tavan takip: %s — DB'den %d gun okundu",
+                        ipo.ticker, len(days_data),
+                    )
+
+                    # Tweet at — Gunluk Takip (tweet #8) ve 25 Gun Performans (tweet #9)
+                    # Jitter: birden fazla IPO varsa tweetler arasi 50-55 sn bekle
+                    try:
+                        from app.services.twitter_service import (
+                            tweet_daily_tracking, tweet_25_day_performance,
+                        )
+                        if days_data:
+                            last_day = days_data[-1]
+                            current_day = len(days_data)
+                            last_close = float(last_day["close"])
+
+                            # Gunluk % degisim hesapla (Decimal tipinde — detect_ceiling_floor Decimal bekler)
+                            if len(days_data) > 1:
+                                prev_c = Decimal(str(days_data[-2]["close"]))
+                            else:
+                                prev_c = Decimal(str(ipo.ipo_price)) if ipo.ipo_price else Decimal("0")
+                            prev_c_f = float(prev_c)
+                            daily_pct = (
+                                ((last_close - prev_c_f) / prev_c_f) * 100
+                                if prev_c_f > 0 else 0
+                            )
+
+                            last_det = detect_ceiling_floor(
+                                close_price=Decimal(str(last_day["close"])),
+                                prev_close=prev_c,
+                                high_price=Decimal(str(last_day["high"])) if last_day.get("high") is not None else None,
+                                low_price=Decimal(str(last_day["low"])) if last_day.get("low") is not None else None,
+                            )
+
+                            # Jitter — ilk IPO haric tweetler arasi 50-55 sn bekle
+                            if success_count > 1:
+                                jitter = random.uniform(50, 55)
+                                logger.info("Tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
+                                await asyncio.sleep(jitter)
+
+                            # Tweet #8: Gunluk takip (her gun) — kumulatif tablo ile
+                            tweet_daily_tracking(
+                                ipo, current_day, last_close,
+                                daily_pct, last_det["durum"],
+                                days_data=days_data,
+                            )
+
+                            # Tweet #9: 25 gun performans (sadece 25. gunde bir kez)
+                            if current_day >= 25:
+                                # 25 gun tweeti icin de jitter bekle
+                                jitter9 = random.uniform(50, 55)
+                                logger.info("Tweet #9 jitter: %.1f sn bekleniyor (%s)", jitter9, ipo.ticker)
+                                await asyncio.sleep(jitter9)
+
+                                ipo_price_f = float(ipo.ipo_price) if ipo.ipo_price else 0
+                                total_pct = (
+                                    ((last_close - ipo_price_f) / ipo_price_f) * 100
+                                    if ipo_price_f > 0 else 0
+                                )
+                                # Tavan/taban gun sayisi — DB'deki track verisinden hesapla
+                                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+                                floor_d = sum(1 for t in tracks if t.hit_floor)
+
+                                avg_lot = (
+                                    float(ipo.estimated_lots_per_person)
+                                    if ipo.estimated_lots_per_person else None
+                                )
+                                tweet_25_day_performance(
+                                    ipo, last_close, total_pct,
+                                    ceiling_d, floor_d, avg_lot,
+                                    days_data=days_data,
+                                )
+                    except Exception as tweet_err:
+                        logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
+                except Exception as ticker_err:
+                    logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
+                    fail_count += 1
+                    failed_tickers.append(ipo.ticker)
 
             await db.commit()
             logger.info("Tavan takip gun sonu tamamlandi — %d IPO islendi", len(active_ipos))
