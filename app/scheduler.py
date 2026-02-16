@@ -502,6 +502,9 @@ async def archive_old_ipos():
                 # --- Arsivle ---
                 ipo.archived = True
                 ipo.archived_at = datetime.now(timezone.utc)
+                # 26 = "kayit tamamlandi" marker (25 gun verisi alindi, arsivlendi)
+                if ipo.trading_day_count and ipo.trading_day_count <= 25:
+                    ipo.trading_day_count = 26
                 archived_count += 1
                 logger.info(f"IPO arsivlendi: {ipo.ticker or ipo.company_name}")
 
@@ -1041,10 +1044,10 @@ async def daily_ceiling_update():
                 if not ipo.ticker or not ipo.trading_start:
                     continue
 
-                # 25 gun tamamlanan IPO'lar icin tweet ATMA (sadece 1-25 arasi)
+                # 25 gun tamamlanan IPO'lar icin tweet ATMA (sadece 1-24 arasi)
                 if ipo.trading_day_count and ipo.trading_day_count >= 25:
                     logger.info(
-                        "Tavan takip: %s — %d gun (>=25), gunluk tweet atlaniyor",
+                        "Tavan takip: %s — KAYIT TAMAMLANDI (gun=%d), gunluk tweet atlaniyor",
                         ipo.ticker, ipo.trading_day_count,
                     )
                     continue
