@@ -1056,41 +1056,45 @@ async def admin_test_notification(
             "token_info": token_info,
         }
 
-    # Firebase init durumu
-    from app.services.notification import is_firebase_initialized, NotificationService
-    token_info["firebase_initialized"] = is_firebase_initialized()
+    # Firebase init + direkt test
+    from app.services.notification import _init_firebase, is_firebase_initialized
+    token_info["firebase_initialized_before"] = is_firebase_initialized()
+    _init_firebase()
+    token_info["firebase_initialized_after"] = is_firebase_initialized()
 
-    # Test bildirimi gonder
+    # Dogrudan Firebase ile gonder — hatayi yakalayip goster
     try:
-        notif = NotificationService(db=db)
-        token_info["firebase_initialized_after"] = is_firebase_initialized()
+        from firebase_admin import messaging
 
-        success = await notif.send_to_device(
-            fcm_token=effective_token,
-            title="🔔 Test Bildirimi",
-            body="Bu bir test bildirimidir. Push bildirim sistemi calisiyor!",
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title="Test Bildirimi",
+                body="Push bildirim sistemi test ediliyor!",
+            ),
             data={"type": "test", "ticker": "TEST"},
-            delay=False,
+            token=effective_token,
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    channel_id="kap_news",
+                ),
+            ),
         )
-        last_err = getattr(notif, "_last_send_error", None)
-        if success:
-            return {
-                "status": "ok",
-                "message": "Test bildirimi gonderildi!",
-                "token_info": token_info,
-            }
-        else:
-            return {
-                "status": "error",
-                "message": f"send_to_device False dondu: {last_err or 'bilinmeyen hata'}",
-                "token_info": token_info,
-            }
+
+        response = messaging.send(message)
+        return {
+            "status": "ok",
+            "message": f"Firebase send basarili! response={response}",
+            "token_info": token_info,
+        }
     except Exception as e:
         import traceback
         return {
             "status": "error",
-            "message": f"Bildirim gonderme hatasi: {str(e)}",
-            "traceback": traceback.format_exc()[-500:],
+            "message": f"Firebase send HATASI: {str(e)}",
+            "error_type": type(e).__name__,
+            "traceback": traceback.format_exc()[-800:],
             "token_info": token_info,
         }
 
