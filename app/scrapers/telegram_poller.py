@@ -42,6 +42,7 @@ TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 _last_update_id: int | None = None
 _poll_lock = asyncio.Lock()  # Eszamanli getUpdates cagrilarini engelle
 _consecutive_errors = 0  # Ust uste hata sayaci — spam onleme
+_last_heartbeat: float = 0.0  # Periyodik status log zamani
 
 
 async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> list[dict]:
@@ -256,13 +257,25 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
     global _last_update_id
 
     try:
-        # Eger offset henuz yoksa (ilk baslangic), son 20 mesaji iste (-20).
-        # Bu sayede restart/deploy sirasinda kacirilan mesajlar yakalanir (catch-up).
-        req_offset = _last_update_id if _last_update_id is not None else -20
+        # Restart sonrasi offset None ise, offset gondermeden cagir
+        # → Telegram API tum pending update'leri verir.
+        # Duplicate kontrolu DB'de telegram_message_id ile yapilir.
+        req_offset = _last_update_id  # None ise offset parametresi gonderilmez
         updates = await fetch_telegram_updates(bot_token, offset=req_offset)
     except Exception as e:
         logger.error("Telegram API baglanamadi: %s", e)
         return 0
+
+    # Periyodik heartbeat log — 5 dakikada bir (bos olsa bile)
+    import time
+    global _last_heartbeat
+    now = time.time()
+    if now - _last_heartbeat > 300:
+        logger.info(
+            "Telegram poller heartbeat: offset=%s, pending_updates=%d, last_update_id=%s",
+            req_offset, len(updates), _last_update_id,
+        )
+        _last_heartbeat = now
 
     if not updates:
         return 0
