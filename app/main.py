@@ -1014,6 +1014,72 @@ async def admin_activate_news_subscription(
     return {"status": "ok", "user_id": user.id, "package": "ana_yildiz", "days": days}
 
 
+@app.post("/api/v1/admin/test-notification/{device_id}")
+async def admin_test_notification(
+    device_id: str,
+    password: str = Query(..., description="Admin sifresi"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Kullaniciya test bildirimi gonder — FCM token durumunu da gosterir."""
+    if password != "SzBist2026Admin!":
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    token_info = {
+        "user_id": user.id,
+        "device_id": user.device_id,
+        "fcm_token": user.fcm_token[:40] + "..." if user.fcm_token and len(user.fcm_token) > 40 else user.fcm_token,
+        "expo_push_token": user.expo_push_token[:40] + "..." if user.expo_push_token and len(user.expo_push_token) > 40 else user.expo_push_token,
+        "notifications_enabled": user.notifications_enabled,
+    }
+
+    # Token yoksa bildirim gonderemeyiz
+    effective_token = user.fcm_token or user.expo_push_token
+    if not effective_token:
+        return {
+            "status": "error",
+            "message": "FCM token ve Expo token bos — bildirim gonderilemez. Kullanicinin uygulamayi acip bildirim iznini vermesi gerekli.",
+            "token_info": token_info,
+        }
+
+    # ExponentPushToken Firebase'e gonderilemez
+    if effective_token.startswith("ExponentPushToken"):
+        return {
+            "status": "error",
+            "message": "Sadece ExponentPushToken var, FCM token yok — Firebase gonderilemez. Cihaz native FCM token kaydetmeli.",
+            "token_info": token_info,
+        }
+
+    # Test bildirimi gonder
+    try:
+        from app.services.notification import NotificationService
+        notif = NotificationService(db=db)
+        await notif.send_to_device(
+            fcm_token=effective_token,
+            title="🔔 Test Bildirimi",
+            body="Bu bir test bildirimidir. Push bildirim sistemi calisiyor!",
+            data={"type": "test", "ticker": "TEST"},
+            delay=False,
+        )
+        return {
+            "status": "ok",
+            "message": "Test bildirimi gonderildi!",
+            "token_info": token_info,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Bildirim gonderme hatasi: {str(e)}",
+            "token_info": token_info,
+        }
+
+
 # -------------------------------------------------------
 # CUZDAN (WALLET) ENDPOINTS
 # -------------------------------------------------------
