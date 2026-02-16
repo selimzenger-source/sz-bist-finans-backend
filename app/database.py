@@ -187,6 +187,23 @@ async def init_db():
         except Exception:
             pass
 
+        # v17 migration: users cuzdan alanlari (sunucu tarafli puan sistemi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance FLOAT DEFAULT 0.0")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_ads_watched INTEGER DEFAULT 0")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ad_watched_at TIMESTAMPTZ")
+            )
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS ads_reset_date VARCHAR(20)")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

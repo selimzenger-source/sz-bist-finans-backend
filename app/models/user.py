@@ -1,8 +1,8 @@
-"""Kullanici, abonelik ve bildirim tercihleri modelleri."""
+"""Kullanici, abonelik, bildirim tercihleri ve cuzdan modelleri."""
 
 from datetime import datetime
 from decimal import Decimal
-from sqlalchemy import String, Text, Boolean, Integer, DateTime, ForeignKey, Index, Numeric
+from sqlalchemy import String, Text, Boolean, Integer, DateTime, ForeignKey, Index, Numeric, Float
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -45,6 +45,12 @@ class User(Base):
     reminder_2h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 2 saat kala")
     reminder_4h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 4 saat kala")
 
+    # --- Cuzdan (Wallet) ---
+    wallet_balance: Mapped[float] = mapped_column(Float, default=0.0, comment="Puan bakiyesi")
+    daily_ads_watched: Mapped[int] = mapped_column(Integer, default=0, comment="Bugun izlenen reklam sayisi")
+    last_ad_watched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Son reklam izleme zamani")
+    ads_reset_date: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Gunluk reklam sayaci tarihi (YYYY-MM-DD)")
+
     # Hesap silme (soft-delete — Google Play zorunlulugu)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, comment="Kullanici hesabini sildi")
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Silme talep tarihi")
@@ -61,6 +67,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     stock_notifications: Mapped[list["StockNotificationSubscription"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    wallet_transactions: Mapped[list["WalletTransaction"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -287,3 +296,56 @@ class StockNotificationSubscription(Base):
         Index("idx_stock_notif_active", "is_active"),
         Index("idx_stock_notif_type", "notification_type"),
     )
+
+
+# -------------------------------------------------------
+# Cuzdan Islem Gecmisi — her puan hareketi loglanir
+# -------------------------------------------------------
+
+class WalletTransaction(Base):
+    """Cuzdan islem gecmisi — reklam kazanimi, kupon, harcama."""
+
+    __tablename__ = "wallet_transactions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+
+    amount: Mapped[float] = mapped_column(Float, comment="Islem miktari (pozitif=kazanc, negatif=harcama)")
+    tx_type: Mapped[str] = mapped_column(
+        String(30), nullable=False,
+        comment="ad_reward, coupon, spend_news, spend_ipo, spend_notif"
+    )
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Islem aciklamasi")
+    balance_after: Mapped[float] = mapped_column(Float, comment="Islem sonrasi bakiye")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="wallet_transactions")
+
+    __table_args__ = (
+        Index("idx_wallet_tx_user", "user_id"),
+        Index("idx_wallet_tx_type", "tx_type"),
+    )
+
+
+# -------------------------------------------------------
+# Kupon Kodlari — sunucu tarafinda tanimli
+# -------------------------------------------------------
+
+WALLET_COUPONS: dict[str, float] = {
+    "SZ250X": 250.0,
+    "SZ500C": 500.0,
+    "SZ750D": 750.0,
+    "SZ1000K": 1000.0,
+    "SZ1250H": 1250.0,
+    "SZ1500M": 1500.0,
+    "SZ1750L": 1750.0,
+    "SZ2000Y": 2000.0,
+    "SZ2500Z": 2500.0,
+    "SZ_ALGO_DENEM01": 10000.0,  # Sinirsiz test kuponu
+}
+
+# Reklam ayarlari
+WALLET_REWARD_AMOUNT = 1.0    # Reklam basina kazanilan puan
+WALLET_COOLDOWN_SECONDS = 180  # 3 dakika bekleme
+WALLET_MAX_DAILY_ADS = 30     # Gunluk max reklam

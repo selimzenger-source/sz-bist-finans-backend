@@ -37,6 +37,8 @@ from app.models import (
     NOTIFICATION_TIER_PRICES, NEWS_TIER_PRICES,
     COMBO_PRICE, QUARTERLY_PRICE,
     ANNUAL_BUNDLE_PRICE, COMBINED_ANNUAL_DISCOUNT_PCT,
+    WalletTransaction, WALLET_COUPONS,
+    WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
     Dividend, DividendHistory,
 )
 from app.schemas import (
@@ -51,6 +53,8 @@ from app.schemas import (
     StockNotificationCreate, StockNotificationOut,
     RealtimeNotifRequest,
     DividendOut,
+    WalletBalanceOut, WalletEarnRequest, WalletSpendRequest,
+    WalletCouponRequest, WalletTransactionOut,
 )
 from app.scheduler import setup_scheduler, shutdown_scheduler
 from app.admin.routes import router as admin_router
@@ -954,6 +958,216 @@ async def get_subscription(device_id: str, db: AsyncSession = Depends(get_db)):
         package=sub.package,
         is_active=sub.is_active,
         expires_at=sub.expires_at,
+    )
+
+
+# -------------------------------------------------------
+# CUZDAN (WALLET) ENDPOINTS
+# -------------------------------------------------------
+
+def _get_wallet_cooldown(user: User) -> int:
+    """Kalan cooldown saniyesini hesapla."""
+    if not user.last_ad_watched_at:
+        return 0
+    now = datetime.now(timezone.utc)
+    diff = (now - user.last_ad_watched_at).total_seconds()
+    remaining = max(0, WALLET_COOLDOWN_SECONDS - int(diff))
+    return remaining
+
+
+def _check_daily_reset(user: User):
+    """Gun degismisse reklam sayacini sifirla."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if user.ads_reset_date != today:
+        user.daily_ads_watched = 0
+        user.last_ad_watched_at = None
+        user.ads_reset_date = today
+
+
+@app.get("/api/v1/users/{device_id}/wallet", response_model=WalletBalanceOut)
+async def get_wallet(device_id: str, db: AsyncSession = Depends(get_db)):
+    """Kullanicinin cuzdan bakiyesini ve reklam durumunu getirir."""
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    _check_daily_reset(user)
+    cooldown = _get_wallet_cooldown(user)
+
+    return WalletBalanceOut(
+        balance=user.wallet_balance or 0.0,
+        daily_ads_watched=user.daily_ads_watched or 0,
+        max_daily_ads=WALLET_MAX_DAILY_ADS,
+        cooldown_remaining=cooldown,
+        can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
+    )
+
+
+@app.post("/api/v1/users/{device_id}/wallet/earn", response_model=WalletBalanceOut)
+@limiter.limit("35/minute")
+async def wallet_earn(
+    request: Request,
+    device_id: str,
+    data: WalletEarnRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reklam izleme sonrasi puan kazanimi — sunucu tarafinda kontrol."""
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    _check_daily_reset(user)
+
+    # Cooldown kontrolu
+    cooldown = _get_wallet_cooldown(user)
+    if cooldown > 0:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Reklam icin {cooldown} saniye beklemeniz gerekiyor."
+        )
+
+    # Gunluk limit kontrolu
+    if (user.daily_ads_watched or 0) >= WALLET_MAX_DAILY_ADS:
+        raise HTTPException(
+            status_code=429,
+            detail="Gunluk reklam izleme limitine ulastiniz."
+        )
+
+    # Puan ekle
+    now = datetime.now(timezone.utc)
+    user.wallet_balance = (user.wallet_balance or 0.0) + WALLET_REWARD_AMOUNT
+    user.daily_ads_watched = (user.daily_ads_watched or 0) + 1
+    user.last_ad_watched_at = now
+    user.ads_reset_date = now.strftime("%Y-%m-%d")
+
+    # Islem logu
+    tx = WalletTransaction(
+        user_id=user.id,
+        amount=WALLET_REWARD_AMOUNT,
+        tx_type="ad_reward",
+        description=f"Reklam izleme #{user.daily_ads_watched}",
+        balance_after=user.wallet_balance,
+    )
+    db.add(tx)
+    await db.flush()
+
+    return WalletBalanceOut(
+        balance=user.wallet_balance,
+        daily_ads_watched=user.daily_ads_watched,
+        max_daily_ads=WALLET_MAX_DAILY_ADS,
+        cooldown_remaining=WALLET_COOLDOWN_SECONDS,
+        can_watch_ad=False,  # Az once izledi, cooldown basladi
+    )
+
+
+@app.post("/api/v1/users/{device_id}/wallet/spend", response_model=WalletBalanceOut)
+async def wallet_spend(
+    device_id: str,
+    data: WalletSpendRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Puan harcama — paket satin alma oncesi bakiye kontrolu."""
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    if data.amount <= 0:
+        raise HTTPException(status_code=400, detail="Miktar 0'dan buyuk olmali")
+
+    current_balance = user.wallet_balance or 0.0
+    if current_balance < data.amount:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Yetersiz bakiye. Mevcut: {current_balance:.0f}, Gerekli: {data.amount:.0f}"
+        )
+
+    # Bakiye dus
+    user.wallet_balance = current_balance - data.amount
+
+    # Islem logu
+    tx = WalletTransaction(
+        user_id=user.id,
+        amount=-data.amount,
+        tx_type=data.spend_type,
+        description=data.description or f"Harcama: {data.spend_type}",
+        balance_after=user.wallet_balance,
+    )
+    db.add(tx)
+    await db.flush()
+
+    _check_daily_reset(user)
+    cooldown = _get_wallet_cooldown(user)
+
+    return WalletBalanceOut(
+        balance=user.wallet_balance,
+        daily_ads_watched=user.daily_ads_watched or 0,
+        max_daily_ads=WALLET_MAX_DAILY_ADS,
+        cooldown_remaining=cooldown,
+        can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
+    )
+
+
+@app.post("/api/v1/users/{device_id}/wallet/redeem-coupon", response_model=WalletBalanceOut)
+@limiter.limit("10/minute")
+async def wallet_redeem_coupon(
+    request: Request,
+    device_id: str,
+    data: WalletCouponRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kupon kodu ile puan ekleme — sunucu tarafinda dogrulama."""
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    code = data.code.upper().strip()
+
+    # Kupon var mi?
+    if code not in WALLET_COUPONS:
+        raise HTTPException(status_code=400, detail="Gecersiz kupon kodu.")
+
+    # Daha once kullanildi mi? (SZ_ALGO_DENEM01 haric — sinirsiz test kuponu)
+    if code != "SZ_ALGO_DENEM01":
+        existing = await db.execute(
+            select(WalletTransaction).where(
+                and_(
+                    WalletTransaction.user_id == user.id,
+                    WalletTransaction.tx_type == "coupon",
+                    WalletTransaction.description == f"Kupon: {code}",
+                )
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Bu kuponu daha once kullandiniz.")
+
+    # Puan ekle
+    amount = WALLET_COUPONS[code]
+    user.wallet_balance = (user.wallet_balance or 0.0) + amount
+
+    # Islem logu
+    tx = WalletTransaction(
+        user_id=user.id,
+        amount=amount,
+        tx_type="coupon",
+        description=f"Kupon: {code}",
+        balance_after=user.wallet_balance,
+    )
+    db.add(tx)
+    await db.flush()
+
+    _check_daily_reset(user)
+    cooldown = _get_wallet_cooldown(user)
+
+    return WalletBalanceOut(
+        balance=user.wallet_balance,
+        daily_ads_watched=user.daily_ads_watched or 0,
+        max_daily_ads=WALLET_MAX_DAILY_ADS,
+        cooldown_remaining=cooldown,
+        can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
     )
 
 

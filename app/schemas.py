@@ -488,3 +488,45 @@ class DividendOut(BaseModel):
     scraped_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# Cuzdan (Wallet) Schemalari
+# -------------------------------------------------------
+
+class WalletBalanceOut(BaseModel):
+    """Kullanici cuzdan bakiyesi."""
+    balance: float
+    daily_ads_watched: int
+    max_daily_ads: int
+    cooldown_remaining: int  # Saniye cinsinden kalan bekleme
+    can_watch_ad: bool
+
+
+class WalletEarnRequest(BaseModel):
+    """Reklam izleme sonrasi puan kazanimi."""
+    reward_type: str = "ad_reward"  # Ileride farkli kazanc tipleri
+
+
+class WalletSpendRequest(BaseModel):
+    """Puan harcama istegi."""
+    amount: float
+    spend_type: str  # spend_news, spend_ipo, spend_notif
+    description: Optional[str] = None
+
+
+class WalletCouponRequest(BaseModel):
+    """Kupon kullanim istegi."""
+    code: str
+
+
+class WalletTransactionOut(BaseModel):
+    """Cuzdan islem kaydi."""
+    id: int
+    amount: float
+    tx_type: str
+    description: Optional[str] = None
+    balance_after: float
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
