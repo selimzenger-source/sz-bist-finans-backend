@@ -45,6 +45,15 @@ BANNER_SPK_BEKLEYENLER = os.path.join(_IMG_DIR, "spk_bekleyenler_banner.png")
 BANNER_SON_BASVURU_GUNU = os.path.join(_IMG_DIR, "son_basvuru_gunu_banner.png")
 BANNER_SON_4_SAAT = os.path.join(_IMG_DIR, "son_4_saat_banner.png")
 BANNER_HALKA_ARZ_HAKKINDA = os.path.join(_IMG_DIR, "halka_arz_hakkinda_banner.png")
+BANNER_GUNLUK_TAKIP = os.path.join(_IMG_DIR, "gunluk_takip_banner.png")
+BANNER_25_GUN_PERFORMANS = os.path.join(_IMG_DIR, "25_gun_performans_banner.png")
+BANNER_DAGITIM_SONUCLARI = os.path.join(_IMG_DIR, "dagitim_sonuclari_banner.png")
+BANNER_GONG_CALIYOR = os.path.join(_IMG_DIR, "gong_caliyor_banner.png")
+BANNER_BASVURULAR_BASLIYOR = os.path.join(_IMG_DIR, "basvurular_basliyor_banner.png")
+BANNER_ACILIS_FIYATI = os.path.join(_IMG_DIR, "acilis_fiyati_banner.png")
+BANNER_SON_30_DAKIKA = os.path.join(_IMG_DIR, "son_30_dakika_banner.png")
+BANNER_SPK_ONAYI = os.path.join(_IMG_DIR, "spk_onayi_banner.png")
+BANNER_AY_SONU_RAPOR = os.path.join(_IMG_DIR, "ay_sonu_rapor_banner.png")
 
 # Credentials cache — lazy init
 _credentials = None
@@ -321,7 +330,7 @@ def tweet_new_ipo(ipo) -> bool:
             f"Detaylar için: {APP_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
     except Exception as e:
         logger.error(f"tweet_new_ipo hatasi: {e}")
         return False
@@ -353,7 +362,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR)
     except Exception as e:
         logger.error(f"tweet_distribution_start hatası: {e}")
         return False
@@ -430,7 +439,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_DAGITIM_SONUCLARI)
     except Exception as e:
         logger.error(f"tweet_allocation_results hatası: {e}")
         return False
@@ -477,7 +486,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA)
     except Exception as e:
         logger.error(f"tweet_last_30_min hatasi: {e}")
         return False
@@ -504,7 +513,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR)
     except Exception as e:
         logger.error(f"tweet_first_trading_day hatasi: {e}")
         return False
@@ -538,7 +547,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI)
     except Exception as e:
         logger.error(f"tweet_opening_price hatasi: {e}")
         return False
@@ -602,7 +611,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
         text = header + table_text + footer
 
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_GUNLUK_TAKIP)
     except Exception as e:
         logger.error(f"tweet_daily_tracking hatasi: {e}")
         return False
@@ -683,7 +692,7 @@ def tweet_25_day_performance(
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
 
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_25_GUN_PERFORMANS)
     except Exception as e:
         logger.error(f"tweet_25_day_performance hatasi: {e}")
         return False
@@ -726,7 +735,7 @@ def tweet_yearly_summary(
             f"\U0001F4F2 {APP_LINK}\n"
             f"#HalkaArz #BIST #AySonuRaporu"
         )
-        return _safe_tweet(text)
+        return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR)
     except Exception as e:
         logger.error(f"tweet_yearly_summary hatasi: {e}")
         return False
