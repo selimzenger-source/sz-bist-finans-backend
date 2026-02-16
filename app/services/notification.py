@@ -242,8 +242,8 @@ class NotificationService:
 
         sent_count = 0
         for user in users:
-            token = user.expo_push_token or user.fcm_token
-            if token:
+            token = user.fcm_token or user.expo_push_token
+            if token and not token.startswith("ExponentPushToken"):
                 await self.send_to_device(
                     fcm_token=token,
                     title=title,
@@ -527,8 +527,8 @@ class NotificationService:
 
         sent_count = 0
         for user in all_users:
-            token = user.expo_push_token or user.fcm_token
-            if token:
+            token = user.fcm_token or user.expo_push_token
+            if token and not token.startswith("ExponentPushToken"):
                 try:
                     await self.send_to_device(
                         fcm_token=token,
@@ -599,8 +599,8 @@ class NotificationService:
 
         sent_count = 0
         for user in users:
-            token = user.expo_push_token or user.fcm_token
-            if token:
+            token = user.fcm_token or user.expo_push_token
+            if token and not token.startswith("ExponentPushToken"):
                 try:
                     await self.send_to_device(
                         fcm_token=token,
