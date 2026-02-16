@@ -317,11 +317,36 @@ class NotificationService:
         )
 
     async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
-        """Tahsisat sonucu bildirimi — notify_ipo_result = True olanlara."""
-        title = "📊 Tahsisat Sonuçları"
-        body = f"{ipo.ticker or ipo.company_name} tahsisat sonuçları açıklandı!"
-        if total_applicants:
-            body += f" ({total_applicants:,} başvuru)"
+        """Dagitim sonucu bildirimi — notify_ipo_result = True olanlara.
+
+        Bildirim icerigi:
+        - Baslik: Dagitim Sonuclari
+        - Govde: Ticker, toplam basvuran, bireysel kisi, dagitilan lot
+        """
+        title = "📊 Dağıtım Sonuçları"
+
+        ticker = ipo.ticker or ipo.company_name
+        parts = [f"{ticker} dağıtım sonuçları açıklandı!"]
+
+        # Toplam basvuran
+        t_applicants = total_applicants or getattr(ipo, "total_applicants", None)
+        if t_applicants:
+            parts.append(f"Toplam başvuru: {int(t_applicants):,} kişi")
+
+        # Bireysel kisi ve lot
+        bireysel_kisi = getattr(ipo, "result_bireysel_kisi", None)
+        bireysel_lot = getattr(ipo, "result_bireysel_lot", None)
+        if bireysel_kisi:
+            parts.append(f"Yurt içi bireysel: {int(bireysel_kisi):,} kişi")
+        if bireysel_lot:
+            parts.append(f"Dağıtılan lot: {int(bireysel_lot):,}")
+
+        # Kisi basi lot
+        if bireysel_kisi and bireysel_lot and bireysel_kisi > 0:
+            avg = bireysel_lot / bireysel_kisi
+            parts.append(f"Kişi başı: ~{avg:.0f} lot")
+
+        body = "\n".join(parts)
 
         data = {
             "type": "ipo_result",
@@ -331,7 +356,7 @@ class NotificationService:
 
         return await self._send_filtered(
             "notify_ipo_result", title, body, data,
-            f"Tahsisat sonucu: {ipo.ticker or ipo.company_name}",
+            f"Dagitim sonucu: {ipo.ticker or ipo.company_name}",
         )
 
     async def notify_first_trading_day(self, ipo) -> int:
