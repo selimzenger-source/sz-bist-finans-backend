@@ -47,30 +47,35 @@ def _queue_tweet(text: str, image_path: str | None = None, source: str = "unknow
 
     TWITTER_AUTO_SEND=False iken tum tweetler buraya yonlendirilir.
     Admin panelinden onaylaninca atilir.
+
+    Sync DB (psycopg2) kullanir — async event loop icinden de guvenle cagrilabilir.
     """
     try:
-        from app.database import async_session
+        from app.config import get_settings
         from app.models.pending_tweet import PendingTweet
 
-        async def _save():
-            async with async_session() as db:
-                tweet = PendingTweet(
-                    text=text,
-                    image_path=image_path,
-                    source=source,
-                    status="pending",
-                )
-                db.add(tweet)
-                await db.commit()
-                logger.info("[TWEET-KUYRUK] Kuyruğa eklendi (%s): %s", source, text[:60])
+        settings = get_settings()
+        db_url = str(settings.DATABASE_URL)
 
-        # Event loop'a gore calistir
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(_save())
-        except RuntimeError:
-            asyncio.run(_save())
+        # async URL'yi sync'e cevir
+        sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
 
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine(sync_url, pool_pre_ping=True)
+        with Session(engine) as db:
+            tweet = PendingTweet(
+                text=text,
+                image_path=image_path,
+                source=source,
+                status="pending",
+            )
+            db.add(tweet)
+            db.commit()
+            logger.info("[TWEET-KUYRUK] Kuyruğa eklendi (%s): %s", source, text[:60])
+
+        engine.dispose()
         return True
     except Exception as e:
         logger.error("[TWEET-KUYRUK] Kuyruğa eklenemedi: %s", e)
