@@ -180,6 +180,7 @@ async def health_check():
         "version": "2.0.0",
         "firebase_initialized": is_firebase_initialized(),
         "telegram_configured": bool(settings.TELEGRAM_BOT_TOKEN),
+        "telegram_reader_configured": bool(settings.TELEGRAM_READER_BOT_TOKEN),
     }
 
 

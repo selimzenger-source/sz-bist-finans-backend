@@ -487,11 +487,13 @@ async def poll_telegram():
         from app.config import get_settings
         settings = get_settings()
 
-        bot_token = settings.TELEGRAM_BOT_TOKEN
+        # Okuyucu bot token: sender bot kendi mesajlarini getUpdates'te goremez,
+        # ayri bir reader bot gerekli. Yoksa fallback olarak sender token kullanilir.
+        bot_token = settings.TELEGRAM_READER_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
         chat_id = settings.TELEGRAM_CHAT_ID
 
         if not bot_token:
-            logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, poller atlaniyor")
+            logger.warning("TELEGRAM_READER_BOT_TOKEN ve TELEGRAM_BOT_TOKEN ayarlanmamis, poller atlaniyor")
             return
 
         try:

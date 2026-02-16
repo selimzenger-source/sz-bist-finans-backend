@@ -19,9 +19,15 @@ class Settings(BaseSettings):
     # Firebase
     GOOGLE_APPLICATION_CREDENTIALS: str = "firebase-service-account.json"
 
-    # Telegram Bot
+    # Telegram Bot — mesaj gonderici (sender)
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = "-1002704950091"
+
+    # Telegram Okuyucu Bot — kanal mesajlarini okur (poller)
+    # Sender bot kendi mesajlarini getUpdates'te goremez,
+    # bu yuzden ayri bir okuyucu bot gerekli.
+    # Bos ise TELEGRAM_BOT_TOKEN fallback olarak kullanilir.
+    TELEGRAM_READER_BOT_TOKEN: str = ""
 
     # Admin paneli
     ADMIN_PASSWORD: str = ""
