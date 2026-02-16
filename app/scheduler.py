@@ -380,16 +380,19 @@ async def tweet_distribution_morning_job():
 
 
 async def archive_old_ipos():
-    """25 is gunu gecen halka arzlari arsivler.
+    """25 is gunu gecen halka arzlari arsivler + 25/25 performans tweeti atar.
 
     Her gece 00:00'da calisir.
     Iki kosuldan biri yeterlii:
       1) trading_start tarihi ~37 takvim gunu oncesinde olan
       2) trading_day_count >= 25 olan (DB'de ceiling track verisi ile doldurulur)
+
+    Arsivlemeden ONCE 25/25 performans tweetini atar (sadece trading_day_count == 25 olanlara).
     """
     try:
         from sqlalchemy import select, and_, or_
-        from app.models.ipo import IPO
+        from decimal import Decimal
+        from app.models.ipo import IPO, IPOCeilingTrack
 
         async with async_session() as db:
             # ~37 takvim gunu ~ 25 is gunu
@@ -417,6 +420,64 @@ async def archive_old_ipos():
 
             archived_count = 0
             for ipo in result.scalars().all():
+                # --- 25/25 Performans Tweeti (arsivlemeden once) ---
+                # Sadece tam 25 gun tamamlayanlar icin at (eskileri atlamak icin)
+                if ipo.trading_day_count and ipo.trading_day_count == 25 and ipo.ticker:
+                    try:
+                        from app.services.twitter_service import tweet_25_day_performance
+
+                        # Ceiling track verilerini oku
+                        track_result = await db.execute(
+                            select(IPOCeilingTrack)
+                            .where(IPOCeilingTrack.ipo_id == ipo.id)
+                            .order_by(IPOCeilingTrack.trading_day.asc())
+                            .limit(25)
+                        )
+                        tracks = track_result.scalars().all()
+
+                        if tracks:
+                            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                            days_data = []
+                            for t in tracks:
+                                days_data.append({
+                                    "trading_day": t.trading_day,
+                                    "date": t.trade_date,
+                                    "open": t.open_price or t.close_price,
+                                    "high": t.high_price or t.close_price,
+                                    "low": t.low_price or t.close_price,
+                                    "close": t.close_price,
+                                    "volume": 0,
+                                })
+
+                            if days_data and ipo_price > 0:
+                                last_close = float(days_data[-1]["close"])
+                                total_pct = ((last_close - ipo_price) / ipo_price) * 100
+                                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+                                floor_d = sum(1 for t in tracks if t.hit_floor)
+                                avg_lot = (
+                                    float(ipo.estimated_lots_per_person)
+                                    if ipo.estimated_lots_per_person else None
+                                )
+
+                                tweet_25_day_performance(
+                                    ipo, last_close, total_pct,
+                                    ceiling_d, floor_d, avg_lot,
+                                    days_data=days_data,
+                                )
+                                logger.info(
+                                    "Arsiv: %s — 25/25 performans tweeti atildi",
+                                    ipo.ticker,
+                                )
+
+                                # Tweetler arasi jitter
+                                await asyncio.sleep(random.uniform(50, 55))
+                    except Exception as tweet_err:
+                        logger.warning(
+                            "Arsiv: %s — 25/25 tweet hatasi: %s",
+                            ipo.ticker, tweet_err,
+                        )
+
+                # --- Arsivle ---
                 ipo.archived = True
                 ipo.archived_at = datetime.now(timezone.utc)
                 archived_count += 1
@@ -1051,38 +1112,13 @@ async def daily_ceiling_update():
                                 logger.info("Tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
                                 await asyncio.sleep(jitter)
 
-                            # Tweet #8: Gunluk takip (her gun) — kumulatif tablo ile
+                            # Tweet #8: Gunluk takip (1/25 — 24/25 arasi)
+                            # NOT: 25/25 performans tweeti gece 00:00 arsivleme sirasinda atilir
                             tweet_daily_tracking(
                                 ipo, current_day, last_close,
                                 daily_pct, last_det["durum"],
                                 days_data=days_data,
                             )
-
-                            # Tweet #9: 25 gun performans (SADECE 25. gunde — bir kez)
-                            if current_day == 25:
-                                # 25 gun tweeti icin de jitter bekle
-                                jitter9 = random.uniform(50, 55)
-                                logger.info("Tweet #9 jitter: %.1f sn bekleniyor (%s)", jitter9, ipo.ticker)
-                                await asyncio.sleep(jitter9)
-
-                                ipo_price_f = float(ipo.ipo_price) if ipo.ipo_price else 0
-                                total_pct = (
-                                    ((last_close - ipo_price_f) / ipo_price_f) * 100
-                                    if ipo_price_f > 0 else 0
-                                )
-                                # Tavan/taban gun sayisi — DB'deki track verisinden hesapla
-                                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
-                                floor_d = sum(1 for t in tracks if t.hit_floor)
-
-                                avg_lot = (
-                                    float(ipo.estimated_lots_per_person)
-                                    if ipo.estimated_lots_per_person else None
-                                )
-                                tweet_25_day_performance(
-                                    ipo, last_close, total_pct,
-                                    ceiling_d, floor_d, avg_lot,
-                                    days_data=days_data,
-                                )
                     except Exception as tweet_err:
                         logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
                 except Exception as ticker_err:
