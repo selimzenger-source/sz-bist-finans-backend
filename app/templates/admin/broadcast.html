@@ -1,0 +1,261 @@
+{% extends "admin/base.html" %}
+{% block title %}Bildirim Gonder{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+
+    <!-- Basari mesaji -->
+    {% if success %}
+    <div class="bg-green-900/50 border border-green-600 text-green-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">✅</span>
+        <span>{{ success }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Hata mesaji -->
+    {% if error %}
+    <div class="bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">❌</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Cooldown uyarisi -->
+    {% if not can_send %}
+    <div class="bg-yellow-900/50 border border-yellow-600 text-yellow-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">⏳</span>
+        <span>Rate limit aktif — <strong>{{ cooldown_remaining }}</strong> saniye bekleyin</span>
+    </div>
+    {% endif %}
+
+    <!-- Ana Form Karti -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+        <h1 class="text-xl font-bold text-gray-100 mb-6 flex items-center gap-2">
+            📢 Toplu Bildirim Gonder
+        </h1>
+
+        <form id="broadcastForm" method="post" action="/admin/broadcast/send"
+              onsubmit="return confirmBroadcast()">
+
+            <!-- Baslik -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-300 mb-1">
+                    Baslik <span class="text-gray-500">(max 100 karakter)</span>
+                </label>
+                <input type="text" name="title" id="titleInput" maxlength="100" required
+                       class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                              text-gray-100 placeholder-gray-500
+                              focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                       placeholder="Ornek: Yeni Ozellik! Tavan Takip Artik Ucretsiz" />
+                <div class="text-xs text-gray-500 mt-1">
+                    <span id="titleCount">0</span>/100
+                </div>
+            </div>
+
+            <!-- Mesaj -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-300 mb-1">
+                    Mesaj <span class="text-gray-500">(max 500 karakter)</span>
+                </label>
+                <textarea name="body" id="bodyInput" maxlength="500" rows="4" required
+                          class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                                 text-gray-100 placeholder-gray-500
+                                 focus:ring-2 focus:ring-indigo-500 focus:border-transparent
+                                 resize-none"
+                          placeholder="Bildirim mesajinizi yazin..."></textarea>
+                <div class="text-xs text-gray-500 mt-1">
+                    <span id="bodyCount">0</span>/500
+                </div>
+            </div>
+
+            <!-- Hedef Kitle -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-300 mb-2">
+                    Hedef Kitle
+                </label>
+                <div class="grid grid-cols-3 gap-3">
+                    <label class="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2.5 cursor-pointer
+                                  border border-gray-600 hover:border-indigo-500 transition has-[:checked]:border-indigo-500 has-[:checked]:bg-indigo-900/30">
+                        <input type="radio" name="audience" value="all" checked
+                               class="text-indigo-500 focus:ring-indigo-500" onchange="updatePreview()" />
+                        <div>
+                            <div class="text-gray-200 text-sm font-medium">Tumu</div>
+                            <div class="text-gray-500 text-xs">Tum kullanicilar</div>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2.5 cursor-pointer
+                                  border border-gray-600 hover:border-emerald-500 transition has-[:checked]:border-emerald-500 has-[:checked]:bg-emerald-900/30">
+                        <input type="radio" name="audience" value="paid"
+                               class="text-emerald-500 focus:ring-emerald-500" onchange="updatePreview()" />
+                        <div>
+                            <div class="text-gray-200 text-sm font-medium">Ucretli</div>
+                            <div class="text-gray-500 text-xs">Premium aboneler</div>
+                        </div>
+                    </label>
+                    <label class="flex items-center gap-2 bg-gray-700 rounded-lg px-3 py-2.5 cursor-pointer
+                                  border border-gray-600 hover:border-orange-500 transition has-[:checked]:border-orange-500 has-[:checked]:bg-orange-900/30">
+                        <input type="radio" name="audience" value="free"
+                               class="text-orange-500 focus:ring-orange-500" onchange="updatePreview()" />
+                        <div>
+                            <div class="text-gray-200 text-sm font-medium">Ucretsiz</div>
+                            <div class="text-gray-500 text-xs">Free kullanicilar</div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Yonlendirme -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-1">
+                    Tiklaninca Yonlendirme
+                </label>
+                <select name="deep_link_target"
+                        class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                               text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                    <option value="none">Yonlendirme Yok (Uygulamayi Ac)</option>
+                    <option value="halka-arz">📊 Halka Arz Sayfasi</option>
+                    <option value="ai-haberler">📰 KAP Haber Sayfasi</option>
+                    <option value="ayarlar">⚙️ Ayarlar Sayfasi</option>
+                </select>
+            </div>
+
+            <!-- Onizleme -->
+            <div class="mb-6 bg-gray-900 rounded-lg border border-gray-600 p-4">
+                <h3 class="text-sm font-medium text-gray-400 mb-3">Onizleme</h3>
+
+                <!-- Telefon bildirim mockup -->
+                <div class="bg-gray-700 rounded-xl p-3 max-w-sm shadow-md">
+                    <div class="flex items-start gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl
+                                    flex items-center justify-center text-xs font-bold shrink-0 text-white shadow">
+                            SZ
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between">
+                                <span class="text-gray-400 text-xs">BIST Haber & Arz</span>
+                                <span class="text-gray-500 text-xs">simdi</span>
+                            </div>
+                            <div id="previewTitle" class="font-semibold text-gray-100 text-sm mt-0.5">
+                                Bildirim basligi
+                            </div>
+                            <div id="previewBody" class="text-gray-400 text-xs mt-0.5 line-clamp-3">
+                                Bildirim mesaji buraya gelecek...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alici sayisi -->
+                <div class="mt-3 flex items-center justify-between">
+                    <span class="text-sm text-gray-400">
+                        Tahmini alici:
+                        <span id="recipientCount" class="font-bold text-indigo-400">—</span>
+                    </span>
+                    <button type="button" onclick="updatePreview()"
+                            class="text-xs text-indigo-400 hover:text-indigo-300 transition">
+                        ↻ Yenile
+                    </button>
+                </div>
+            </div>
+
+            <!-- Gonder butonu -->
+            <button type="submit" id="sendBtn"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3
+                           rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed
+                           flex items-center justify-center gap-2"
+                    {{ 'disabled' if not can_send else '' }}>
+                <span>📢</span>
+                <span>Bildirimi Gonder</span>
+            </button>
+
+            {% if not can_send %}
+            <p class="text-center text-yellow-400 text-xs mt-2">
+                Rate limit aktif — {{ cooldown_remaining }} saniye sonra tekrar deneyebilirsiniz
+            </p>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Bilgi notu -->
+    <div class="bg-gray-800/50 rounded-lg border border-gray-700 p-4 text-sm text-gray-500">
+        <p class="flex items-center gap-1.5">
+            <span>ℹ️</span>
+            Bildirimler arka planda gonderilir. Sonuc Telegram'a raporlanir.
+            Gonderimler arasi 2 saniye beklenir (Firebase korumasi).
+            Her 5 dakikada 1 broadcast gonderilebilir.
+        </p>
+    </div>
+</div>
+
+<script>
+// Karakter sayaclari + canli onizleme
+const titleInput = document.getElementById('titleInput');
+const bodyInput = document.getElementById('bodyInput');
+
+titleInput.addEventListener('input', function() {
+    document.getElementById('titleCount').textContent = this.value.length;
+    document.getElementById('previewTitle').textContent =
+        this.value || 'Bildirim basligi';
+});
+
+bodyInput.addEventListener('input', function() {
+    document.getElementById('bodyCount').textContent = this.value.length;
+    document.getElementById('previewBody').textContent =
+        this.value || 'Bildirim mesaji buraya gelecek...';
+});
+
+// Hedef kitle degisince alici sayisini AJAX ile guncelle
+async function updatePreview() {
+    const audience = document.querySelector('[name="audience"]:checked').value;
+    const countEl = document.getElementById('recipientCount');
+    countEl.textContent = 'Hesaplaniyor...';
+
+    try {
+        const formData = new FormData();
+        formData.append('audience', audience);
+
+        const resp = await fetch('/admin/broadcast/preview', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+        const data = await resp.json();
+        countEl.textContent = data.count + ' kullanici';
+    } catch (e) {
+        countEl.textContent = 'Hata — tekrar deneyin';
+    }
+}
+
+// Sayfa yuklenince ilk sorgu
+updatePreview();
+
+// Onay dialogu
+function confirmBroadcast() {
+    const title = titleInput.value.trim();
+    const body = bodyInput.value.trim();
+    const audience = document.querySelector('[name="audience"]:checked').value;
+    const count = document.getElementById('recipientCount').textContent;
+
+    const audienceLabels = {
+        all: 'TUM KULLANICILAR',
+        paid: 'UCRETLI ABONELER',
+        free: 'UCRETSIZ KULLANICILAR'
+    };
+
+    if (!title || !body) {
+        alert('Baslik ve mesaj alanlari bos birakilamaz!');
+        return false;
+    }
+
+    return confirm(
+        '⚠️ DIKKAT: Bu islem geri alinamaz!\n\n' +
+        '📋 Baslik: ' + title + '\n' +
+        '👥 Hedef: ' + audienceLabels[audience] + '\n' +
+        '📊 Tahmini alici: ' + count + '\n\n' +
+        'Bildirimi gondermek istediginizden emin misiniz?'
+    );
+}
+</script>
+{% endblock %}

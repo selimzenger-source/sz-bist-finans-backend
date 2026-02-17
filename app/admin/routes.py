@@ -950,3 +950,114 @@ async def toggle_auto_send(request: Request):
     )
 
     return RedirectResponse(url="/admin/tweets", status_code=303)
+
+
+# -------------------------------------------------------
+# BROADCAST — Toplu Bildirim Gonderimi
+# -------------------------------------------------------
+
+@router.get("/broadcast", response_class=HTMLResponse)
+async def broadcast_page(
+    request: Request,
+    success: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Broadcast bildirim gonderim sayfasi."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.services.broadcast import can_broadcast
+
+    can_send, cooldown_remaining = can_broadcast()
+
+    return templates.TemplateResponse("admin/broadcast.html", {
+        "request": request,
+        "success": success,
+        "error": error,
+        "can_send": can_send,
+        "cooldown_remaining": cooldown_remaining,
+    })
+
+
+@router.post("/broadcast/preview")
+async def broadcast_preview(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Broadcast onizleme — hedef kitle sayisini dondurur (AJAX)."""
+    if not get_current_admin(request):
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    form = await request.form()
+    audience = form.get("audience", "all")
+
+    from app.services.broadcast import count_recipients
+    count = await count_recipients(db, audience)
+
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"count": count, "audience": audience})
+
+
+@router.post("/broadcast/send")
+async def broadcast_send(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Broadcast bildirim gonder — background task olarak."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    body = (form.get("body") or "").strip()
+    audience = form.get("audience", "all")
+    deep_link_target = form.get("deep_link_target", "none")
+
+    # Validasyon
+    if not title or len(title) > 100:
+        return RedirectResponse(
+            url="/admin/broadcast?error=Baslik 1-100 karakter olmali",
+            status_code=303,
+        )
+    if not body or len(body) > 500:
+        return RedirectResponse(
+            url="/admin/broadcast?error=Mesaj 1-500 karakter olmali",
+            status_code=303,
+        )
+    if audience not in ("all", "paid", "free"):
+        return RedirectResponse(
+            url="/admin/broadcast?error=Gecersiz hedef kitle",
+            status_code=303,
+        )
+    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar"):
+        deep_link_target = "none"
+
+    from app.services.broadcast import can_broadcast, mark_broadcast_sent, count_recipients
+
+    can_send, cooldown_remaining = can_broadcast()
+    if not can_send:
+        return RedirectResponse(
+            url=f"/admin/broadcast?error=Rate limit aktif — {cooldown_remaining} saniye bekleyin",
+            status_code=303,
+        )
+
+    # Tahmini alici sayisi (admin bilgisi icin)
+    estimated = await count_recipients(db, audience)
+
+    # Cooldown baslat
+    mark_broadcast_sent()
+
+    # Arka plan gorevi baslat
+    import asyncio
+    from app.services.broadcast import broadcast_background_task
+    asyncio.create_task(
+        broadcast_background_task(title, body, audience, deep_link_target)
+    )
+
+    audience_labels = {"all": "tum kullanicilara", "paid": "ucretli abonelere", "free": "ucretsiz kullanicilara"}
+    return RedirectResponse(
+        url=f"/admin/broadcast?success=Broadcast baslatildi! Tahmini {estimated} {audience_labels.get(audience, 'kullaniciya')} gonderiliyor...",
+        status_code=303,
+    )
