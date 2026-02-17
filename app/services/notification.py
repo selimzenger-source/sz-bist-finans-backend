@@ -174,12 +174,17 @@ class NotificationService:
         try:
             from firebase_admin import messaging
 
+            # Data payload — tum value'lar STRING olmali (Firebase zorunlulugu)
+            safe_data = {}
+            for k, v in (data or {}).items():
+                safe_data[k] = str(v) if v is not None else ""
+
             message = messaging.Message(
                 notification=messaging.Notification(
                     title=title,
                     body=body,
                 ),
-                data=data or {},
+                data=safe_data,
                 topic=topic,
                 android=messaging.AndroidConfig(
                     priority="high",
