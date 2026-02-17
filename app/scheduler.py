@@ -130,33 +130,33 @@ async def scrape_spk():
         import re
         from app.scrapers.spk_scraper import SPKScraper
         from app.models.spk_application import SPKApplication
-        from app.models.ipo import IPO
+        from app.models.ipo import IPO, DeletedIPO
         from sqlalchemy import select
 
         def _normalize(name: str) -> str:
             """Sirket ismini normalize et — bosluk/satir sonu/harf farklarini gider."""
             return re.sub(r"\s+", " ", name.strip()).lower() if name else ""
 
-        def _is_in_ipo(spk_name: str, ipo_set: set) -> bool:
-            """SPK ismi IPO tablosundakilerden biriyle eslesiyor mu?
+        def _name_in_set(spk_name: str, name_set: set) -> bool:
+            """SPK ismi verilen settekilerden biriyle eslesiyor mu?
             1. birebir  2. startswith (kisa isim)  3. ilk 3 kelime
             """
             n = _normalize(spk_name)
             if not n:
                 return False
-            if n in ipo_set:
+            if n in name_set:
                 return True
-            for ipo_n in ipo_set:
-                if n.startswith(ipo_n) or ipo_n.startswith(n):
+            for ref_n in name_set:
+                if n.startswith(ref_n) or ref_n.startswith(n):
                     return True
             skip = {"a.ş.", "a.s.", "aş", "as", "san.", "tic.", "ve", "ve/veya", "ltd.", "şti.", "sti."}
             spk_words = [w for w in n.split() if w not in skip][:3]
             if len(spk_words) < 2:
                 return False
             spk_key = " ".join(spk_words)
-            for ipo_n in ipo_set:
-                ipo_words = [w for w in ipo_n.split() if w not in skip][:3]
-                if " ".join(ipo_words) == spk_key:
+            for ref_n in name_set:
+                ref_words = [w for w in ref_n.split() if w not in skip][:3]
+                if " ".join(ref_words) == spk_key:
                     return True
             return False
 
@@ -187,6 +187,15 @@ async def scrape_spk():
                     if name:
                         ipo_names_normalized.add(_normalize(name))
 
+                # Silinen IPO kara listesi — scraper tekrar eklemesin
+                deleted_result = await db.execute(select(DeletedIPO.company_name))
+                deleted_names_normalized = set()
+                for (name,) in deleted_result.all():
+                    if name:
+                        deleted_names_normalized.add(_normalize(name))
+
+                skipped_deleted = 0
+
                 # 1. Yeni ekle + mevcut guncelle
                 for app_data in applications:
                     company_name = app_data.get("company_name", "").strip()
@@ -199,8 +208,13 @@ async def scrape_spk():
                     processed_names.add(company_name)
 
                     # IPO tablosunda zaten var — SPK'dan gecmis, pending'e ekleme
-                    if _is_in_ipo(company_name, ipo_names_normalized):
+                    if _name_in_set(company_name, ipo_names_normalized):
                         skipped_ipo += 1
+                        continue
+
+                    # Kara listede mi? (admin silmis — tekrar ekleme)
+                    if _name_in_set(company_name, deleted_names_normalized):
+                        skipped_deleted += 1
                         continue
 
                     result = await db.execute(
@@ -211,6 +225,10 @@ async def scrape_spk():
                     existing = result.scalars().first()
 
                     if existing:
+                        # Admin silmis ise DOKUNMA — tekrar pending yapma
+                        if existing.status == "deleted":
+                            skipped_deleted += 1
+                            continue
                         # Mevcut kaydi guncelle (tarih degismis olabilir)
                         new_date = app_data.get("application_date")
                         if new_date and existing.application_date != new_date:
@@ -243,8 +261,8 @@ async def scrape_spk():
                 await db.commit()
 
             logger.info(
-                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d onaylandi (listeden cikti), %d IPO'da mevcut (atlandi)",
-                len(applications), new_count, updated_count, removed_count, skipped_ipo,
+                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d onaylandi (listeden cikti), %d IPO'da mevcut, %d kara listede (atlandi)",
+                len(applications), new_count, updated_count, removed_count, skipped_ipo, skipped_deleted,
             )
         finally:
             await scraper.close()
