@@ -799,22 +799,30 @@ async def toggle_mute_stock_notification(
 @limiter.limit("10/minute")
 async def register_device(request: Request, data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Cihaz kayit — ilk acilista cagrilir."""
+    # Bos string token'lari None'a cevir (AuthContext bos token ile register yapar)
+    clean_fcm = data.fcm_token.strip() if data.fcm_token else None
+    clean_fcm = clean_fcm or None  # "" -> None
+    clean_expo = data.expo_push_token.strip() if data.expo_push_token else None
+    clean_expo = clean_expo or None
+
     result = await db.execute(
         select(User).where(User.device_id == data.device_id)
     )
     user = result.scalar_one_or_none()
 
     if user:
-        user.fcm_token = data.fcm_token
-        if data.expo_push_token:
-            user.expo_push_token = data.expo_push_token
+        # Sadece gecerli token varsa guncelle (bos string ile ezme)
+        if clean_fcm:
+            user.fcm_token = clean_fcm
+        if clean_expo:
+            user.expo_push_token = clean_expo
         user.platform = data.platform
         user.app_version = data.app_version
     else:
         user = User(
             device_id=data.device_id,
-            fcm_token=data.fcm_token,
-            expo_push_token=data.expo_push_token,
+            fcm_token=clean_fcm,
+            expo_push_token=clean_expo,
             platform=data.platform,
             app_version=data.app_version,
         )
@@ -863,6 +871,20 @@ async def update_user(
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
     update_data = data.model_dump(exclude_unset=True)
+
+    # Bos string token'lari temizle — bos string gecerli token degildir
+    if "fcm_token" in update_data:
+        val = (update_data["fcm_token"] or "").strip()
+        if not val:
+            del update_data["fcm_token"]  # Bos token ile mevcut tokeni ezme
+        else:
+            update_data["fcm_token"] = val
+    if "expo_push_token" in update_data:
+        val = (update_data["expo_push_token"] or "").strip()
+        if not val:
+            del update_data["expo_push_token"]
+        else:
+            update_data["expo_push_token"] = val
 
     # Hesap silme talebi — soft-delete: bildirimleri kapat, tokenlari temizle
     if update_data.get("deleted") is True:

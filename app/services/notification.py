@@ -283,10 +283,11 @@ class NotificationService:
             select(User).where(
                 and_(
                     User.notifications_enabled == True,
+                    User.deleted == False,
                     pref_col == True,
                     or_(
-                        User.expo_push_token.isnot(None),
-                        User.fcm_token.isnot(None),
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
                     ),
                 )
             )
@@ -558,10 +559,11 @@ class NotificationService:
                     UserSubscription.is_active == True,
                     UserSubscription.package == "ana_yildiz",
                     User.notifications_enabled == True,
+                    User.deleted == False,
                     User.notify_kap_all == True,
                     or_(
-                        User.expo_push_token.isnot(None),
-                        User.fcm_token.isnot(None),
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
                     ),
                 )
             )
@@ -580,10 +582,11 @@ class NotificationService:
                     StockNotificationSubscription.is_active == True,
                     StockNotificationSubscription.is_annual_bundle == True,
                     User.notifications_enabled == True,
+                    User.deleted == False,
                     User.notify_kap_all == True,
                     or_(
-                        User.expo_push_token.isnot(None),
-                        User.fcm_token.isnot(None),
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
                     ),
                 )
             )
@@ -678,10 +681,11 @@ class NotificationService:
             select(User).where(
                 and_(
                     User.notifications_enabled == True,
+                    User.deleted == False,
                     User.notify_kap_bist30 == True,
                     or_(
-                        User.expo_push_token.isnot(None),
-                        User.fcm_token.isnot(None),
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
                     ),
                     User.id.notin_(paid_kap_ids),
                     User.id.notin_(paid_bundle_ids),
