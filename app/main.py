@@ -878,6 +878,14 @@ async def update_user(
         if hasattr(user, key):
             setattr(user, key, value)
 
+    # Guvenlik agi: FCM token guncellendiyse ve gecerliyse,
+    # notifications_enabled acik degilse otomatik ac
+    # (kullanici izin verdiyse token gelir — bildirimleri de acik olmali)
+    new_fcm = update_data.get("fcm_token")
+    if new_fcm and "notifications_enabled" not in update_data:
+        if not user.notifications_enabled:
+            user.notifications_enabled = True
+
     await db.flush()
     return user
 
