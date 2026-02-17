@@ -393,9 +393,6 @@ def generate_daily_tracking_image(
         if banner_img:
             img.paste(banner_img, (0, 0))
 
-        # Banner uzerine gun numarasi overlay
-        _overlay_day_number(img, trading_day, banner_h)
-
         # Watermark
         _draw_bg_watermark(img, width, total_h)
 
@@ -480,11 +477,11 @@ def generate_daily_tracking_image(
             durum_raw = d.get("durum", "")
             durum_label_map = {
                 "tavan": "TAVAN", "alici_kapatti": "ALICILI",
-                "satici_kapatti": "SATICILI", "taban": "TABAN", "not_kapatti": "",
+                "satici_kapatti": "SATICILI", "taban": "TABAN", "not_kapatti": "NORMAL",
             }
             durum_color_map = {
                 "tavan": GREEN, "alici_kapatti": GREEN,
-                "satici_kapatti": RED, "taban": RED, "not_kapatti": GRAY,
+                "satici_kapatti": RED, "taban": RED, "not_kapatti": ORANGE,
             }
             durum_label = durum_label_map.get(durum_raw, "")
             durum_color = durum_color_map.get(durum_raw, GRAY)
