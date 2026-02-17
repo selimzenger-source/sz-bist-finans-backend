@@ -910,12 +910,14 @@ async def scrape_halkarz():
                         # Tweet #3: Dagitim sonuclari tweeti
                         try:
                             from app.services.twitter_service import tweet_allocation_results
+                            from app.services.admin_telegram import notify_tweet_sent
                             # IPOAllocation nesnelerini yeniden cek (flush sonrasi)
                             alloc_result = await db.execute(
                                 select(IPOAllocation).where(IPOAllocation.ipo_id == ipo.id)
                             )
                             alloc_list = alloc_result.scalars().all()
-                            tweet_allocation_results(ipo, alloc_list)
+                            tw_ok = tweet_allocation_results(ipo, alloc_list)
+                            await notify_tweet_sent("dagitim_sonucu", ipo.ticker or ipo.company_name, tw_ok)
                             logger.info("HalkArz: %s — dagitim sonucu tweeti atildi", ipo.ticker or ipo.company_name)
                         except Exception as tweet_err:
                             logger.warning("HalkArz: %s — tweet hatasi: %s", ipo.ticker or ipo.company_name, tweet_err)

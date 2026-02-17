@@ -377,11 +377,13 @@ async def tweet_distribution_morning_job():
                 return
 
             from app.services.twitter_service import tweet_distribution_start
+            from app.services.admin_telegram import notify_tweet_sent
 
             for ipo in ipos:
                 try:
-                    tweet_distribution_start(ipo)
+                    tw_ok = tweet_distribution_start(ipo)
                     logger.info("Dagitim sabah tweeti: %s", ipo.ticker or ipo.company_name)
+                    await notify_tweet_sent("dagitim_baslangic", ipo.ticker or ipo.company_name, tw_ok)
                 except Exception as e:
                     logger.error("Dagitim sabah tweet hatasi (%s): %s", ipo.ticker, e)
 
@@ -641,16 +643,19 @@ async def check_reminders():
                 # Jitter — ilk IPO haric 50-55 sn bekle
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
+                    from app.services.admin_telegram import notify_tweet_sent
                     if _r_tweet_idx > 0:
                         jitter = random.uniform(50, 55)
                         logger.info("Hatirlatma tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker or ipo.company_name)
                         await asyncio.sleep(jitter)
                     if reminder_check == "reminder_4h":
-                        tweet_last_4_hours(ipo)
+                        tw_ok = tweet_last_4_hours(ipo)
                         _r_tweet_idx += 1
+                        await notify_tweet_sent("son_4_saat", ipo.ticker or ipo.company_name, tw_ok)
                     elif reminder_check == "reminder_30min":
-                        tweet_last_30_min(ipo)
+                        tw_ok = tweet_last_30_min(ipo)
                         _r_tweet_idx += 1
+                        await notify_tweet_sent("son_30_dk", ipo.ticker or ipo.company_name, tw_ok)
                 except Exception:
                     pass  # Tweet hatasi sistemi etkilemez
 
@@ -856,6 +861,7 @@ async def tweet_spk_approval_intro_job():
                 return
 
             from app.services.twitter_service import tweet_company_intro
+            from app.services.admin_telegram import notify_tweet_sent
             import asyncio
 
             tweeted = 0
@@ -876,6 +882,7 @@ async def tweet_spk_approval_intro_job():
                     await asyncio.sleep(random.uniform(50, 55))
 
                 success = tweet_company_intro(ipo)
+                await notify_tweet_sent("sirket_tanitim_spk", ipo.ticker or ipo.company_name, success)
                 if success:
                     ipo.intro_tweeted = True
                     await db.commit()
@@ -918,11 +925,13 @@ async def tweet_last_day_morning_job():
                 return
 
             from app.services.twitter_service import tweet_last_day_morning
+            from app.services.admin_telegram import notify_tweet_sent
             for idx, ipo in enumerate(last_day_ipos):
                 if idx > 0:
                     import asyncio
                     await asyncio.sleep(random.uniform(50, 55))  # Jitter
-                tweet_last_day_morning(ipo)
+                tw_ok = tweet_last_day_morning(ipo)
+                await notify_tweet_sent("son_gun_sabah", ipo.ticker or ipo.company_name, tw_ok)
 
             logger.info(f"Son gun sabah tweeti: {len(last_day_ipos)} IPO")
 
@@ -958,12 +967,14 @@ async def tweet_company_intro_job():
                 return
 
             from app.services.twitter_service import tweet_company_intro
+            from app.services.admin_telegram import notify_tweet_sent
             tweeted = 0
             for idx, ipo in enumerate(new_ipos):
                 if idx > 0:
                     import asyncio
                     await asyncio.sleep(random.uniform(50, 55))
                 success = tweet_company_intro(ipo)
+                await notify_tweet_sent("sirket_tanitim", ipo.ticker or ipo.company_name, success)
                 if success:
                     ipo.intro_tweeted = True
                     await db.commit()
@@ -1008,7 +1019,9 @@ async def tweet_spk_pending_monthly_job():
                 image_path = None  # Gorsel bulunamazsa sadece metin
 
             from app.services.twitter_service import tweet_spk_pending_with_image
-            tweet_spk_pending_with_image(pending_count, image_path)
+            from app.services.admin_telegram import notify_tweet_sent
+            tw_ok = tweet_spk_pending_with_image(pending_count, image_path)
+            await notify_tweet_sent("spk_bekleyenler_aylik", f"{pending_count} basvuru", tw_ok)
 
             logger.info(f"SPK bekleyenler aylik tweet: {pending_count} basvuru")
 
@@ -1186,7 +1199,9 @@ async def market_snapshot_tweet():
 
             # Tweet at
             from app.services.twitter_service import tweet_market_snapshot
-            tweet_market_snapshot(snapshot_data, image_path)
+            from app.services.admin_telegram import notify_tweet_sent
+            tw_ok = tweet_market_snapshot(snapshot_data, image_path)
+            await notify_tweet_sent("piyasa_snapshot", f"{len(snapshot_data)} hisse", tw_ok)
 
             logger.info("Ogle arasi snapshot tweet basarili: %d hisse", len(snapshot_data))
 
@@ -1529,12 +1544,14 @@ async def send_first_trading_day_notifications():
                 # Jitter — ilk IPO haric 50-55 sn bekle
                 try:
                     from app.services.twitter_service import tweet_first_trading_day
+                    from app.services.admin_telegram import notify_tweet_sent
                     if _ft_tweet_idx > 0:
                         jitter = random.uniform(50, 55)
                         logger.info("Ilk islem tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker or ipo.company_name)
                         await asyncio.sleep(jitter)
-                    tweet_first_trading_day(ipo)
+                    tw_ok = tweet_first_trading_day(ipo)
                     _ft_tweet_idx += 1
+                    await notify_tweet_sent("ilk_islem_gunu", ipo.ticker or ipo.company_name, tw_ok)
                 except Exception:
                     pass  # Tweet hatasi sistemi etkilemez
 
@@ -1601,8 +1618,10 @@ async def tweet_opening_price_job():
                                 logger.info("Acilis tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
                                 await asyncio.sleep(jitter)
                             from app.services.twitter_service import tweet_opening_price
-                            tweet_opening_price(ipo, open_price, pct_change)
+                            from app.services.admin_telegram import notify_tweet_sent
+                            tw_ok = tweet_opening_price(ipo, open_price, pct_change)
                             _tweet_idx += 1
+                            await notify_tweet_sent("acilis_fiyati", ipo.ticker or ipo.company_name, tw_ok, f"Açılış: {open_price}₺ ({pct_change:+.1f}%)")
                     except Exception as e:
                         logger.error("Acilis fiyati tweet hatasi %s: %s", ipo.ticker, e)
             finally:
@@ -1704,7 +1723,8 @@ async def monthly_yearly_summary_tweet():
             positive_count = sum(1 for r in returns if r["pct"] > 0)
 
             from app.services.twitter_service import tweet_yearly_summary
-            tweet_yearly_summary(
+            from app.services.admin_telegram import notify_tweet_sent
+            tw_ok = tweet_yearly_summary(
                 year=report_year,
                 month_name=month_name,
                 total_ipos=total_ipos,
@@ -1716,6 +1736,7 @@ async def monthly_yearly_summary_tweet():
                 total_completed=len(returns),
                 positive_count=positive_count,
             )
+            await notify_tweet_sent("aylik_rapor", f"{month_name} {report_year}", tw_ok, f"Toplam: {total_ipos} IPO, Ort: {avg_return:.1f}%")
 
     except Exception as e:
         logger.error("Ay sonu rapor tweet hatasi: %s", e)

@@ -648,7 +648,10 @@ async def check_spk_bulletins():
                 if new_ipos_this_bulletin:
                     try:
                         from app.services.twitter_service import tweet_new_ipos_batch
-                        tweet_new_ipos_batch(new_ipos_this_bulletin, bno_str_val)
+                        from app.services.admin_telegram import notify_tweet_sent
+                        tw_ok = tweet_new_ipos_batch(new_ipos_this_bulletin, bno_str_val)
+                        tickers = ", ".join(i.ticker or i.company_name for i in new_ipos_this_bulletin)
+                        await notify_tweet_sent("spk_onayi_toplu", tickers, tw_ok, f"Bülten: {bno_str_val}")
                         logger.info(
                             "SPK toplu tweet atildi: %d IPO, bulten %s",
                             len(new_ipos_this_bulletin), bno_str_val,

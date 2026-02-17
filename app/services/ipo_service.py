@@ -346,7 +346,9 @@ class IPOService:
         if ipo:
             try:
                 from app.services.twitter_service import tweet_allocation_results
-                tweet_allocation_results(ipo, new_allocations)
+                from app.services.admin_telegram import notify_tweet_sent
+                tw_ok = tweet_allocation_results(ipo, new_allocations)
+                await notify_tweet_sent("dagitim_sonucu", ipo.ticker or ipo.company_name, tw_ok)
             except Exception:
                 pass  # Tweet hatasi sistemi etkilemez
 
@@ -696,7 +698,9 @@ class IPOService:
             # Tweet #2: Dagitima Cikis
             try:
                 from app.services.twitter_service import tweet_distribution_start
-                tweet_distribution_start(ipo)
+                from app.services.admin_telegram import notify_tweet_sent
+                tw_ok = tweet_distribution_start(ipo)
+                await notify_tweet_sent("dagitim_baslangic", ipo.ticker or ipo.company_name, tw_ok)
             except Exception:
                 pass  # Tweet hatasi sistemi etkilemez
 

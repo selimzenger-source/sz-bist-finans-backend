@@ -2511,6 +2511,7 @@ async def bulk_allocations(request: Request, payload: dict, db: AsyncSession = D
         # Tweet #3: Kesinlesen Dagitim Sonuclari
         try:
             from app.services.twitter_service import tweet_allocation_results
+            from app.services.admin_telegram import notify_tweet_sent
             # Allocation listesini dict formatinda gonder
             alloc_dicts = []
             for grp in item.get("groups", []):
@@ -2521,7 +2522,8 @@ async def bulk_allocations(request: Request, payload: dict, db: AsyncSession = D
                     "participant_count": grp.get("participant_count"),
                     "avg_lot_per_person": grp.get("avg_lot_per_person"),
                 })
-            tweet_allocation_results(ipo, alloc_dicts)
+            tw_ok = tweet_allocation_results(ipo, alloc_dicts)
+            await notify_tweet_sent("dagitim_sonucu", ipo.ticker or ipo.company_name, tw_ok)
         except Exception:
             pass  # Tweet hatasi sistemi etkilemez
 

@@ -447,13 +447,15 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     tweet_kw = matched_kw
                     if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                         tweet_kw = "Yeni KAP Bildirimi"
-                    
+
                     # Sentiment hep positive kabul ediliyor bu poller'da
-                    # Arka planda tweet at (await etme, poller'i bloke etmesin)
-                    # Ancak tweet_bist30_news senkron bir fonksiyon (httpx sync kullaniyor _safe_tweet icinde)
-                    # Bu yuzden direkt cagiriyoruz, _safe_tweet zaten exception yutar.
-                    tweet_bist30_news(ticker, tweet_kw, "positive")
-                    logger.info("Twitter BIST50 tweet atildi: %s", ticker)
+                    # tweet_bist30_news senkron fonksiyon — _safe_tweet exception yutar.
+                    tw_success = tweet_bist30_news(ticker, tweet_kw, "positive")
+                    logger.info("Twitter BIST50 tweet atildi: %s (basarili=%s)", ticker, tw_success)
+
+                    # Admin Telegram bildirimi
+                    from app.services.admin_telegram import notify_tweet_sent
+                    await notify_tweet_sent("bist50_kap_haber", ticker, tw_success, f"Anahtar: {tweet_kw}")
 
             except Exception as tw_err:
                 logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)
