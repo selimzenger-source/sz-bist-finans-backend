@@ -97,6 +97,25 @@ def generate_25day_image(
         if lot_count > 0:
             lot_profit = (last_close - ipo_price) * 100 * lot_count  # 1 lot = 100 hisse
 
+        # ── Banner tema gorseli yukle ─────────────────
+        banner_h = 0
+        banner_img = None
+        _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        banner_path = os.path.join(_IMG_DIR, "25_gun_performans_banner.png")
+        if os.path.exists(banner_path):
+            try:
+                banner_img = Image.open(banner_path).convert("RGB")
+                # Banner'i tablonun genisligine kucult, oran koru
+                banner_ratio = banner_img.width / banner_img.height
+                banner_h = int(1200 / banner_ratio)
+                if banner_h > 300:
+                    banner_h = 300  # max 300px
+                banner_img = banner_img.resize((1200, banner_h), Image.LANCZOS)
+            except Exception as be:
+                logger.warning("Banner yuklenemedi: %s", be)
+                banner_img = None
+                banner_h = 0
+
         # ── Boyut hesapla ──────────────────────────────
         width = 1200
         header_h = 280       # ust bilgi alani
@@ -106,9 +125,14 @@ def generate_25day_image(
         padding = 40
         num_rows = len(days_data)
         table_h = col_header_h + (num_rows * row_h)
-        total_h = header_h + table_h + footer_h
+        total_h = banner_h + header_h + table_h + footer_h
 
         img = Image.new("RGB", (width, total_h), BG_COLOR)
+
+        # Banner'i uste yapistir
+        if banner_img:
+            img.paste(banner_img, (0, 0))
+
         draw = ImageDraw.Draw(img)
 
         # Fontlar
@@ -122,7 +146,7 @@ def generate_25day_image(
         font_footer_sm = _load_font(24)
         font_watermark = _load_font(22)
 
-        y = padding
+        y = banner_h + padding
 
         # ── HEADER ─────────────────────────────────────
         # Baslik
@@ -157,13 +181,13 @@ def generate_25day_image(
             y += 50
 
         # ── DIVIDER ────────────────────────────────────
-        y = header_h - 10
+        y = banner_h + header_h - 10
         draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
         y += 15
 
         # ── SUTUN BASLIKLARI ───────────────────────────
-        col_x = [padding, 140, 380, 600, 860]  # Gün, Kapanış, Günlük%, Küm%, Durum (opsiyonel)
-        col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %"]
+        col_x = [padding, 140, 370, 580, 810]  # Gün, Kapanış, Günlük%, Küm%, Durum
+        col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum"]
 
         for i, label in enumerate(col_labels):
             draw.text((col_x[i], y), label, fill=GOLD, font=font_col_header)
@@ -213,8 +237,29 @@ def generate_25day_image(
             cum_str = f"%{cum_pct:+.1f}"
             draw.text((col_x[3], text_y), cum_str, fill=cum_color, font=font_row_bold)
 
+            # Durum (TAVAN, ALICILI, SATICILI, TABAN)
+            durum_raw = d.get("durum", "")
+            durum_label_map = {
+                "tavan": "TAVAN",
+                "alici_kapatti": "ALICILI",
+                "satici_kapatti": "SATICILI",
+                "taban": "TABAN",
+                "not_kapatti": "",
+            }
+            durum_color_map = {
+                "tavan": GREEN,
+                "alici_kapatti": GREEN,
+                "satici_kapatti": RED,
+                "taban": RED,
+                "not_kapatti": GRAY,
+            }
+            durum_label = durum_label_map.get(durum_raw, "")
+            durum_color = durum_color_map.get(durum_raw, GRAY)
+            if durum_label:
+                draw.text((col_x[4], text_y), durum_label, fill=durum_color, font=font_row_bold)
+
         # ── FOOTER ─────────────────────────────────────
-        footer_y = header_h + table_h + 15
+        footer_y = banner_h + header_h + table_h + 15
 
         # Divider
         draw.line([(padding, footer_y - 5), (width - padding, footer_y - 5)],

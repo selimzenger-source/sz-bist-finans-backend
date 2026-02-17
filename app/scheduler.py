@@ -457,6 +457,7 @@ async def archive_old_ipos():
                                         "low": t.low_price or t.close_price,
                                         "close": t.close_price,
                                         "volume": 0,
+                                        "durum": t.durum or "",
                                     })
 
                                 if days_data and ipo_price > 0:
@@ -1082,6 +1083,7 @@ async def daily_ceiling_update():
                             "low": t.low_price if t.low_price is not None else t.close_price,
                             "close": t.close_price,
                             "volume": 0,
+                            "durum": t.durum or "",
                         })
 
                     if not days_data:
@@ -1848,6 +1850,7 @@ async def _test_25day_image_tweet():
                     "low": t.low_price or t.close_price,
                     "close": t.close_price,
                     "volume": 0,
+                    "durum": t.durum or "",
                 })
 
             if days_data and ipo_price > 0:
