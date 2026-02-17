@@ -623,8 +623,14 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
 # ================================================================
 def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                          pct_change: float, durum: str,
-                         days_data: list = None) -> bool:
-    """Her islem gunu 18:20'de kumulatif tablo seklinde gunluk takip tweeti."""
+                         days_data: list = None,
+                         ceiling_days: int = 0,
+                         floor_days: int = 0) -> bool:
+    """Her islem gunu 18:20'de gunluk takip tweeti.
+
+    - 1-5. gun: Eski metin format + statik banner
+    - 6-24. gun: Dinamik PNG gorsel + kisa metin
+    """
     try:
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
 
@@ -637,46 +643,79 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
             "taban": "\U0001F534 Taban",
         }
         durum_text = durum_map.get(durum, durum)
-
-        # Kumulatif performans tablosu — her gun halka arz fiyatina gore toplam getiri
-        table_lines = []
-        if days_data and ipo_price > 0:
-            for d in days_data:
-                day_num = d["trading_day"]
-                day_close = float(d["close"])
-                cum_pct = ((day_close - ipo_price) / ipo_price) * 100
-                emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
-                if day_num == trading_day:
-                    table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f} \u25C0")
-                else:
-                    table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
-        else:
-            # days_data yoksa eski formatta tek satir yaz
-            if ipo_price > 0:
-                cum_change = ((close_price - ipo_price) / ipo_price) * 100
-            else:
-                cum_change = 0
-            table_lines.append(f"{trading_day}. %{cum_change:+.1f}")
-
-        table_text = "\n".join(table_lines)
-
-        # Gunluk degisim emoji
         daily_emoji = "\U0001F7E2" if pct_change >= 0 else "\U0001F534"
 
-        # Header + Kumulatif Toplam basligi + footer bugun detay
-        header = (
-            f"\U0001F4CA #{ipo.ticker or ipo.company_name} \u2014 {trading_day}. Gün Sonu\n\n"
-            f"Kümülatif Toplam:\n"
-        )
-        footer = (
-            f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
-            f"\U0001F4F2 Detaylar için: {APP_LINK}\n"
-            f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-        )
+        # ── 6+ gun: Dinamik PNG gorsel ───────────────────
+        image_path = None
+        if trading_day >= 6 and days_data and ipo_price > 0:
+            try:
+                from app.services.chart_image_generator import generate_daily_tracking_image
+                image_path = generate_daily_tracking_image(
+                    ipo, days_data, ceiling_days, floor_days, trading_day,
+                )
+            except Exception as img_err:
+                logger.warning("Gunluk takip gorsel olusturulamadi: %s", img_err)
 
-        text = header + table_text + footer
+        if image_path:
+            # Kisa tweet metni — gorsel detayi iceriyor
+            cum_pct = ((close_price - ipo_price) / ipo_price) * 100 if ipo_price > 0 else 0
+            normal_d = trading_day - ceiling_days - floor_days
+            text = (
+                f"\U0001F4CA #{ipo.ticker or ipo.company_name} \u2014 {trading_day}/25 Gün Sonu\n\n"
+                f"Halka Arz: {ipo_price:.2f} TL\n"
+                f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
+                f"Kümülatif: %{cum_pct:+.1f}\n\n"
+                f"Tavan: {ceiling_days} | Taban: {floor_days} | Normal: {normal_d}\n\n"
+                f"\U0001F4F2 {APP_LINK}\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+            banner = image_path
+        else:
+            # ── 1-5 gun (veya gorsel hata): Eski metin format ──
+            table_lines = []
+            if days_data and ipo_price > 0:
+                for d in days_data:
+                    day_num = d["trading_day"]
+                    day_close = float(d["close"])
+                    cum_pct = ((day_close - ipo_price) / ipo_price) * 100
+                    emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
+                    if day_num == trading_day:
+                        table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f} \u25C0")
+                    else:
+                        table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
+            else:
+                if ipo_price > 0:
+                    cum_change = ((close_price - ipo_price) / ipo_price) * 100
+                else:
+                    cum_change = 0
+                table_lines.append(f"{trading_day}. %{cum_change:+.1f}")
 
-        return _safe_tweet_with_media(text, BANNER_GUNLUK_TAKIP)
+            table_text = "\n".join(table_lines)
+
+            text = (
+                f"\U0001F4CA #{ipo.ticker or ipo.company_name} \u2014 {trading_day}. Gün Sonu\n\n"
+                f"Kümülatif Toplam:\n"
+                f"{table_text}"
+                f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
+                f"\U0001F4F2 Detaylar için: {APP_LINK}\n"
+                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
+            )
+            banner = BANNER_GUNLUK_TAKIP
+
+        # Kuyruk modunda temp dosyayi silme
+        from app.config import get_settings
+        auto_send = get_settings().TWITTER_AUTO_SEND
+
+        result = _safe_tweet_with_media(text, banner)
+
+        # Temp dosya temizligi — sadece auto_send modunda
+        if image_path and auto_send:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+
+        return result
     except Exception as e:
         logger.error(f"tweet_daily_tracking hatasi: {e}")
         return False
