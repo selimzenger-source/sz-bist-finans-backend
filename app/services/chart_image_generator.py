@@ -284,14 +284,14 @@ def generate_25day_image(
                 "alici_kapatti": "ALICILI",
                 "satici_kapatti": "SATICILI",
                 "taban": "TABAN",
-                "not_kapatti": "",
+                "not_kapatti": "NORMAL",
             }
             durum_color_map = {
                 "tavan": GREEN,
                 "alici_kapatti": GREEN,
                 "satici_kapatti": RED,
                 "taban": RED,
-                "not_kapatti": GRAY,
+                "not_kapatti": ORANGE,
             }
             durum_label = durum_label_map.get(durum_raw, "")
             durum_color = durum_color_map.get(durum_raw, GRAY)
