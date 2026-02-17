@@ -363,20 +363,25 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     text, re.IGNORECASE
                 )
                 if detail_match:
-                    matched_kw = detail_match.group(1).strip()
+                    raw_kw = detail_match.group(1).strip()
+                    # "Haber Detayi Bulunamadi" gibi anlamsiz degerler atlanir
+                    if raw_kw and "BULUNAMADI" not in raw_kw.upper():
+                        matched_kw = raw_kw
             if not matched_kw:
                 matched_kw = ticker or ""
 
             # Parsed body — fiyat bilgisi olmadan temiz format
-            parsed_body = f"Sembol: {ticker or '???'}"
+            # Sembol satiri, keyword, % degisim/gap/tarih bilgisi
+            body_parts = [f"Sembol: {ticker or '???'}"]
             if matched_kw and matched_kw != ticker:
-                parsed_body += f"\n{matched_kw}"
+                body_parts.append(matched_kw)
             if message_type == "seans_ici_pozitif" and pct_change:
-                parsed_body += f"\nDeğişim: {pct_change}"
+                body_parts.append(f"Değişim: {pct_change}")
             elif message_type == "seans_disi_acilis" and gap is not None:
-                parsed_body += f"\nGap: %{gap}"
+                body_parts.append(f"Gap: %{gap}")
             elif message_type == "borsa_kapali" and expected_date:
-                parsed_body += f"\nBeklenen İşlem Günü: {expected_date.isoformat()}"
+                body_parts.append(f"Beklenen İşlem Günü: {expected_date.isoformat()}")
+            parsed_body = "\n".join(body_parts)
 
             # DB'ye kaydet — fiyat yok
             news = TelegramNews(
