@@ -215,6 +215,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v19 migration: ipo_ceiling_tracks.alis_lot + satis_lot (1. kademe lot verileri — ogle arasi tweet)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS alis_lot INTEGER")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS satis_lot INTEGER")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

@@ -7,7 +7,7 @@ Halka Arz Tavan/Taban Takip — Excel -> Backend Canli Sync
 Her 15 saniyede bir Matriks Excel'den canli fiyat verilerini okuyup
 tavan/taban durumunu analiz eder, 5 bildirim tipini yonetir.
 
-Excel Formati (Matriks — 9 sutun):
+Excel Formati (Matriks — 12 sutun):
   A: ILK ISLEM  (22.Oca.26 gibi)
   B: HISSE      (AKHAN, NETCD, UCAYM)
   C: TAVAN      (Tavan limit fiyati)
@@ -17,6 +17,9 @@ Excel Formati (Matriks — 9 sutun):
   G: SON        (Son fiyat / Kapanis)
   H: %G FARK    (Gunluk % degisim)
   I: TARIH      (Verinin tarihi)
+  J: G.EN YUKSEK (Gun ici en yuksek fiyat)
+  K: ALIS LOT   (1. kademe alis lotu — canli)
+  L: SATIS LOT  (1. kademe satis lotu — canli)
 
 5 Bildirim Servisi:
   1. TAVAN ACILINCA / KiTLENiNCE (tavan_bozulma)  — 10 TL / 5 TL ilk HA
@@ -143,6 +146,8 @@ SON_FIYAT_SUTUN = "G"
 GUN_FARK_SUTUN = "H"
 TARIH_SUTUN = "I"
 GUN_EN_YUKSEK_SUTUN = "J"
+ALIS_LOT_SUTUN = "K"       # 1. kademe alis lotu
+SATIS_LOT_SUTUN = "L"      # 1. kademe satis lotu
 
 BASLIK_SATIR = 1
 VERI_BASLANGIC = 2
@@ -164,6 +169,8 @@ class StockState:
     satis_kademe: Optional[str] = None  # Satis kademe fiyati veya "#YOK"/None
     gun_fark: float = 0.0              # Gunluk % degisim
     gun_en_yuksek: float = 0.0         # Gun ici en yuksek fiyat (J sutunu)
+    alis_lot: int = 0                  # 1. kademe alis lotu (K sutunu)
+    satis_lot: int = 0                 # 1. kademe satis lotu (L sutunu)
     is_ceiling_locked: bool = False     # Tavana kilitli mi?
     is_floor_locked: bool = False       # Tabana kilitli mi?
 
@@ -284,6 +291,10 @@ def read_excel_data() -> list[StockState]:
             # J: G.EN YUKSEK (gun ici en yuksek fiyat)
             gun_en_yuksek = safe_float(sheet.Range(f"{GUN_EN_YUKSEK_SUTUN}{satir}").Value)
 
+            # K: ALIS LOT, L: SATIS LOT (1. kademe lot verileri)
+            alis_lot = int(safe_float(sheet.Range(f"{ALIS_LOT_SUTUN}{satir}").Value))
+            satis_lot = int(safe_float(sheet.Range(f"{SATIS_LOT_SUTUN}{satir}").Value))
+
             # Kademe degerlerini parse et
             alis_kademe = parse_kademe(alis_kademe_val)
             satis_kademe = parse_kademe(satis_kademe_val)
@@ -301,6 +312,8 @@ def read_excel_data() -> list[StockState]:
                 satis_kademe=satis_kademe,
                 gun_fark=gun_fark,
                 gun_en_yuksek=gun_en_yuksek,
+                alis_lot=alis_lot,
+                satis_lot=satis_lot,
                 is_ceiling_locked=is_ceiling_locked,
                 is_floor_locked=is_floor_locked,
             )
@@ -456,6 +469,8 @@ def send_ceiling_data_to_backend(stock: StockState, hit_ceiling: bool, hit_floor
             "low_price": stock.taban,
             "hit_ceiling": hit_ceiling,
             "hit_floor": hit_floor,
+            "alis_lot": stock.alis_lot,
+            "satis_lot": stock.satis_lot,
         }
         if state.day_open_price > 0:
             payload["open_price"] = state.day_open_price
@@ -808,8 +823,8 @@ def print_stock_table(stocks: list[StockState]):
     """Hisse durumlarini tablo olarak goster."""
     now = dt.datetime.now()
     print(f"\n[{now.strftime('%H:%M:%S')}] {len(stocks)} hisse okundu:")
-    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'G.HIGH':>8s} {'ALIS K.':>10s} {'SATIS K.':>10s} {'DURUM'}")
-    print(f"  {'-'*80}")
+    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'G.HIGH':>8s} {'ALIS K.':>10s} {'SATIS K.':>10s} {'A.LOT':>10s} {'S.LOT':>10s} {'DURUM'}")
+    print(f"  {'-'*100}")
     for s in stocks:
         durum = ""
         if s.is_ceiling_locked:
@@ -821,6 +836,8 @@ def print_stock_table(stocks: list[StockState]):
 
         ak = s.alis_kademe or "-"
         sk = s.satis_kademe or "-"
+        al = f"{s.alis_lot:,}".replace(",", ".") if s.alis_lot else "-"
+        sl = f"{s.satis_lot:,}".replace(",", ".") if s.satis_lot else "-"
 
         # %4/%7 dusus durumunu goster (J sutunundan gun_en_yuksek)
         gun_high = s.gun_en_yuksek
@@ -829,7 +846,7 @@ def print_stock_table(stocks: list[StockState]):
             if drop >= 1.0:
                 durum += f" (-%{drop:.1f})"
 
-        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {gun_high:>8.2f} {ak:>10s} {sk:>10s} {durum}")
+        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {gun_high:>8.2f} {ak:>10s} {sk:>10s} {al:>10s} {sl:>10s} {durum}")
 
 
 def is_market_hours() -> bool:

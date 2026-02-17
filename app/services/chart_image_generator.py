@@ -291,7 +291,7 @@ def generate_25day_image(
                 "alici_kapatti": "ALICILI",
                 "satici_kapatti": "SATICILI",
                 "taban": "TABAN",
-                "not_kapatti": "NORMAL",
+                "not_kapatti": "Normal İşlem",
             }
             durum_color_map = {
                 "tavan": GREEN,
@@ -316,9 +316,9 @@ def generate_25day_image(
         draw.text((padding, footer_y + 5), f"Toplam: %{total_pct:+.1f}",
                   fill=pct_color, font=font_footer)
 
-        # Tavan / Taban / Normal
+        # Tavan / Taban / Normal İşlem
         draw.text((padding, footer_y + 38),
-                  f"Tavan: {ceiling_days}  |  Taban: {floor_days}  |  Normal: {normal_days}",
+                  f"Tavan: {ceiling_days}  |  Taban: {floor_days}  |  Normal İşlem: {normal_days}",
                   fill=GRAY, font=font_footer_sm)
 
         # szalgo.net.tr
@@ -556,3 +556,249 @@ def _overlay_day_number(img: Image.Image, day_num: int, banner_h: int):
         draw.text((badge_x, badge_y), text, fill=WHITE, font=font)
     except Exception as e:
         logger.warning("Gun numarasi overlay eklenemedi: %s", e)
+
+
+# ═══════════════════════════════════════════════════════════════
+# OGLE ARASI MARKET SNAPSHOT (14:00 — tum islem goren hisseler)
+# ═══════════════════════════════════════════════════════════════
+
+def _format_lot(lot_val) -> str:
+    """Lot sayisini binlik ayiracli formata cevirir. 0 veya None → '—'."""
+    if not lot_val or lot_val == 0:
+        return "—"
+    return f"{int(lot_val):,}".replace(",", ".")
+
+
+def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
+    """Ogle arasi market snapshot gorseli olusturur — kart (card) bazli layout.
+
+    Args:
+        snapshot_data: Her hisse icin dict listesi:
+            [
+                {
+                    "ticker": "AKHAN",
+                    "trading_day": 3,
+                    "close_price": 23.65,
+                    "pct_change": 10.0,     # gunluk %
+                    "cum_pct": 45.2,        # kumulatif % (HA fiyatindan)
+                    "durum": "tavan",        # tavan/taban/alici_kapatti/satici_kapatti/not_kapatti
+                    "alis_lot": 1245000,
+                    "satis_lot": 0,
+                    "ipo_price": 21.50,
+                }
+            ]
+
+    Returns:
+        PNG dosya yolu (tempdir) veya None
+    """
+    try:
+        if not snapshot_data:
+            return None
+
+        width = 1200
+        padding = 40
+
+        # Fontlar
+        font_title = _load_font(36, bold=True)
+        font_subtitle = _load_font(24, bold=False)
+        font_ticker = _load_font(32, bold=True)
+        font_data = _load_font(24, bold=False)
+        font_data_bold = _load_font(24, bold=True)
+        font_lot = _load_font(20, bold=False)
+        font_cum_val = _load_font(16, bold=True)   # G. Toplam yuzde degeri (kucuk)
+        font_footer = _load_font(22, bold=False)
+        font_footer_bold = _load_font(24, bold=True)
+
+        # Banner yukleme
+        _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        banner_path = os.path.join(_IMG_DIR, "ogle_arasi_banner.png")
+        banner_img = None
+        banner_h = 0
+
+        if os.path.exists(banner_path):
+            try:
+                raw_banner = Image.open(banner_path).convert("RGB")
+                # Banner'i 1200 genislige scale et (orantili)
+                scale = width / raw_banner.width
+                new_h = int(raw_banner.height * scale)
+                banner_img = raw_banner.resize((width, new_h), Image.LANCZOS)
+                banner_h = new_h
+            except Exception:
+                banner_img = None
+
+        # Layout hesaplamalari
+        header_h = 90      # Baslik (42pt GOLD) + tarih
+        card_h = 90         # Her kart yuksekligi
+        card_gap = 4        # Kartlar arasi bosluk
+        footer_h = 45       # Footer (sadece szalgo.net.tr)
+        accent_w = 5        # Sol kenar renk cizgisi genisligi
+
+        num_cards = len(snapshot_data)
+        cards_total_h = num_cards * card_h + (num_cards - 1) * card_gap
+        total_h = banner_h + header_h + cards_total_h + footer_h + 20  # 20 = alt bosluk
+
+        # Gorsel olustur
+        img = Image.new("RGB", (width, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        # Banner paste
+        y = 0
+        if banner_img:
+            img.paste(banner_img, (0, 0))
+            y = banner_h
+
+        # ── Header ──────────────────────────────────────────
+        draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG)
+        now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+        # Baslik — GOLD, buyuk, ozel
+        font_brand = _load_font(42, bold=True)
+        draw.text((padding, y + 8), "HALKA ARZ HİSSELERİ", fill=GOLD, font=font_brand)
+        draw.text((padding, y + 54), f"{now_str}  |  {num_cards} Hisse İşlemde", fill=GRAY, font=font_subtitle)
+
+        # Tavan/taban/normal sayaci — sag tarafa
+        tavan_c = sum(1 for s in snapshot_data if s.get("durum") == "tavan")
+        taban_c = sum(1 for s in snapshot_data if s.get("durum") == "taban")
+        normal_c = num_cards - tavan_c - taban_c
+        summary = f"Tavan: {tavan_c}  Taban: {taban_c}  Normal İşlem: {normal_c}"
+        bbox = font_subtitle.getbbox(summary)
+        sw = bbox[2] - bbox[0]
+        draw.text((width - padding - sw, y + 56), summary, fill=GOLD, font=font_subtitle)
+
+        y += header_h
+
+        # Divider
+        draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
+        y += 4
+
+        # ── Kartlar ────────────────────────────────────────
+        for idx, stock in enumerate(snapshot_data):
+            card_y = y + idx * (card_h + card_gap)
+
+            # Arka plan (alternating)
+            card_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
+            draw.rectangle([(0, card_y), (width, card_y + card_h)], fill=card_bg)
+
+            # Sol kenar renk accent (pozitif=GREEN, negatif=RED)
+            pct = float(stock.get("pct_change", 0))
+            accent_color = GREEN if pct >= 0 else RED
+            draw.rectangle([(0, card_y), (accent_w, card_y + card_h)], fill=accent_color)
+
+            # ─ Satir 1: Ticker | Gun | Fiyat | Gunluk% | Durum ─
+            row1_y = card_y + 10
+
+            # Ticker (sol, buyuk bold)
+            draw.text((padding, row1_y), stock["ticker"], fill=WHITE, font=font_ticker)
+
+            # X/25 Gun (ticker'dan sonra)
+            day_text = f"{stock['trading_day']}/25"
+            draw.text((padding + 180, row1_y + 6), day_text, fill=GRAY, font=font_data)
+
+            # Son Fiyat (orta)
+            price_text = f"{float(stock['close_price']):.2f} TL"
+            draw.text((420, row1_y), price_text, fill=WHITE, font=font_data_bold)
+
+            # Gunluk % (orta-sag)
+            pct_color = GREEN if pct >= 0 else RED
+            pct_text = f"%{pct:+.2f}"
+            draw.text((620, row1_y), pct_text, fill=pct_color, font=font_data_bold)
+
+            # Kumulatif % — "3 G. Toplam: ▲%+42.5" seklinde
+            cum_pct = float(stock.get("cum_pct", 0))
+            t_day = stock.get("trading_day", 0)
+            # Label kismi duz GRAY
+            cum_label = f"{t_day} G. Toplam: "
+            draw.text((750, row1_y + 6), cum_label, fill=GRAY, font=font_lot)
+            # Yuzde kismi renkli (kucuk font, oksuz)
+            label_w = font_lot.getbbox(cum_label)[2] - font_lot.getbbox(cum_label)[0]
+            cum_color = GREEN if cum_pct >= 0 else RED
+            cum_val = f"%{cum_pct:+.1f}"
+            draw.text((750 + label_w, row1_y + 8), cum_val, fill=cum_color, font=font_cum_val)
+
+            # Durum badge (sag kenar)
+            durum = stock.get("durum", "")
+            durum_labels = {
+                "tavan": "TAVAN",
+                "taban": "TABAN",
+                "alici_kapatti": "ALICILI",
+                "satici_kapatti": "SATICILI",
+                "not_kapatti": "Normal İşlem",
+            }
+            durum_colors = {
+                "tavan": GREEN,
+                "taban": RED,
+                "alici_kapatti": GREEN,
+                "satici_kapatti": RED,
+                "not_kapatti": ORANGE,
+            }
+            d_label = durum_labels.get(durum, durum.upper() if durum else "—")
+            d_color = durum_colors.get(durum, GRAY)
+
+            # Badge arka plan kutusu
+            font_badge = font_lot if len(d_label) > 8 else font_data_bold  # uzun etiketler icin kucuk font
+            d_bbox = font_badge.getbbox(d_label)
+            d_w = d_bbox[2] - d_bbox[0]
+            badge_x = width - padding - d_w - 16
+            badge_y = row1_y - 2
+            badge_h = 28 if len(d_label) > 8 else 32
+            draw.rectangle(
+                [(badge_x, badge_y), (badge_x + d_w + 16, badge_y + badge_h)],
+                fill=(d_color[0], d_color[1], d_color[2]),
+            )
+            # Badge metni (koyu arka plan uzerine siyah)
+            draw.text((badge_x + 8, badge_y + 3), d_label, fill=(0, 0, 0), font=font_badge)
+
+            # ─ Satir 2: Lot bilgileri (durum'a gore degisir) ─
+            row2_y = card_y + 52
+
+            alis_lot = stock.get("alis_lot")
+            satis_lot = stock.get("satis_lot")
+
+            if durum == "tavan":
+                # Tavandaysa sadece alis lot goster
+                lot_text = f"Tavanda Bekleyen Alış: {_format_lot(alis_lot)}"
+                lot_color = GREEN
+            elif durum == "taban":
+                # Tabandaysa sadece satis lot goster
+                lot_text = f"Tabanda Bekleyen Satış: {_format_lot(satis_lot)}"
+                lot_color = RED
+            else:
+                # Normal — her ikisini goster
+                lot_text = f"Alış Lot: {_format_lot(alis_lot)}  |  Satış Lot: {_format_lot(satis_lot)}"
+                lot_color = GRAY
+
+            draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
+
+            # HA fiyati (sag alt)
+            ipo_price = stock.get("ipo_price")
+            if ipo_price:
+                ha_text = f"HA: {float(ipo_price):.2f} TL"
+                ha_bbox = font_lot.getbbox(ha_text)
+                ha_w = ha_bbox[2] - ha_bbox[0]
+                draw.text((width - padding - ha_w, row2_y), ha_text, fill=GRAY, font=font_lot)
+
+        # ── Footer ──────────────────────────────────────────
+        footer_y = y + cards_total_h + 10
+        draw.line([(padding, footer_y), (width - padding, footer_y)], fill=DIVIDER, width=2)
+        footer_y += 8
+        draw.rectangle([(0, footer_y), (width, footer_y + footer_h)], fill=HEADER_BG)
+
+        # szalgo.net.tr (orta)
+        footer_text = "szalgo.net.tr"
+        ft_bbox = font_footer_bold.getbbox(footer_text)
+        ft_w = ft_bbox[2] - ft_bbox[0]
+        draw.text(((width - ft_w) // 2, footer_y + 8), footer_text, fill=ORANGE, font=font_footer_bold)
+
+        # Watermark
+        _draw_bg_watermark(img, width, total_h)
+
+        # Kaydet
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"market_snapshot_{ts}.png"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        logger.info("Market snapshot gorsel olusturuldu: %s (%d hisse)", filepath, num_cards)
+        return filepath
+
+    except Exception as e:
+        logger.error("Market snapshot gorsel hatasi: %s", e)
+        return None

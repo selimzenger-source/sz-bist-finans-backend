@@ -232,6 +232,10 @@ class IPOCeilingTrack(Base):
         comment="Gunluk % degisim (onceki gun kapanisina gore)",
     )
 
+    # v19: 1. kademe lot verileri (ogle arasi market snapshot icin)
+    alis_lot: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="1. kademe alis lotu")
+    satis_lot: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="1. kademe satis lotu")
+
     ipo: Mapped["IPO"] = relationship(back_populates="ceiling_tracks")
 
     __table_args__ = (

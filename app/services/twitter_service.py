@@ -96,6 +96,7 @@ BANNER_ACILIS_FIYATI = os.path.join(_IMG_DIR, "acilis_fiyati_banner.png")
 BANNER_SON_30_DAKIKA = os.path.join(_IMG_DIR, "son_30_dakika_banner.png")
 BANNER_SPK_ONAYI = os.path.join(_IMG_DIR, "spk_onayi_banner.png")
 BANNER_AY_SONU_RAPOR = os.path.join(_IMG_DIR, "ay_sonu_rapor_banner.png")
+BANNER_OGLE_ARASI = os.path.join(_IMG_DIR, "ogle_arasi_banner.png")
 
 # Credentials cache — lazy init
 _credentials = None
@@ -704,7 +705,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"Halka Arz: {ipo_price:.2f} TL\n"
                 f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
                 f"Kümülatif: %{cum_pct:+.1f}\n\n"
-                f"Tavan: {ceiling_days} | Taban: {floor_days} | Normal: {normal_d}\n\n"
+                f"Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
                 f"\U0001F4F2 {APP_LINK}\n"
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
@@ -808,7 +809,7 @@ def tweet_25_day_performance(
             text += f"\nKi\u015fi Ba\u015f\u0131 Ort Lot: {int(avg_lot)}"
         text += lot_text
         text += (
-            f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal: {normal_days}\n\n"
+            f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
             f"\U0001F4F2 {APP_LINK}\n"
             f"#HalkaArz #BIST #{ticker}"
         )
@@ -1201,3 +1202,58 @@ def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str
         f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
         f"Detaylar için: {APP_LINK}"
     )
+
+
+# ================================================================
+# 15. OGLE ARASI MARKET SNAPSHOT (14:00 — tum islem goren hisseler)
+# ================================================================
+def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
+    """Saat 14:00 ogle arasi market snapshot tweeti.
+
+    Dinamik PNG gorsel + kisa ozet metin.
+
+    Args:
+        snapshot_data: Her hisse icin dict listesi
+            [{ticker, trading_day, close_price, pct_change, durum, ...}]
+        image_path: generate_market_snapshot_image() ciktisi
+    """
+    try:
+        if not snapshot_data or not image_path:
+            return False
+
+        count = len(snapshot_data)
+        tavan_count = sum(1 for s in snapshot_data if s.get("durum") == "tavan")
+        taban_count = sum(1 for s in snapshot_data if s.get("durum") == "taban")
+
+        # Her hisse icin kisa ozet satiri
+        lines = []
+        for s in snapshot_data:
+            pct = float(s.get("pct_change", 0))
+            emoji = "\U0001F7E2" if pct >= 0 else "\U0001F534"
+            lines.append(f"{emoji} #{s['ticker']} {s['trading_day']}/25 %{pct:+.1f}")
+
+        text = (
+            f"\U0001F4CA Ogle Arasi — {count} Hisse\n\n"
+            + "\n".join(lines) + "\n\n"
+            f"Tavan: {tavan_count} | Taban: {taban_count}\n\n"
+            f"\U0001F4F2 {APP_LINK}\n"
+            f"#HalkaArz #BIST #Borsa"
+        )
+
+        # Kuyruk modunda temp dosyayi silme
+        from app.config import get_settings
+        auto_send = get_settings().TWITTER_AUTO_SEND
+
+        result = _safe_tweet_with_media(text, image_path)
+
+        # Temp dosya temizligi — sadece auto_send modunda
+        if auto_send:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+
+        return result
+    except Exception as e:
+        logger.error(f"tweet_market_snapshot hatasi: {e}")
+        return False

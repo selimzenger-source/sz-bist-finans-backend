@@ -1480,6 +1480,8 @@ async def update_ceiling_track(
         low_price=data.low_price,
         hit_ceiling=data.hit_ceiling,
         hit_floor=data.hit_floor,
+        alis_lot=data.alis_lot,
+        satis_lot=data.satis_lot,
     )
 
     # Eski + yeni bildirim abonelerini topla
@@ -1752,6 +1754,8 @@ async def bulk_ceiling_track(
             low_price = D(str(t["low_price"])) if t.get("low_price") else None
             hit_ceiling = bool(t.get("hit_ceiling", False))
             hit_floor = bool(t.get("hit_floor", False))
+            alis_lot = int(t["alis_lot"]) if t.get("alis_lot") else None
+            satis_lot = int(t["satis_lot"]) if t.get("satis_lot") else None
 
             track = await ipo_service.update_ceiling_track(
                 ipo_id=ipo.id,
@@ -1763,6 +1767,8 @@ async def bulk_ceiling_track(
                 low_price=low_price,
                 hit_ceiling=hit_ceiling,
                 hit_floor=hit_floor,
+                alis_lot=alis_lot,
+                satis_lot=satis_lot,
             )
 
             # trading_day_count guncelle

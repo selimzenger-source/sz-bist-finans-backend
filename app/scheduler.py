@@ -997,6 +997,117 @@ async def tweet_spk_pending_monthly_job():
         logger.error(f"SPK bekleyenler tweet hatasi: {e}")
 
 
+async def market_snapshot_tweet():
+    """Ogle arasi market snapshot tweet — 14:00 TR (UTC 11:00).
+
+    Islemde olan tum halka arz hisselerinin anlik durumunu
+    kart bazli gorsel ile tweet atar.
+
+    Borsa kapali kontrolu: Bugunun tarihine ait IPOCeilingTrack kaydı yoksa
+    (yani Excel sync bugunku tarihle veri göndermediyse) borsa kapalidir, tweet atilmaz.
+    """
+    try:
+        from sqlalchemy import select, and_, func
+        from decimal import Decimal
+        from datetime import date as date_type
+        from app.models.ipo import IPO, IPOCeilingTrack
+
+        async with async_session() as db:
+            # Status = "trading" olan tum IPO'lari bul
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status == "trading",
+                        IPO.archived == False,
+                        IPO.trading_start.isnot(None),
+                    )
+                )
+            )
+            active_ipos = result.scalars().all()
+
+            if not active_ipos:
+                logger.info("Ogle arasi snapshot: Aktif islem goren IPO yok")
+                return
+
+            today = date_type.today()
+            snapshot_data = []
+
+            for ipo in active_ipos:
+                if not ipo.ticker:
+                    continue
+
+                # 25 gun dolmus IPO'lar icin snapshot atma
+                if ipo.trading_day_count and ipo.trading_day_count >= 25:
+                    continue
+
+                # Bugunun ceiling track kaydini al
+                track_result = await db.execute(
+                    select(IPOCeilingTrack).where(
+                        and_(
+                            IPOCeilingTrack.ipo_id == ipo.id,
+                            IPOCeilingTrack.trade_date == today,
+                        )
+                    )
+                )
+                today_track = track_result.scalar_one_or_none()
+
+                if not today_track:
+                    # Bugun icin veri yok — ya borsa kapali ya da sync henuz calismadi
+                    continue
+
+                # Kumulatif % hesapla (HA fiyatindan)
+                ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                close_price = float(today_track.close_price) if today_track.close_price else 0
+                cum_pct = 0.0
+                if ipo_price > 0 and close_price > 0:
+                    cum_pct = ((close_price - ipo_price) / ipo_price) * 100
+
+                # Gunluk % (pct_change DB'de var)
+                daily_pct = float(today_track.pct_change) if today_track.pct_change is not None else 0.0
+
+                # Durum
+                durum = today_track.durum or "not_kapatti"
+
+                snapshot_data.append({
+                    "ticker": ipo.ticker,
+                    "trading_day": today_track.trading_day,
+                    "close_price": close_price,
+                    "pct_change": daily_pct,
+                    "cum_pct": cum_pct,
+                    "durum": durum,
+                    "alis_lot": today_track.alis_lot,
+                    "satis_lot": today_track.satis_lot,
+                    "ipo_price": ipo_price,
+                })
+
+            if not snapshot_data:
+                logger.info("Ogle arasi snapshot: Bugun islem goren hisse yok (borsa kapali olabilir)")
+                return
+
+            logger.info(
+                "Ogle arasi snapshot: %d hisse — %s",
+                len(snapshot_data),
+                ", ".join(s["ticker"] for s in snapshot_data),
+            )
+
+            # Gorsel olustur
+            from app.services.chart_image_generator import generate_market_snapshot_image
+            image_path = generate_market_snapshot_image(snapshot_data)
+
+            if not image_path:
+                logger.error("Ogle arasi snapshot: Gorsel olusturulamadi")
+                return
+
+            # Tweet at
+            from app.services.twitter_service import tweet_market_snapshot
+            tweet_market_snapshot(snapshot_data, image_path)
+
+            logger.info("Ogle arasi snapshot tweet basarili: %d hisse", len(snapshot_data))
+
+    except Exception as e:
+        logger.error(f"Ogle arasi snapshot hatasi: {e}")
+
+
 async def daily_ceiling_update():
     """Gun sonu tavan takip tweet — 18:20 (UTC 15:20).
 
@@ -1788,6 +1899,17 @@ def _setup_scheduler_impl():
         CronTrigger(day=1, hour=17, minute=0),
         id="spk_pending_monthly_tweet",
         name="SPK Bekleyenler Aylik Tweet (Ayin 1'i 20:00 TR)",
+        replace_existing=True,
+    )
+
+    # 22. Ogle Arasi Market Snapshot — her gun 14:00 TR (UTC 11:00) Pzt-Cuma
+    # Islemdeki tum halka arz hisselerinin anlik durumunu gorsel tweet atar
+    # Borsa kapali ise (bugunun trade_date'i yoksa) tweet atilmaz
+    scheduler.add_job(
+        market_snapshot_tweet,
+        CronTrigger(hour=11, minute=0, day_of_week="mon-fri"),
+        id="market_snapshot_tweet",
+        name="Ogle Arasi Market Snapshot (14:00 TR)",
         replace_existing=True,
     )
 

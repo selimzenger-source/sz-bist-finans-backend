@@ -367,6 +367,8 @@ class IPOService:
         high_price: Optional[Decimal] = None,
         low_price: Optional[Decimal] = None,
         hit_floor: bool = False,
+        alis_lot: Optional[int] = None,
+        satis_lot: Optional[int] = None,
     ) -> IPOCeilingTrack:
         """Tavan/taban takip bilgisini gunceller veya olusturur.
 
@@ -392,6 +394,8 @@ class IPOService:
             track.low_price = low_price
             track.hit_ceiling = hit_ceiling
             track.hit_floor = hit_floor
+            track.alis_lot = alis_lot
+            track.satis_lot = satis_lot
 
             if not hit_ceiling and not track.ceiling_broken_at:
                 track.ceiling_broken_at = datetime.utcnow()
@@ -410,6 +414,8 @@ class IPOService:
                 low_price=low_price,
                 hit_ceiling=hit_ceiling,
                 hit_floor=hit_floor,
+                alis_lot=alis_lot,
+                satis_lot=satis_lot,
                 ceiling_broken_at=datetime.utcnow() if not hit_ceiling else None,
                 floor_hit_at=datetime.utcnow() if hit_floor else None,
             )
