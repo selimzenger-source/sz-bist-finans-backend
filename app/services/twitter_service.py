@@ -704,8 +704,7 @@ def tweet_25_day_performance(
         lot_text = ""
         if avg_lot and ipo_price > 0:
             lot_count = int(avg_lot)
-            profit_per_lot = (close_price_25 - ipo_price) * 100  # 1 lot = 100 hisse
-            total_profit = profit_per_lot * lot_count
+            total_profit = (close_price_25 - ipo_price) * lot_count  # lot = adet
             if total_profit >= 0:
                 lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})"
             else:

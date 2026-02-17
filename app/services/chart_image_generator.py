@@ -95,7 +95,7 @@ def generate_25day_image(
         lot_count = int(avg_lot) if avg_lot else 0
         lot_profit = 0.0
         if lot_count > 0:
-            lot_profit = (last_close - ipo_price) * 100 * lot_count  # 1 lot = 100 hisse
+            lot_profit = (last_close - ipo_price) * lot_count  # lot = adet
 
         # ── Banner tema gorseli yukle ─────────────────
         banner_h = 0
@@ -108,8 +108,8 @@ def generate_25day_image(
                 # Banner'i tablonun genisligine kucult, oran koru
                 banner_ratio = banner_img.width / banner_img.height
                 banner_h = int(1200 / banner_ratio)
-                if banner_h > 300:
-                    banner_h = 300  # max 300px
+                if banner_h > 500:
+                    banner_h = 500  # max 500px
                 banner_img = banner_img.resize((1200, banner_h), Image.LANCZOS)
             except Exception as be:
                 logger.warning("Banner yuklenemedi: %s", be)
@@ -178,7 +178,13 @@ def generate_25day_image(
             else:
                 profit_text = f"25. Gün Karnesi: {lot_profit:,.0f} TL (%{total_pct:+.1f})"
             draw.text((padding, y), profit_text, fill=profit_color, font=font_big)
-            y += 50
+            y += 38
+            # Disclaimer
+            font_tiny = _load_font(18)
+            draw.text((padding, y),
+                      "* Kisi basi ort lot ile 25. gun kapanis degerine gore hesaplanmistir.",
+                      fill=GRAY, font=font_tiny)
+            y += 28
         else:
             # Lot bilgisi yoksa sadece toplam yuzde
             pct_color = GREEN if total_pct >= 0 else RED
