@@ -388,6 +388,45 @@ def tweet_new_ipo(ipo) -> bool:
         return False
 
 
+def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
+    """Ayni bultendeki halka arz onaylarini tek tweet'te atar.
+
+    1 adet ise: eski format (tweet_new_ipo)
+    2+ adet ise: birlesik format (liste halinde)
+
+    Args:
+        ipos: Yeni olusturulan IPO objeleri listesi
+        bulletin_no: Bulten numarasi (orn: "2/2026")
+    """
+    try:
+        if not ipos:
+            return False
+
+        # Tek onay → eski format
+        if len(ipos) == 1:
+            return tweet_new_ipo(ipos[0])
+
+        # 2+ onay → birlesik format
+        lines = []
+        for ipo in ipos:
+            price = f" — {ipo.ipo_price} TL" if ipo.ipo_price else ""
+            lines.append(f"✅ {ipo.company_name}{price}")
+
+        text = (
+            f"\U0001F6A8 SPK Bülteni Yayımlandı!\n\n"
+            f"{bulletin_no} Bülteninde {len(ipos)} adet onaylanan halka arz "
+            f"için halka arz başvurusu SPK tarafından onaylandı.\n\n"
+            + "\n".join(lines) + "\n\n"
+            f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
+            f"Detaylar için: {APP_LINK}\n\n"
+            f"#HalkaArz #BIST #Borsa"
+        )
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
+    except Exception as e:
+        logger.error(f"tweet_new_ipos_batch hatasi: {e}")
+        return False
+
+
 # ================================================================
 # 2. DAGITIMA CIKIS
 # ================================================================

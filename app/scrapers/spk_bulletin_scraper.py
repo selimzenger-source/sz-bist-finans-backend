@@ -21,7 +21,6 @@ Kaynak: https://spk.gov.tr/spk-bultenleri/{yil}-yili-spk-bultenleri
 import io
 import re
 import json
-import random
 import asyncio
 import logging
 from datetime import date, datetime
@@ -580,7 +579,6 @@ async def check_spk_bulletins():
             total_approvals = 0
             highest_no = last_no
 
-            _tweet_idx = 0  # Jitter icin sayac — ilk tweet aninda, sonrakiler bekler
             for bulletin in sorted(new_bulletins, key=lambda x: x["bulletin_no"]):
                 bno = bulletin["bulletin_no"]
                 bno_str_val = bulletin_no_str(*bno)
@@ -589,16 +587,10 @@ async def check_spk_bulletins():
                     bulletin["pdf_url"], bno,
                 )
 
-                for approval in approvals:
-                    # Birden fazla onay varsa tweetler arasi 50-55 sn bekle (spam onleme)
-                    if _tweet_idx > 0:
-                        jitter = random.uniform(50, 55)
-                        logger.info(
-                            "SPK tweet jitter: %.1f sn bekleniyor (%s)",
-                            jitter, approval["company_name"],
-                        )
-                        await asyncio.sleep(jitter)
+                # Bu bultendeki yeni IPO'lari topla — sonra tek tweet atilacak
+                new_ipos_this_bulletin = []
 
+                for approval in approvals:
                     ipo_data = {
                         "company_name": approval["company_name"],
                         "spk_bulletin_url": approval.get("bulletin_url"),
@@ -639,8 +631,8 @@ async def check_spk_bulletins():
                     if ipo and ipo.created_at and (
                         datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
                     ).total_seconds() < 60:
+                        new_ipos_this_bulletin.append(ipo)
                         await notif_service.notify_new_ipo(ipo)
-                        _tweet_idx += 1
                         try:
                             from app.services.admin_telegram import notify_spk_approval
                             await notify_spk_approval(
@@ -651,6 +643,18 @@ async def check_spk_bulletins():
                             pass
 
                     total_approvals += 1
+
+                # Bultendeki tum onaylar islendi — tek tweet at
+                if new_ipos_this_bulletin:
+                    try:
+                        from app.services.twitter_service import tweet_new_ipos_batch
+                        tweet_new_ipos_batch(new_ipos_this_bulletin, bno_str_val)
+                        logger.info(
+                            "SPK toplu tweet atildi: %d IPO, bulten %s",
+                            len(new_ipos_this_bulletin), bno_str_val,
+                        )
+                    except Exception as _tw_err:
+                        logger.warning("SPK toplu tweet hatasi: %s", _tw_err)
 
                 if highest_no is None or is_newer(bno, highest_no):
                     highest_no = bno

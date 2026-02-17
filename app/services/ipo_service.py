@@ -241,12 +241,9 @@ class IPOService:
             self.db.add(ipo)
             logger.info(f"Yeni IPO olusturuldu: {ipo.ticker or ipo.company_name}")
 
-            # Tweet #1: Yeni Halka Arz (SPK onayi)
-            try:
-                from app.services.twitter_service import tweet_new_ipo
-                tweet_new_ipo(ipo)
-            except Exception:
-                pass  # Tweet hatasi sistemi etkilemez
+            # NOT: Tweet artik burada atilmiyor.
+            # check_spk_bulletins() icerisinde tum onaylar toplandiktan sonra
+            # tweet_new_ipos_batch() ile tek tweet olarak atiliyor.
 
             # SPKApplication tablosunda varsa → approved yap
             try:
