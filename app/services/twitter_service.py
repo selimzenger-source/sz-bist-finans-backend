@@ -14,7 +14,7 @@ Tweet Tipleri:
 8.  Gunluk Takip (18:20 her islem gunu)
 9.  25 Gün Performans Ozeti (25. gunde bir kez)
 10. Yillik Halka Arz Ozeti (her ayin 1'i 20:00, ocak haric)
-11. BIST 30 KAP Haberi (aninda)
+11. BIST 50 KAP Haberi (aninda)
 12. Son Gun Sabah Tweeti (07:30 — hafif uyari tonu)
 13. Sirket Tanitim Tweeti (ertesi gun 20:00 — izahname sonrasi)
 14. SPK Bekleyenler Gorselli Tweet (her ayin 1'i — gorsel ile)
@@ -880,10 +880,10 @@ def tweet_yearly_summary(
 
 
 # ================================================================
-# 11. BIST 30 KAP HABERI
+# 11. BIST 50 KAP HABERI
 # ================================================================
 def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool:
-    """BIST 30 hissesi icin KAP haberi tweeti."""
+    """BIST 50 hissesi icin KAP haberi tweeti."""
     try:
         # Görsel yolu
         img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
@@ -908,9 +908,9 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
             f"Anlık Haber Yakalandı {now_str}\n\n"
             f"İlişkili Kelime : {clean_kw}\n\n"
             f"350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!\n\n"
-            f"Ücretsiz BIST 30 bildirimleri için:\n"
+            f"Ücretsiz BIST 50 bildirimleri için:\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
-            f"#BIST30 #{ticker} #KAP #Borsa"
+            f"#BIST50 #{ticker} #KAP #Borsa"
         )
         
         if img_path:
@@ -918,7 +918,7 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
         else:
             return _safe_tweet(text)
     except Exception as e:
-        logger.error(f"tweet_bist30_news hatasi: {e}")
+        logger.error(f"tweet_bist50_news hatasi: {e}")
         return False
 
 

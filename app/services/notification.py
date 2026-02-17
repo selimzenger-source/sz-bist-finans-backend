@@ -487,7 +487,7 @@ class NotificationService:
         """KAP haber bildirimini gonder (sadece pozitif).
 
         Ucretli aboneler (ana_yildiz): Per-user bildirim — notify_kap_all kontrollu
-        Ucretsiz BIST 30: Per-user push (_send_bist30_free) — ucretli aboneler haric (dedup)
+        Ucretsiz BIST 50: Per-user push (_send_bist50_free) — ucretli aboneler haric (dedup)
 
         3 Tip Bildirim:
         - Seans Ici Pozitif Haber Yakalandi
@@ -515,7 +515,7 @@ class NotificationService:
             "matched_keyword": matched_keyword,
         }
 
-        from app.services.news_service import BIST30_TICKERS
+        from app.services.news_service import BIST50_TICKERS
 
         sent = 0
         ticker_upper = ticker.upper()
@@ -523,9 +523,9 @@ class NotificationService:
         # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
         sent += await self._send_paid_kap_news(title, body, data, ticker_upper)
 
-        # 2. BIST 30 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
-        if ticker_upper in BIST30_TICKERS:
-            sent += await self._send_bist30_free(title, body, data, ticker_upper)
+        # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
+        if ticker_upper in BIST50_TICKERS:
+            sent += await self._send_bist50_free(title, body, data, ticker_upper)
 
             # Tweet: poller'da zaten tweet_bist30_news cagriliyor, burada TEKRAR atma (dedup)
 
@@ -638,14 +638,14 @@ class NotificationService:
 
         return sent_count
 
-    async def _send_bist30_free(
+    async def _send_bist50_free(
         self,
         title: str,
         body: str,
         data: dict,
         ticker: str,
     ) -> int:
-        """BIST 30 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
+        """BIST 50 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
 
         Dedup: _send_paid_kap_news ile zaten bildirim alan kullanicilar haric tutulur:
         - UserSubscription aktif ana_yildiz olanlar
@@ -708,10 +708,10 @@ class NotificationService:
                         failed_count += 1
                 except Exception as e:
                     failed_count += 1
-                    logger.warning("BIST30 free bildirim hatasi (user=%s): %s", user.id, e)
+                    logger.warning("BIST50 free bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "BIST30 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",
+            "BIST50 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",
             ticker, sent_count,
         )
 
@@ -719,7 +719,7 @@ class NotificationService:
         try:
             from app.services.admin_telegram import notify_push_sent
             await notify_push_sent(
-                notification_type=f"KAP BIST30 Free: {ticker}",
+                notification_type=f"KAP BIST50 Free: {ticker}",
                 title=title,
                 sent_count=sent_count,
                 failed_count=failed_count,

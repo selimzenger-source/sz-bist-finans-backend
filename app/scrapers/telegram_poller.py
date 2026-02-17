@@ -435,14 +435,14 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             )
 
             # ----------------------------------------------------------------
-            # TWITTER ENTEGRASYONU (Sadece BIST 30)
+            # TWITTER ENTEGRASYONU (Sadece BIST 50)
             # ----------------------------------------------------------------
             try:
-                # BIST 30 kontrolu icin import — lazy import (dongu icinde ama performans sorunu olmaz)
-                from app.services.news_service import BIST30_TICKERS
+                # BIST 50 kontrolu icin import — lazy import (dongu icinde ama performans sorunu olmaz)
+                from app.services.news_service import BIST50_TICKERS
                 from app.services.twitter_service import tweet_bist30_news
 
-                if ticker and ticker.upper() in BIST30_TICKERS:
+                if ticker and ticker.upper() in BIST50_TICKERS:
                     # Tweet metni icin keyword temizligi
                     tweet_kw = matched_kw
                     if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
@@ -453,7 +453,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # Ancak tweet_bist30_news senkron bir fonksiyon (httpx sync kullaniyor _safe_tweet icinde)
                     # Bu yuzden direkt cagiriyoruz, _safe_tweet zaten exception yutar.
                     tweet_bist30_news(ticker, tweet_kw, "positive")
-                    logger.info("Twitter BIST30 tweet atildi: %s", ticker)
+                    logger.info("Twitter BIST50 tweet atildi: %s", ticker)
 
             except Exception as tw_err:
                 logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)

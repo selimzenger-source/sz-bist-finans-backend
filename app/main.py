@@ -406,10 +406,10 @@ async def list_telegram_news(
 ):
     """Telegram kanalindan gelen AI haberler.
 
-    - Abone DEGiL: BIST 30 hisselerinin son 10 haberi (ucretsiz tanitim)
-    - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 20 haberi
+    - Abone DEGiL: BIST 50 hisselerinin son 20 haberi (ucretsiz tanitim)
+    - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 30 haberi
     """
-    from app.services.news_service import BIST30_TICKERS
+    from app.services.news_service import BIST50_TICKERS
 
     has_paid_sub = False
     active_package = None
@@ -438,7 +438,7 @@ async def list_telegram_news(
     since = datetime.utcnow() - timedelta(days=days)
 
     if has_paid_sub:
-        # Ucretli abone (ana_yildiz): tum hisselerin haberleri (max 50, sayfa basi 25)
+        # Ucretli abone (ana_yildiz): tum hisselerin haberleri (max 50, sayfa basi 30)
         query = (
             select(TelegramNews)
             .where(TelegramNews.created_at >= since)
@@ -454,13 +454,13 @@ async def list_telegram_news(
 
         query = query.limit(min(limit, 50)).offset(offset)
     else:
-        # Ucretsiz: BIST 30 hisselerinin son 10 haberi
+        # Ucretsiz: BIST 50 hisselerinin son 20 haberi
         query = (
             select(TelegramNews)
             .where(
                 and_(
                     TelegramNews.created_at >= since,
-                    TelegramNews.ticker.in_(BIST30_TICKERS),
+                    TelegramNews.ticker.in_(BIST50_TICKERS),
                 )
             )
             .order_by(desc(TelegramNews.created_at))
@@ -473,7 +473,7 @@ async def list_telegram_news(
         if sentiment:
             query = query.where(TelegramNews.sentiment == sentiment)
 
-        query = query.limit(min(limit, 10)).offset(offset)
+        query = query.limit(min(limit, 20)).offset(offset)
 
     result = await db.execute(query)
     return list(result.scalars().all())
