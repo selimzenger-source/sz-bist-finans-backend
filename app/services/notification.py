@@ -148,10 +148,39 @@ class NotificationService:
             return True
 
         except Exception as e:
-            logger.error(f"Push bildirim hatasi: {e}")
+            error_name = type(e).__name__
+            logger.error(f"Push bildirim hatasi ({error_name}): {e}")
             # Hata detayini attribute olarak sakla — test endpoint'ten okunabilir
             self._last_send_error = str(e)
+
+            # UnregisteredError → token gecersiz/stale, DB'den temizle
+            if error_name == "UnregisteredError":
+                await self._clear_stale_token(fcm_token)
+
             return False
+
+    async def _clear_stale_token(self, fcm_token: str):
+        """UnregisteredError alan FCM token'i DB'den temizler.
+
+        Token gecersiz/stale olunca Firebase hata veriyor.
+        Kullanici uygulamayi tekrar actiginda yeni token alinir.
+        """
+        try:
+            from app.models.user import User
+
+            result = await self.db.execute(
+                select(User).where(User.fcm_token == fcm_token)
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                logger.warning(
+                    f"Stale FCM token temizleniyor — user_id={user.id}, "
+                    f"device_id={user.device_id[:8]}..."
+                )
+                user.fcm_token = None
+                await self.db.flush()
+        except Exception as e:
+            logger.error(f"Stale token temizleme hatasi: {e}")
 
     async def send_to_topic(
         self,
