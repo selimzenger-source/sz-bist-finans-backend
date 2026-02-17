@@ -153,8 +153,11 @@ class NotificationService:
             # Hata detayini attribute olarak sakla — test endpoint'ten okunabilir
             self._last_send_error = str(e)
 
-            # UnregisteredError → token gecersiz/stale, DB'den temizle
-            if error_name == "UnregisteredError":
+            # Gecersiz/stale token → DB'den temizle
+            # UnregisteredError: Cihaz artik kayitli degil
+            # InvalidArgumentError: Token formati gecersiz
+            # SenderIdMismatchError: Token farkli bir Firebase projesine ait
+            if error_name in ("UnregisteredError", "InvalidArgumentError", "SenderIdMismatchError"):
                 await self._clear_stale_token(fcm_token)
 
             return False
