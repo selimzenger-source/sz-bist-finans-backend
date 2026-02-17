@@ -11,7 +11,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,35 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
             except Exception:
                 continue
     return ImageFont.load_default()
+
+
+def _draw_bg_watermark(img: Image.Image, width: int, height: int):
+    """Gorsel uzerine silik capraz 'szalgo.net.tr' watermark basar."""
+    try:
+        wm_font = _load_font(30, bold=False)
+        wm_text = "szalgo.net.tr"
+        # Seffaf katman olustur
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        wm_draw = ImageDraw.Draw(overlay)
+
+        # Kucuk font, genis aralik — silik ve profesyonel
+        spacing_x = 600
+        spacing_y = 320
+        for yy in range(-height, height * 2, spacing_y):
+            for xx in range(-width, width * 2, spacing_x):
+                wm_draw.text((xx, yy), wm_text, fill=(255, 255, 255, 10), font=wm_font)
+
+        # Katmani -30 derece dondur
+        overlay = overlay.rotate(-30, resample=Image.BICUBIC, expand=False)
+        # Ortala kirp (rotate expand=False ile ayni boyut kalir)
+
+        # Ana gorseli RGBA'ya cevir, overlay'i birlestur, sonra RGB'ye geri don
+        img_rgba = img.convert("RGBA")
+        img_rgba = Image.alpha_composite(img_rgba, overlay)
+        # Sonucu orijinal img'ye geri yaz
+        img.paste(img_rgba.convert("RGB"))
+    except Exception as e:
+        logger.warning("Watermark eklenemedi: %s", e)
 
 
 def generate_25day_image(
@@ -132,6 +161,9 @@ def generate_25day_image(
         # Banner'i uste yapistir
         if banner_img:
             img.paste(banner_img, (0, 0))
+
+        # ── ARKA PLAN WATERMARK (silik çapraz szalgo.net.tr) ──
+        _draw_bg_watermark(img, width, total_h)
 
         draw = ImageDraw.Draw(img)
 
