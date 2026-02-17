@@ -169,3 +169,87 @@ async def notify_tweet_sent(tweet_type: str, ticker: str, success: bool, detail:
         text += f"\n{detail}"
 
     await send_admin_message(text, silent=success)
+
+
+# -------------------------------------------------------
+# Push Bildirim Monitoring
+# -------------------------------------------------------
+
+async def notify_push_sent(
+    notification_type: str,
+    title: str,
+    sent_count: int,
+    failed_count: int = 0,
+    stale_tokens: int = 0,
+    detail: str = "",
+):
+    """Push bildirim gonderim sonucunu raporla.
+
+    Her toplu bildirim gonderiminde (KAP, halka arz, tavan vs.)
+    kaca gitti, kaci basarisiz, stale token sayisi.
+    """
+    if sent_count == 0 and failed_count == 0:
+        return  # Hicbir sey gonderilmediyse spam yapma
+
+    emoji = "📲" if failed_count == 0 else "⚠️"
+    text = (
+        f"{emoji} <b>Push Bildirim</b>\n"
+        f"Tip: {notification_type}\n"
+        f"Baslik: {title[:60]}\n"
+        f"Gonderilen: {sent_count}"
+    )
+    if failed_count > 0:
+        text += f"\nBasarisiz: {failed_count}"
+    if stale_tokens > 0:
+        text += f"\n🗑 Stale token temizlendi: {stale_tokens}"
+    if detail:
+        text += f"\n{detail}"
+
+    await send_admin_message(text, silent=(failed_count == 0))
+
+
+async def notify_push_error(
+    notification_type: str,
+    error: str,
+    user_id: int | None = None,
+):
+    """Push bildirim hatasi — aninda uyari."""
+    text = f"❌ <b>Push Hata</b>\n" f"Tip: {notification_type}\n" f"Hata: {error[:300]}"
+    if user_id:
+        text += f"\nUser ID: {user_id}"
+
+    await send_admin_message(text)
+
+
+async def notify_stale_token_cleaned(user_id: int, device_id: str):
+    """Stale FCM token temizlendi — bilgilendirme."""
+    await send_admin_message(
+        f"🗑 <b>Stale Token Temizlendi</b>\n"
+        f"User ID: {user_id}\n"
+        f"Device: {device_id[:12]}...",
+        silent=True,
+    )
+
+
+async def notify_push_health_report(
+    total_users: int,
+    with_fcm_token: int,
+    with_expo_token: int,
+    notifications_enabled: int,
+    stale_cleaned_today: int = 0,
+):
+    """Saatlik push bildirim saglik raporu."""
+    no_token = total_users - with_fcm_token
+    text = (
+        f"📊 <b>Push Saglik Raporu</b>\n"
+        f"━━━━━━━━━━━━━━━━\n"
+        f"Toplam kullanici: {total_users}\n"
+        f"FCM token var: {with_fcm_token} ✅\n"
+        f"Token yok: {no_token} ⚪\n"
+        f"Bildirim acik: {notifications_enabled}\n"
+        f"Expo token var: {with_expo_token}"
+    )
+    if stale_cleaned_today > 0:
+        text += f"\n🗑 Bugun temizlenen stale: {stale_cleaned_today}"
+
+    await send_admin_message(text, silent=True)

@@ -179,6 +179,13 @@ class NotificationService:
                 )
                 user.fcm_token = None
                 await self.db.flush()
+
+                # Telegram admin bildirimi
+                try:
+                    from app.services.admin_telegram import notify_stale_token_cleaned
+                    await notify_stale_token_cleaned(user.id, user.device_id)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Stale token temizleme hatasi: {e}")
 
@@ -287,22 +294,39 @@ class NotificationService:
         users = list(users_result.scalars().all())
 
         sent_count = 0
+        failed_count = 0
         for user in users:
             token = user.fcm_token or user.expo_push_token
             if token and not token.startswith("ExponentPushToken"):
-                await self.send_to_device(
+                success = await self.send_to_device(
                     fcm_token=token,
                     title=title,
                     body=body,
                     data=data,
                     channel_id=channel_id,
                 )
-                sent_count += 1
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
 
         logger.info(
-            "%s — %d kullaniciya gonderildi (filtre: %s)",
-            log_label, sent_count, preference_field,
+            "%s — %d kullaniciya gonderildi, %d basarisiz (filtre: %s)",
+            log_label, sent_count, failed_count, preference_field,
         )
+
+        # Telegram admin raporu
+        try:
+            from app.services.admin_telegram import notify_push_sent
+            await notify_push_sent(
+                notification_type=log_label,
+                title=title,
+                sent_count=sent_count,
+                failed_count=failed_count,
+            )
+        except Exception:
+            pass  # Telegram hatasi bildirim akisini bozmasin
+
         return sent_count
 
     # -------------------------------------------------------
@@ -574,25 +598,44 @@ class NotificationService:
                 all_users.append(u)
 
         sent_count = 0
+        failed_count = 0
         for user in all_users:
             token = user.fcm_token or user.expo_push_token
             if token and not token.startswith("ExponentPushToken"):
                 try:
-                    await self.send_to_device(
+                    success = await self.send_to_device(
                         fcm_token=token,
                         title=title,
                         body=body,
                         data=data,
                         channel_id="kap_news_v2",
                     )
-                    sent_count += 1
+                    if success:
+                        sent_count += 1
+                    else:
+                        failed_count += 1
                 except Exception as e:
+                    failed_count += 1
                     logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
             "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap=%d, stock_bundle=%d)",
             ticker, sent_count, len(kap_users), len(stock_users),
         )
+
+        # Telegram admin raporu
+        try:
+            from app.services.admin_telegram import notify_push_sent
+            await notify_push_sent(
+                notification_type=f"KAP Ucretli: {ticker}",
+                title=title,
+                sent_count=sent_count,
+                failed_count=failed_count,
+                detail=f"KAP abone: {len(kap_users)}, Bundle: {len(stock_users)}",
+            )
+        except Exception:
+            pass
+
         return sent_count
 
     async def _send_bist30_free(
@@ -647,23 +690,41 @@ class NotificationService:
         users = list(users_result.scalars().all())
 
         sent_count = 0
+        failed_count = 0
         for user in users:
             token = user.fcm_token or user.expo_push_token
             if token and not token.startswith("ExponentPushToken"):
                 try:
-                    await self.send_to_device(
+                    success = await self.send_to_device(
                         fcm_token=token,
                         title=title,
                         body=body,
                         data=data,
                         channel_id="kap_news_v2",
                     )
-                    sent_count += 1
+                    if success:
+                        sent_count += 1
+                    else:
+                        failed_count += 1
                 except Exception as e:
+                    failed_count += 1
                     logger.warning("BIST30 free bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
             "BIST30 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",
             ticker, sent_count,
         )
+
+        # Telegram admin raporu
+        try:
+            from app.services.admin_telegram import notify_push_sent
+            await notify_push_sent(
+                notification_type=f"KAP BIST30 Free: {ticker}",
+                title=title,
+                sent_count=sent_count,
+                failed_count=failed_count,
+            )
+        except Exception:
+            pass
+
         return sent_count

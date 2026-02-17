@@ -1016,6 +1016,69 @@ async def tweet_spk_pending_monthly_job():
         logger.error(f"SPK bekleyenler tweet hatasi: {e}")
 
 
+async def push_health_report_job():
+    """Push bildirim saglik raporu — 4 saatte bir.
+
+    Toplam kullanici, FCM token durumu, stale token sayisi.
+    Telegram admin'e gonderilir.
+    """
+    try:
+        from sqlalchemy import select, and_, func
+        from app.models.user import User
+        from app.services.admin_telegram import notify_push_health_report
+
+        async with async_session() as session:
+            # Toplam kullanici
+            total_result = await session.execute(
+                select(func.count(User.id)).where(User.deleted == False)
+            )
+            total_users = total_result.scalar() or 0
+
+            # FCM token olan
+            fcm_result = await session.execute(
+                select(func.count(User.id)).where(
+                    and_(
+                        User.deleted == False,
+                        User.fcm_token.isnot(None),
+                        User.fcm_token != "",
+                    )
+                )
+            )
+            with_fcm = fcm_result.scalar() or 0
+
+            # Expo token olan
+            expo_result = await session.execute(
+                select(func.count(User.id)).where(
+                    and_(
+                        User.deleted == False,
+                        User.expo_push_token.isnot(None),
+                        User.expo_push_token != "",
+                    )
+                )
+            )
+            with_expo = expo_result.scalar() or 0
+
+            # Bildirim acik olan
+            notif_result = await session.execute(
+                select(func.count(User.id)).where(
+                    and_(
+                        User.deleted == False,
+                        User.notifications_enabled == True,
+                    )
+                )
+            )
+            notif_enabled = notif_result.scalar() or 0
+
+            await notify_push_health_report(
+                total_users=total_users,
+                with_fcm_token=with_fcm,
+                with_expo_token=with_expo,
+                notifications_enabled=notif_enabled,
+            )
+    except Exception as e:
+        logger.error(f"Push health report hatasi: {e}")
+
+
 async def market_snapshot_tweet():
     """Ogle arasi market snapshot tweet — 14:00 TR (UTC 11:00).
 
@@ -1933,6 +1996,15 @@ def _setup_scheduler_impl():
         CronTrigger(hour=11, minute=0, day_of_week="mon-fri"),
         id="market_snapshot_tweet",
         name="Ogle Arasi Market Snapshot (14:00 TR)",
+        replace_existing=True,
+    )
+
+    # 23. Push Bildirim Saglik Raporu — 4 saatte bir
+    scheduler.add_job(
+        push_health_report_job,
+        CronTrigger(hour="3,7,11,15,19,23", minute=0),
+        id="push_health_report",
+        name="Push Saglik Raporu (4 saatte bir)",
         replace_existing=True,
     )
 
