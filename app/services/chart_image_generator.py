@@ -149,12 +149,19 @@ def generate_25day_image(
 
         # ── Boyut hesapla ──────────────────────────────
         width = 1200
-        header_h = 280       # ust bilgi alani (kisaltildi)
         row_h = 44            # her satir yuksekligi
         col_header_h = 50     # sutun baslik satiri
-        footer_h = 70         # alt — sadece szalgo.net.tr
+        footer_h = 120        # alt — toplam + tavan/taban/normal + szalgo
         padding = 40
         num_rows = len(days_data)
+
+        # Header yuksekligini icerigi hesaplayarak belirle
+        # Baslik(48) + sirket(36) + fiyat(40) + lot/toplam(~50) + bosluk(20)
+        if lot_count > 0:
+            header_h = 48 + 36 + 40 + 40 + 38 + 20  # lot + kar bilgisi
+        else:
+            header_h = 48 + 36 + 40 + 50 + 20        # sadece toplam yuzde
+
         table_h = col_header_h + (num_rows * row_h)
         total_h = banner_h + header_h + table_h + footer_h
 
@@ -298,13 +305,24 @@ def generate_25day_image(
             if durum_label:
                 draw.text((col_x[4], text_y), durum_label, fill=durum_color, font=font_row_bold)
 
-        # ── FOOTER (sadece szalgo.net.tr) ─────────────
+        # ── FOOTER ────────────────────────────────────
         footer_y = banner_h + header_h + table_h + 15
 
         draw.line([(padding, footer_y - 5), (width - padding, footer_y - 5)],
                   fill=DIVIDER, width=2)
 
-        draw.text((padding, footer_y + 10), "szalgo.net.tr", fill=ORANGE, font=font_watermark)
+        # Toplam yuzde
+        pct_color = GREEN if total_pct >= 0 else RED
+        draw.text((padding, footer_y + 5), f"Toplam: %{total_pct:+.1f}",
+                  fill=pct_color, font=font_footer)
+
+        # Tavan / Taban / Normal
+        draw.text((padding, footer_y + 38),
+                  f"Tavan: {ceiling_days}  |  Taban: {floor_days}  |  Normal: {normal_days}",
+                  fill=GRAY, font=font_footer_sm)
+
+        # szalgo.net.tr
+        draw.text((padding, footer_y + 70), "szalgo.net.tr", fill=ORANGE, font=font_watermark)
 
         # ── KAYDET ─────────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
