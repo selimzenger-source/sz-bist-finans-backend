@@ -1538,28 +1538,31 @@ async def update_ceiling_track(
 
                 if not data.hit_ceiling and not track.notified_ceiling_break:
                     await notif_service.send_to_device(
-                        token=user.fcm_token,
+                        fcm_token=user.fcm_token,
                         title=f"{data.ticker} Tavan Cozuldu!",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tavan bozuldu. Kapanis: {data.close_price} TL",
                         data={"type": "ceiling_break", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                        channel_id="ceiling_alerts_v2",
                     )
                     notifications_sent += 1
 
                 if data.hit_floor and not track.notified_floor:
                     await notif_service.send_to_device(
-                        token=user.fcm_token,
+                        fcm_token=user.fcm_token,
                         title=f"{data.ticker} Tabana Kitlendi!",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tabana kitlendi.",
                         data={"type": "floor_lock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                        channel_id="ceiling_alerts_v2",
                     )
                     notifications_sent += 1
 
                 if track.relocked and not track.notified_relock:
                     await notif_service.send_to_device(
-                        token=user.fcm_token,
+                        fcm_token=user.fcm_token,
                         title=f"{data.ticker} TAVANA KİTLEDİ",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
                         data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                        channel_id="ceiling_alerts_v2",
                     )
                     notifications_sent += 1
 
@@ -1682,7 +1685,7 @@ async def send_realtime_notification(
 
         try:
             await notif_service.send_to_device(
-                token=user.fcm_token,
+                fcm_token=user.fcm_token,
                 title=notif_title,
                 body=notif_body,
                 data={
@@ -1691,6 +1694,7 @@ async def send_realtime_notification(
                     "ticker": data.ticker,
                     "ipo_id": str(ipo.id),
                 },
+                channel_id="ceiling_alerts_v2",
             )
             notifications_sent += 1
             sub.notified_count = (sub.notified_count or 0) + 1

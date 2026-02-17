@@ -626,7 +626,7 @@ async def check_reminders():
             for ipo in last_day_ipos:
                 for user in users:
                     await notif_service.send_to_device(
-                        token=user.fcm_token,
+                        fcm_token=user.fcm_token,
                         title=f"Son Gun Hatirlatma",
                         body=f"{ipo.ticker or ipo.company_name} icin basvuru son gun! Kapanisa {time_label} kaldi.",
                         data={
@@ -634,6 +634,7 @@ async def check_reminders():
                             "ipo_id": str(ipo.id),
                             "ticker": ipo.ticker or "",
                         },
+                        channel_id="ipo_alerts_v2",
                     )
 
                 # Tweet at — Son 4 Saat veya Son 30 Dakika (her IPO icin bir kez)

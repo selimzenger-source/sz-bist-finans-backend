@@ -90,6 +90,7 @@ class NotificationService:
         body: str,
         data: Optional[dict] = None,
         delay: bool = True,
+        channel_id: str = "default_v2",
     ) -> bool:
         """Tek bir cihaza push bildirim gonderir.
 
@@ -121,7 +122,7 @@ class NotificationService:
                     priority="high",
                     notification=messaging.AndroidNotification(
                         sound="default",
-                        channel_id="kap_news_v2",
+                        channel_id=channel_id,
                         default_vibrate_timings=True,
                         notification_priority="PRIORITY_MAX",
                         visibility="PUBLIC",
@@ -227,6 +228,7 @@ class NotificationService:
         body: str,
         data: dict,
         log_label: str,
+        channel_id: str = "default_v2",
     ) -> int:
         """Belirli bildirim tercihini kontrol ederek sadece aktif kullanicilara gonderir.
 
@@ -264,6 +266,7 @@ class NotificationService:
                     title=title,
                     body=body,
                     data=data,
+                    channel_id=channel_id,
                 )
                 sent_count += 1
 
@@ -295,6 +298,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_new_ipo", title, body, data,
             f"Yeni halka arz: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
         )
 
     async def notify_ipo_subscription_start(self, ipo) -> int:
@@ -313,6 +317,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_ipo_start", title, body, data,
             f"Basvuru basladi: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
         )
 
     async def notify_ipo_last_day(self, ipo) -> int:
@@ -329,6 +334,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_ipo_last_day", title, body, data,
             f"Son gun uyarisi: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
         )
 
     async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
@@ -372,6 +378,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_ipo_result", title, body, data,
             f"Dagitim sonucu: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
         )
 
     async def notify_first_trading_day(self, ipo) -> int:
@@ -390,6 +397,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_first_trading_day", title, body, data,
             f"Ilk islem gunu: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
         )
 
     async def notify_ceiling_broken(self, ipo) -> int:
@@ -406,6 +414,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_ceiling_break", title, body, data,
             f"Tavan bozuldu: {ipo.ticker}",
+            channel_id="ceiling_alerts_v2",
         )
 
     # -------------------------------------------------------
@@ -545,6 +554,7 @@ class NotificationService:
                         title=title,
                         body=body,
                         data=data,
+                        channel_id="kap_news_v2",
                     )
                     sent_count += 1
                 except Exception as e:
@@ -617,6 +627,7 @@ class NotificationService:
                         title=title,
                         body=body,
                         data=data,
+                        channel_id="kap_news_v2",
                     )
                     sent_count += 1
                 except Exception as e:
