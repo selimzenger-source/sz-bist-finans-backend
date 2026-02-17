@@ -156,11 +156,11 @@ def generate_25day_image(
         num_rows = len(days_data)
 
         # Header yuksekligini icerigi hesaplayarak belirle
-        # Baslik(48) + sirket(36) + fiyat(40) + lot/toplam(~50) + bosluk(20)
+        # Baslik(48) + sirket(36) + fiyat(40) + lot/toplam(~50) + bosluk(30)
         if lot_count > 0:
-            header_h = 48 + 36 + 40 + 40 + 38 + 20  # lot + kar bilgisi
+            header_h = 48 + 36 + 40 + 40 + 38 + 30  # lot + kar bilgisi
         else:
-            header_h = 48 + 36 + 40 + 50 + 20        # sadece toplam yuzde
+            header_h = 48 + 36 + 40 + 50 + 30        # sadece toplam yuzde
 
         table_h = col_header_h + (num_rows * row_h)
         total_h = banner_h + header_h + table_h + footer_h
