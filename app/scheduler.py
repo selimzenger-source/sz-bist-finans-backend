@@ -1036,7 +1036,7 @@ async def market_snapshot_tweet():
                 if not ipo.ticker:
                     continue
 
-                # 25 gun dolmus IPO'lar icin snapshot atma
+                # 25 gun dolmus IPO'lar snapshot'ta olmasin (25/25 dahil)
                 if ipo.trading_day_count and ipo.trading_day_count >= 25:
                     continue
 
@@ -1053,6 +1053,10 @@ async def market_snapshot_tweet():
 
                 if not today_track:
                     # Bugun icin veri yok — ya borsa kapali ya da sync henuz calismadi
+                    continue
+
+                # Bugunun trading_day'i 25+ ise atla (25/25 = ay tamamlanmis)
+                if today_track.trading_day and today_track.trading_day >= 25:
                     continue
 
                 # Kumulatif % hesapla (HA fiyatindan)
