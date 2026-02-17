@@ -871,6 +871,13 @@ async def approve_tweet(
         if success:
             tweet.status = "sent"
             tweet.sent_at = datetime.now(timezone.utc)
+            # Basarili gonderim sonrasi temp gorsel dosyasini temizle
+            if tweet.image_path and tweet.image_path.startswith(("/tmp", "C:\\Users")):
+                try:
+                    import os
+                    os.remove(tweet.image_path)
+                except OSError:
+                    pass
         else:
             tweet.status = "failed"
             tweet.error_message = "Tweet gonderilemedi"

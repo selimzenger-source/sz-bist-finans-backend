@@ -737,10 +737,15 @@ def tweet_25_day_performance(
 
         # Dinamik gorsel varsa onu kullan, yoksa statik banner
         banner = image_path if image_path else BANNER_25_GUN_PERFORMANS
+
+        # Kuyruk modunda temp dosyayi silme — admin onayindan sonra lazim
+        from app.config import get_settings
+        auto_send = get_settings().TWITTER_AUTO_SEND
+
         result = _safe_tweet_with_media(text, banner)
 
-        # Temp dosyayi temizle
-        if image_path:
+        # Temp dosyayi temizle — sadece auto_send modunda (kuyrukta dosya lazim)
+        if image_path and auto_send:
             try:
                 os.remove(image_path)
             except OSError:
