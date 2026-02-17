@@ -515,7 +515,8 @@ class NotificationService:
             "matched_keyword": matched_keyword,
         }
 
-        from app.services.news_service import BIST50_TICKERS
+        from app.services.news_service import get_bist50_tickers_sync
+        BIST50_TICKERS = get_bist50_tickers_sync()
 
         sent = 0
         ticker_upper = ticker.upper()

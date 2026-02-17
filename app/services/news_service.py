@@ -314,20 +314,88 @@ NEGATIVE_KEYWORDS: list[str] = [
 # BIST Endeks Bileşenleri
 # ================================================================
 
-# Not: Bu listeler periyodik olarak guncellenmeli
-BIST30_TICKERS: set[str] = {
-    "AKBNK", "ARCLK", "ASELS", "BIMAS", "EKGYO", "ENKAI", "EREGL",
-    "FROTO", "GARAN", "GUBRF", "HEKTS", "ISCTR", "KCHOL", "KOZAA",
-    "KOZAL", "KRDMD", "MGROS", "ODAS", "PETKM", "PGSUS", "SAHOL",
-    "SASA", "SISE", "TAVHL", "TCELL", "THYAO", "TKFEN", "TOASO",
-    "TUPRS", "YKBNK",
+# BIST 50 — Hardcoded fallback (DB'den okunamazsa kullanilir)
+# Guncelleme: 2026-02-18 (kaynak: infoyatirim.com)
+# Otomatik guncelleme: Her ayin 1'inde bist_index_scraper calisir
+BIST50_TICKERS_FALLBACK: set[str] = {
+    "AEFES", "AKBNK", "ALARK", "ARCLK", "ASELS", "ASTOR", "BIMAS",
+    "BRSAN", "BTCIM", "CCOLA", "CIMSA", "DOAS", "DOHOL", "DSTKF",
+    "EKGYO", "ENKAI", "EREGL", "FROTO", "GARAN", "GUBRF", "HALKB",
+    "HEKTS", "ISCTR", "KCHOL", "KONTR", "KRDMD", "KUYAS", "MAVI",
+    "MGROS", "MIATK", "OYAKC", "PASEU", "PETKM", "PGSUS", "SAHOL",
+    "SASA", "SISE", "SOKM", "TAVHL", "TCELL", "THYAO", "TOASO",
+    "TRALT", "TRMET", "TSKB", "TTKOM", "TUPRS", "ULKER", "VAKBN",
+    "YKBNK",
 }
 
-BIST50_TICKERS: set[str] = BIST30_TICKERS | {
-    "AEFES", "AKFGY", "AKSA", "ALARK", "ASTOR", "CCOLA", "CIMSA",
-    "DOHOL", "EGEEN", "GESAN", "HALKB", "ISGYO", "KONTR", "MPARK",
-    "OYAKC", "SOKM", "TTKOM", "TTRAK", "ULKER", "VAKBN",
-}
+# Runtime'da DB'den okunan guncel liste (None ise fallback kullanilir)
+_bist50_cache: set[str] | None = None
+_bist50_cache_ts: float = 0  # Son guncelleme zamani
+
+
+def get_bist50_tickers_sync() -> set[str]:
+    """Senkron BIST50 listesi — cache veya fallback."""
+    if _bist50_cache is not None:
+        return _bist50_cache
+    return BIST50_TICKERS_FALLBACK
+
+
+def set_bist50_cache(tickers: set[str]):
+    """Scraper veya startup'tan cagirilir — cache'i gunceller."""
+    import time
+    global _bist50_cache, _bist50_cache_ts
+    _bist50_cache = tickers
+    _bist50_cache_ts = time.time()
+
+
+async def load_bist50_from_db(db):
+    """Startup'ta DB'den BIST50 cache'ini yukle."""
+    import json
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    result = await db.execute(
+        select(ScraperState).where(ScraperState.key == "bist50_tickers")
+    )
+    state = result.scalar_one_or_none()
+    if state and state.value:
+        try:
+            tickers = set(json.loads(state.value))
+            if len(tickers) >= 40:
+                set_bist50_cache(tickers)
+                logger.info("BIST50 DB'den yuklendi: %d hisse", len(tickers))
+                return tickers
+        except Exception as e:
+            logger.error("BIST50 DB parse hatasi: %s", e)
+    return None
+
+
+async def save_bist50_to_db(db, tickers: set[str]):
+    """BIST50 listesini DB'ye kaydet (ScraperState key-value)."""
+    import json
+    from datetime import datetime
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    result = await db.execute(
+        select(ScraperState).where(ScraperState.key == "bist50_tickers")
+    )
+    state = result.scalar_one_or_none()
+    tickers_json = json.dumps(sorted(tickers))
+
+    if state:
+        state.value = tickers_json
+        state.updated_at = datetime.utcnow()
+    else:
+        db.add(ScraperState(key="bist50_tickers", value=tickers_json))
+
+    await db.commit()
+    set_bist50_cache(tickers)
+    logger.info("BIST50 DB'ye kaydedildi: %d hisse", len(tickers))
+
+
+# Geriye uyumluluk — eski import'lar icin alias
+BIST50_TICKERS = BIST50_TICKERS_FALLBACK
 
 BIST100_TICKERS: set[str] = BIST50_TICKERS | {
     "ADEL", "AGHOL", "AHGAZ", "AKFYE", "AKSGY", "ALFAS", "ALTNY",

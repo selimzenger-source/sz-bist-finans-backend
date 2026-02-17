@@ -84,6 +84,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Veritabani init hatasi: %s", e)
 
+    # BIST50 cache'ini DB'den yukle
+    try:
+        from app.database import async_session
+        from app.services.news_service import load_bist50_from_db
+        async with async_session() as db:
+            await load_bist50_from_db(db)
+    except Exception as e:
+        logger.warning("BIST50 cache yukleme hatasi (fallback kullanilacak): %s", e)
+
     # Scheduler'i baslat
     try:
         setup_scheduler()
@@ -409,7 +418,8 @@ async def list_telegram_news(
     - Abone DEGiL: BIST 50 hisselerinin son 20 haberi (ucretsiz tanitim)
     - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 30 haberi
     """
-    from app.services.news_service import BIST50_TICKERS
+    from app.services.news_service import get_bist50_tickers_sync
+    BIST50_TICKERS = get_bist50_tickers_sync()
 
     has_paid_sub = False
     active_package = None
@@ -3071,4 +3081,38 @@ async def admin_delete_ipo(request: Request, ipo_id: int, db: AsyncSession = Dep
         "deleted_ipo_id": ipo_id,
         "ticker": ticker,
         "company_name": company,
+    }
+
+
+# -------------------------------------------------------
+# Admin: BIST 50 Endeks Yonetimi
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/bist50-update")
+@limiter.limit("5/minute")
+async def admin_bist50_update(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """BIST 50 listesini infoyatirim.com'dan manuel guncelle.
+
+    {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.scrapers.bist_index_scraper import fetch_bist50_tickers
+    from app.services.news_service import get_bist50_tickers_sync, save_bist50_to_db
+
+    new_tickers = await fetch_bist50_tickers()
+    old_tickers = get_bist50_tickers_sync()
+
+    added = new_tickers - old_tickers
+    removed = old_tickers - new_tickers
+
+    await save_bist50_to_db(db, new_tickers)
+
+    return {
+        "success": True,
+        "total": len(new_tickers),
+        "tickers": sorted(new_tickers),
+        "added": sorted(added) if added else [],
+        "removed": sorted(removed) if removed else [],
     }

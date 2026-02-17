@@ -1742,6 +1742,55 @@ async def monthly_yearly_summary_tweet():
         logger.error("Ay sonu rapor tweet hatasi: %s", e)
 
 
+async def update_bist50_index_job():
+    """Her ayin 1'inde BIST 50 listesini infoyatirim.com'dan guncelle.
+
+    Mevcut liste ile karsilastirir, degisiklik varsa DB'ye kaydeder
+    ve admin Telegram'a bildirim gonderir.
+    """
+    try:
+        from app.scrapers.bist_index_scraper import fetch_bist50_tickers
+        from app.services.news_service import (
+            get_bist50_tickers_sync, save_bist50_to_db, set_bist50_cache,
+        )
+        from app.services.admin_telegram import send_admin_message
+
+        new_tickers = await fetch_bist50_tickers()
+        old_tickers = get_bist50_tickers_sync()
+
+        added = new_tickers - old_tickers
+        removed = old_tickers - new_tickers
+
+        if added or removed:
+            async with async_session() as db:
+                await save_bist50_to_db(db, new_tickers)
+
+            # Admin Telegram bildirimi
+            parts = [f"📊 <b>BIST 50 Guncellendi</b> ({len(new_tickers)} hisse)"]
+            if added:
+                parts.append(f"\n✅ Eklenen: {', '.join(sorted(added))}")
+            if removed:
+                parts.append(f"\n❌ Çıkan: {', '.join(sorted(removed))}")
+            await send_admin_message("\n".join(parts))
+            logger.info(
+                "BIST50 guncellendi: +%d -%d (toplam %d)",
+                len(added), len(removed), len(new_tickers),
+            )
+        else:
+            logger.info("BIST50 degisiklik yok (%d hisse)", len(new_tickers))
+            await send_admin_message(
+                f"📊 BIST 50 kontrol edildi — değişiklik yok ({len(new_tickers)} hisse)"
+            )
+
+    except Exception as e:
+        logger.error("BIST50 guncelleme hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("bist50_index_update", str(e))
+        except Exception:
+            pass
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -2026,6 +2075,15 @@ def _setup_scheduler_impl():
         CronTrigger(hour="3,7,11,15,19,23", minute=0),
         id="push_health_report",
         name="Push Saglik Raporu (4 saatte bir)",
+        replace_existing=True,
+    )
+
+    # 24. BIST 50 Endeks Guncelleme — her ayin 1'i 09:00 TR (UTC 06:00)
+    scheduler.add_job(
+        update_bist50_index_job,
+        CronTrigger(day=1, hour=6, minute=0),
+        id="bist50_index_update",
+        name="BIST 50 Endeks Guncelleme (Ayin 1'i 09:00 TR)",
         replace_existing=True,
     )
 

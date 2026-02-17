@@ -439,10 +439,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # ----------------------------------------------------------------
             try:
                 # BIST 50 kontrolu icin import — lazy import (dongu icinde ama performans sorunu olmaz)
-                from app.services.news_service import BIST50_TICKERS
+                from app.services.news_service import get_bist50_tickers_sync
                 from app.services.twitter_service import tweet_bist30_news
 
-                if ticker and ticker.upper() in BIST50_TICKERS:
+                if ticker and ticker.upper() in get_bist50_tickers_sync():
                     # Tweet metni icin keyword temizligi
                     tweet_kw = matched_kw
                     if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
