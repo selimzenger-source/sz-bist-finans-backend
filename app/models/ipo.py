@@ -237,3 +237,20 @@ class IPOCeilingTrack(Base):
     __table_args__ = (
         Index("idx_ceiling_ipo_day", "ipo_id", "trading_day", unique=True),
     )
+
+
+class DeletedIPO(Base):
+    """Silinen IPO kara listesi — scraper ayni sirketi tekrar eklemesin.
+
+    Admin panelden IPO silindiginde sirket adi buraya kaydedilir.
+    create_or_update_ipo() yeni IPO olusturmadan once bu tabloyu kontrol eder.
+    """
+
+    __tablename__ = "deleted_ipos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_name: Mapped[str] = mapped_column(Text, nullable=False, comment="Silinen sirket adi")
+    ticker: Mapped[str | None] = mapped_column(String(10), comment="Silinen hisse kodu")
+    deleted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), comment="Silinme zamani"
+    )

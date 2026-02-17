@@ -5,6 +5,7 @@ veritabanina kaydeder ve gunceller.
 """
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -12,9 +13,22 @@ from typing import Optional
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.ipo import IPO, IPOBroker, IPOAllocation, IPOCeilingTrack
+from app.models.ipo import IPO, IPOBroker, IPOAllocation, IPOCeilingTrack, DeletedIPO
 
 logger = logging.getLogger(__name__)
+
+# Kara liste — silinen IPO ilk 2 kelime karsilastirmasi
+_SKIP_WORDS = {"a.ş.", "a.s.", "aş", "san.", "tic.", "ve", "ltd.", "şti.", "sti."}
+
+
+def _first_two_words_match(name1: str, name2: str) -> bool:
+    """Iki sirket adinin ilk 2 anlamli kelimesi eslesiyor mu?"""
+    def _get_words(n: str) -> list[str]:
+        words = re.sub(r"\s+", " ", n.strip()).lower().split()
+        return [w for w in words if w not in _SKIP_WORDS][:2]
+    w1 = _get_words(name1 or "")
+    w2 = _get_words(name2 or "")
+    return len(w1) >= 2 and len(w2) >= 2 and w1 == w2
 
 
 class IPOService:
@@ -208,6 +222,19 @@ class IPOService:
                     f"{data.get('ticker') or data.get('company_name')}"
                 )
                 return None
+
+            # Kara liste kontrolu — admin tarafindan silinen sirketleri tekrar ekleme
+            incoming_name = data.get("company_name", "")
+            if incoming_name:
+                deleted_result = await self.db.execute(select(DeletedIPO))
+                for del_row in deleted_result.scalars().all():
+                    if _first_two_words_match(incoming_name, del_row.company_name):
+                        logger.info(
+                            "IPO kara listede, eklenmedi: '%s' ≈ '%s' (silindi: %s)",
+                            incoming_name, del_row.company_name,
+                            del_row.deleted_at.strftime("%Y-%m-%d") if del_row.deleted_at else "?",
+                        )
+                        return None
 
             # Yeni olustur — sadece SPK bulten veya admin kaynaklarından
             ipo = IPO(**{k: v for k, v in data.items() if hasattr(IPO, k) and v is not None})

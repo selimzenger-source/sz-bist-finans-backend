@@ -490,7 +490,15 @@ async def delete_ipo(
     if not ipo:
         return RedirectResponse(url="/admin/?error=not_found", status_code=303)
 
-    logger.info(f"Admin: IPO siliniyor — {ipo.company_name} (ID: {ipo.id})")
+    # Kara listeye ekle — scraper ayni sirketi tekrar eklemesin
+    from app.models import DeletedIPO
+    deleted_record = DeletedIPO(
+        company_name=ipo.company_name,
+        ticker=ipo.ticker,
+    )
+    db.add(deleted_record)
+
+    logger.info(f"Admin: IPO siliniyor — {ipo.company_name} (ID: {ipo.id}) → kara listeye eklendi")
     await db.delete(ipo)
     await db.flush()
 

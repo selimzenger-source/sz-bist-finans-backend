@@ -1,4 +1,4 @@
-from app.models.ipo import IPO, IPOBroker, IPOAllocation, IPOCeilingTrack
+from app.models.ipo import IPO, IPOBroker, IPOAllocation, IPOCeilingTrack, DeletedIPO
 from app.models.spk_application import SPKApplication
 from app.models.news import KapNews
 from app.models.user import (
@@ -16,7 +16,7 @@ from app.models.scraper_state import ScraperState
 from app.models.pending_tweet import PendingTweet
 
 __all__ = [
-    "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack",
+    "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
     "SPKApplication",
     "KapNews",
     "User", "UserSubscription", "UserIPOAlert",
