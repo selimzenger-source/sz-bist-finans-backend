@@ -126,7 +126,7 @@ def generate_25day_image(
 
         # ── HEADER ─────────────────────────────────────
         # Baslik
-        title = f"#{ticker} — 25 Günü Bitirdi"
+        title = f"{ticker} — 25 Günü Bitirdi"
         draw.text((padding, y), title, fill=WHITE, font=font_title)
         y += 52
 
