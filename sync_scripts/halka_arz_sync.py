@@ -173,6 +173,7 @@ class StockState:
     satis_lot: int = 0                 # 1. kademe satis lotu (L sutunu)
     is_ceiling_locked: bool = False     # Tavana kilitli mi?
     is_floor_locked: bool = False       # Tabana kilitli mi?
+    tarih: Optional[dt.date] = None    # Excel I sutunu — verinin tarihi
 
 
 @dataclass
@@ -291,6 +292,33 @@ def read_excel_data() -> list[StockState]:
             # J: G.EN YUKSEK (gun ici en yuksek fiyat)
             gun_en_yuksek = safe_float(sheet.Range(f"{GUN_EN_YUKSEK_SUTUN}{satir}").Value)
 
+            # I: TARIH (verinin tarihi — borsa kapali gunu kontrol icin)
+            tarih_val = sheet.Range(f"{TARIH_SUTUN}{satir}").Value
+            tarih_date = None
+            if tarih_val is not None:
+                try:
+                    if isinstance(tarih_val, dt.datetime):
+                        tarih_date = tarih_val.date()
+                    elif hasattr(tarih_val, 'date'):
+                        # pywintypes.datetime — .date() metodu var
+                        tarih_date = tarih_val.date()
+                    elif isinstance(tarih_val, (int, float)):
+                        # Excel serial date number
+                        import math
+                        tarih_date = dt.datetime(1899, 12, 30) + dt.timedelta(days=int(tarih_val))
+                        tarih_date = tarih_date.date()
+                    elif isinstance(tarih_val, str):
+                        # String olarak gelirse parse et
+                        tarih_val = tarih_val.strip()
+                        for fmt in ("%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                            try:
+                                tarih_date = dt.datetime.strptime(tarih_val.split('.')[0], fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                except Exception:
+                    pass
+
             # K: ALIS LOT, L: SATIS LOT (1. kademe lot verileri)
             alis_lot = int(safe_float(sheet.Range(f"{ALIS_LOT_SUTUN}{satir}").Value))
             satis_lot = int(safe_float(sheet.Range(f"{SATIS_LOT_SUTUN}{satir}").Value))
@@ -316,6 +344,7 @@ def read_excel_data() -> list[StockState]:
                 satis_lot=satis_lot,
                 is_ceiling_locked=is_ceiling_locked,
                 is_floor_locked=is_floor_locked,
+                tarih=tarih_date,
             )
             stocks.append(stock)
             satir += 1
@@ -969,6 +998,17 @@ def run():
 
             if not stocks:
                 print(f"\r  [{now.strftime('%H:%M:%S')}] Excel'den veri okunamadi", end="", flush=True)
+                time.sleep(SYNC_INTERVAL)
+                continue
+
+            # TARIH kontrolu — Excel'deki tarih bugune esit degilse borsa kapali (tatil/cumartesi)
+            bugun = dt.date.today()
+            excel_tarih = stocks[0].tarih if stocks else None
+            if excel_tarih and excel_tarih != bugun:
+                if tick_count % 20 == 0:  # 5 dakikada bir logla (20 tick * 15sn)
+                    log(f"TARIH UYUMSUZLUGU: Excel={excel_tarih}, Bugun={bugun} — borsa kapali, veri gonderilmiyor")
+                print(f"\r  [{now.strftime('%H:%M:%S')}] Borsa kapali (Excel tarih: {excel_tarih})", end="", flush=True)
+                tick_count += 1
                 time.sleep(SYNC_INTERVAL)
                 continue
 
