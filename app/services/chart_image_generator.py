@@ -378,7 +378,7 @@ def generate_daily_tracking_image(
 
         # ── Boyut hesapla ────────────────────────────────
         width = 1200
-        header_h = 200       # lot/kar yok, daha kisa header
+        header_h = 230       # lot/kar yok, biraz bosluk
         row_h = 44
         col_header_h = 50
         footer_h = 70
