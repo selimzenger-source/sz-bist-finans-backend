@@ -118,7 +118,7 @@ def generate_25day_image(
 
         # ── Boyut hesapla ──────────────────────────────
         width = 1200
-        header_h = 280       # ust bilgi alani
+        header_h = 320       # ust bilgi alani (sirket adi dahil)
         row_h = 44            # her satir yuksekligi
         col_header_h = 50     # sutun baslik satiri
         footer_h = 180        # alt ozet alani
@@ -152,7 +152,13 @@ def generate_25day_image(
         # Baslik
         title = f"{ticker} — 25 Günü Bitirdi"
         draw.text((padding, y), title, fill=WHITE, font=font_title)
-        y += 52
+        y += 48
+
+        # Sirket adi
+        company = ipo.company_name or ""
+        if company and company != ticker:
+            draw.text((padding, y), company, fill=GRAY, font=font_subtitle)
+            y += 36
 
         # Halka arz fiyati
         draw.text((padding, y), f"Halka Arz Fiyatı: {ipo_price:.2f} TL",
