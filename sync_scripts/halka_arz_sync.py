@@ -456,6 +456,27 @@ def send_notification_to_backend(
         log(f"  {ticker} [{notif_type}]: Baglanti hatasi: {e}")
 
 
+def fetch_trading_days_from_api() -> dict[str, int]:
+    """Backend'den tum trading IPO'larin trading_day_count degerlerini cek.
+
+    trading_day_count gun sonu (18:20) guncellenir, gun icinde
+    bugunun islemi henuz sayilmaz. O yuzden +1 ekliyoruz.
+    """
+    try:
+        resp = requests.get(f"{API_BASE_URL}/api/v1/ipos", timeout=15)
+        if resp.status_code == 200:
+            data = resp.json()
+            result = {}
+            for ipo in data:
+                if ipo.get("status") == "trading" and ipo.get("ticker"):
+                    count = ipo.get("trading_day_count") or 0
+                    result[ipo["ticker"]] = count + 1  # +1 = bugunun islemi
+            return result
+    except Exception as e:
+        log(f"API trading_day cekme hatasi: {e}")
+    return {}
+
+
 def send_ceiling_data_to_backend(stock: StockState, hit_ceiling: bool, hit_floor: bool, state: TrackingState):
     """Backend /api/v1/ceiling-track endpoint'ine tavan/taban verisini gonder."""
     try:
@@ -471,6 +492,7 @@ def send_ceiling_data_to_backend(stock: StockState, hit_ceiling: bool, hit_floor
             "hit_floor": hit_floor,
             "alis_lot": stock.alis_lot,
             "satis_lot": stock.satis_lot,
+            "pct_change": stock.gun_fark,  # Excel'den direkt gunluk % degisim
         }
         if state.day_open_price > 0:
             payload["open_price"] = state.day_open_price
@@ -900,6 +922,18 @@ def run():
 
     log("SYSTEM: Halka Arz Sync baslatildi")
 
+    # Script baslangicinda trading_day degerlerini API'den cek
+    trading_days = fetch_trading_days_from_api()
+    if trading_days:
+        log(f"API'den {len(trading_days)} hisse icin trading_day cekildi:")
+        for ticker, day in sorted(trading_days.items()):
+            if ticker not in tracking_states:
+                tracking_states[ticker] = TrackingState(ticker=ticker)
+            tracking_states[ticker].trading_day = day
+            log(f"  {ticker}: trading_day = {day}")
+    else:
+        log("UYARI: API'den trading_day cekilemedi — varsayilan 1 kullanilacak")
+
     tick_count = 0
 
     while True:
@@ -953,6 +987,19 @@ def run():
                 process_stock(stock, now)
 
             tick_count += 1
+
+            # Her 4 tick'te bir (60 saniyede bir) tum hisselerin ceiling data'sini gonder
+            if tick_count % 4 == 0:
+                for stock in stocks:
+                    if stock.son_fiyat <= 0:
+                        continue
+                    ticker = stock.ticker
+                    if ticker not in tracking_states:
+                        tracking_states[ticker] = TrackingState(ticker=ticker)
+                    state = tracking_states[ticker]
+                    send_ceiling_data_to_backend(
+                        stock, stock.is_ceiling_locked, stock.is_floor_locked, state
+                    )
 
             # Her 4 tick'te bir (60 saniyede bir) tablo goster
             if tick_count % 4 == 0:

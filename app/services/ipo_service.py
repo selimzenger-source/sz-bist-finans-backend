@@ -369,6 +369,7 @@ class IPOService:
         hit_floor: bool = False,
         alis_lot: Optional[int] = None,
         satis_lot: Optional[int] = None,
+        pct_change: Optional[float] = None,
     ) -> IPOCeilingTrack:
         """Tavan/taban takip bilgisini gunceller veya olusturur.
 
@@ -470,6 +471,9 @@ class IPOService:
             daily_pct = ((close_price - ipo_price) / ipo_price) * 100
 
         # pct_change = gunluk degisim (eski: kumulatif)
+        # Hesaplanan deger yoksa Excel'den gelen gun_fark degerini kullan
+        if daily_pct is None and pct_change is not None:
+            daily_pct = pct_change
         track.pct_change = daily_pct
 
         # v3: 5 durum — gunluk degisime gore

@@ -378,6 +378,7 @@ class CeilingTrackUpdate(BaseModel):
     hit_floor: bool = False
     alis_lot: Optional[int] = None    # 1. kademe alis lotu
     satis_lot: Optional[int] = None   # 1. kademe satis lotu
+    pct_change: Optional[float] = None  # Excel'den direkt gunluk % degisim
 
 
 # -------------------------------------------------------

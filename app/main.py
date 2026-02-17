@@ -1482,6 +1482,7 @@ async def update_ceiling_track(
         hit_floor=data.hit_floor,
         alis_lot=data.alis_lot,
         satis_lot=data.satis_lot,
+        pct_change=data.pct_change,
     )
 
     # Eski + yeni bildirim abonelerini topla
