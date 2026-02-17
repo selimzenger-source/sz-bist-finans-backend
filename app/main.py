@@ -1460,6 +1460,7 @@ async def update_ceiling_track(
     db: AsyncSession = Depends(get_db),
 ):
     """Matriks Excel pipeline'indan gelen tavan/taban bilgisini kaydeder."""
+    import traceback
     from app.services.ipo_service import IPOService
     from app.services.notification import NotificationService
 
@@ -1470,101 +1471,122 @@ async def update_ceiling_track(
     if not ipo:
         raise HTTPException(status_code=404, detail=f"IPO bulunamadi: {data.ticker}")
 
-    track = await ipo_service.update_ceiling_track(
-        ipo_id=ipo.id,
-        trading_day=data.trading_day,
-        trade_date=data.trade_date,
-        open_price=data.open_price,
-        close_price=data.close_price,
-        high_price=data.high_price,
-        low_price=data.low_price,
-        hit_ceiling=data.hit_ceiling,
-        hit_floor=data.hit_floor,
-        alis_lot=data.alis_lot,
-        satis_lot=data.satis_lot,
-        pct_change=data.pct_change,
-    )
-
-    # Eski + yeni bildirim abonelerini topla
-    subs_result = await db.execute(
-        select(CeilingTrackSubscription).where(
-            and_(
-                CeilingTrackSubscription.ipo_id == ipo.id,
-                CeilingTrackSubscription.is_active == True,
-                CeilingTrackSubscription.tracking_days >= data.trading_day,
-            )
+    try:
+        track = await ipo_service.update_ceiling_track(
+            ipo_id=ipo.id,
+            trading_day=data.trading_day,
+            trade_date=data.trade_date,
+            open_price=data.open_price,
+            close_price=data.close_price,
+            high_price=data.high_price,
+            low_price=data.low_price,
+            hit_ceiling=data.hit_ceiling,
+            hit_floor=data.hit_floor,
+            alis_lot=data.alis_lot,
+            satis_lot=data.satis_lot,
+            pct_change=data.pct_change,
         )
-    )
-    active_subs = list(subs_result.scalars().all())
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"ceiling-track update_ceiling_track HATASI ({data.ticker}): {e}\n{tb}")
+        return {"status": "error", "phase": "update_ceiling_track", "detail": str(e), "traceback": tb}
 
-    stock_notif_result = await db.execute(
-        select(StockNotificationSubscription).where(
-            and_(
-                or_(
-                    and_(
-                        StockNotificationSubscription.ipo_id == ipo.id,
-                        StockNotificationSubscription.notification_type.in_(["tavan_bozulma", "taban_acilma"]),
-                    ),
-                    StockNotificationSubscription.is_annual_bundle == True,
-                ),
-                StockNotificationSubscription.is_active == True,
-            )
-        )
-    )
-    stock_notif_subs = list(stock_notif_result.scalars().all())
-
+    # --- Bildirim gonderme (hata olursa veri kaybini onle) ---
     notifications_sent = 0
-    all_subscribers = active_subs + stock_notif_subs
-
-    for sub in all_subscribers:
-        user_result = await db.execute(
-            select(User).where(User.id == sub.user_id)
+    try:
+        # Eski + yeni bildirim abonelerini topla
+        subs_result = await db.execute(
+            select(CeilingTrackSubscription).where(
+                and_(
+                    CeilingTrackSubscription.ipo_id == ipo.id,
+                    CeilingTrackSubscription.is_active == True,
+                    CeilingTrackSubscription.tracking_days >= data.trading_day,
+                )
+            )
         )
-        user = user_result.scalar_one_or_none()
-        if not user or not user.fcm_token:
-            continue
-        # Master switch kontrolu
-        if not user.notifications_enabled:
-            continue
+        active_subs = list(subs_result.scalars().all())
 
-        if not data.hit_ceiling and not track.notified_ceiling_break:
-            await notif_service.send_to_device(
-                token=user.fcm_token,
-                title=f"{data.ticker} Tavan Cozuldu!",
-                body=f"{data.ticker} {data.trading_day}. islem gunu tavan bozuldu. Kapanis: {data.close_price} TL",
-                data={"type": "ceiling_break", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+        stock_notif_result = await db.execute(
+            select(StockNotificationSubscription).where(
+                and_(
+                    or_(
+                        and_(
+                            StockNotificationSubscription.ipo_id == ipo.id,
+                            StockNotificationSubscription.notification_type.in_(["tavan_bozulma", "taban_acilma"]),
+                        ),
+                        StockNotificationSubscription.is_annual_bundle == True,
+                    ),
+                    StockNotificationSubscription.is_active == True,
+                )
             )
-            notifications_sent += 1
+        )
+        stock_notif_subs = list(stock_notif_result.scalars().all())
 
-        if data.hit_floor and not track.notified_floor:
-            await notif_service.send_to_device(
-                token=user.fcm_token,
-                title=f"{data.ticker} Tabana Kitlendi!",
-                body=f"{data.ticker} {data.trading_day}. islem gunu tabana kitlendi.",
-                data={"type": "floor_lock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
-            )
-            notifications_sent += 1
+        all_subscribers = active_subs + stock_notif_subs
 
-        if track.relocked and not track.notified_relock:
-            await notif_service.send_to_device(
-                token=user.fcm_token,
-                title=f"{data.ticker} TAVANA KİTLEDİ",
-                body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
-                data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
-            )
-            notifications_sent += 1
+        for sub in all_subscribers:
+            try:
+                user_result = await db.execute(
+                    select(User).where(User.id == sub.user_id)
+                )
+                user = user_result.scalar_one_or_none()
+                if not user or not user.fcm_token:
+                    continue
+                # Master switch kontrolu
+                if not user.notifications_enabled:
+                    continue
 
-        if hasattr(sub, 'notified_count'):
-            sub.notified_count += 1
+                if not data.hit_ceiling and not track.notified_ceiling_break:
+                    await notif_service.send_to_device(
+                        token=user.fcm_token,
+                        title=f"{data.ticker} Tavan Cozuldu!",
+                        body=f"{data.ticker} {data.trading_day}. islem gunu tavan bozuldu. Kapanis: {data.close_price} TL",
+                        data={"type": "ceiling_break", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                    )
+                    notifications_sent += 1
 
-    if not data.hit_ceiling:
-        track.notified_ceiling_break = True
-    if data.hit_floor:
-        track.notified_floor = True
-    if track.relocked:
-        track.notified_relock = True
+                if data.hit_floor and not track.notified_floor:
+                    await notif_service.send_to_device(
+                        token=user.fcm_token,
+                        title=f"{data.ticker} Tabana Kitlendi!",
+                        body=f"{data.ticker} {data.trading_day}. islem gunu tabana kitlendi.",
+                        data={"type": "floor_lock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                    )
+                    notifications_sent += 1
 
-    await db.flush()
+                if track.relocked and not track.notified_relock:
+                    await notif_service.send_to_device(
+                        token=user.fcm_token,
+                        title=f"{data.ticker} TAVANA KİTLEDİ",
+                        body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
+                        data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
+                    )
+                    notifications_sent += 1
+
+                if hasattr(sub, 'notified_count'):
+                    sub.notified_count += 1
+            except Exception as sub_err:
+                logger.error(f"Ceiling-track bildirim gonderi hatasi (sub={getattr(sub, 'id', '?')}): {sub_err}")
+
+        if not data.hit_ceiling:
+            track.notified_ceiling_break = True
+        if data.hit_floor:
+            track.notified_floor = True
+        if track.relocked:
+            track.notified_relock = True
+
+    except Exception as notif_err:
+        tb = traceback.format_exc()
+        logger.error(f"Ceiling-track bildirim blogu hatasi ({data.ticker}): {notif_err}\n{tb}")
+        # Bildirim hatasi veri kaydini engellememeli — devam et
+
+    try:
+        await db.flush()
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"ceiling-track flush HATASI ({data.ticker}): {e}\n{tb}")
+        return {"status": "error", "phase": "flush", "detail": str(e), "traceback": tb}
+
     return {
         "status": "ok",
         "ticker": data.ticker,

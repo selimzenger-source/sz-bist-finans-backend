@@ -1815,12 +1815,12 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 13. Tavan Takip Gun Sonu — TEST: 18:45 TR (UTC 15:45) — sonra 18:07'ye al
+    # 13. Tavan Takip Gun Sonu — 18:07 TR (UTC 15:07) Pzt-Cuma
     scheduler.add_job(
         daily_ceiling_update,
-        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"),
+        CronTrigger(hour=15, minute=7, day_of_week="mon-fri"),
         id="daily_ceiling_update",
-        name="Tavan Takip Gun Sonu (18:45 TEST)",
+        name="Tavan Takip Gun Sonu (18:07 TR)",
         replace_existing=True,
     )
 
