@@ -2698,7 +2698,7 @@ async def admin_list_users(request: Request, payload: dict, db: AsyncSession = D
     return [
         {
             "id": u.id,
-            "device_id": u.device_id[:8] + "...",
+            "device_id": u.device_id,
             "platform": u.platform,
             "fcm_token": u.fcm_token[:30] + "..." if u.fcm_token and len(u.fcm_token) > 30 else u.fcm_token,
             "expo_push_token": getattr(u, "expo_push_token", None),
