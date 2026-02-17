@@ -1783,11 +1783,106 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
+    # ── BIR KERELIK TEST: MEYSU 25 gun karne gorselli tweet (5 dk sonra) ──
+    from datetime import timedelta as _td
+    scheduler.add_job(
+        _test_25day_image_tweet,
+        "date",
+        run_date=datetime.now(timezone.utc) + _td(minutes=5),
+        id="test_25day_image_once",
+        name="TEST: MEYSU 25 gun karne gorselli tweet (1 kerelik)",
+        replace_existing=True,
+    )
+    logger.info("TEST JOB eklendi — 5 dk sonra MEYSU 25 gun karne tweeti atilacak")
+    # ── TEST SONU — deploy sonrasi bu blogu sil ──
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
         len(scheduler.get_jobs()),
     )
+
+
+async def _test_25day_image_tweet():
+    """BIR KERELIK TEST: MEYSU 25 gun karne gorselli tweet.
+
+    Deploy sonrasi sil!
+    """
+    logger.info("TEST: MEYSU 25 gun karne gorselli tweet basliyor...")
+    try:
+        from sqlalchemy import select
+        from app.models.ipo import IPO, IPOCeilingTrack
+        from app.services.twitter_service import tweet_25_day_performance
+
+        async with async_session() as db:
+            # MEYSU'yu bul
+            result = await db.execute(
+                select(IPO).where(IPO.ticker == "MEYSU")
+            )
+            ipo = result.scalar_one_or_none()
+            if not ipo:
+                logger.error("TEST: MEYSU bulunamadi!")
+                return
+
+            # Ceiling track verilerini oku
+            track_result = await db.execute(
+                select(IPOCeilingTrack)
+                .where(IPOCeilingTrack.ipo_id == ipo.id)
+                .order_by(IPOCeilingTrack.trading_day.asc())
+                .limit(25)
+            )
+            tracks = track_result.scalars().all()
+
+            if not tracks:
+                logger.error("TEST: MEYSU ceiling track verisi yok!")
+                return
+
+            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+            days_data = []
+            for t in tracks:
+                days_data.append({
+                    "trading_day": t.trading_day,
+                    "date": t.trade_date,
+                    "open": t.open_price or t.close_price,
+                    "high": t.high_price or t.close_price,
+                    "low": t.low_price or t.close_price,
+                    "close": t.close_price,
+                    "volume": 0,
+                })
+
+            if days_data and ipo_price > 0:
+                last_close = float(days_data[-1]["close"])
+                total_pct = ((last_close - ipo_price) / ipo_price) * 100
+                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+                floor_d = sum(1 for t in tracks if t.hit_floor)
+                avg_lot = (
+                    float(ipo.estimated_lots_per_person)
+                    if ipo.estimated_lots_per_person else None
+                )
+
+                tweet_ok = tweet_25_day_performance(
+                    ipo, last_close, total_pct,
+                    ceiling_d, floor_d, avg_lot,
+                    days_data=days_data,
+                )
+                logger.info("TEST: MEYSU 25 gun karne tweeti sonuc: %s", tweet_ok)
+
+                # Admin Telegram bildirim
+                try:
+                    from app.services.admin_telegram import notify_tweet_sent
+                    await notify_tweet_sent(
+                        "TEST_25_gun_karne_gorsel",
+                        ipo.ticker,
+                        tweet_ok,
+                        f"TEST — Toplam: %{total_pct:+.1f} | Tavan: {ceiling_d} | Taban: {floor_d}",
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.error("TEST: MEYSU days_data bos veya ipo_price=0")
+
+    except Exception as e:
+        logger.error("TEST: MEYSU 25 gun karne hatasi: %s", e, exc_info=True)
 
 
 def shutdown_scheduler():

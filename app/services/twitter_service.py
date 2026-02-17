@@ -694,17 +694,11 @@ def tweet_25_day_performance(
     avg_lot: Optional[float] = None,
     days_data: list = None,
 ) -> bool:
-    """25 islem gunu tamamlandiginda kumulatif tablo + performans ozeti tweeti."""
+    """25 islem gunu tamamlandiginda dinamik tablo gorseli + kisa metin tweeti."""
     try:
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-
-        # Performans emoji
-        if total_pct >= 50:
-            perf_emoji = "\U0001F525"  # ates
-        elif total_pct >= 0:
-            perf_emoji = "\U0001F7E2"
-        else:
-            perf_emoji = "\U0001F534"
+        ticker = ipo.ticker or ipo.company_name
+        normal_days = 25 - ceiling_days - floor_days
 
         # Lot kazanc hesabi
         lot_text = ""
@@ -713,51 +707,47 @@ def tweet_25_day_performance(
             profit_per_lot = (close_price_25 - ipo_price) * 100  # 1 lot = 100 hisse
             total_profit = profit_per_lot * lot_count
             if total_profit >= 0:
-                lot_text = f"\n{lot_count} lot kazanç: +{total_profit:,.0f} TL"
+                lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})"
             else:
-                lot_text = f"\n{lot_count} lot zarar: {total_profit:,.0f} TL"
+                lot_text = f"\nOrt Lotla Karne: {total_profit:,.0f} TL (%{total_pct:+.1f})"
 
-        # Kumulatif performans tablosu
-        table_lines = []
+        # Dinamik gorsel olustur (days_data varsa)
+        image_path = None
         if days_data and ipo_price > 0:
-            for d in days_data:
-                day_num = d["trading_day"]
-                day_close = float(d["close"])
-                cum_pct = ((day_close - ipo_price) / ipo_price) * 100
-                emoji = "\U0001F7E2" if cum_pct >= 0 else "\U0001F534"
-                table_lines.append(f"{day_num}. {emoji} %{cum_pct:+.1f}")
+            try:
+                from app.services.chart_image_generator import generate_25day_image
+                image_path = generate_25day_image(
+                    ipo, days_data, ceiling_days, floor_days, avg_lot,
+                )
+            except Exception as img_err:
+                logger.warning("25 gun gorsel olusturulamadi, statik banner kullanilacak: %s", img_err)
 
-        if table_lines:
-            header = (
-                f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gün Performans\n\n"
-                f"Kümülatif Toplam:\n"
-            )
-            footer = (
-                f"\n\n{perf_emoji} Toplam: %{total_pct:+.2f} | "
-                f"Tavan: {ceiling_days} | Taban: {floor_days}"
-                f"{lot_text}\n\n"
-                f"\U0001F4F2 {APP_LINK}\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
+        # Kisa tweet metni (gorsel detayi veriyor)
+        text = (
+            f"\U0001F4CB #{ticker} \u2014 25 G\u00fcn\u00fc Bitirdi\n\n"
+            f"Halka Arz: {ipo_price:.2f} TL"
+        )
+        if avg_lot:
+            text += f"\nKi\u015fi Ba\u015f\u0131 Ort Lot: {int(avg_lot)}"
+        text += lot_text
+        text += (
+            f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal: {normal_days}\n\n"
+            f"\U0001F4F2 {APP_LINK}\n"
+            f"#HalkaArz #BIST #{ticker}"
+        )
 
-            # Premium hesap — 4000 karakter limiti, tam tablo sigdiriyoruz
-            table_text = "\n".join(table_lines)
-            text = header + table_text + footer
+        # Dinamik gorsel varsa onu kullan, yoksa statik banner
+        banner = image_path if image_path else BANNER_25_GUN_PERFORMANS
+        result = _safe_tweet_with_media(text, banner)
 
-        else:
-            # days_data yoksa eski ozet formati
-            text = (
-                f"{perf_emoji} #{ipo.ticker or ipo.company_name} \u2014 25 Gün Performans\n\n"
-                f"\u2022 Halka arz: {ipo_price:.2f} TL\n"
-                f"\u2022 25. gun: {close_price_25:.2f} TL\n"
-                f"\u2022 Toplam: %{total_pct:+.2f}\n"
-                f"\u2022 Tavan: {ceiling_days} | Taban: {floor_days}"
-                f"{lot_text}\n\n"
-                f"\U0001F4F2 {APP_LINK}\n"
-                f"#HalkaArz #{ipo.ticker or 'Borsa'}"
-            )
+        # Temp dosyayi temizle
+        if image_path:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
 
-        return _safe_tweet_with_media(text, BANNER_25_GUN_PERFORMANS)
+        return result
     except Exception as e:
         logger.error(f"tweet_25_day_performance hatasi: {e}")
         return False
