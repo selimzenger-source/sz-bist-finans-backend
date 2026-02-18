@@ -32,6 +32,7 @@ from datetime import datetime, date
 from typing import Optional
 
 import os
+import tempfile
 import httpx
 
 import asyncio
@@ -1196,6 +1197,15 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown") 
         if not get_settings().TWITTER_AUTO_SEND:
             import inspect
             caller = inspect.stack()[1].function if source == "unknown" else source
+            # /tmp goruntusu deploy/restart ile silinir — kalici dizine kopyala
+            if image_path and os.path.exists(image_path) and image_path.startswith(tempfile.gettempdir()):
+                persist_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "tmp")
+                os.makedirs(persist_dir, exist_ok=True)
+                persist_path = os.path.join(persist_dir, os.path.basename(image_path))
+                import shutil
+                shutil.copy2(image_path, persist_path)
+                image_path = persist_path
+                logger.info("Kuyruk modu: gorsel kalici dizine kopyalandi: %s", persist_path)
             return _queue_tweet(text, image_path=image_path, source=caller)
 
         # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma

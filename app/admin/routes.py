@@ -1135,10 +1135,11 @@ async def approve_tweet(
             tweet.status = "sent"
             tweet.sent_at = datetime.now(timezone.utc)
             # Basarili gonderim sonrasi temp gorsel dosyasini temizle
-            if tweet.image_path and tweet.image_path.startswith(("/tmp", "C:\\Users")):
+            if tweet.image_path:
                 try:
                     import os
-                    os.remove(tweet.image_path)
+                    if os.path.exists(tweet.image_path):
+                        os.remove(tweet.image_path)
                 except OSError:
                     pass
         else:
