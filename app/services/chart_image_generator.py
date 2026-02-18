@@ -705,17 +705,16 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             pct_text = f"%{pct:+.2f}"
             draw.text((620, row1_y), pct_text, fill=pct_color, font=font_data_bold)
 
-            # Kumulatif % — "3 G. Toplam: ▲%+42.5" seklinde
-            cum_pct = float(stock.get("cum_pct", 0))
-            t_day = stock.get("trading_day", 0)
+            # Gunluk Fark — H sutunundan gelen pct_change
+            daily_fark = float(stock.get("pct_change", 0))
             # Label kismi duz GRAY
-            cum_label = f"{t_day} G. Toplam: "
-            draw.text((750, row1_y + 6), cum_label, fill=GRAY, font=font_lot)
-            # Yuzde kismi renkli (kucuk font, oksuz)
-            label_w = font_lot.getbbox(cum_label)[2] - font_lot.getbbox(cum_label)[0]
-            cum_color = GREEN if cum_pct >= 0 else RED
-            cum_val = f"%{cum_pct:+.1f}"
-            draw.text((750 + label_w, row1_y + 8), cum_val, fill=cum_color, font=font_cum_val)
+            fark_label = "Günlük Fark: "
+            draw.text((750, row1_y + 6), fark_label, fill=GRAY, font=font_lot)
+            # Yuzde kismi renkli
+            label_w = font_lot.getbbox(fark_label)[2] - font_lot.getbbox(fark_label)[0]
+            fark_color = GREEN if daily_fark >= 0 else RED
+            fark_val = f"%{daily_fark:+.2f}"
+            draw.text((750 + label_w, row1_y + 8), fark_val, fill=fark_color, font=font_cum_val)
 
             # Durum badge (sag kenar)
             durum = stock.get("durum", "")
@@ -760,16 +759,13 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
                 # Tavandaysa sadece alis lot goster
                 lot_text = f"Tavanda Bekleyen Alış: {_format_lot(alis_lot)}"
                 lot_color = GREEN
+                draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             elif durum == "taban":
                 # Tabandaysa sadece satis lot goster
                 lot_text = f"Tabanda Bekleyen Satış: {_format_lot(satis_lot)}"
                 lot_color = RED
-            else:
-                # Normal — her ikisini goster
-                lot_text = f"Alış Lot: {_format_lot(alis_lot)}  |  Satış Lot: {_format_lot(satis_lot)}"
-                lot_color = GRAY
-
-            draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
+                draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
+            # Normal durum — lot bilgisi gosterilmez
 
             # Halka Arz fiyati (sag alt)
             ipo_price = stock.get("ipo_price")
