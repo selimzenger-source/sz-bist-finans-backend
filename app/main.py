@@ -1175,6 +1175,74 @@ async def admin_test_kap_notification(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/spk-bulletin-status")
+@limiter.limit("10/minute")
+async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: SPK bulten durumunu goster ve manuel isle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.scraper_state import ScraperState
+    result = await db.execute(
+        select(ScraperState).where(ScraperState.key == "spk_last_bulletin_no")
+    )
+    state = result.scalar_one_or_none()
+    last_no = state.value if state else None
+
+    return {
+        "last_bulletin_no": last_no,
+        "updated_at": str(state.updated_at) if state and state.updated_at else None,
+    }
+
+
+@app.post("/api/v1/admin/trigger-spk-check")
+@limiter.limit("3/minute")
+async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: SPK bulten monitor'u manuel tetikle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    try:
+        from app.scrapers.spk_bulletin_scraper import check_spk_bulletins
+        await check_spk_bulletins()
+        return {"status": "ok", "message": "SPK bulten kontrolu tamamlandi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/reset-spk-bulletin-no")
+@limiter.limit("3/minute")
+async def admin_reset_spk_bulletin_no(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: SPK son bulten numarasini geri al (yeniden tara)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    new_no = payload.get("bulletin_no")  # orn: "2026/8"
+    if not new_no:
+        raise HTTPException(status_code=400, detail="bulletin_no gerekli (orn: 2026/8)")
+
+    from app.models.scraper_state import ScraperState
+    result = await db.execute(
+        select(ScraperState).where(ScraperState.key == "spk_last_bulletin_no")
+    )
+    state = result.scalar_one_or_none()
+    old_no = state.value if state else None
+
+    if state:
+        state.value = new_no
+    else:
+        state = ScraperState(key="spk_last_bulletin_no", value=new_no)
+        db.add(state)
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "message": f"SPK bulten no degistirildi: {old_no} → {new_no}",
+        "old": old_no,
+        "new": new_no,
+    }
+
+
 # -------------------------------------------------------
 # CUZDAN (WALLET) ENDPOINTS
 # -------------------------------------------------------
