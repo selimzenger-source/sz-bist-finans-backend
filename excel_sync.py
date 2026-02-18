@@ -379,18 +379,21 @@ def upload_tracks(tracks):
         return None
 
 
-def _send_realtime_notification(ticker, notif_type, title, body):
+def _send_realtime_notification(ticker, notif_type, title, body, sub_event=None):
     """Render API'ye anlik bildirim gonder (tavan bozulma, taban acilma, yuzde dusus)."""
     try:
+        payload = {
+            "admin_password": ADMIN_PASSWORD,
+            "ticker": ticker,
+            "notification_type": notif_type,
+            "title": title,
+            "body": body,
+        }
+        if sub_event:
+            payload["sub_event"] = sub_event
         resp = requests.post(
             f"{API_URL}/api/v1/realtime-notification",
-            json={
-                "admin_password": ADMIN_PASSWORD,
-                "ticker": ticker,
-                "notification_type": notif_type,
-                "title": title,
-                "body": body,
-            },
+            json=payload,
             timeout=30,
         )
         if resp.status_code == 200:
@@ -492,10 +495,13 @@ def live_sync(filepath, interval=15):
                     continue
 
                 next_day = ipo_info["trading_day_count"] + 1
+                # Guvenlik: trading_start'tan HER ZAMAN dogrula (stale count koruması)
                 trading_start = ipo_info.get("trading_start")
-                if trading_start and next_day == 1:
+                if trading_start:
                     from_start = _count_business_days(trading_start, today)
-                    if from_start > 1:
+                    if from_start > 0 and from_start != next_day:
+                        if cycle == 1:  # Sadece ilk dongude logla (spam onleme)
+                            log(f"  DUZELTME: {ticker} — DB next_day={next_day}, trading_start'tan hesap={from_start} → {from_start} kullaniliyor")
                         next_day = from_start
 
                 track = {
@@ -566,6 +572,7 @@ def live_sync(filepath, interval=15):
                             ticker, "yuzde_dusus",
                             f"⚠️ {ticker} %7 Dusus!",
                             f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                            sub_event="pct7",
                         )
                         sent.add("pct7")
                         sent.add("pct4")  # %7 geldiyse %4 de gonderilmis say
@@ -577,6 +584,7 @@ def live_sync(filepath, interval=15):
                             ticker, "yuzde_dusus",
                             f"⚠️ {ticker} %4 Dusus!",
                             f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                            sub_event="pct4",
                         )
                         sent.add("pct4")
                         pct_alerts_sent[ticker] = sent
@@ -688,13 +696,12 @@ def main():
         ipo_info = active_ipos.get(ticker)
         if ipo_info:
             next_day = ipo_info["trading_day_count"] + 1
-            # Guvenlik: trading_start'tan hesaplanan is gunu ile karsilastir
+            # Guvenlik: trading_start'tan HER ZAMAN dogrula (stale count koruması)
             trading_start = ipo_info.get("trading_start")
-            if trading_start and next_day == 1:
-                # ceiling_tracks ve trading_day_count ikisi de 0 → trading_start'tan hesapla
+            if trading_start:
                 from_start = _count_business_days(trading_start, today)
-                if from_start > 1:
-                    log(f"  UYARI: {ticker} — DB'de track/count yok ama trading_start'tan {from_start} is gunu gecmis → gun {from_start} kullaniliyor")
+                if from_start > 0 and from_start != next_day:
+                    log(f"  DUZELTME: {ticker} — DB next_day={next_day}, trading_start'tan hesap={from_start} → {from_start} kullaniliyor")
                     next_day = from_start
         else:
             log(f"  UYARI: {ticker} API'de trading bolumunde bulunamadi — ATLANIYOR")
@@ -712,7 +719,7 @@ def main():
         }
 
         # Alis/Satis varsa open_price olarak ekle
-        alis = row.get("alis")
+        alis = row.get("alis_fiyat")
         if alis and alis > 0:
             track["open_price"] = str(alis)
 
