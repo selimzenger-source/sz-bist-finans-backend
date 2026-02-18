@@ -116,6 +116,25 @@ def parse_bool(value: Optional[str]) -> bool:
     return value == "on" or value == "true" or value == "1"
 
 
+def _build_subscription_hours(form) -> Optional[str]:
+    """Iki ayri select'ten subscription_hours string'i olusturur.
+
+    subscription_hour_open = "09:00", subscription_hour_close = "17:00"
+    → "09:00-17:00"
+    """
+    sub_open = form.get("subscription_hour_open", "").strip()
+    sub_close = form.get("subscription_hour_close", "").strip()
+    if sub_open and sub_close:
+        return f"{sub_open}-{sub_close}"
+    elif sub_open:
+        return f"{sub_open}-17:00"
+    elif sub_close:
+        return f"09:00-{sub_close}"
+    # Eski format uyumlulugu (text input ile girilmis olabilir)
+    old_val = form.get("subscription_hours", "").strip()
+    return old_val or None
+
+
 # -------------------------------------------------------
 # LOGIN
 # -------------------------------------------------------
@@ -267,7 +286,7 @@ async def create_ipo(
             partner_sale_lots=parse_int(form.get("partner_sale_lots")),
             subscription_start=parse_date(form.get("subscription_start")),
             subscription_end=parse_date(form.get("subscription_end")),
-            subscription_hours=form.get("subscription_hours", "").strip() or None,
+            subscription_hours=_build_subscription_hours(form),
             trading_start=parse_date(form.get("trading_start")),
             spk_approval_date=parse_date(form.get("spk_approval_date")),
             expected_trading_date=parse_date(form.get("expected_trading_date")),
@@ -390,7 +409,18 @@ async def update_ipo(
         # Tarihler
         ipo.subscription_start = parse_date(form.get("subscription_start"))
         ipo.subscription_end = parse_date(form.get("subscription_end"))
-        ipo.subscription_hours = form.get("subscription_hours", "").strip() or None
+
+        # subscription_hours — iki ayrı select'ten birleştir (HH:MM-HH:MM)
+        sub_open = form.get("subscription_hour_open", "").strip()
+        sub_close = form.get("subscription_hour_close", "").strip()
+        if sub_open and sub_close:
+            ipo.subscription_hours = f"{sub_open}-{sub_close}"
+        elif sub_open:
+            ipo.subscription_hours = f"{sub_open}-17:00"
+        elif sub_close:
+            ipo.subscription_hours = f"09:00-{sub_close}"
+        # else: degistirme (mevcut degeri koru)
+
         ipo.trading_start = parse_date(form.get("trading_start"))
         ipo.spk_approval_date = parse_date(form.get("spk_approval_date"))
         ipo.expected_trading_date = parse_date(form.get("expected_trading_date"))
@@ -446,10 +476,35 @@ async def update_ipo(
         ipo.archived = parse_bool(form.get("archived"))
         ipo.trading_day_count = parse_int(form.get("trading_day_count")) or 0
 
+        # --- Auto-lock: Admin doldurulan alanlari otomatik kilitle ---
+        import json as _json
+        lockable_fields = {
+            "subscription_start": ipo.subscription_start,
+            "subscription_end": ipo.subscription_end,
+            "subscription_hours": ipo.subscription_hours,
+            "trading_start": ipo.trading_start,
+            "ipo_price": ipo.ipo_price,
+            "total_lots": ipo.total_lots,
+            "expected_trading_date": ipo.expected_trading_date,
+        }
+
+        existing_locks = set()
+        if ipo.manual_fields:
+            try:
+                existing_locks = set(_json.loads(ipo.manual_fields))
+            except Exception:
+                pass
+
+        for field_name, field_val in lockable_fields.items():
+            if field_val is not None:
+                existing_locks.add(field_name)
+
+        ipo.manual_fields = _json.dumps(list(existing_locks))
+
         ipo.updated_at = datetime.utcnow()
 
         await db.flush()
-        logger.info(f"Admin: IPO guncellendi — {ipo.company_name} (ID: {ipo.id})")
+        logger.info(f"Admin: IPO guncellendi — {ipo.company_name} (ID: {ipo.id}) [locks: {list(existing_locks)}]")
         return RedirectResponse(url=f"/admin/ipo/{ipo.id}/edit?success=updated", status_code=303)
 
     except Exception as e:

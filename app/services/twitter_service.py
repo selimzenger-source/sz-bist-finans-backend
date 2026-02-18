@@ -560,11 +560,18 @@ def tweet_last_4_hours(ipo) -> bool:
             return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
+        # Kapanis saatini goster
+        end_hour = "17:00"
+        if ipo.subscription_hours:
+            parts = str(ipo.subscription_hours).split("-")
+            if len(parts) >= 2:
+                end_hour = parts[-1].strip()
+
         text = (
             f"\u23F0 Son 4 Saat!\n\n"
             f"{ipo.company_name}{ticker_text} halka arz başvurusu için"
             f" kapanışa son 4 saat kaldı!\n\n"
-            f"Başvurunuzu yapmayı unutmayın.\n\n"
+            f"⏳ Başvurular saat {end_hour}'a kadar devam ediyor.\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
         )
@@ -584,10 +591,17 @@ def tweet_last_30_min(ipo) -> bool:
             return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
 
+        # Kapanis saatini goster
+        end_hour = "17:00"
+        if ipo.subscription_hours:
+            parts = str(ipo.subscription_hours).split("-")
+            if len(parts) >= 2:
+                end_hour = parts[-1].strip()
+
         text = (
             f"\U0001F6A8 Son 30 Dakika!\n\n"
             f"{ipo.company_name}{ticker_text} halka arz başvurusu kapanmak üzere!\n\n"
-            f"Başvuru yapmak isteyenler acele etsin.\n\n"
+            f"Saat {end_hour}'da başvurular kapanıyor, acele edin!\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
         )

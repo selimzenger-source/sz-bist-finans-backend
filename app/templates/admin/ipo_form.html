@@ -93,7 +93,12 @@
             <h2 class="text-lg font-semibold text-gray-200 mb-4 border-b border-gray-700 pb-2">Fiyat & Buyukluk</h2>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Halka Arz Fiyati (TL)</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Halka Arz Fiyati (TL)
+                        {% if ipo and ipo.manual_fields and 'ipo_price' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi">&#128274;</span>
+                        {% endif %}
+                    </label>
                     <input type="text" name="ipo_price" placeholder="11.20"
                            value="{{ ipo.ipo_price if ipo and ipo.ipo_price else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none font-mono placeholder-gray-500">
@@ -136,31 +141,91 @@
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Baslangic</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Basvuru Baslangic
+                        {% if ipo and ipo.manual_fields and 'subscription_start' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi">&#128274;</span>
+                        {% endif %}
+                    </label>
                     <input type="date" name="subscription_start"
                            value="{{ ipo.subscription_start if ipo and ipo.subscription_start else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Bitis</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Basvuru Bitis
+                        {% if ipo and ipo.manual_fields and 'subscription_end' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi">&#128274;</span>
+                        {% endif %}
+                    </label>
                     <input type="date" name="subscription_end"
                            value="{{ ipo.subscription_end if ipo and ipo.subscription_end else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Basvuru Saatleri</label>
-                    <input type="text" name="subscription_hours" placeholder="09:00-17:00"
-                           value="{{ ipo.subscription_hours if ipo and ipo.subscription_hours else '' }}"
-                           class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none placeholder-gray-500">
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Basvuru Baslangic Saati
+                        {% if ipo and ipo.manual_fields and 'subscription_hours' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi — scraper bu alani ezmez">&#128274;</span>
+                        {% endif %}
+                    </label>
+                    {% set sub_open = '' %}
+                    {% if ipo and ipo.subscription_hours %}
+                        {% set parts = ipo.subscription_hours.split('-') %}
+                        {% if parts|length >= 1 %}
+                            {% set sub_open = parts[0]|trim %}
+                        {% endif %}
+                    {% endif %}
+                    <select name="subscription_hour_open"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="">Seciniz</option>
+                        {% set time_options = ['08:00','08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00'] %}
+                        {% for t in time_options %}
+                        <option value="{{ t }}" {{ 'selected' if sub_open == t else '' }}>{{ t }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Islem Baslangic</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Basvuru Kapanis Saati
+                        {% if ipo and ipo.manual_fields and 'subscription_hours' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi — scraper bu alani ezmez">&#128274;</span>
+                        {% endif %}
+                    </label>
+                    {% set sub_close = '' %}
+                    {% if ipo and ipo.subscription_hours %}
+                        {% set parts = ipo.subscription_hours.split('-') %}
+                        {% if parts|length >= 2 %}
+                            {% set sub_close = parts[1]|trim %}
+                        {% endif %}
+                    {% endif %}
+                    <select name="subscription_hour_close"
+                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="">Seciniz</option>
+                        {% set time_options_close = ['14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00'] %}
+                        {% for t in time_options_close %}
+                        <option value="{{ t }}" {{ 'selected' if sub_close == t else '' }}>{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Islem Baslangic
+                        {% if ipo and ipo.manual_fields and 'trading_start' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi">&#128274;</span>
+                        {% endif %}
+                    </label>
                     <input type="date" name="trading_start"
                            value="{{ ipo.trading_start if ipo and ipo.trading_start else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-400 mb-1">Beklenen Islem Tarihi</label>
+                    <label class="block text-sm font-medium text-gray-400 mb-1">
+                        Beklenen Islem Tarihi
+                        {% if ipo and ipo.manual_fields and 'expected_trading_date' in (ipo.manual_fields or '') %}
+                            <span class="text-yellow-400 ml-1" title="Admin kilidi">&#128274;</span>
+                        {% endif %}
+                    </label>
                     <input type="date" name="expected_trading_date"
                            value="{{ ipo.expected_trading_date if ipo and ipo.expected_trading_date else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">

@@ -544,28 +544,103 @@ async def archive_old_ipos():
             pass
 
 
-async def check_reminders():
-    """Hatirlatma zamani kontrolu — son gun oncesi bildirim.
+# -------------------------------------------------------
+# IPO Zamanlama Yardimcilari — subscription_hours bazli
+# -------------------------------------------------------
 
-    Kullanicinin sectigi zamanlama ayarlarina gore bildirim gonderir:
-    - 30 dk oncesi
-    - 1 saat oncesi
-    - 2 saat oncesi
-    - 4 saat oncesi
+def _get_closing_time(ipo) -> tuple:
+    """IPO'nun kapanis saatini dondurur (hour, minute).
+    subscription_hours = "09:00-17:00" → (17, 0)
+    Yoksa default (17, 0)
+    """
+    if ipo.subscription_hours:
+        import re as _re
+        parts = str(ipo.subscription_hours).split("-")
+        if len(parts) >= 2:
+            time_str = parts[-1].strip()
+            match = _re.match(r"(\d{1,2}):(\d{2})", time_str)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+    return 17, 0  # default
+
+
+def _get_opening_time(ipo) -> tuple:
+    """IPO'nun acilis saatini dondurur (hour, minute).
+    subscription_hours = "09:00-17:00" → (9, 0)
+    Yoksa default (9, 0)
+    """
+    if ipo.subscription_hours:
+        import re as _re
+        parts = str(ipo.subscription_hours).split("-")
+        if parts:
+            time_str = parts[0].strip()
+            match = _re.match(r"(\d{1,2}):(\d{2})", time_str)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+    return 9, 0  # default
+
+
+# In-memory dedup — ayni IPO + event tipi icin tekrar gonderim engelle
+# Key: "ipo_{id}_{event_type}" → Value: gonderim tarihi (date)
+# Her gun sifirlanir (date farkliysa cache miss olur)
+_timing_sent: dict[str, date] = {}
+
+
+def _timing_already_sent(ipo_id: int, event_type: str) -> bool:
+    """Bu IPO + event bugün zaten gönderildi mi?"""
+    key = f"ipo_{ipo_id}_{event_type}"
+    sent_date = _timing_sent.get(key)
+    return sent_date == date.today()
+
+
+def _timing_mark_sent(ipo_id: int, event_type: str):
+    """Bu IPO + event'i bugün gönderildi olarak işaretle."""
+    key = f"ipo_{ipo_id}_{event_type}"
+    _timing_sent[key] = date.today()
+
+
+def _get_active_reminder(remaining_minutes: float) -> str | None:
+    """Kalan dakikaya göre aktif hatırlatma tipini döndürür."""
+    if 25 <= remaining_minutes <= 35:
+        return "reminder_30min"
+    elif 55 <= remaining_minutes <= 65:
+        return "reminder_1h"
+    elif 115 <= remaining_minutes <= 125:
+        return "reminder_2h"
+    elif 235 <= remaining_minutes <= 245:
+        return "reminder_4h"
+    return None
+
+
+async def check_reminders():
+    """Hatirlatma zamani kontrolu — subscription_hours bazli.
+
+    Her IPO'nun kendi kapanis saatine gore hesaplar:
+    - 30 dk oncesi (kapanis - 30dk)
+    - 1 saat oncesi (kapanis - 1h)
+    - 2 saat oncesi (kapanis - 2h)
+    - 4 saat oncesi (kapanis - 4h)
+
+    Ayrica tweet atar: 4h kala + 30dk kala (resimli).
     """
     try:
+        from zoneinfo import ZoneInfo
         from sqlalchemy import select, and_, or_
         from app.models.ipo import IPO
         from app.models.user import User
         from app.services.notification import NotificationService
 
+        TR_TZ = ZoneInfo("Europe/Istanbul")
+
         async with async_session() as db:
             today = date.today()
+            now_tr = datetime.now(TR_TZ)
+            from datetime import time as Time
 
             result = await db.execute(
                 select(IPO).where(
                     and_(
-                        IPO.status.in_(["in_distribution", "active"]),  # yeni + geriye uyumluluk
+                        IPO.status.in_(["in_distribution", "active"]),
                         IPO.subscription_end == today,
                     )
                 )
@@ -577,60 +652,60 @@ async def check_reminders():
 
             notif_service = NotificationService(db)
 
-            now = datetime.now()
-            from datetime import time as Time
-            closing_time = datetime.combine(today, Time(17, 0))
-            remaining_minutes = (closing_time - now).total_seconds() / 60
-
-            if remaining_minutes < 0:
-                return
-
-            # Hangi hatirlatma zamanindayiz?
-            reminder_check = None
-            if 25 <= remaining_minutes <= 35:
-                reminder_check = "reminder_30min"
-            elif 55 <= remaining_minutes <= 65:
-                reminder_check = "reminder_1h"
-            elif 115 <= remaining_minutes <= 125:
-                reminder_check = "reminder_2h"
-            elif 235 <= remaining_minutes <= 245:
-                reminder_check = "reminder_4h"
-
-            if not reminder_check:
-                return
-
-            users_result = await db.execute(
-                select(User).where(
-                    and_(
-                        User.notifications_enabled == True,
-                        getattr(User, reminder_check) == True,
-                        or_(
-                            User.expo_push_token.isnot(None),
-                            User.fcm_token.isnot(None),
-                        ),
-                    )
-                )
-            )
-            users = list(users_result.scalars().all())
-
-            if not users:
-                return
-
             time_labels = {
                 "reminder_30min": "30 dakika",
                 "reminder_1h": "1 saat",
                 "reminder_2h": "2 saat",
                 "reminder_4h": "4 saat",
             }
-            time_label = time_labels.get(reminder_check, "")
 
             _r_tweet_idx = 0
+
             for ipo in last_day_ipos:
+                # Her IPO'nun kendi kapanis saati
+                close_h, close_m = _get_closing_time(ipo)
+                closing_time = now_tr.replace(
+                    hour=close_h, minute=close_m, second=0, microsecond=0,
+                )
+                remaining_minutes = (closing_time - now_tr).total_seconds() / 60
+
+                if remaining_minutes < 0:
+                    continue  # Bu IPO'nun suresi dolmus
+
+                reminder_check = _get_active_reminder(remaining_minutes)
+                if not reminder_check:
+                    continue
+
+                # Dedup — bu IPO + bu reminder bugün zaten gönderildi mi?
+                if _timing_already_sent(ipo.id, reminder_check):
+                    continue
+
+                # Bu reminder tipini seçmiş kullanıcıları bul
+                users_result = await db.execute(
+                    select(User).where(
+                        and_(
+                            User.notifications_enabled == True,
+                            User.deleted == False,
+                            getattr(User, reminder_check) == True,
+                            User.fcm_token.isnot(None),
+                            User.fcm_token != "",
+                        )
+                    )
+                )
+                users = list(users_result.scalars().all())
+
+                if not users:
+                    _timing_mark_sent(ipo.id, reminder_check)
+                    continue
+
+                time_label = time_labels.get(reminder_check, "")
+                close_time_str = f"{close_h:02d}:{close_m:02d}"
+
                 for user in users:
                     await notif_service.send_to_device(
                         fcm_token=user.fcm_token,
                         title=f"Son Gun Hatirlatma",
-                        body=f"{ipo.ticker or ipo.company_name} icin basvuru son gun! Kapanisa {time_label} kaldi.",
+                        body=f"{ipo.ticker or ipo.company_name} icin basvuru son gun! Saat {close_time_str}'a {time_label} kaldi.",
                         data={
                             "type": "reminder",
                             "ipo_id": str(ipo.id),
@@ -639,14 +714,15 @@ async def check_reminders():
                         channel_id="ipo_alerts_v2",
                     )
 
-                # Tweet at — Son 4 Saat veya Son 30 Dakika (her IPO icin bir kez)
-                # Jitter — ilk IPO haric 50-55 sn bekle
+                _timing_mark_sent(ipo.id, reminder_check)
+
+                # Tweet at — Son 4 Saat veya Son 30 Dakika
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
                     from app.services.admin_telegram import notify_tweet_sent
                     if _r_tweet_idx > 0:
                         jitter = random.uniform(50, 55)
-                        logger.info("Hatirlatma tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker or ipo.company_name)
+                        logger.info("Hatirlatma tweet jitter: %.1f sn (%s)", jitter, ipo.ticker or ipo.company_name)
                         await asyncio.sleep(jitter)
                     if reminder_check == "reminder_4h":
                         tw_ok = tweet_last_4_hours(ipo)
@@ -657,15 +733,107 @@ async def check_reminders():
                         _r_tweet_idx += 1
                         await notify_tweet_sent("son_30_dk", ipo.ticker or ipo.company_name, tw_ok)
                 except Exception:
-                    pass  # Tweet hatasi sistemi etkilemez
+                    pass
 
-            logger.info(f"Hatirlatma: {len(last_day_ipos)} IPO, {len(users)} kullanici")
+            logger.info(f"Hatirlatma: {len(last_day_ipos)} IPO kontrol edildi (TR: {now_tr.strftime('%H:%M')})")
 
     except Exception as e:
         logger.error(f"Hatirlatma kontrol hatasi: {e}")
         try:
             from app.services.admin_telegram import notify_scraper_error
             await notify_scraper_error("Hatırlatma Kontrolü", str(e))
+        except Exception:
+            pass
+
+
+async def check_morning_tweets():
+    """Sabah tweet zamanlama kontrolu — subscription_hours bazli.
+
+    Her 5 dakikada calisir ve su kontrolleri yapar:
+    1. Dagitim sabah tweeti: subscription_start == bugun, acilisa 1 saat kala
+    2. Son gun sabah tweeti: subscription_end == bugun, acilisa 1 saat kala
+
+    IPO'nun acilis saatine gore dinamik zamanlama yapar.
+    Dedup: _timing_sent ile ayni gun tekrar tweet atilmaz.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        from sqlalchemy import select, and_, or_
+        from app.models.ipo import IPO
+
+        TR_TZ = ZoneInfo("Europe/Istanbul")
+        now_tr = datetime.now(TR_TZ)
+        today = date.today()
+
+        async with async_session() as db:
+            # Bugun dagitima baslayan VEYA bugun son gun olan IPO'lar
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status.in_(["in_distribution", "active"]),
+                        IPO.archived == False,
+                        or_(
+                            IPO.subscription_start == today,
+                            IPO.subscription_end == today,
+                        ),
+                    )
+                )
+            )
+            ipos = list(result.scalars().all())
+
+            if not ipos:
+                return
+
+            from app.services.twitter_service import tweet_distribution_start, tweet_last_day_morning
+            from app.services.admin_telegram import notify_tweet_sent
+
+            tweet_idx = 0
+
+            for ipo in ipos:
+                open_h, open_m = _get_opening_time(ipo)
+                opening_time = now_tr.replace(
+                    hour=open_h, minute=open_m, second=0, microsecond=0,
+                )
+                minutes_to_open = (opening_time - now_tr).total_seconds() / 60
+
+                # --- Dagitim sabah tweeti: acilisa 55-65 dk kala (1 saat) ---
+                if (ipo.subscription_start == today
+                        and 55 <= minutes_to_open <= 65
+                        and not _timing_already_sent(ipo.id, "distribution_morning_tweet")):
+                    if tweet_idx > 0:
+                        await asyncio.sleep(random.uniform(50, 55))
+                    tw_ok = tweet_distribution_start(ipo)
+                    await notify_tweet_sent("dagitim_sabah_timing", ipo.ticker or ipo.company_name, tw_ok)
+                    _timing_mark_sent(ipo.id, "distribution_morning_tweet")
+                    tweet_idx += 1
+                    logger.info(
+                        "Dagitim sabah tweeti (timing): %s — acilisa %d dk",
+                        ipo.ticker or ipo.company_name, int(minutes_to_open),
+                    )
+
+                # --- Son gun sabah tweeti: acilisa 55-65 dk kala (1 saat) ---
+                if (ipo.subscription_end == today
+                        and 55 <= minutes_to_open <= 65
+                        and not _timing_already_sent(ipo.id, "last_day_morning_tweet")):
+                    if tweet_idx > 0:
+                        await asyncio.sleep(random.uniform(50, 55))
+                    tw_ok = tweet_last_day_morning(ipo)
+                    await notify_tweet_sent("son_gun_sabah_timing", ipo.ticker or ipo.company_name, tw_ok)
+                    _timing_mark_sent(ipo.id, "last_day_morning_tweet")
+                    tweet_idx += 1
+                    logger.info(
+                        "Son gun sabah tweeti (timing): %s — acilisa %d dk",
+                        ipo.ticker or ipo.company_name, int(minutes_to_open),
+                    )
+
+        if tweet_idx > 0:
+            logger.info("Sabah tweet kontrolu: %d tweet atildi", tweet_idx)
+
+    except Exception as e:
+        logger.error(f"Sabah tweet kontrol hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Sabah Tweet Kontrol", str(e))
         except Exception:
             pass
 
@@ -1985,12 +2153,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 7c. Dagitim gunu sabah tweeti — 08:00 TR (UTC 05:00)
+    # 7c. Sabah Tweet Zamanlama — her 5 dakika (acilis saatine gore)
+    # Dagitim sabah tweeti + son gun sabah tweeti — IPO'nun acilis saatine 1 saat kala
     scheduler.add_job(
-        tweet_distribution_morning_job,
-        CronTrigger(hour=5, minute=0),  # UTC 05:00 = TR 08:00
-        id="distribution_morning_tweet",
-        name="Dagitim Sabah Tweeti (08:00)",
+        check_morning_tweets,
+        IntervalTrigger(minutes=5),
+        id="morning_tweet_checker",
+        name="Sabah Tweet Kontrol (acilisa 1h kala)",
         replace_existing=True,
     )
 
@@ -2136,15 +2305,9 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 19. Son Gun Sabah Tweeti — her gun 05:00 Turkiye (UTC 02:00)
-    # Bugun subscription_end olan IPO'lar icin hafif uyari tonu tweet
-    scheduler.add_job(
-        tweet_last_day_morning_job,
-        CronTrigger(hour=2, minute=0),
-        id="last_day_morning_tweet",
-        name="Son Gun Sabah Tweet (05:00 TR)",
-        replace_existing=True,
-    )
+    # 19. Son Gun Sabah Tweeti — artik check_morning_tweets() ile yonetiliyor
+    # Eski sabit CronTrigger (05:00 TR) kaldirildi — acilis saatine gore dinamik
+    # tweet_last_day_morning_job hala yedek olarak mevcut (fallback olarak kalabilir)
 
     # 20. Sirket Tanitim Tweeti — her gun 12:00 Turkiye (UTC 09:00)
     # Dun dagitima cikan IPO icin ogle vakti sirket tanitimi
