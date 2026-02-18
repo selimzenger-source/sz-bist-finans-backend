@@ -1279,7 +1279,7 @@ async def tweet_spk_approval_intro_job():
                     continue
 
                 if tweeted > 0:
-                    await asyncio.sleep(random.uniform(50, 55))
+                    await asyncio.sleep(random.uniform(2700, 2750))  # ~45 dk arayla tweet
 
                 success = tweet_company_intro(ipo)
                 await notify_tweet_sent("sirket_tanitim_spk", ipo.ticker or ipo.company_name, success)
@@ -1372,7 +1372,7 @@ async def tweet_company_intro_job():
             for idx, ipo in enumerate(new_ipos):
                 if idx > 0:
                     import asyncio
-                    await asyncio.sleep(random.uniform(50, 55))
+                    await asyncio.sleep(random.uniform(2700, 2750))  # ~45 dk arayla tweet
                 success = tweet_company_intro(ipo)
                 await notify_tweet_sent("sirket_tanitim", ipo.ticker or ipo.company_name, success)
                 if success:
