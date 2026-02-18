@@ -1869,6 +1869,25 @@ async def bulk_ceiling_track(
 
 
 # -------------------------------------------------------
+# T15 — Ogle Arasi Market Snapshot Tweet Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-snapshot-tweet")
+@limiter.limit("5/minute")
+async def trigger_snapshot_tweet(
+    request: Request,
+    payload: dict,
+):
+    """Admin panelden ogle arasi market snapshot tweet'ini tetikler."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.scheduler import market_snapshot_tweet
+    await market_snapshot_tweet()
+    return {"status": "ok", "message": "Market snapshot tweet tetiklendi"}
+
+
+# -------------------------------------------------------
 # T16 — Yeni Halka Arzlar Acilis Bilgileri Tweet Trigger
 # -------------------------------------------------------
 

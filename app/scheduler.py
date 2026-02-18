@@ -1400,6 +1400,10 @@ async def market_snapshot_tweet():
                 if ipo.trading_day_count and ipo.trading_day_count >= 25:
                     continue
 
+                # trading_day: IPO tablosundaki trading_day_count + 1 (bugun icin)
+                # Bu deger sync script'ten bagimsiz, admin panelden yonetiliyor
+                real_trading_day = (ipo.trading_day_count or 0) + 1
+
                 # Bugunun ceiling track kaydini al
                 track_result = await db.execute(
                     select(IPOCeilingTrack).where(
@@ -1411,12 +1415,23 @@ async def market_snapshot_tweet():
                 )
                 today_track = track_result.scalar_one_or_none()
 
+                # Track yoksa son track'i dene (belki sync henuz calismadi)
                 if not today_track:
-                    # Bugun icin veri yok — ya borsa kapali ya da sync henuz calismadi
-                    continue
+                    last_track_result = await db.execute(
+                        select(IPOCeilingTrack).where(
+                            IPOCeilingTrack.ipo_id == ipo.id,
+                        ).order_by(IPOCeilingTrack.trading_day.desc()).limit(1)
+                    )
+                    last_track = last_track_result.scalar_one_or_none()
+                    if not last_track:
+                        # Hic track yok — bu hisseyi gosterme
+                        continue
+                    # Son track'in trade_date bugun degilse → borsa kapali veya sync calismadi
+                    # Yine de goster, son bilinen veriyle
+                    today_track = last_track
 
-                # Bugunun trading_day'i 25+ ise atla (25/25 = ay tamamlanmis)
-                if today_track.trading_day and today_track.trading_day >= 25:
+                # Bugunun trading_day'i 25+ ise atla
+                if real_trading_day >= 26:
                     continue
 
                 # Kumulatif % hesapla (HA fiyatindan)
@@ -1426,7 +1441,7 @@ async def market_snapshot_tweet():
                 if ipo_price > 0 and close_price > 0:
                     cum_pct = ((close_price - ipo_price) / ipo_price) * 100
 
-                # Gunluk % (pct_change DB'de var)
+                # Gunluk % (pct_change DB'de var — H sutunundan geliyor)
                 daily_pct = float(today_track.pct_change) if today_track.pct_change is not None else 0.0
 
                 # Durum
@@ -1434,7 +1449,7 @@ async def market_snapshot_tweet():
 
                 snapshot_data.append({
                     "ticker": ipo.ticker,
-                    "trading_day": today_track.trading_day,
+                    "trading_day": real_trading_day,
                     "close_price": close_price,
                     "pct_change": daily_pct,
                     "cum_pct": cum_pct,

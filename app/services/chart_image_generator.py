@@ -9,8 +9,11 @@ Tweet'e resim olarak eklenir.
 import logging
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
+
+# Turkiye saat dilimi (UTC+3)
+_TR_TZ = timezone(timedelta(hours=3))
 from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
@@ -649,7 +652,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
 
         # ── Header ──────────────────────────────────────────
         draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG)
-        now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+        now_str = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
         # Baslik — GOLD, buyuk, ozel
         font_brand = _load_font(42, bold=True)
         draw.text((padding, y + 8), "HALKA ARZ HİSSELERİ", fill=GOLD, font=font_brand)
@@ -963,7 +966,7 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         title_text = "YENİ HALKA ARZLAR — AÇILIŞ BİLGİLERİ"
         draw.text((padding, hdr_y + 10), title_text, fill=GOLD, font=font_header)
 
-        date_text = datetime.now().strftime("%d.%m.%Y %H:%M")
+        date_text = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
         info_text = f"{date_text}  |  {num_stocks} Hisse  |  İlk 5 İşlem Günü"
         draw.text((padding, hdr_y + 44), info_text, fill=GRAY, font=font_header_sm)
 
