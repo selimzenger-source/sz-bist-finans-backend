@@ -1860,9 +1860,9 @@ async def bulk_ceiling_track(
                 pct_change=pct_change,
             )
 
-            # trading_day_count guncelle
-            if trading_day > (ipo.trading_day_count or 0):
-                ipo.trading_day_count = trading_day
+            # trading_day_count GUNCELLENMEZ — sadece daily_ceiling_update scheduler yapar.
+            # Boylece live_sync gun ici calisirken trading_day_count artmaz ve
+            # kapanis modu yanlis gun olusturmaz.
 
             # ceiling_tracking_active
             if not ipo.ceiling_tracking_active:
@@ -1908,6 +1908,152 @@ async def trigger_snapshot_tweet(
     if result and result.get("error"):
         return {"status": "error", "message": result["error"]}
     return {"status": "ok", "message": result.get("message", "Market snapshot tweet tetiklendi") if result else "Market snapshot tweet tetiklendi"}
+
+
+# -------------------------------------------------------
+# T17 — Gun Sonu Kapanis Tweet Trigger (Admin Manuel)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-closing-tweet")
+@limiter.limit("3/minute")
+async def trigger_closing_tweet(
+    request: Request,
+    payload: dict,
+):
+    """Admin panelden gun sonu kapanis tweet'ini manuel tetikler.
+
+    daily_ceiling_update() scheduler fonksiyonunu cagirır.
+    Duplicate tweet koruması: twitter_service._is_duplicate_tweet() 24 saat penceresi.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.scheduler import daily_ceiling_update
+    try:
+        await daily_ceiling_update()
+        return {"status": "ok", "message": "Kapanis tweet'leri tetiklendi (daily_ceiling_update)"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# -------------------------------------------------------
+# T18 — Yalanci Gun Duzeltme (fix-ghost-days)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/fix-ghost-days")
+@limiter.limit("3/minute")
+async def fix_ghost_days(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Yalanci gun kayitlarini temizle.
+
+    live_sync gün içi calistiysa trading_day_count yanlis artmis olabilir.
+    Bu endpoint her aktif IPO icin:
+    1. trading_start'tan bugunun gercek gun numarasini hesaplar
+    2. Bu numaradan BUYUK ceiling_track kayitlarini siler
+    3. ipo.trading_day_count'u gercek gecmis gun sayisina gore duzeltir
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from datetime import date as date_type, timedelta
+    from app.models.ipo import IPO, IPOCeilingTrack
+
+    today = date_type.today()
+
+    def count_business_days(start_date, end_date):
+        """Iki tarih arasindaki is gunlerini say (her ikisi dahil)."""
+        if isinstance(start_date, str):
+            from datetime import datetime
+            start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        if isinstance(end_date, str):
+            from datetime import datetime
+            end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+        count = 0
+        cur = start_date
+        while cur <= end_date:
+            if cur.weekday() < 5:
+                count += 1
+            cur += timedelta(days=1)
+        return count
+
+    result = await db.execute(
+        select(IPO).where(
+            and_(
+                IPO.status == "trading",
+                IPO.archived == False,
+                IPO.trading_start.isnot(None),
+            )
+        )
+    )
+    active_ipos = result.scalars().all()
+
+    if not active_ipos:
+        return {"status": "ok", "message": "Aktif IPO yok", "fixed": []}
+
+    fixed = []
+    errors = []
+
+    for ipo in active_ipos:
+        if not ipo.ticker or not ipo.trading_start:
+            continue
+        try:
+            # Bugunun gercek gun numarasi (trading_start dahil)
+            real_today_day = count_business_days(ipo.trading_start, today)
+
+            # Bu numaradan buyuk track'leri sil (yalanci gunler)
+            del_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    and_(
+                        IPOCeilingTrack.ipo_id == ipo.id,
+                        IPOCeilingTrack.trading_day > real_today_day,
+                    )
+                )
+            )
+            ghost_tracks = del_result.scalars().all()
+            ghost_days = [t.trading_day for t in ghost_tracks]
+            for gt in ghost_tracks:
+                await db.delete(gt)
+
+            # Kalan (gercek) track sayisini say
+            real_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    IPOCeilingTrack.ipo_id == ipo.id,
+                ).order_by(IPOCeilingTrack.trading_day.asc())
+            )
+            real_tracks = real_result.scalars().all()
+            real_count = len(real_tracks)
+
+            # trading_day_count'u gercek kapanmis gun sayisina guncelle
+            # (bugunun gunu kapanmadiysa real_today_day-1 olabilir)
+            # Gercek track sayisi en guvenilir kaynak
+            old_count = ipo.trading_day_count or 0
+            ipo.trading_day_count = real_count
+
+            fixed.append({
+                "ticker": ipo.ticker,
+                "real_today_day": real_today_day,
+                "ghost_days_deleted": ghost_days,
+                "old_trading_day_count": old_count,
+                "new_trading_day_count": real_count,
+            })
+
+        except Exception as e:
+            errors.append({"ticker": ipo.ticker, "error": str(e)})
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "fixed_count": len(fixed),
+        "error_count": len(errors),
+        "fixed": fixed,
+        "errors": errors,
+    }
 
 
 # -------------------------------------------------------
