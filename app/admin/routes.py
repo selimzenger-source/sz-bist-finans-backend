@@ -852,6 +852,21 @@ async def run_halkarz_scraper(request: Request):
         return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
 
 
+@router.post("/run-scraper/gedik")
+async def run_gedik_scraper(request: Request):
+    """Gedik scraper'ini admin panelden manuel tetikle."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.scrapers.gedik_scraper import scrape_gedik
+        await scrape_gedik()
+        return RedirectResponse(url="/admin/?success=Gedik scraper basariyla calisti!", status_code=303)
+    except Exception as e:
+        logger.error(f"Admin: Gedik scraper tetikleme hatasi — {e}")
+        return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
+
+
 # -------------------------------------------------------
 # TWEET KUYRUGU — Bekleyen Tweetler
 # -------------------------------------------------------

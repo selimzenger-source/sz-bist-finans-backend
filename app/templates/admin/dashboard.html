@@ -2,6 +2,18 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+<!-- Bildirim Banner -->
+{% if request.query_params.get('success') %}
+<div class="mb-4 p-3 rounded-lg bg-green-900/50 border border-green-700 text-green-300 text-sm">
+    ✅ {{ request.query_params.get('success') }}
+</div>
+{% endif %}
+{% if request.query_params.get('error') %}
+<div class="mb-4 p-3 rounded-lg bg-red-900/50 border border-red-700 text-red-300 text-sm">
+    ❌ {{ request.query_params.get('error') }}
+</div>
+{% endif %}
+
 <!-- Istatistikler -->
 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
     <a href="/admin/" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if not current_status else '' }}">
@@ -43,9 +55,26 @@
                 <span class="text-sm font-normal text-gray-500">— {{ current_status }}</span>
             {% endif %}
         </h2>
-        <a href="/admin/ipo/new" class="bg-indigo-500 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-600 transition">
-            + Yeni IPO
-        </a>
+        <div class="flex items-center gap-2">
+            <!-- Scraper Tetikleme Butonlari -->
+            <form method="post" action="/admin/run-scraper/halkarz" class="inline">
+                <button type="submit" id="btn-halkarz"
+                        onclick="this.disabled=true;this.innerHTML='⏳ Cekiliyor...';this.form.submit();"
+                        class="bg-amber-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-amber-700 transition font-medium">
+                    🔄 HalkArz Cek
+                </button>
+            </form>
+            <form method="post" action="/admin/run-scraper/gedik" class="inline">
+                <button type="submit" id="btn-gedik"
+                        onclick="this.disabled=true;this.innerHTML='⏳ Cekiliyor...';this.form.submit();"
+                        class="bg-teal-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-teal-700 transition font-medium">
+                    🔄 Gedik Cek
+                </button>
+            </form>
+            <a href="/admin/ipo/new" class="bg-indigo-500 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-600 transition">
+                + Yeni IPO
+            </a>
+        </div>
     </div>
 
     <div class="overflow-x-auto">
