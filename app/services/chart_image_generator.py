@@ -768,10 +768,10 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
 
             draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
 
-            # HA fiyati (sag alt)
+            # Halka Arz fiyati (sag alt)
             ipo_price = stock.get("ipo_price")
             if ipo_price:
-                ha_text = f"HA: {float(ipo_price):.2f} TL"
+                ha_text = f"Halka Arz: {float(ipo_price):.2f} TL"
                 ha_bbox = font_lot.getbbox(ha_text)
                 ha_w = ha_bbox[2] - ha_bbox[0]
                 draw.text((width - padding - ha_w, row2_y), ha_text, fill=GRAY, font=font_lot)
@@ -1031,12 +1031,12 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
                            font_value_lg, price_color)
             y += 28
 
-            # ─ Dunku Kapanis + HA Fiyat (yan yana) ─
+            # ─ Dunku Kapanis + Halka Arz Fiyati (yan yana) ─
             left_mid = cx + card_w // 4
             right_mid = cx + 3 * card_w // 4
 
             _draw_centered(draw, left_mid, y, "Dünkü Kapanış", font_small, (100, 100, 120))
-            _draw_centered(draw, right_mid, y, "HA Fiyatı", font_small, (100, 100, 120))
+            _draw_centered(draw, right_mid, y, "Halka Arz Fiyatı", font_small, (100, 100, 120))
             y += 15
             _draw_centered(draw, left_mid, y, f"{prev_close:.2f}", font_value, LIGHT_BLUE)
             _draw_centered(draw, right_mid, y, f"{ipo_price:.2f}", font_value, CYAN)
