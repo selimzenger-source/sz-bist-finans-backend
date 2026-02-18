@@ -1196,7 +1196,7 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
 
 
 @app.post("/api/v1/admin/trigger-spk-check")
-@limiter.limit("3/minute")
+@limiter.limit("30/minute")
 async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
     """Admin: SPK bulten monitor'u manuel tetikle — detayli debug."""
     if not _verify_admin_password(payload.get("admin_password", "")):
@@ -1236,9 +1236,17 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
                 debug_info["last_bulletin_no"] = bulletin_no_str(*last_no) if last_no else None
             debug_info["steps"].append(f"1. Son bulten: {debug_info['last_bulletin_no']}")
 
-            # 2. Bulten listesini al
+            # 2. Bulten listesini al — force_last_no'dan yil cikar veya mevcut yil
+            if last_no:
+                search_year = last_no[0]  # force_last_no'nun yili
+            else:
+                search_year = _date.today().year
+            bulletins = await scraper.fetch_bulletin_list(year=search_year)
+            # Mevcut yil farkliysa onu da ekle
             current_year = _date.today().year
-            bulletins = await scraper.fetch_bulletin_list(year=current_year)
+            if search_year != current_year:
+                current_bulletins = await scraper.fetch_bulletin_list(year=current_year)
+                bulletins.extend(current_bulletins)
             debug_info["total_bulletins"] = len(bulletins)
             debug_info["bulletin_list"] = [
                 {"no": bulletin_no_str(*b["bulletin_no"]), "url": b["pdf_url"][:80]}
