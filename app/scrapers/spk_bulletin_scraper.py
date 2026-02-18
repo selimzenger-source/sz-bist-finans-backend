@@ -45,6 +45,9 @@ HEADERS = {
 # DB state key — son islenmis bulten numarasi
 SCRAPER_STATE_KEY = "spk_last_bulletin_no"
 
+# Race condition korumasi — ayni anda iki kez calismasin
+_spk_check_lock = asyncio.Lock()
+
 
 # -------------------------------------------------------
 # Yardimci: Bulten numarasi parse/karsilastirma
@@ -520,7 +523,21 @@ async def check_spk_bulletins():
     5. Son numarayi guncelle
 
     Yil gecisi: current year + next year listesi kontrol edilir.
+
+    RACE CONDITION KORUMASI: asyncio.Lock ile ayni anda sadece
+    bir instance calisir. Scheduler + admin trigger cakismasini onler.
     """
+    # Lock — concurrent calismayi onle (duplicate IPO korumasi)
+    if _spk_check_lock.locked():
+        logger.warning("SPK Monitor: zaten calisiyor — bu cagrı atlaniyor")
+        return
+
+    async with _spk_check_lock:
+        await _check_spk_bulletins_inner()
+
+
+async def _check_spk_bulletins_inner():
+    """SPK bulten kontrolunun asil mantigi (lock iceride)."""
     from app.database import async_session
     from app.services.ipo_service import IPOService
     from app.services.notification import NotificationService

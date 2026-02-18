@@ -236,6 +236,26 @@ class IPOService:
                         )
                         return None
 
+            # Son kontrol — DB'ye flush yaparak race condition'da duplicate onle
+            # (ayni company_name + spk_bulletin_no kombinasyonu zaten varsa ekleme)
+            if data.get("company_name") and data.get("spk_bulletin_no"):
+                from sqlalchemy import and_ as _and2
+                _dup_result = await self.db.execute(
+                    select(IPO).where(
+                        _and2(
+                            IPO.company_name == data["company_name"],
+                            IPO.spk_bulletin_no == data["spk_bulletin_no"],
+                        )
+                    )
+                )
+                _dup_existing = _dup_result.scalar_one_or_none()
+                if _dup_existing:
+                    logger.warning(
+                        "IPO duplicate onlendi (ayni bulten+isim): %s (%s)",
+                        data["company_name"], data["spk_bulletin_no"],
+                    )
+                    return _dup_existing
+
             # Yeni olustur — sadece SPK bulten veya admin kaynaklarından
             ipo = IPO(**{k: v for k, v in data.items() if hasattr(IPO, k) and v is not None})
             self.db.add(ipo)
