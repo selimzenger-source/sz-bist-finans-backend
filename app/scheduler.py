@@ -1539,6 +1539,163 @@ async def market_snapshot_tweet():
     return {"error": f"3 deneme sonrasi veri gelmedi — tweet olusturulamadi"}
 
 
+# ═══════════════════════════════════════════════════════════════
+# T16 — ACILIS BILGILERI (09:57 TR / 06:57 UTC)
+# Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini tweet atar
+# ═══════════════════════════════════════════════════════════════
+
+async def _opening_summary_attempt(retry_num: int = 0):
+    """Tek bir acilis bilgileri denemesi — retry mantigi opening_summary_tweet'te."""
+    from datetime import date as date_type
+    from sqlalchemy import select, and_
+    from app.database import AsyncSessionLocal
+    from app.models.ipo import IPO, IPOCeilingTrack
+
+    async with AsyncSessionLocal() as db:
+        today = date_type.today()
+
+        result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "trading",
+                    IPO.archived == False,
+                    IPO.ticker.isnot(None),
+                    IPO.ceiling_tracking_active == True,
+                )
+            )
+        )
+        trading_ipos = list(result.scalars().all())
+
+        stocks = []
+        no_open_count = 0
+
+        for ipo in trading_ipos:
+            tracks_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    IPOCeilingTrack.ipo_id == ipo.id
+                ).order_by(IPOCeilingTrack.trading_day.asc())
+            )
+            tracks = list(tracks_result.scalars().all())
+            if not tracks:
+                continue
+
+            latest = tracks[-1]
+            current_day = latest.trading_day
+            if current_day > 5:
+                continue
+
+            today_track = None
+            for t in tracks:
+                if t.trade_date == today:
+                    today_track = t
+                    break
+
+            if not today_track or not today_track.open_price:
+                no_open_count += 1
+                continue
+
+            ceiling_days = sum(1 for t in tracks if t.hit_ceiling)
+            floor_days = sum(1 for t in tracks if t.hit_floor)
+            normal_days = len(tracks) - ceiling_days - floor_days
+
+            prev_close = 0.0
+            for t in tracks:
+                if t.trade_date < today and t.close_price:
+                    prev_close = float(t.close_price)
+
+            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+            if prev_close <= 0:
+                prev_close = ipo_price
+
+            open_price = float(today_track.open_price)
+            pct_change = ((open_price - ipo_price) / ipo_price * 100) if ipo_price > 0 else 0
+            daily_pct = ((open_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+
+            alis_lot = today_track.alis_lot or 0
+            satis_lot = today_track.satis_lot or 0
+
+            if pct_change >= 9.5:
+                durum = "tavan"
+            elif pct_change <= -9.5:
+                durum = "taban"
+            elif pct_change > 0:
+                durum = "alici_kapatti"
+            elif pct_change < 0:
+                durum = "satici_kapatti"
+            else:
+                durum = "not_kapatti"
+
+            stocks.append({
+                "ticker": ipo.ticker,
+                "company_name": ipo.company_name,
+                "trading_day": current_day,
+                "ipo_price": ipo_price,
+                "open_price": open_price,
+                "prev_close": round(prev_close, 2),
+                "pct_change": round(pct_change, 2),
+                "daily_pct": round(daily_pct, 2),
+                "durum": durum,
+                "ceiling_days": ceiling_days,
+                "floor_days": floor_days,
+                "normal_days": normal_days,
+                "alis_lot": alis_lot,
+                "satis_lot": satis_lot,
+            })
+
+        if not stocks and no_open_count > 0 and retry_num < 2:
+            return {"retry": f"Acilis fiyati olan hisse yok ({no_open_count} hisse veri bekliyor)"}
+
+        if not stocks:
+            logger.info("T16: Ilk 5 gun icinde hisse yok, tweet atilmadi.")
+            return {"message": "Ilk 5 gun icinde hisse yok, tweet atilmadi."}
+
+        tickers_str = ", ".join(s["ticker"] for s in stocks)
+
+        from app.services.twitter_service import tweet_opening_summary
+        from app.services.admin_telegram import notify_tweet_sent
+
+        tw_ok = tweet_opening_summary(stocks)
+        await notify_tweet_sent("acilis_ozet", tickers_str, tw_ok, f"{len(stocks)} hisse")
+
+        if tw_ok:
+            logger.info("T16 Acilis bilgileri tweet BASARILI — %d hisse (%s)", len(stocks), tickers_str)
+            return {"message": f"T16 tweet olusturuldu — {len(stocks)} hisse ({tickers_str})"}
+        else:
+            logger.error("T16 Acilis bilgileri tweet BASARISIZ — tw_ok=False")
+            return {"error": f"tweet_opening_summary False dondu — {len(stocks)} hisse ({tickers_str})"}
+
+
+async def opening_summary_tweet():
+    """Acilis bilgileri tweet — 09:57 TR (UTC 06:57).
+
+    Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini
+    grid layout gorsel ile tweet atar.
+
+    Veri henuz gelmemisse 60sn bekleyip 2 kez daha dener.
+
+    Returns dict with "message" or "error" key for debug.
+    """
+    import asyncio
+
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            result = await _opening_summary_attempt(retry_num=attempt)
+
+            if result and result.get("retry"):
+                logger.info("T16 retry %d/3 — 60sn bekleniyor: %s", attempt + 1, result["retry"])
+                await asyncio.sleep(60)
+                continue
+
+            return result
+
+        except Exception as e:
+            logger.error(f"T16 acilis bilgileri hatasi (deneme {attempt+1}): {e}", exc_info=True)
+            return {"error": f"Exception: {str(e)}"}
+
+    return {"error": "T16: 3 deneme sonrasi veri gelmedi — tweet olusturulamadi"}
+
+
 async def daily_ceiling_update():
     """Gun sonu tavan takip tweet — 18:20 (UTC 15:20).
 
@@ -2401,6 +2558,17 @@ def _setup_scheduler_impl():
         CronTrigger(hour=11, minute=0, day_of_week="mon-fri"),
         id="market_snapshot_tweet",
         name="Ogle Arasi Market Snapshot (14:00 TR)",
+        replace_existing=True,
+    )
+
+    # 22b. T16 Acilis Bilgileri — 09:57 TR (UTC 06:57) Pzt-Cuma
+    # Ilk 5 islem gunundeki hisselerin acilis fiyatlarini gorsel tweet atar
+    # Sync verisi gelmemisse 60sn bekleyip 2 kez daha dener
+    scheduler.add_job(
+        opening_summary_tweet,
+        CronTrigger(hour=6, minute=57, day_of_week="mon-fri"),
+        id="opening_summary_tweet",
+        name="T16 Acilis Bilgileri (09:57 TR)",
         replace_existing=True,
     )
 
