@@ -1290,6 +1290,13 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
                     "header": header_preview[:200],
                 }
 
+            # Table 1 detayli satirlar (Ilk Halka Arz tablosu olmasi beklenir)
+            if len(tables) > 1 and tables[1]:
+                debug_info["table_1_rows"] = []
+                for ri, row in enumerate(tables[1]):
+                    row_str = [str(c or "").replace("\n", "\\n")[:50] for c in row]
+                    debug_info["table_1_rows"].append(f"row{ri}: {row_str}")
+
             # Ilk halka arz tablosu
             ipo_approvals = find_ilk_halka_arz_table(tables, full_text)
             debug_info["ipo_approvals"] = [
