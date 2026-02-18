@@ -1141,6 +1141,40 @@ async def admin_test_notification(
         }
 
 
+@app.post("/api/v1/admin/test-kap-notification")
+@limiter.limit("5/minute")
+async def admin_test_kap_notification(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: KAP haber bildirimi simulasyonu — notify_kap_news cagir."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ticker = payload.get("ticker", "ARSAN")
+    news_type = payload.get("news_type", "seans_ici")  # seans_ici | seans_disi | seans_disi_acilis
+    matched_keyword = payload.get("matched_keyword", "Kredi Sozlesmesi")
+    pct_change = payload.get("pct_change", "%-2.38")
+
+    from app.services.notification import NotificationService
+    notif_service = NotificationService(db)
+
+    sent = await notif_service.notify_kap_news(
+        ticker=ticker,
+        price=None,
+        kap_id="TEST_" + ticker,
+        matched_keyword=matched_keyword,
+        sentiment="positive",
+        news_type=news_type,
+        pct_change=pct_change,
+    )
+
+    return {
+        "status": "ok",
+        "message": f"KAP bildirim testi: {ticker} ({news_type}) — {sent} kullaniciya gonderildi",
+        "sent": sent,
+        "ticker": ticker,
+        "news_type": news_type,
+    }
+
+
 # -------------------------------------------------------
 # CUZDAN (WALLET) ENDPOINTS
 # -------------------------------------------------------
