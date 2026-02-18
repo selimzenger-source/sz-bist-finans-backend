@@ -54,15 +54,17 @@ def mark_broadcast_sent():
 def _base_filter():
     """Tum broadcast sorgularinda ortak filtre.
 
-    Sadece FCM token'i olan kullanicilari dahil et.
-    Expo Push Token tek basina bildirim gondermek icin yeterli degil
-    — Firebase (FCM) uzerinden gonderim yapiyoruz.
+    FCM veya Expo token'i olan kullanicilari dahil et.
+    _send_to_user() FCM basarisiz olursa Expo fallback yapar.
     """
+    from sqlalchemy import or_
     return and_(
         User.notifications_enabled == True,
         User.deleted == False,
-        User.fcm_token.isnot(None),
-        User.fcm_token != "",
+        or_(
+            and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+            and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
+        ),
     )
 
 
@@ -175,20 +177,9 @@ async def broadcast_background_task(
                 await _send_telegram_report(title, audience, deep_link_target, 0, 0, 0, [])
                 return
 
-            # Firebase dogrudan kullan — NotificationService yerine
-            # (NotificationService._clear_stale_token session sorunlari onlemek icin)
-            from app.services.notification import _init_firebase, is_firebase_initialized
+            # NotificationService._send_to_user() kullan — FCM + Expo fallback
+            from app.services.notification import NotificationService, _init_firebase
             _init_firebase()
-
-            if not is_firebase_initialized():
-                logger.error("Broadcast: Firebase baslatılamadı — iptal")
-                await _send_telegram_report(
-                    title, audience, deep_link_target, total, 0, total,
-                    ["Firebase baslatılamadı"],
-                )
-                return
-
-            from firebase_admin import messaging
 
             # Data payload — tum value'lar STRING olmali
             safe_data = {
@@ -201,60 +192,37 @@ async def broadcast_background_task(
                 title, total, audience,
             )
 
+            notif_service = NotificationService(db)
+
             for user in users:
                 try:
-                    token = (user.fcm_token or "").strip()
-                    if not token:
+                    fcm = (user.fcm_token or "").strip()
+                    expo = (user.expo_push_token or "").strip()
+                    if not fcm and not expo:
                         logger.warning(
-                            "Broadcast: User %d FCM token bos — atlaniyor", user.id
+                            "Broadcast: User %d token bos — atlaniyor", user.id
                         )
                         failed += 1
                         error_details.append(f"User {user.id}: token bos")
                         continue
 
-                    # Token debug — ilk 30 karakteri logla
-                    logger.info(
-                        "Broadcast: User %d gonderiliyor (token: %s...%s, len=%d)",
-                        user.id, token[:15], token[-5:], len(token),
-                    )
-
-                    message = messaging.Message(
-                        notification=messaging.Notification(
-                            title=title,
-                            body=body,
-                        ),
+                    success = await notif_service._send_to_user(
+                        user=user,
+                        title=title,
+                        body=body,
                         data=safe_data,
-                        token=token,
-                        android=messaging.AndroidConfig(
-                            priority="high",
-                            notification=messaging.AndroidNotification(
-                                sound="default",
-                                channel_id="default_v2",
-                            ),
-                        ),
-                        apns=messaging.APNSConfig(
-                            payload=messaging.APNSPayload(
-                                aps=messaging.Aps(
-                                    sound="default",
-                                    badge=1,
-                                ),
-                            ),
-                        ),
+                        channel_id="default_v2",
+                        delay=False,
                     )
 
-                    # messaging.send() senkron blocking I/O — thread pool'da calistir
-                    # (async event loop'u bloke etmesin)
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None, functools.partial(messaging.send, message)
-                    )
-                    sent += 1
-                    logger.info(
-                        "Broadcast: User %d OK — %s",
-                        user.id, response,
-                    )
+                    if success:
+                        sent += 1
+                        logger.info("Broadcast: User %d OK", user.id)
+                    else:
+                        failed += 1
+                        error_details.append(f"User {user.id}: gonderim basarisiz")
 
-                    # 2sn throttle — Firebase rate limit koruması
+                    # 2sn throttle — rate limit koruması
                     await asyncio.sleep(2)
 
                 except Exception as e:
@@ -265,8 +233,8 @@ async def broadcast_background_task(
                         f"User {user.id} ({error_name}): {error_msg}"
                     )
                     logger.warning(
-                        "Broadcast: User %d FAILED (%s): %s (token: %s...)",
-                        user.id, error_name, error_msg, token[:20],
+                        "Broadcast: User %d FAILED (%s): %s",
+                        user.id, error_name, error_msg,
                     )
 
         logger.info(
