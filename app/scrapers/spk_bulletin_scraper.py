@@ -115,10 +115,16 @@ def extract_tables_from_pdf(pdf_bytes: bytes) -> list[list[list[str]]]:
 # -------------------------------------------------------
 
 def _clean_number(val: str | None) -> Decimal | None:
-    """'141.000.000' veya '22,00' -> Decimal."""
+    """'141.000.000' veya '22,00' -> Decimal.
+
+    Dipnot referanslarini temizler: '12,05\\n(2)' -> '12,05' -> Decimal('12.05')
+    """
     if not val:
         return None
-    val = val.strip().replace(" ", "")
+    # Newline ve dipnot referanslarini temizle: "12,05\n(2)" -> "12,05"
+    val = val.split("\n")[0].strip()
+    val = re.sub(r"\s*\(\d+\)\s*$", "", val).strip()
+    val = val.replace(" ", "")
     if val in ("-", "\u2013", ""):
         return None
     # Turkce format: nokta = binlik, virgul = ondalik
@@ -219,14 +225,19 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
 
             # Ilk sutun = sirket adi
             company_name = str(row[0] or "").strip()
+            # Newline'lari bosluklara cevir (PDF tablo satir kırılmasi)
+            company_name = company_name.replace("\n", " ").replace("\r", " ")
+            company_name = re.sub(r"\s+", " ", company_name).strip()
             if not company_name or len(company_name) < 3:
                 continue
 
             # Kisa notlari temizle: "(1)", "(2)" gibi dipnotlar
             company_name = re.sub(r"\s*\(\d+\)\s*$", "", company_name).strip()
 
-            # "Ortaklik" header kelimesini atla
-            if "ortakl" in company_name.lower():
+            # "Ortaklik" header kelimesini atla — ama "Ortaklik" TAMAMEN header ise
+            # Sirket adi "... Ortakligi AS" olabilir, bunu ATLAMA!
+            cn_lower = company_name.lower().replace("\n", " ")
+            if cn_lower.strip() in ("ortaklık", "ortaklik", "ortaklık adı"):
                 continue
 
             # "Kaynak", "Not", dipnot satirlarini atla
