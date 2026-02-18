@@ -125,7 +125,7 @@ class NotificationService:
                         sound="default",
                         channel_id=channel_id,
                         default_vibrate_timings=True,
-                        visibility="PUBLIC",
+                        visibility="public",
                         icon="notification_icon",
                     ),
                 ),
