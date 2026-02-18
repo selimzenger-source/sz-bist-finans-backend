@@ -230,9 +230,6 @@ async def broadcast_background_task(
                             notification=messaging.AndroidNotification(
                                 sound="default",
                                 channel_id="default_v2",
-                                default_vibrate_timings=True,
-                                notification_priority="PRIORITY_MAX",
-                                visibility="PUBLIC",
                             ),
                         ),
                         apns=messaging.APNSConfig(
