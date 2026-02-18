@@ -1,6 +1,7 @@
-"""Firebase Cloud Messaging (FCM) push bildirim servisi.
+"""Firebase Cloud Messaging (FCM) + Expo Push bildirim servisi.
 
 Kullanicilara halka arz ve KAP haber bildirimlerini gonderir.
+FCM token varsa Firebase, ExponentPushToken varsa Expo Push API kullanilir.
 Ust uste seri bildirim onlemek icin her bildirim arasi 5 saniye beklenir.
 """
 
@@ -163,6 +164,118 @@ class NotificationService:
 
             return False
 
+    async def send_to_expo_device(
+        self,
+        expo_token: str,
+        title: str,
+        body: str,
+        data: Optional[dict] = None,
+        delay: bool = True,
+    ) -> bool:
+        """Expo Push Token'li cihaza bildirim gonderir (Expo Push API v2).
+
+        FCM token yerine ExponentPushToken[...] olan kullanicilar icin.
+        """
+        try:
+            import httpx
+
+            safe_data = {}
+            for k, v in (data or {}).items():
+                safe_data[k] = str(v) if v is not None else ""
+
+            payload = {
+                "to": expo_token,
+                "title": title,
+                "body": body,
+                "data": safe_data,
+                "sound": "default",
+                "priority": "high",
+                "channelId": "default_v2",
+            }
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.post(
+                    "https://exp.host/--/api/v2/push/send",
+                    json=payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Accept-Encoding": "gzip, deflate",
+                        "Content-Type": "application/json",
+                    },
+                )
+                result = resp.json()
+
+            # Expo API sonucu: {"data": {"status": "ok"}} veya {"data": {"status": "error"}}
+            status = result.get("data", {}).get("status", "error")
+            if status == "ok":
+                logger.info(f"Expo push gonderildi: {expo_token[:30]}...")
+                if delay:
+                    await asyncio.sleep(NOTIFICATION_DELAY_SECONDS)
+                return True
+            else:
+                err = result.get("data", {}).get("message", "unknown")
+                logger.warning(f"Expo push hatasi ({expo_token[:20]}...): {err}")
+                # DeviceNotRegistered → token gecersiz, DB'den temizle
+                if "DeviceNotRegistered" in str(err) or "InvalidCredentials" in str(err):
+                    await self._clear_expo_token(expo_token)
+                return False
+
+        except Exception as e:
+            logger.error(f"Expo push exception: {e}")
+            return False
+
+    async def _clear_expo_token(self, expo_token: str):
+        """Gecersiz Expo push token'i DB'den temizler."""
+        try:
+            from app.models.user import User
+            result = await self.db.execute(
+                select(User).where(User.expo_push_token == expo_token)
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                logger.warning(f"Stale Expo token temizleniyor — user_id={user.id}")
+                user.expo_push_token = None
+                await self.db.flush()
+        except Exception as e:
+            logger.error(f"Expo token temizleme hatasi: {e}")
+
+    async def _send_to_user(
+        self,
+        user,
+        title: str,
+        body: str,
+        data: Optional[dict] = None,
+        channel_id: str = "default_v2",
+        delay: bool = True,
+    ) -> bool:
+        """FCM veya Expo token ile kullaniciya bildirim gonderir.
+
+        FCM token varsa Firebase, ExponentPushToken varsa Expo Push API kullanilir.
+        """
+        fcm = (user.fcm_token or "").strip()
+        expo = (user.expo_push_token or "").strip()
+
+        if fcm:
+            return await self.send_to_device(
+                fcm_token=fcm,
+                title=title,
+                body=body,
+                data=data,
+                channel_id=channel_id,
+                delay=delay,
+            )
+        elif expo and expo.startswith("ExponentPushToken"):
+            return await self.send_to_expo_device(
+                expo_token=expo,
+                title=title,
+                body=body,
+                data=data,
+                delay=delay,
+            )
+        else:
+            logger.warning(f"Kullanicinin gecerli tokeni yok: user_id={user.id}")
+            return False
+
     async def _clear_stale_token(self, fcm_token: str):
         """UnregisteredError alan FCM token'i DB'den temizler.
 
@@ -302,10 +415,9 @@ class NotificationService:
         sent_count = 0
         failed_count = 0
         for user in users:
-            token = user.fcm_token or user.expo_push_token
-            if token and not token.startswith("ExponentPushToken"):
-                success = await self.send_to_device(
-                    fcm_token=token,
+            try:
+                success = await self._send_to_user(
+                    user=user,
                     title=title,
                     body=body,
                     data=data,
@@ -315,6 +427,9 @@ class NotificationService:
                     sent_count += 1
                 else:
                     failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning("_send_filtered bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
             "%s — %d kullaniciya gonderildi, %d basarisiz (filtre: %s)",
@@ -548,14 +663,13 @@ class NotificationService:
         """Ucretli abonelere KAP haber bildirimi gonder.
 
         2 kaynak:
-        1. ana_yildiz KAP haber aboneleri (UserSubscription)
+        1. ana_yildiz KAP haber aboneleri (UserSubscription) — notify_kap_all kontrollu
         2. 3 aylik / yillik hisse bildirim paketi sahipleri (StockNotificationSubscription)
-
-        notify_kap_all == True olan ucretli kullanicilara tek tek gonderir.
+           — notify_kap_all filtresi YOK (hisse paketi aldiysa KAP haberi alir)
         """
         from app.models.user import User, UserSubscription, StockNotificationSubscription
 
-        # 1) ana_yildiz KAP haber aboneleri
+        # 1) ana_yildiz KAP haber aboneleri — notify_kap_all == True zorunlu
         kap_sub_result = await self.db.execute(
             select(User)
             .join(UserSubscription, UserSubscription.user_id == User.id)
@@ -576,6 +690,7 @@ class NotificationService:
         kap_users = list(kap_sub_result.scalars().all())
 
         # 2) 3 aylik / yillik hisse bildirim paketi sahipleri
+        # NOT: notify_kap_all filtresi yok — hisse paketi alan kisi KAP haberini alir
         stock_bundle_result = await self.db.execute(
             select(User)
             .join(
@@ -588,7 +703,6 @@ class NotificationService:
                     StockNotificationSubscription.is_annual_bundle == True,
                     User.notifications_enabled == True,
                     User.deleted == False,
-                    User.notify_kap_all == True,
                     or_(
                         and_(User.fcm_token.isnot(None), User.fcm_token != ""),
                         and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
@@ -609,23 +723,21 @@ class NotificationService:
         sent_count = 0
         failed_count = 0
         for user in all_users:
-            token = user.fcm_token or user.expo_push_token
-            if token and not token.startswith("ExponentPushToken"):
-                try:
-                    success = await self.send_to_device(
-                        fcm_token=token,
-                        title=title,
-                        body=body,
-                        data=data,
-                        channel_id="kap_news_v2",
-                    )
-                    if success:
-                        sent_count += 1
-                    else:
-                        failed_count += 1
-                except Exception as e:
+            try:
+                success = await self._send_to_user(
+                    user=user,
+                    title=title,
+                    body=body,
+                    data=data,
+                    channel_id="kap_news_v2",
+                )
+                if success:
+                    sent_count += 1
+                else:
                     failed_count += 1
-                    logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
+            except Exception as e:
+                failed_count += 1
+                logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
             "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap=%d, stock_bundle=%d)",
@@ -702,23 +814,21 @@ class NotificationService:
         sent_count = 0
         failed_count = 0
         for user in users:
-            token = user.fcm_token or user.expo_push_token
-            if token and not token.startswith("ExponentPushToken"):
-                try:
-                    success = await self.send_to_device(
-                        fcm_token=token,
-                        title=title,
-                        body=body,
-                        data=data,
-                        channel_id="kap_news_v2",
-                    )
-                    if success:
-                        sent_count += 1
-                    else:
-                        failed_count += 1
-                except Exception as e:
+            try:
+                success = await self._send_to_user(
+                    user=user,
+                    title=title,
+                    body=body,
+                    data=data,
+                    channel_id="kap_news_v2",
+                )
+                if success:
+                    sent_count += 1
+                else:
                     failed_count += 1
-                    logger.warning("BIST50 free bildirim hatasi (user=%s): %s", user.id, e)
+            except Exception as e:
+                failed_count += 1
+                logger.warning("BIST50 free bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
             "BIST50 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",

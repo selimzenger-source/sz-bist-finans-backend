@@ -1642,9 +1642,8 @@ async def broadcast_send(
 
     # --- SENKRON GONDERIM (request icinde) ---
     import asyncio
-    import functools
 
-    from app.services.notification import _init_firebase, is_firebase_initialized
+    from app.services.notification import _init_firebase, is_firebase_initialized, NotificationService
     _init_firebase()
 
     if not is_firebase_initialized():
@@ -1663,8 +1662,6 @@ async def broadcast_send(
             status_code=303,
         )
 
-    from firebase_admin import messaging
-
     safe_data = {
         "type": "announcement",
         "target": str(deep_link_target),
@@ -1674,45 +1671,31 @@ async def broadcast_send(
     failed = 0
     error_details: list[str] = []
 
+    notif_service = NotificationService(db)
+
     for user in users:
+        fcm = (user.fcm_token or "").strip()
+        expo = (user.expo_push_token or "").strip()
+        if not fcm and not expo:
+            failed += 1
+            error_details.append(f"User {user.id}: token bos")
+            continue
+
         try:
-            token = (user.fcm_token or "").strip()
-            if not token:
-                failed += 1
-                error_details.append(f"User {user.id}: token bos")
-                continue
-
-            message = messaging.Message(
-                notification=messaging.Notification(
-                    title=title,
-                    body=body,
-                ),
+            success = await notif_service._send_to_user(
+                user=user,
+                title=title,
+                body=body,
                 data=safe_data,
-                token=token,
-                android=messaging.AndroidConfig(
-                    priority="high",
-                    notification=messaging.AndroidNotification(
-                        sound="default",
-                        channel_id="default_v2",
-                    ),
-                ),
-                apns=messaging.APNSConfig(
-                    payload=messaging.APNSPayload(
-                        aps=messaging.Aps(
-                            sound="default",
-                            badge=1,
-                        ),
-                    ),
-                ),
+                channel_id="default_v2",
+                delay=False,
             )
-
-            # Thread pool'da calistir — async event loop'u bloke etmesin
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None, functools.partial(messaging.send, message)
-            )
-            sent += 1
-            logger.info("Broadcast: User %d OK — %s", user.id, response)
+            if success:
+                sent += 1
+                logger.info("Broadcast: User %d OK", user.id)
+            else:
+                failed += 1
+                error_details.append(f"User {user.id}: gonderim basarisiz")
 
             # Throttle
             await asyncio.sleep(1)

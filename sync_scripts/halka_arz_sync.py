@@ -94,8 +94,8 @@ API_BASE_URL = os.getenv("BIST_API_URL", "https://sz-bist-finans-api.onrender.co
 API_NOTIF_URL = f"{API_BASE_URL}/api/v1/realtime-notification"
 API_CEILING_URL = f"{API_BASE_URL}/api/v1/ceiling-track"
 
-# Admin sifresi
-ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "")
+# Admin sifresi — env var yoksa hardcoded fallback kullan
+ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "SzBist2026Admin!")
 
 # Sync araligi (saniye) — 15 saniyede bir
 SYNC_INTERVAL = 15
