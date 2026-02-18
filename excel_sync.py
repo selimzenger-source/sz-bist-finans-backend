@@ -4,16 +4,24 @@ BIST Finans — Matriks Excel Sync Script
 Matriks Excel'den tavan takip verilerini okuyup Render API'ye gonder.
 
 Excel Formati (Matriks):
-  A: ILK ISLEM  (22.Oca.26 gibi)
-  B: HISSE      (AKHAN, NETCD, UCAYM)
-  C: TAVAN      (Tavan limit fiyati)
-  D: TABAN      (Taban limit fiyati)
-  E: ALIS       (Alis Kademe fiyati, 0=islem yok)
-  F: SATIS      (Satis Kademe fiyati, 0=islem yok)
-  G: SON        (Son fiyat / Kapanis, 0=borsa kapali)
-  H: %G FARK    (Gunluk % degisim)
-  I: TARIH      (Verinin tarihi — 09/02/2026 00:00:00.00000)
-  J: G.EN YUKSEK (Gun ici en yuksek fiyat)
+  A: ILK ISLEM     (22.Oca.26 gibi)
+  B: HISSE         (AKHAN, NETCD, UCAYM)
+  C: TAVAN         (Tavan limit fiyati)
+  D: TABAN         (Taban limit fiyati)
+  E: ALIS          (Alis Kademe fiyati, 0=islem yok)
+  F: SATIS         (Satis Kademe fiyati, 0=islem yok)
+  G: SON           (Son fiyat / Kapanis, 0=borsa kapali)
+  H: %G FARK       (Gunluk % degisim — oran veya yuzde)
+  I: TARIH         (Verinin tarihi — 18/02/2026 00:00:00.00000)
+  J: G.EN YUKSEK   (Gun ici en yuksek fiyat)
+  K: ALISTAKI LOT  (1. kademe alis lotu)
+  L: SATISTAKI LOT (1. kademe satis lotu)
+
+Canli mod (--live):
+  win32com ile acik Excel'den canli Matriks verilerini okur.
+  Matriks terminali DDE/RTD ile Excel'i anlik besler.
+  15 saniyede bir fiyat degisimlerini Render API'ye push eder.
+  Tavan bozulma, taban acilma, yuzde dusus bildirimlerini tetikler.
 
 Calismasi:
   1. Excel'i okur
@@ -38,6 +46,7 @@ Task Scheduler ile 18:20'de otomatik calistirmak icin:
 import os
 import sys
 import json
+import time
 import argparse
 import requests
 from datetime import datetime, date
@@ -52,7 +61,7 @@ API_URL = os.getenv("BIST_API_URL", "https://sz-bist-finans-api.onrender.com")
 ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "SzBist2026Admin!")
 
 # Varsayilan Excel dosya yolu — masaustunde
-DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "tavan_takip.xlsx")
+DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "halka arz TAVAN TABAN.xlsm")
 
 # Tavan/taban eslesme toleransi (kurus)
 PRICE_TOLERANCE = Decimal("0.02")
@@ -113,9 +122,119 @@ def _count_business_days(start_date, end_date):
     return count
 
 
+def read_matriks_excel_live(filepath):
+    """
+    WIN32COM ile ACIK OLAN Excel'den canli Matriks verilerini oku.
+    Matriks terminali DDE/RTD ile Excel'i anlik besliyor — bu fonksiyon
+    formul sonuclarini (canli fiyatlari) okur.
+
+    Sutunlar:
+    A: ILK ISLEM | B: HISSE | C: TAVAN | D: TABAN | E: ALIS | F: SATIS
+    G: SON | H: %G FARK | I: TARIH | J: G.EN YUKSEK | K: ALISTAKI LOT | L: SATISTAKI LOT
+
+    Returns: list of dict
+    """
+    import win32com.client
+
+    file_name = Path(filepath).name
+
+    # Calisan Excel uygulamasina baglan
+    excel = win32com.client.GetObject(Class="Excel.Application")
+
+    # Acik workbook'lar arasinda dosyayi ara
+    wb = None
+    for workbook in excel.Workbooks:
+        if workbook.Name.lower() == file_name.lower():
+            wb = workbook
+            break
+
+    if wb is None:
+        log(f"HATA: Excel acik ama '{file_name}' dosyasi acik degil!")
+        return []
+
+    sheet = wb.ActiveSheet
+    rows = []
+    row_idx = 2  # 1. satir header
+
+    while row_idx <= 50:  # Max 50 satir (guvenlik siniri)
+        # B: HISSE
+        ticker_val = sheet.Range(f"B{row_idx}").Value
+        if ticker_val is None or str(ticker_val).strip() == "":
+            break
+
+        ticker = str(ticker_val).strip().upper()
+
+        # C: TAVAN, D: TABAN
+        tavan_limit = parse_price(sheet.Range(f"C{row_idx}").Value)
+        taban_limit = parse_price(sheet.Range(f"D{row_idx}").Value)
+
+        # E: ALIS (kademe fiyati), F: SATIS (kademe fiyati)
+        alis_fiyat = parse_price(sheet.Range(f"E{row_idx}").Value)
+        satis_fiyat = parse_price(sheet.Range(f"F{row_idx}").Value)
+
+        # G: SON (anlik/kapanis fiyati)
+        son_price = parse_price(sheet.Range(f"G{row_idx}").Value)
+
+        # H: %G FARK (gunluk degisim)
+        # Matriks Excel formati: %G FARK hucresinin NumberFormat'i "%"
+        # iceriyorsa deger oran olarak gelir (0.10 = %10), yoksa zaten yuzde (10 = %10).
+        # Guvenli yontem: hucrenin NumberFormat'ina bak.
+        pct_cell = sheet.Range(f"H{row_idx}")
+        pct_raw = pct_cell.Value
+        daily_pct = None
+        if pct_raw is not None:
+            try:
+                pct_float = float(pct_raw)
+                number_format = str(pct_cell.NumberFormat)
+                if "%" in number_format:
+                    # Oran formati: 0.10 → %10
+                    daily_pct = Decimal(str(round(pct_float * 100, 4)))
+                else:
+                    # Zaten yuzde: 10.0 → %10
+                    daily_pct = Decimal(str(round(pct_float, 4)))
+            except (ValueError, TypeError):
+                pass
+
+        # I: TARIH
+        tarih_val = sheet.Range(f"I{row_idx}").Value
+        tarih = parse_date_cell(tarih_val)
+
+        # J: GUN ICI EN YUKSEK
+        gun_en_yuksek = parse_price(sheet.Range(f"J{row_idx}").Value)
+
+        # K: ALISTAKI LOT
+        alis_lot_val = sheet.Range(f"K{row_idx}").Value
+        alis_lot = int(float(alis_lot_val)) if alis_lot_val and float(alis_lot_val) > 0 else None
+
+        # L: SATISTAKI LOT
+        satis_lot_val = sheet.Range(f"L{row_idx}").Value
+        satis_lot = int(float(satis_lot_val)) if satis_lot_val and float(satis_lot_val) > 0 else None
+
+        rows.append({
+            "ticker": ticker,
+            "tavan_limit": tavan_limit,
+            "taban_limit": taban_limit,
+            "alis_fiyat": alis_fiyat,
+            "satis_fiyat": satis_fiyat,
+            "son": son_price,
+            "daily_pct": daily_pct,
+            "tarih": tarih,
+            "gun_en_yuksek": gun_en_yuksek,
+            "alis_lot": alis_lot,
+            "satis_lot": satis_lot,
+            "row_idx": row_idx,
+        })
+
+        row_idx += 1
+
+    log(f"  {len(rows)} satir okundu (canli)")
+    return rows
+
+
 def read_matriks_excel(filepath):
     """
-    Matriks Excel formatini oku.
+    Matriks Excel formatini oku — openpyxl ile (kaydedilmis veri).
+    NOT: Canli mod (--live) icin read_matriks_excel_live() kullanilir.
 
     Beklenen sutunlar:
     A: ILK ISLEM | B: HISSE | C: TAVAN | D: TABAN | E: ALIS | F: SATIS | G: SON | H: %G FARK | I: TARIH | J: G.EN YUKSEK
@@ -129,7 +248,7 @@ def read_matriks_excel(filepath):
         sys.exit(1)
 
     log(f"Excel okunuyor: {filepath}")
-    wb = openpyxl.load_workbook(filepath, data_only=True)
+    wb = openpyxl.load_workbook(filepath, data_only=True, keep_links=False)
     ws = wb.active
 
     rows = []
@@ -162,12 +281,14 @@ def read_matriks_excel(filepath):
             "ticker": ticker,
             "tavan_limit": tavan_limit,
             "taban_limit": taban_limit,
-            "alis": parse_price(row[4]),
-            "satis": parse_price(row[5]),
+            "alis_fiyat": parse_price(row[4]),
+            "satis_fiyat": parse_price(row[5]),
             "son": son_price,
             "daily_pct": daily_pct,
             "tarih": tarih,
             "gun_en_yuksek": gun_en_yuksek,
+            "alis_lot": None,
+            "satis_lot": None,
             "row_idx": row_idx,
         })
 
@@ -258,12 +379,245 @@ def upload_tracks(tracks):
         return None
 
 
+def _send_realtime_notification(ticker, notif_type, title, body):
+    """Render API'ye anlik bildirim gonder (tavan bozulma, taban acilma, yuzde dusus)."""
+    try:
+        resp = requests.post(
+            f"{API_URL}/api/v1/realtime-notification",
+            json={
+                "admin_password": ADMIN_PASSWORD,
+                "ticker": ticker,
+                "notification_type": notif_type,
+                "title": title,
+                "body": body,
+            },
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            log(f"  📢 Bildirim: {ticker} {notif_type} → {data.get('sent', 0)} kisi")
+        else:
+            log(f"  ⚠ Bildirim hatasi: {ticker} {notif_type} → HTTP {resp.status_code}")
+    except Exception as e:
+        log(f"  ⚠ Bildirim gonderilemedi: {ticker} {notif_type} → {e}")
+
+
+def live_sync(filepath, interval=15):
+    """Canli sync modu — Excel'i belirli aralikla okuyup degisen fiyatlari API'ye gonderir.
+
+    Matriks terminali acikken Excel anlik guncellenir.
+    Bu fonksiyon Excel'i 'interval' saniyede bir okur,
+    degisen fiyatlari tespit eder ve sadece degisenleri API'ye push eder.
+
+    Ek olarak durum degisikliklerini tespit eder:
+    - Tavan bozulma (tavan → normal/taban)
+    - Taban acilma (taban → normal/tavan)
+    - Yuzde dusus (%4 ve %7 esik)
+    ve Render'a realtime bildirim gonderir.
+    """
+    log("=" * 55)
+    log(f"BIST Finans — CANLI SYNC MODU")
+    log(f"Excel: {filepath}")
+    log(f"API: {API_URL}")
+    log(f"Guncelleme araligi: {interval} saniye")
+    log(f"Durdurmak icin Ctrl+C")
+    log("=" * 55)
+
+    # win32com dosyanin ACIK olmasini gerektirir — os.path.exists kontrolu yetersiz
+    # Excel'e baglanarak kontrol edilir (read_matriks_excel_live icinde)
+
+    # API'den aktif IPO bilgilerini al (bir kere)
+    log("\nAPI'den aktif IPO bilgileri aliniyor...")
+    active_ipos = get_active_trading_ipos()
+    if not active_ipos:
+        log("HATA: API'de aktif IPO bulunamadi!")
+        sys.exit(1)
+    log(f"  {len(active_ipos)} aktif IPO bulundu: {', '.join(active_ipos.keys())}")
+
+    # Onceki durumlari tut — degisiklikleri tespit icin
+    prev_prices = {}       # {ticker: Decimal(son_fiyat)}
+    prev_hit_ceiling = {}  # {ticker: bool}
+    prev_hit_floor = {}    # {ticker: bool}
+    pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
+    cycle = 0
+
+    try:
+        while True:
+            cycle += 1
+            now = datetime.now().strftime("%H:%M:%S")
+
+            try:
+                rows = read_matriks_excel_live(filepath)
+            except Exception as e:
+                log(f"[{now}] Excel okuma hatasi: {e} — {interval}s sonra tekrar...")
+                time.sleep(interval)
+                continue
+
+            if not rows:
+                log(f"[{now}] Excel bos — {interval}s sonra tekrar...")
+                time.sleep(interval)
+                continue
+
+            today = date.today()
+            changed_tracks = []
+
+            for row in rows:
+                ticker = row["ticker"]
+                son = row.get("son")
+                tarih = row.get("tarih")
+
+                # Tarih kontrolu — sadece bugunun verisini al
+                if tarih and tarih != today:
+                    continue
+
+                # SON = 0 → borsa kapali
+                if son is None or son == 0:
+                    continue
+
+                # Fiyat degisti mi?
+                if ticker in prev_prices and prev_prices[ticker] == son:
+                    continue  # Ayni fiyat, atla
+
+                # Degismis — track hazirla
+                prev_prices[ticker] = son
+
+                tavan_limit = row.get("tavan_limit")
+                taban_limit = row.get("taban_limit")
+
+                hit_ceiling = bool(tavan_limit and son and abs(son - tavan_limit) <= PRICE_TOLERANCE)
+                hit_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
+
+                ipo_info = active_ipos.get(ticker)
+                if not ipo_info:
+                    continue
+
+                next_day = ipo_info["trading_day_count"] + 1
+                trading_start = ipo_info.get("trading_start")
+                if trading_start and next_day == 1:
+                    from_start = _count_business_days(trading_start, today)
+                    if from_start > 1:
+                        next_day = from_start
+
+                track = {
+                    "ticker": ticker,
+                    "trading_day": next_day,
+                    "trade_date": today.isoformat(),
+                    "close_price": str(son),
+                    "hit_ceiling": hit_ceiling,
+                    "hit_floor": hit_floor,
+                }
+
+                gun_en_yuksek = row.get("gun_en_yuksek")
+                if gun_en_yuksek and gun_en_yuksek > 0:
+                    track["high_price"] = str(gun_en_yuksek)
+                elif tavan_limit and tavan_limit > 0:
+                    track["high_price"] = str(tavan_limit)
+                if taban_limit and taban_limit > 0:
+                    track["low_price"] = str(taban_limit)
+
+                # Gunluk % degisim
+                daily_pct = row.get("daily_pct")
+                if daily_pct is not None:
+                    track["pct_change"] = str(daily_pct)
+
+                # Alis/satis lot (K ve L sutunlari)
+                alis_lot = row.get("alis_lot")
+                satis_lot = row.get("satis_lot")
+                if alis_lot:
+                    track["alis_lot"] = alis_lot
+                if satis_lot:
+                    track["satis_lot"] = satis_lot
+
+                status = "TAVAN" if hit_ceiling else ("TABAN" if hit_floor else "NORMAL")
+                changed_tracks.append(track)
+                pct_str = f" %{float(daily_pct):+.1f}" if daily_pct else ""
+                log(f"  {ticker}: {son} TL {status}{pct_str}")
+
+                # ── Anlik bildirim tespiti ──
+
+                # 1. Tavan bozulma: onceki dongu tavandaydi, simdi degil
+                was_ceiling = prev_hit_ceiling.get(ticker, False)
+                if was_ceiling and not hit_ceiling:
+                    log(f"  🔔 TAVAN BOZULMA: {ticker}")
+                    _send_realtime_notification(
+                        ticker, "tavan_bozulma",
+                        f"🔓 {ticker} Tavan Bozuldu!",
+                        f"{ticker} tavan fiyatindan dusmeye basladi. Son: {son} TL",
+                    )
+
+                # 2. Taban acilma: onceki dongu tabandaydi, simdi degil
+                was_floor = prev_hit_floor.get(ticker, False)
+                if was_floor and not hit_floor:
+                    log(f"  🔔 TABAN ACILMA: {ticker}")
+                    _send_realtime_notification(
+                        ticker, "taban_acilma",
+                        f"📈 {ticker} Taban Acildi!",
+                        f"{ticker} taban fiyatindan yukselmeye basladi. Son: {son} TL",
+                    )
+
+                # 3. Yuzde dusus: %4 ve %7 esik (gun ici 1 kere)
+                if daily_pct is not None:
+                    pct_val = float(daily_pct)
+                    sent = pct_alerts_sent.get(ticker, set())
+
+                    if pct_val <= -7.0 and "pct7" not in sent:
+                        log(f"  🔔 %7 DUSUS: {ticker} %{pct_val:.1f}")
+                        _send_realtime_notification(
+                            ticker, "yuzde_dusus",
+                            f"⚠️ {ticker} %7 Dusus!",
+                            f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                        )
+                        sent.add("pct7")
+                        sent.add("pct4")  # %7 geldiyse %4 de gonderilmis say
+                        pct_alerts_sent[ticker] = sent
+
+                    elif pct_val <= -4.0 and "pct4" not in sent:
+                        log(f"  🔔 %4 DUSUS: {ticker} %{pct_val:.1f}")
+                        _send_realtime_notification(
+                            ticker, "yuzde_dusus",
+                            f"⚠️ {ticker} %4 Dusus!",
+                            f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                        )
+                        sent.add("pct4")
+                        pct_alerts_sent[ticker] = sent
+
+                # Durumlari guncelle
+                prev_hit_ceiling[ticker] = hit_ceiling
+                prev_hit_floor[ticker] = hit_floor
+
+            # Degisen varsa gonder
+            if changed_tracks:
+                log(f"[{now}] #{cycle} — {len(changed_tracks)} hisse degisti, gonderiliyor...")
+                result = upload_tracks(changed_tracks)
+                if result and result.get("status") == "ok":
+                    log(f"  ✓ {result.get('loaded', 0)} kayit yuklendi")
+                else:
+                    log(f"  ✗ Yukleme basarisiz")
+            else:
+                # Her 4 donguede bir (1 dakika) sessiz log
+                if cycle % 4 == 0:
+                    log(f"[{now}] #{cycle} — Degisiklik yok")
+
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        log("\n\nCanli sync durduruldu. (Ctrl+C)")
+        log(f"Toplam {cycle} dongu calistirildi.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="BIST Finans — Matriks Excel → Render Sync")
     parser.add_argument("--file", "-f", default=DEFAULT_EXCEL_PATH, help="Excel dosya yolu")
     parser.add_argument("--dry-run", action="store_true", help="Gonderme, sadece goster")
     parser.add_argument("--force", action="store_true", help="Tarih kontrolunu atla")
+    parser.add_argument("--live", action="store_true", help="Canli sync modu (15sn aralikla)")
+    parser.add_argument("--interval", type=int, default=15, help="Canli sync guncelleme araligi (saniye)")
     args = parser.parse_args()
+
+    # Canli sync modu
+    if args.live:
+        live_sync(args.file, args.interval)
+        return
 
     today = date.today()
     log("=" * 55)

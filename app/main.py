@@ -1843,6 +1843,7 @@ async def bulk_ceiling_track(
             hit_floor = bool(t.get("hit_floor", False))
             alis_lot = int(t["alis_lot"]) if t.get("alis_lot") else None
             satis_lot = int(t["satis_lot"]) if t.get("satis_lot") else None
+            pct_change = float(t["pct_change"]) if t.get("pct_change") is not None else None
 
             track = await ipo_service.update_ceiling_track(
                 ipo_id=ipo.id,
@@ -1856,6 +1857,7 @@ async def bulk_ceiling_track(
                 hit_floor=hit_floor,
                 alis_lot=alis_lot,
                 satis_lot=satis_lot,
+                pct_change=pct_change,
             )
 
             # trading_day_count guncelle
