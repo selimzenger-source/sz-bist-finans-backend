@@ -1081,59 +1081,50 @@ async def admin_test_notification(
     }
 
     # Token yoksa bildirim gonderemeyiz
-    effective_token = user.fcm_token or user.expo_push_token
-    if not effective_token:
+    fcm = (user.fcm_token or "").strip()
+    expo = (user.expo_push_token or "").strip()
+    if not fcm and not expo:
         return {
             "status": "error",
             "message": "FCM token ve Expo token bos — bildirim gonderilemez. Kullanicinin uygulamayi acip bildirim iznini vermesi gerekli.",
             "token_info": token_info,
         }
 
-    # ExponentPushToken Firebase'e gonderilemez
-    if effective_token.startswith("ExponentPushToken"):
-        return {
-            "status": "error",
-            "message": "Sadece ExponentPushToken var, FCM token yok — Firebase gonderilemez. Cihaz native FCM token kaydetmeli.",
-            "token_info": token_info,
-        }
+    # _send_to_user kullan — FCM varsa Firebase, Expo varsa Expo Push API
+    from app.services.notification import NotificationService
+    notif_service = NotificationService(db)
 
-    # Firebase init + direkt test
-    from app.services.notification import _init_firebase, is_firebase_initialized
-    token_info["firebase_initialized_before"] = is_firebase_initialized()
-    _init_firebase()
-    token_info["firebase_initialized_after"] = is_firebase_initialized()
-
-    # Dogrudan Firebase ile gonder — hatayi yakalayip goster
     try:
-        from firebase_admin import messaging
-
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title="Test Bildirimi",
-                body="Push bildirim sistemi test ediliyor!",
-            ),
+        success = await notif_service._send_to_user(
+            user=user,
+            title="Test Bildirimi",
+            body="Push bildirim sistemi test ediliyor!",
             data={"type": "test", "ticker": "TEST"},
-            token=effective_token,
-            android=messaging.AndroidConfig(
-                priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="default",
-                    channel_id="kap_news_v2",
-                ),
-            ),
+            channel_id="kap_news_v2",
+            delay=False,
         )
 
-        response = messaging.send(message)
-        return {
-            "status": "ok",
-            "message": f"Firebase send basarili! response={response}",
-            "token_info": token_info,
-        }
+        method = "FCM" if fcm else "Expo"
+        if success:
+            return {
+                "status": "ok",
+                "message": f"{method} test bildirimi basarili!",
+                "token_info": token_info,
+                "method": method,
+            }
+        else:
+            return {
+                "status": "error",
+                "message": f"{method} test bildirimi basarisiz — token gecersiz olabilir",
+                "token_info": token_info,
+                "method": method,
+                "last_error": getattr(notif_service, '_last_send_error', None),
+            }
     except Exception as e:
         import traceback
         return {
             "status": "error",
-            "message": f"Firebase send HATASI: {str(e)}",
+            "message": f"Test bildirim HATASI: {str(e)}",
             "error_type": type(e).__name__,
             "traceback": traceback.format_exc()[-800:],
             "token_info": token_info,
@@ -1565,21 +1556,32 @@ async def update_ceiling_track(
 
         all_subscribers = active_subs + stock_notif_subs
 
+        # Dedup — ayni kullaniciya 2 kere gonderme
+        notified_user_ids: set = set()
+
         for sub in all_subscribers:
             try:
+                if sub.user_id in notified_user_ids:
+                    continue
+
                 user_result = await db.execute(
                     select(User).where(User.id == sub.user_id)
                 )
                 user = user_result.scalar_one_or_none()
-                if not user or not user.fcm_token:
+                if not user:
+                    continue
+                # Token kontrolu — FCM veya Expo token olmali
+                fcm = (user.fcm_token or "").strip()
+                expo = (user.expo_push_token or "").strip()
+                if not fcm and not expo:
                     continue
                 # Master switch kontrolu
                 if not user.notifications_enabled:
                     continue
 
                 if not data.hit_ceiling and not track.notified_ceiling_break:
-                    await notif_service.send_to_device(
-                        fcm_token=user.fcm_token,
+                    await notif_service._send_to_user(
+                        user=user,
                         title=f"{data.ticker} Tavan Cozuldu!",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tavan bozuldu. Kapanis: {data.close_price} TL",
                         data={"type": "ceiling_break", "ticker": data.ticker, "ipo_id": str(ipo.id)},
@@ -1588,8 +1590,8 @@ async def update_ceiling_track(
                     notifications_sent += 1
 
                 if data.hit_floor and not track.notified_floor:
-                    await notif_service.send_to_device(
-                        fcm_token=user.fcm_token,
+                    await notif_service._send_to_user(
+                        user=user,
                         title=f"{data.ticker} Tabana Kitlendi!",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tabana kitlendi.",
                         data={"type": "floor_lock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
@@ -1598,14 +1600,16 @@ async def update_ceiling_track(
                     notifications_sent += 1
 
                 if track.relocked and not track.notified_relock:
-                    await notif_service.send_to_device(
-                        fcm_token=user.fcm_token,
+                    await notif_service._send_to_user(
+                        user=user,
                         title=f"{data.ticker} TAVANA KİTLEDİ",
                         body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
                         data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
                         channel_id="ceiling_alerts_v2",
                     )
                     notifications_sent += 1
+
+                notified_user_ids.add(sub.user_id)
 
                 if hasattr(sub, 'notified_count'):
                     sub.notified_count += 1
@@ -1706,10 +1710,16 @@ async def send_realtime_notification(
     notifications_sent = 0
     errors = 0
 
+    # Dedup — ayni kullaniciya 2 kere gonderme
+    notified_user_ids: set = set()
+
     for sub in active_subs:
         # Paket aboneleri icin: "all" tipinde kayitli, her bildirim tipini alir
         if sub.is_annual_bundle and sub.notification_type != "all":
             pass
+
+        if sub.user_id in notified_user_ids:
+            continue
 
         notif_title = data.title
         notif_body = data.body
@@ -1718,15 +1728,20 @@ async def send_realtime_notification(
             select(User).where(User.id == sub.user_id)
         )
         user = user_result.scalar_one_or_none()
-        if not user or not user.fcm_token:
+        if not user:
+            continue
+        # Token kontrolu — FCM veya Expo token olmali
+        fcm = (user.fcm_token or "").strip()
+        expo = (user.expo_push_token or "").strip()
+        if not fcm and not expo:
             continue
         # Master switch kontrolu — tum bildirimler kapaliysa atla
         if not user.notifications_enabled:
             continue
 
         try:
-            await notif_service.send_to_device(
-                fcm_token=user.fcm_token,
+            success = await notif_service._send_to_user(
+                user=user,
                 title=notif_title,
                 body=notif_body,
                 data={
@@ -1737,7 +1752,11 @@ async def send_realtime_notification(
                 },
                 channel_id="ceiling_alerts_v2",
             )
-            notifications_sent += 1
+            if success:
+                notifications_sent += 1
+                notified_user_ids.add(sub.user_id)
+            else:
+                errors += 1
             sub.notified_count = (sub.notified_count or 0) + 1
         except Exception as e:
             errors += 1

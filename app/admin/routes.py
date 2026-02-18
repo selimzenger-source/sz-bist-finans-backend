@@ -1789,12 +1789,12 @@ async def debug_test_push(
     user_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Belirli bir kullaniciya test bildirimi gonder (debug)."""
+    """Belirli bir kullaniciya test bildirimi gonder (debug). FCM veya Expo token kullanir."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
     from app.models.user import User
-    from app.services.notification import _init_firebase, is_firebase_initialized
+    from app.services.notification import NotificationService
 
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -1802,45 +1802,33 @@ async def debug_test_push(
         from starlette.responses import JSONResponse
         return JSONResponse({"error": "Kullanici bulunamadi"}, status_code=404)
 
-    _init_firebase()
-    if not is_firebase_initialized():
-        from starlette.responses import JSONResponse
-        return JSONResponse({"error": "Firebase baslatılamadı"}, status_code=500)
-
-    token = (user.fcm_token or "").strip()
-    if not token:
+    fcm = (user.fcm_token or "").strip()
+    expo = (user.expo_push_token or "").strip()
+    if not fcm and not expo:
         from starlette.responses import JSONResponse
         return JSONResponse({
-            "error": "FCM token bos",
+            "error": "FCM ve Expo token bos — bildirim gonderilemez",
             "user_id": user.id,
-            "expo_token": (user.expo_push_token or "")[:30],
         })
 
-    from firebase_admin import messaging
+    notif_service = NotificationService(db)
 
     try:
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title="Test Bildirimi",
-                body="Bu bir admin debug test bildirimidir.",
-            ),
+        success = await notif_service._send_to_user(
+            user=user,
+            title="Test Bildirimi",
+            body="Bu bir admin debug test bildirimidir.",
             data={"type": "test"},
-            token=token,
-            android=messaging.AndroidConfig(
-                priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="default",
-                    channel_id="default_v2",
-                ),
-            ),
+            channel_id="default_v2",
+            delay=False,
         )
-        response = messaging.send(message)
+        method = "FCM" if fcm else "Expo"
         from starlette.responses import JSONResponse
         return JSONResponse({
-            "success": True,
+            "success": success,
             "user_id": user.id,
-            "fcm_response": response,
-            "token_prefix": token[:20],
+            "method": method,
+            "token_prefix": (fcm or expo)[:20],
         })
     except Exception as e:
         from starlette.responses import JSONResponse
@@ -1848,6 +1836,5 @@ async def debug_test_push(
             "success": False,
             "user_id": user.id,
             "error": f"{type(e).__name__}: {str(e)[:200]}",
-            "token_prefix": token[:20],
-            "token_len": len(token),
+            "token_prefix": (fcm or expo)[:20],
         })

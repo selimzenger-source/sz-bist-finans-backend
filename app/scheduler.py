@@ -680,15 +680,17 @@ async def check_reminders():
                 if _timing_already_sent(ipo.id, reminder_check):
                     continue
 
-                # Bu reminder tipini seçmiş kullanıcıları bul
+                # Bu reminder tipini seçmiş kullanıcıları bul (FCM veya Expo token)
                 users_result = await db.execute(
                     select(User).where(
                         and_(
                             User.notifications_enabled == True,
                             User.deleted == False,
                             getattr(User, reminder_check) == True,
-                            User.fcm_token.isnot(None),
-                            User.fcm_token != "",
+                            or_(
+                                and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                                and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
+                            ),
                         )
                     )
                 )
@@ -702,8 +704,8 @@ async def check_reminders():
                 close_time_str = f"{close_h:02d}:{close_m:02d}"
 
                 for user in users:
-                    await notif_service.send_to_device(
-                        fcm_token=user.fcm_token,
+                    await notif_service._send_to_user(
+                        user=user,
                         title=f"Son Gun Hatirlatma",
                         body=f"{ipo.ticker or ipo.company_name} icin basvuru son gun! Saat {close_time_str}'a {time_label} kaldi.",
                         data={
