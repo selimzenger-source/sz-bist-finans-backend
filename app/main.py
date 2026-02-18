@@ -1807,8 +1807,8 @@ async def update_ceiling_track(
                 if not data.hit_ceiling and not track.notified_ceiling_break:
                     await notif_service._send_to_user(
                         user=user,
-                        title=f"{data.ticker} Tavan Cozuldu!",
-                        body=f"{data.ticker} {data.trading_day}. islem gunu tavan bozuldu. Kapanis: {data.close_price} TL",
+                        title=f"{data.ticker} Tavan Çözüldü!",
+                        body=f"{data.ticker} {data.trading_day}. işlem günü tavan bozuldu. Kapanış: {data.close_price} TL",
                         data={"type": "ceiling_break", "ticker": data.ticker, "ipo_id": str(ipo.id)},
                         channel_id="ceiling_alerts_v2",
                     )
@@ -1818,7 +1818,7 @@ async def update_ceiling_track(
                     await notif_service._send_to_user(
                         user=user,
                         title=f"{data.ticker} Tabana Kitlendi!",
-                        body=f"{data.ticker} {data.trading_day}. islem gunu tabana kitlendi.",
+                        body=f"{data.ticker} {data.trading_day}. işlem günü tabana kitlendi.",
                         data={"type": "floor_lock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
                         channel_id="ceiling_alerts_v2",
                     )
@@ -1828,7 +1828,7 @@ async def update_ceiling_track(
                     await notif_service._send_to_user(
                         user=user,
                         title=f"{data.ticker} TAVANA KİTLEDİ",
-                        body=f"{data.ticker} {data.trading_day}. islem gunu tavana kitledi.",
+                        body=f"{data.ticker} {data.trading_day}. işlem günü tavana kitledi.",
                         data={"type": "relock", "ticker": data.ticker, "ipo_id": str(ipo.id)},
                         channel_id="ceiling_alerts_v2",
                     )

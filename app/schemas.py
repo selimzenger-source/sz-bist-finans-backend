@@ -75,6 +75,7 @@ class IPOListOut(BaseModel):
     ceiling_broken: bool = False
     total_applicants: Optional[int] = None
     estimated_lots_per_person: Optional[int] = None
+    katilim_endeksi: Optional[str] = None
     # v3 — 5 bolumlu yapi alanlari
     spk_approval_date: Optional[date] = None
     spk_bulletin_no: Optional[str] = None
@@ -136,6 +137,9 @@ class IPODetailOut(BaseModel):
 
     # Tahmini Lot (500K katilimci varsayimi)
     estimated_lots_per_person: Optional[int] = None
+
+    # Katilim Endeksi
+    katilim_endeksi: Optional[str] = None
 
     # Ek Bilgiler
     lock_up_period_days: Optional[int] = None

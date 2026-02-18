@@ -91,6 +91,11 @@ class IPO(Base):
     price_stability_days: Mapped[int | None] = mapped_column(Integer, comment="Fiyat istikrari suresi (gun)")
     min_application_lot: Mapped[int | None] = mapped_column(Integer, default=1, comment="Minimum basvuru lotu")
 
+    # --- Katilim Endeksi ---
+    katilim_endeksi: Mapped[str | None] = mapped_column(
+        String(20), comment="Katilim endeksine uygunluk: uygun, uygun_degil"
+    )
+
     # --- Sirket Hakkinda ---
     company_description: Mapped[str | None] = mapped_column(Text, comment="Sirket tanitim metni")
     sector: Mapped[str | None] = mapped_column(String(100), comment="Sektor")

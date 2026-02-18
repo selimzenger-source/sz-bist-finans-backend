@@ -26,19 +26,19 @@
     </a>
     <a href="/admin/?status=in_distribution" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'in_distribution' else '' }}">
         <div class="text-2xl font-bold text-green-400">{{ status_counts.get('in_distribution', 0) }}</div>
-        <div class="text-xs text-gray-400 mt-1">Dagitimda</div>
+        <div class="text-xs text-gray-400 mt-1">Dağıtımda</div>
     </a>
     <a href="/admin/?status=awaiting_trading" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'awaiting_trading' else '' }}">
         <div class="text-2xl font-bold text-orange-400">{{ status_counts.get('awaiting_trading', 0) }}</div>
-        <div class="text-xs text-gray-400 mt-1">Islem Bekliyor</div>
+        <div class="text-xs text-gray-400 mt-1">İşlem Bekliyor</div>
     </a>
     <a href="/admin/?status=trading" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'trading' else '' }}">
         <div class="text-2xl font-bold text-emerald-400">{{ status_counts.get('trading', 0) }}</div>
-        <div class="text-xs text-gray-400 mt-1">Islem Goruyor</div>
+        <div class="text-xs text-gray-400 mt-1">İşlem Görüyor</div>
     </a>
     <a href="/admin/?status=archived" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if current_status == 'archived' else '' }}">
         <div class="text-2xl font-bold text-gray-500">{{ status_counts.get('archived', 0) }}</div>
-        <div class="text-xs text-gray-400 mt-1">Arsiv</div>
+        <div class="text-xs text-gray-400 mt-1">Arşiv</div>
     </a>
     <a href="/admin/spk" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700">
         <div class="text-2xl font-bold text-yellow-400">{{ spk_count }}</div>
@@ -59,16 +59,16 @@
             <!-- Scraper Tetikleme Butonlari -->
             <form method="post" action="/admin/run-scraper/halkarz" class="inline">
                 <button type="submit" id="btn-halkarz"
-                        onclick="this.disabled=true;this.innerHTML='⏳ Cekiliyor...';this.form.submit();"
+                        onclick="this.disabled=true;this.innerHTML='⏳ Çekiliyor...';this.form.submit();"
                         class="bg-amber-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-amber-700 transition font-medium">
-                    🔄 HalkArz Cek
+                    🔄 HalkArz Çek
                 </button>
             </form>
             <form method="post" action="/admin/run-scraper/gedik" class="inline">
                 <button type="submit" id="btn-gedik"
-                        onclick="this.disabled=true;this.innerHTML='⏳ Cekiliyor...';this.form.submit();"
+                        onclick="this.disabled=true;this.innerHTML='⏳ Çekiliyor...';this.form.submit();"
                         class="bg-teal-600 text-white text-sm px-3 py-1.5 rounded-lg hover:bg-teal-700 transition font-medium">
-                    🔄 Gedik Cek
+                    🔄 Gedik Çek
                 </button>
             </form>
             <a href="/admin/ipo/new" class="bg-indigo-500 text-white text-sm px-4 py-1.5 rounded-lg hover:bg-indigo-600 transition">
@@ -83,12 +83,12 @@
                 <tr>
                     <th class="px-4 py-2 text-left">ID</th>
                     <th class="px-4 py-2 text-left">Ticker</th>
-                    <th class="px-4 py-2 text-left">Sirket</th>
+                    <th class="px-4 py-2 text-left">Şirket</th>
                     <th class="px-4 py-2 text-center">Status</th>
                     <th class="px-4 py-2 text-right">Fiyat</th>
-                    <th class="px-4 py-2 text-center">Basvuru</th>
-                    <th class="px-4 py-2 text-center">Islem</th>
-                    <th class="px-4 py-2 text-center">Islemler</th>
+                    <th class="px-4 py-2 text-center">Başvuru</th>
+                    <th class="px-4 py-2 text-center">İşlem</th>
+                    <th class="px-4 py-2 text-center">İşlemler</th>
                 </tr>
             </thead>
             <tbody class="divide-y divide-gray-700">
@@ -106,11 +106,11 @@
                             'archived': 'bg-gray-700/50 text-gray-400 border border-gray-600',
                         } %}
                         {% set status_labels = {
-                            'newly_approved': 'SPK Onayli',
-                            'in_distribution': 'Dagitimda',
-                            'awaiting_trading': 'Islem Bekliyor',
-                            'trading': 'Islem Goruyor',
-                            'archived': 'Arsiv',
+                            'newly_approved': 'SPK Onaylı',
+                            'in_distribution': 'Dağıtımda',
+                            'awaiting_trading': 'İşlem Bekliyor',
+                            'trading': 'İşlem Görüyor',
+                            'archived': 'Arşiv',
                         } %}
                         <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(ipo.status, 'bg-gray-700 text-gray-400') }}">
                             {{ status_labels.get(ipo.status, ipo.status) }}
@@ -129,11 +129,11 @@
                         <div class="flex items-center justify-center gap-1">
                             <a href="/admin/ipo/{{ ipo.id }}/edit"
                                class="bg-indigo-900/50 text-indigo-300 px-2 py-1 rounded text-xs hover:bg-indigo-800/50 transition border border-indigo-700">
-                                Duzenle
+                                Düzenle
                             </a>
                             <a href="/admin/ipo/{{ ipo.id }}/allocations"
                                class="bg-emerald-900/50 text-emerald-300 px-2 py-1 rounded text-xs hover:bg-emerald-800/50 transition border border-emerald-700">
-                                Dagitim
+                                Dağıtım
                             </a>
                             <form method="post" action="/admin/ipo/{{ ipo.id }}/delete"
                                   onsubmit="return confirm('{{ ipo.company_name }} silinecek. Emin misiniz?');"
@@ -151,7 +151,7 @@
                 {% if not ipos %}
                 <tr>
                     <td colspan="8" class="px-4 py-8 text-center text-gray-500">
-                        Henuz kayitli halka arz yok.
+                        Henüz kayıtlı halka arz yok.
                     </td>
                 </tr>
                 {% endif %}

@@ -574,7 +574,7 @@ async def scrape_gedik():
                 if detail:
                     for field in ["distribution_method", "market_segment", "total_lots",
                                   "public_float_pct", "price_stability_days",
-                                  "estimated_lots_per_person"]:
+                                  "estimated_lots_per_person", "katilim_endeksi"]:
                         if detail.get(field) is not None:
                             update_data[field] = detail[field]
 

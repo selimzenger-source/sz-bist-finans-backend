@@ -851,9 +851,9 @@ async def cleanup_spk_duplicates(
 # ============================================================
 
 async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
-    """Scraper sonrasi aktif IPO'larin eksik/dolu alan raporunu olusturur.
+    """Scraper sonrasi aktif IPO durum raporunu olusturur.
 
-    Hem dashboard success mesaji hem Telegram icin kullanilir.
+    Dashboard + Telegram: Status gruplarına gore IPO sayisi + eksik alanlar.
     """
     result = await db.execute(
         select(IPO).where(
@@ -868,58 +868,70 @@ async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
     if not active_ipos:
         return f"{source}: Aktif IPO yok"
 
-    # Onemli alanlar — eksik olanlari raporla
+    # Status gruplari
+    status_labels = {
+        "newly_approved": "SPK Onayli",
+        "in_distribution": "Dagitimda",
+        "awaiting_trading": "Islem Bekliyor",
+        "trading": "Islem Goruyor",
+    }
+    status_emojis = {
+        "newly_approved": "🆕",
+        "in_distribution": "📋",
+        "awaiting_trading": "⏳",
+        "trading": "📈",
+    }
+    status_groups: dict[str, list] = {}
+    for ipo in active_ipos:
+        status_groups.setdefault(ipo.status, []).append(ipo)
+
+    # Onemli alanlar
     key_fields = {
         "ipo_price": "Fiyat",
-        "subscription_start": "Basvuru Baslangic",
-        "subscription_end": "Basvuru Bitis",
-        "subscription_hours": "Basvuru Saatleri",
-        "trading_start": "Islem Baslangic",
-        "total_lots": "Toplam Lot",
-        "lead_broker": "Araci Kurum",
-        "distribution_method": "Dagitim Yontemi",
+        "subscription_start": "Basv.Bas",
+        "subscription_end": "Basv.Bit",
+        "trading_start": "Islem Tar",
+        "total_lots": "Lot",
+        "lead_broker": "Araci",
+        "distribution_method": "Dagitim",
     }
 
-    lines = []
-    telegram_lines = []
-    for ipo in active_ipos:
-        ticker = ipo.ticker or "?"
-        name = ipo.company_name[:25] if ipo.company_name else "?"
+    # Dashboard + Telegram
+    dashboard_parts = []
+    tg_sections = []
 
-        filled = []
-        missing = []
-        for field, label in key_fields.items():
-            val = getattr(ipo, field, None)
-            if val is not None and (not isinstance(val, str) or val.strip()):
-                filled.append(label)
+    for status_key, ipos in status_groups.items():
+        label = status_labels.get(status_key, status_key)
+        emoji = status_emojis.get(status_key, "📌")
+        dashboard_parts.append(f"{label}:{len(ipos)}")
+
+        tg_lines = [f"{emoji} <b>{label} ({len(ipos)})</b>"]
+        for ipo in ipos:
+            ticker = ipo.ticker or "?"
+            missing = []
+            for field, flabel in key_fields.items():
+                val = getattr(ipo, field, None)
+                if val is None or (isinstance(val, str) and not val.strip()):
+                    missing.append(flabel)
+
+            if missing:
+                tg_lines.append(f"  ⚠️ {ticker} — eksik: {', '.join(missing)}")
             else:
-                missing.append(label)
+                tg_lines.append(f"  ✅ {ticker}")
 
-        status_emoji = "✅" if not missing else "⚠️"
-        # Dashboard icin kisa ozet
-        if missing:
-            lines.append(f"{status_emoji} {ticker}: eksik → {', '.join(missing)}")
-        else:
-            lines.append(f"{status_emoji} {ticker}: tam")
+        tg_sections.append("\n".join(tg_lines))
 
-        # Telegram icin detayli
-        tg_line = f"{status_emoji} <b>{ticker}</b> ({name})"
-        if missing:
-            tg_line += f"\n   Eksik: {', '.join(missing)}"
-        if filled:
-            tg_line += f"\n   Dolu: {', '.join(filled)}"
-        telegram_lines.append(tg_line)
+    # Dashboard mesaji
+    summary = f"{source} OK! {len(active_ipos)} IPO — " + " | ".join(dashboard_parts)
 
-    # Dashboard mesaji (URL-safe, kisa)
-    summary = f"{source} OK! {len(active_ipos)} IPO tarandi. " + " | ".join(lines)
-
-    # Telegram rapor
+    # Telegram rapor — temiz format
     try:
         from app.services.admin_telegram import send_admin_message
         tg_msg = (
-            f"🔄 <b>{source} — Manuel Tetikleme</b>\n\n"
-            f"Taranan IPO: {len(active_ipos)}\n\n"
-            + "\n\n".join(telegram_lines)
+            f"🔄 <b>{source} Scraper</b>\n"
+            f"━━━━━━━━━━━━━━━━\n"
+            f"Toplam: {len(active_ipos)} aktif IPO\n\n"
+            + "\n\n".join(tg_sections)
         )
         import asyncio
         asyncio.ensure_future(send_admin_message(tg_msg))

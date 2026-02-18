@@ -42,6 +42,139 @@ _ceiling_retry_pending = False
 
 scheduler = AsyncIOScheduler()
 
+# --- Scraper Boost Modu ---
+# Yeni IPO tespit edilince halkarz+gedik scraper'i 12 saat boyunca 15dk'da 1 calistirir
+BOOST_INTERVAL_MINUTES = 15
+BOOST_DURATION_HOURS = 12
+NORMAL_INTERVAL_HOURS = 2
+_boost_active = False
+
+
+async def activate_scraper_boost():
+    """SPK bulteninden yeni IPO tespit edilince scraper sikligini artir.
+
+    halkarz_gedik_scraper: 2 saat → 15 dakika (12 saat boyunca)
+    infoyatirim_scraper: 6 saat → 30 dakika (12 saat boyunca)
+    """
+    global _boost_active
+    if _boost_active:
+        logger.info("Scraper boost zaten aktif, atlaniyor")
+        return
+
+    try:
+        # ScraperState'e boost bitis zamanini kaydet
+        from app.database import async_session
+        from app.models.scraper_state import ScraperState
+        from sqlalchemy import select
+
+        boost_until = datetime.utcnow() + timedelta(hours=BOOST_DURATION_HOURS)
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(ScraperState).where(ScraperState.key == "scraper_boost_until")
+            )
+            state = result.scalar_one_or_none()
+            if state:
+                state.value = boost_until.isoformat()
+            else:
+                db.add(ScraperState(key="scraper_boost_until", value=boost_until.isoformat()))
+            await db.commit()
+
+        # Job'lari hizlandir
+        scheduler.reschedule_job(
+            "halkarz_gedik_scraper",
+            trigger=IntervalTrigger(minutes=BOOST_INTERVAL_MINUTES),
+        )
+        scheduler.reschedule_job(
+            "infoyatirim_scraper",
+            trigger=IntervalTrigger(minutes=30),
+        )
+        _boost_active = True
+        logger.warning(
+            "🚀 Scraper boost AKTIF: halkarz=%ddk, infoyatirim=30dk — %s'e kadar",
+            BOOST_INTERVAL_MINUTES,
+            boost_until.strftime("%H:%M UTC"),
+        )
+    except Exception as e:
+        logger.error("Scraper boost aktivasyon hatasi: %s", e)
+
+
+async def _check_scraper_boost_expiry():
+    """Boost suresi dolduysa normal frekanslara don."""
+    global _boost_active
+    if not _boost_active:
+        return
+
+    try:
+        from app.database import async_session
+        from app.models.scraper_state import ScraperState
+        from sqlalchemy import select
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(ScraperState).where(ScraperState.key == "scraper_boost_until")
+            )
+            state = result.scalar_one_or_none()
+            if not state or not state.value:
+                _boost_active = False
+                return
+
+            boost_until = datetime.fromisoformat(state.value)
+            if datetime.utcnow() >= boost_until:
+                # Boost suresi doldu — normal frekanslara don
+                scheduler.reschedule_job(
+                    "halkarz_gedik_scraper",
+                    trigger=IntervalTrigger(hours=NORMAL_INTERVAL_HOURS),
+                )
+                scheduler.reschedule_job(
+                    "infoyatirim_scraper",
+                    trigger=IntervalTrigger(hours=6),
+                )
+                state.value = None
+                await db.commit()
+                _boost_active = False
+                logger.warning("⏱️ Scraper boost BITTI — normal frekanslara donuldu")
+    except Exception as e:
+        logger.error("Boost expiry kontrol hatasi: %s", e)
+
+
+async def _restore_boost_on_startup():
+    """Uygulama yeniden basladiginda onceki boost suresi hala aktifse devam et."""
+    global _boost_active
+    try:
+        await asyncio.sleep(10)  # DB hazir olsun
+        from app.database import async_session
+        from app.models.scraper_state import ScraperState
+        from sqlalchemy import select
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(ScraperState).where(ScraperState.key == "scraper_boost_until")
+            )
+            state = result.scalar_one_or_none()
+            if state and state.value:
+                boost_until = datetime.fromisoformat(state.value)
+                if datetime.utcnow() < boost_until:
+                    scheduler.reschedule_job(
+                        "halkarz_gedik_scraper",
+                        trigger=IntervalTrigger(minutes=BOOST_INTERVAL_MINUTES),
+                    )
+                    scheduler.reschedule_job(
+                        "infoyatirim_scraper",
+                        trigger=IntervalTrigger(minutes=30),
+                    )
+                    _boost_active = True
+                    remaining = boost_until - datetime.utcnow()
+                    logger.warning(
+                        "🔄 Scraper boost DEVAM: %.0f dakika kaldi",
+                        remaining.total_seconds() / 60,
+                    )
+                else:
+                    state.value = None
+                    await db.commit()
+    except Exception as e:
+        logger.error("Boost startup restore hatasi: %s", e)
+
 
 async def scrape_kap_ipo():
     """SPK ihrac verileri API'den halka arz bilgilerini ceker.
@@ -2433,6 +2566,15 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
+    # 11b. Scraper Boost Kontrol — her 15 dakikada boost suresi dolmus mu diye bak
+    scheduler.add_job(
+        _check_scraper_boost_expiry,
+        IntervalTrigger(minutes=15),
+        id="scraper_boost_checker",
+        name="Scraper Boost Süre Kontrolü",
+        replace_existing=True,
+    )
+
     # 12. Son gun uyarisi — her gun 09:00 ve 17:00
     scheduler.add_job(
         send_last_day_warnings,
@@ -2597,6 +2739,10 @@ def _setup_scheduler_impl():
         "Scheduler baslatildi — %d gorev ayarlandi",
         len(scheduler.get_jobs()),
     )
+
+    # Startup: Onceki boost suresi hala aktif mi kontrol et
+    import asyncio
+    asyncio.get_event_loop().create_task(_restore_boost_on_startup())
 
 
 def shutdown_scheduler():

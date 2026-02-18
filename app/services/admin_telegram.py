@@ -91,10 +91,10 @@ async def notify_ipo_status_change(
 
     status_labels = {
         "spk_pending": "SPK Onay Bekleniyor",
-        "newly_approved": "Yeni Onaylandi",
-        "in_distribution": "Dagitim Surecinde",
-        "awaiting_trading": "Islem Gunu Bekleniyor",
-        "trading": "Isleme Basladi",
+        "newly_approved": "Yeni Onaylandı",
+        "in_distribution": "Dağıtım Sürecinde",
+        "awaiting_trading": "İşlem Günü Bekleniyor",
+        "trading": "İşleme Başladı",
     }
     old_label = status_labels.get(old_status, old_status)
     new_label = status_labels.get(new_status, new_status)

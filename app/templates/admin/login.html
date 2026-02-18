@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Giris — BIST Finans</title>
+    <title>Admin Giriş — BIST Finans</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-900 min-h-screen flex items-center justify-center">
@@ -21,20 +21,20 @@
         {% endif %}
 
         <form method="post" action="/admin/login">
-            <label class="block text-sm font-medium text-gray-400 mb-1">Sifre</label>
+            <label class="block text-sm font-medium text-gray-400 mb-1">Şifre</label>
             <input
                 type="password"
                 name="password"
                 required
                 autofocus
                 class="w-full px-4 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none placeholder-gray-500"
-                placeholder="Admin sifresini girin"
+                placeholder="Admin şifresini girin"
             />
             <button
                 type="submit"
                 class="w-full mt-4 bg-indigo-500 text-white py-2 rounded-lg font-medium hover:bg-indigo-600 transition"
             >
-                Giris Yap
+                Giriş Yap
             </button>
         </form>
     </div>

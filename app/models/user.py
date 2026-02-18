@@ -133,10 +133,10 @@ class UserIPOAlert(Base):
 
 # Eski fiyatlama (geriye donuk uyumluluk icin)
 CEILING_TIER_PRICES = {
-    "5_gun":  {"days": 5,  "price_tl": Decimal("20.00"), "label": "Ilk 5 islem gunu"},
-    "10_gun": {"days": 10, "price_tl": Decimal("50.00"), "label": "Ilk 10 islem gunu"},
-    "15_gun": {"days": 15, "price_tl": Decimal("60.00"), "label": "Ilk 15 islem gunu"},
-    "20_gun": {"days": 20, "price_tl": Decimal("75.00"), "label": "Ilk 20 islem gunu"},
+    "5_gun":  {"days": 5,  "price_tl": Decimal("20.00"), "label": "İlk 5 işlem günü"},
+    "10_gun": {"days": 10, "price_tl": Decimal("50.00"), "label": "İlk 10 işlem günü"},
+    "15_gun": {"days": 15, "price_tl": Decimal("60.00"), "label": "İlk 15 işlem günü"},
+    "20_gun": {"days": 20, "price_tl": Decimal("75.00"), "label": "İlk 20 işlem günü"},
 }
 
 # YENİ v2: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
@@ -167,17 +167,17 @@ COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
 QUARTERLY_PRICE = Decimal("90.00")  # 3 Aylik
 ANNUAL_BUNDLE_PRICE = Decimal("245.00")  # Yillik
 
-# YENİ: Haber abonelik fiyatlari — tek paket: Ana+Yildiz
+# YENİ: Haber abonelik fiyatlari — tek paket: Ana+Yıldız
 NEWS_TIER_PRICES = {
     "ana_yildiz": {
         "price_tl_monthly": Decimal("75.00"),
         "price_tl_annual": Decimal("675.00"),  # 9 aylik fiyat (3 ay tasarruf)
         "annual_months": 9,
-        "label": "Ana Pazar + Yildiz Pazar Hisseleri (~350 hisse)",
-        "description": "Ana ve Yildiz Pazar'daki tum hisselerin haber takibi",
+        "label": "Ana Pazar + Yıldız Pazar Hisseleri (~350 hisse)",
+        "description": "Ana ve Yıldız Pazar'daki tüm hisselerin haber takibi",
     },
 }
-COMBINED_ANNUAL_DISCOUNT_PCT = 20  # Halka Arz + Ana+Yildiz kombine indirim
+COMBINED_ANNUAL_DISCOUNT_PCT = 20  # Halka Arz + Ana+Yıldız kombine indirim
 
 
 class CeilingTrackSubscription(Base):

@@ -226,6 +226,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v20 migration: ipos.katilim_endeksi (katilim endeksine uygunluk)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS katilim_endeksi VARCHAR(20)")
+            )
+        except Exception:
+            pass
+
         # v11 migration: telegram_news.message_date saat +3 hatasini duzelt
         # Eski kayitlar TZ_TR ile kaydedilmisti, UTC olmasi lazimdi.
         # Sadece 1 kez calisir: tz_fix_applied kolonu yoksa calistir, sonra kolonu ekle.

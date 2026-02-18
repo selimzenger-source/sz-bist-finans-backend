@@ -373,18 +373,18 @@ class InfoYatirimScraper:
 
         if "borsada" in raw_lower or "borsa" in raw_lower:
             return (
-                "Borsada satis yontemiyle katilim yapilir. Normal hisse senedi "
-                "alir gibi, araci kurum uygulamanizdan borsa kodunu (ornegin BESTE) "
-                "yazip 'AL' emri verirsiniz. Talep toplama tarihlerinde borsa "
-                "uzerinden islem yapilir. Herhangi bir araci kurumdan basvurabilirsiniz."
+                "Borsada satış yöntemiyle katılım yapılır. Normal hisse senedi "
+                "alır gibi, aracı kurum uygulamanızdan borsa kodunu (örneğin BESTE) "
+                "yazıp 'AL' emri verirsiniz. Talep toplama tarihlerinde borsa "
+                "üzerinden işlem yapılır. Herhangi bir aracı kurumdan başvurabilirsiniz."
             )
 
         if "talep" in raw_lower:
             return (
-                "Talep toplama yontemiyle katilim yapilir. Araci kurumunuzun "
-                "(banka veya yatirim kurulusu) uygulamasindan 'Halka Arz' "
-                "bolumune girin ve basvurunuzu yapin. Talep toplama tarihleri "
-                "arasinda basvuru yapmaniz gerekir."
+                "Talep toplama yöntemiyle katılım yapılır. Aracı kurumunuzun "
+                "(banka veya yatırım kuruluşu) uygulamasından 'Halka Arz' "
+                "bölümüne girin ve başvurunuzu yapın. Talep toplama tarihleri "
+                "arasında başvuru yapmanız gerekir."
             )
 
         return raw.strip()
@@ -432,7 +432,8 @@ async def scrape_infoyatirim():
                 for field in ["ticker", "ipo_price", "subscription_start",
                               "subscription_end", "trading_start", "total_lots",
                               "distribution_method", "distribution_description",
-                              "participation_method", "participation_description"]:
+                              "participation_method", "participation_description",
+                              "katilim_endeksi"]:
                     if ipo_data.get(field) is not None:
                         update_data[field] = ipo_data[field]
 

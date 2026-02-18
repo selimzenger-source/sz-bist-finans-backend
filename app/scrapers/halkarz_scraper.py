@@ -350,10 +350,13 @@ class HalkArzDetailParser:
                 self.data["estimated_lots_per_person"] = lot_estimates[key]
                 break
 
-        # Fonun Kullanim Yeri
+        # Fonun Kullanim Yeri — "%100 Yeni yatirim" veya "%100-85 Proje maliyetleri" formatlari
         fund_usage = []
-        for m in re.finditer(r"-\s*%(\d+)\s+(.+?)(?:\n|$)", body_text):
-            fund_usage.append(f"%{m.group(1)} {m.group(2).strip()}")
+        for m in re.finditer(r"-\s*%([\d\-–]+)\s+(.+?)(?:\n|$)", body_text):
+            pct_part = m.group(1).strip()
+            desc_part = m.group(2).strip().rstrip(".")
+            if desc_part and len(desc_part) > 2:
+                fund_usage.append(f"%{pct_part} {desc_part}")
         if fund_usage:
             self.data["fund_usage"] = json.dumps(fund_usage, ensure_ascii=False)
 
@@ -835,7 +838,7 @@ async def scrape_halkarz():
                     # Finansal veriler (revenue, gross_profit) kasitli olarak atlanıyor.
                     "fund_usage": "fund_usage",
                     "company_description": "company_description",
-                    "katilim_endeksi": None,  # DB'de yok, logla
+                    "katilim_endeksi": "katilim_endeksi",
                 }
 
                 for scrape_key, db_field in field_mapping.items():

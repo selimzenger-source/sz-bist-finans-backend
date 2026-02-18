@@ -700,6 +700,13 @@ async def _check_spk_bulletins_inner():
                     except Exception as _tw_err:
                         logger.warning("SPK toplu tweet hatasi: %s", _tw_err)
 
+                    # Yeni IPO tespit edildi — scraper'lari hizlandir (12 saat, 15dk)
+                    try:
+                        from app.scheduler import activate_scraper_boost
+                        await activate_scraper_boost()
+                    except Exception as _boost_err:
+                        logger.warning("Scraper boost aktivasyon hatasi: %s", _boost_err)
+
                 if highest_no is None or is_newer(bno, highest_no):
                     highest_no = bno
 

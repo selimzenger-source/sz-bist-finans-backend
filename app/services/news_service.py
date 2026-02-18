@@ -187,7 +187,7 @@ POSITIVE_KEYWORDS: list[str] = [
     "yazilim sozlesmesi",
     "teknoloji ortakligi",
     "dijital donusum",
-    "yeni urun lansmanı",
+    "yeni ürün lansmanı",
     "platform devreye",
     "mobil uygulama",
     "e-ticaret",
