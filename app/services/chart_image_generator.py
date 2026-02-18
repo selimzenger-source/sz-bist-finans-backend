@@ -1029,49 +1029,38 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             y += 18
             _draw_centered(draw, mid_x, y, f"{open_price:.2f} TL",
                            font_value_lg, price_color)
-            y += 28
+            y += 30
 
-            # ─ Dunku Kapanis + Halka Arz Fiyati (yan yana) ─
+            # ─ Acilis % Fark (buyuk, renkli) ─
+            _draw_centered(draw, mid_x, y, "Açılış % Fark", font_label, GRAY)
+            y += 18
+            pct_text = f"%{daily_pct:+.1f}"
+            _draw_centered(draw, mid_x, y, pct_text, font_value_lg, price_color)
+            y += 32
+
+            # ─ Lot bilgileri ─
+            _alis = alis_lot or 0
+            _satis = satis_lot or 0
             left_mid = cx + card_w // 4
             right_mid = cx + 3 * card_w // 4
 
-            _draw_centered(draw, left_mid, y, "Dünkü Kapanış", font_small, (100, 100, 120))
-            _draw_centered(draw, right_mid, y, "Halka Arz Fiyatı", font_small, (100, 100, 120))
-            y += 15
-            _draw_centered(draw, left_mid, y, f"{prev_close:.2f}", font_value, LIGHT_BLUE)
-            _draw_centered(draw, right_mid, y, f"{ipo_price:.2f}", font_value, CYAN)
-            y += 24
-
-            # ─ Gunluk % Degisim (buyuk) ─
-            pct_text = f"%{daily_pct:+.1f}"
-            _draw_centered(draw, mid_x, y, pct_text, font_value_lg, price_color)
-            y += 28
-
-            # ─ Lot bilgileri ─
-            # Satis 0 ise tavanda bekliyor anlamina gelir
-            _alis = alis_lot or 0
-            _satis = satis_lot or 0
-
             if durum == "tavan" or (_satis == 0 and _alis > 0):
-                lot_text = f"Alış Bekleyen: {_format_lot(_alis)} lot"
-                _draw_centered(draw, mid_x, y, lot_text, font_lot, GREEN)
+                _draw_centered(draw, mid_x, y, "Tavanda Alış Bekleyen", font_small, (100, 100, 120))
+                y += 16
+                _draw_centered(draw, mid_x, y, f"{_format_lot(_alis)} lot",
+                               font_value, GREEN)
             elif durum == "taban" or (_alis == 0 and _satis > 0):
-                lot_text = f"Satış Bekleyen: {_format_lot(_satis)} lot"
-                _draw_centered(draw, mid_x, y, lot_text, font_lot, RED)
+                _draw_centered(draw, mid_x, y, "Tabanda Satış Bekleyen", font_small, (100, 100, 120))
+                y += 16
+                _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
+                               font_value, RED)
             else:
-                # Normal islem — Alış Kademesi / Satış Kademesi
+                _draw_centered(draw, mid_x, y, "Normal İşlem Kademesi", font_small, (100, 100, 120))
+                y += 16
                 a_text = f"Alış: {_format_lot(_alis)}"
                 s_text = f"Satış: {_format_lot(_satis)}"
                 _draw_centered(draw, left_mid, y, a_text, font_lot, GREEN)
                 _draw_centered(draw, right_mid, y, s_text, font_lot, RED)
-            y += 18
-
-            # ─ Tavan/Taban/Normal gecmis ─
-            c_d = stock.get("ceiling_days", 0)
-            f_d = stock.get("floor_days", 0)
-            n_d = stock.get("normal_days", 0)
-            hist_text = f"T:{c_d}  Tb:{f_d}  N:{n_d}"
-            _draw_centered(draw, mid_x, y, hist_text, font_small, (80, 80, 100))
 
         # ── Footer ────────────────────────────────
         footer_y = total_h - footer_h
@@ -1079,15 +1068,30 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         draw.line([(padding, footer_y), (width - padding, footer_y)],
                   fill=DIVIDER, width=2)
 
-        # szalgo.net.tr (orta)
+        # Logo (sol — 30x30 boyutunda)
+        logo_path = os.path.join(_img_dir, "logo.jpg")
+        logo_x = padding
+        try:
+            if os.path.exists(logo_path):
+                logo_raw = Image.open(logo_path).convert("RGBA")
+                logo_size = 30
+                logo_resized = logo_raw.resize((logo_size, logo_size), Image.LANCZOS)
+                logo_y_pos = footer_y + (footer_h - logo_size) // 2
+                img.paste(logo_resized.convert("RGB"), (logo_x, logo_y_pos))
+                logo_x += logo_size + 8  # logo'dan sonra bosluk
+        except Exception:
+            pass
+
+        # szalgo.net.tr (logo'nun yaninda)
         site_text = "szalgo.net.tr"
-        sb = font_footer.getbbox(site_text)
-        sw = sb[2] - sb[0]
-        draw.text(((width - sw) // 2, footer_y + 12), site_text,
+        draw.text((logo_x, footer_y + 12), site_text,
                   fill=ORANGE, font=font_footer)
 
-        # Disclaimer (sol)
-        draw.text((padding, footer_y + 14), "YZ destekli bildirimdir",
+        # Disclaimer (sag)
+        disc_text = "YZ destekli bildirimdir"
+        db = font_footer_sm.getbbox(disc_text)
+        dw = db[2] - db[0]
+        draw.text((width - padding - dw, footer_y + 14), disc_text,
                   fill=GRAY, font=font_footer_sm)
 
         # Watermark
