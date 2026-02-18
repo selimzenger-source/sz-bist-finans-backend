@@ -837,8 +837,90 @@ async def cleanup_spk_duplicates(
 # SCRAPER TETIKLEME
 # ============================================================
 
+async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
+    """Scraper sonrasi aktif IPO'larin eksik/dolu alan raporunu olusturur.
+
+    Hem dashboard success mesaji hem Telegram icin kullanilir.
+    """
+    result = await db.execute(
+        select(IPO).where(
+            and_(
+                IPO.archived == False,
+                IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"]),
+            )
+        )
+    )
+    active_ipos = list(result.scalars().all())
+
+    if not active_ipos:
+        return f"{source}: Aktif IPO yok"
+
+    # Onemli alanlar — eksik olanlari raporla
+    key_fields = {
+        "ipo_price": "Fiyat",
+        "subscription_start": "Basvuru Baslangic",
+        "subscription_end": "Basvuru Bitis",
+        "subscription_hours": "Basvuru Saatleri",
+        "trading_start": "Islem Baslangic",
+        "total_lots": "Toplam Lot",
+        "lead_broker": "Araci Kurum",
+        "distribution_method": "Dagitim Yontemi",
+    }
+
+    lines = []
+    telegram_lines = []
+    for ipo in active_ipos:
+        ticker = ipo.ticker or "?"
+        name = ipo.company_name[:25] if ipo.company_name else "?"
+
+        filled = []
+        missing = []
+        for field, label in key_fields.items():
+            val = getattr(ipo, field, None)
+            if val is not None and (not isinstance(val, str) or val.strip()):
+                filled.append(label)
+            else:
+                missing.append(label)
+
+        status_emoji = "✅" if not missing else "⚠️"
+        # Dashboard icin kisa ozet
+        if missing:
+            lines.append(f"{status_emoji} {ticker}: eksik → {', '.join(missing)}")
+        else:
+            lines.append(f"{status_emoji} {ticker}: tam")
+
+        # Telegram icin detayli
+        tg_line = f"{status_emoji} <b>{ticker}</b> ({name})"
+        if missing:
+            tg_line += f"\n   Eksik: {', '.join(missing)}"
+        if filled:
+            tg_line += f"\n   Dolu: {', '.join(filled)}"
+        telegram_lines.append(tg_line)
+
+    # Dashboard mesaji (URL-safe, kisa)
+    summary = f"{source} OK! {len(active_ipos)} IPO tarandi. " + " | ".join(lines)
+
+    # Telegram rapor
+    try:
+        from app.services.admin_telegram import send_admin_message
+        tg_msg = (
+            f"🔄 <b>{source} — Manuel Tetikleme</b>\n\n"
+            f"Taranan IPO: {len(active_ipos)}\n\n"
+            + "\n\n".join(telegram_lines)
+        )
+        import asyncio
+        asyncio.ensure_future(send_admin_message(tg_msg))
+    except Exception as tg_err:
+        logger.warning("Scraper Telegram rapor hatasi: %s", tg_err)
+
+    return summary
+
+
 @router.post("/run-scraper/halkarz")
-async def run_halkarz_scraper(request: Request):
+async def run_halkarz_scraper(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """HalkArz scraper'ini admin panelden manuel tetikle."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
@@ -846,14 +928,24 @@ async def run_halkarz_scraper(request: Request):
     try:
         from app.scrapers.halkarz_scraper import scrape_halkarz
         await scrape_halkarz()
-        return RedirectResponse(url="/admin/?success=HalkArz scraper basariyla calisti!", status_code=303)
+
+        # Rapor olustur
+        summary = await _scraper_ipo_report(db, "HalkArz")
+        # URL icin cok uzunsa kirp
+        if len(summary) > 500:
+            summary = summary[:497] + "..."
+
+        return RedirectResponse(url=f"/admin/?success={summary}", status_code=303)
     except Exception as e:
         logger.error(f"Admin: HalkArz scraper tetikleme hatasi — {e}")
-        return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
+        return RedirectResponse(url=f"/admin/?error=HalkArz hatasi: {str(e)[:100]}", status_code=303)
 
 
 @router.post("/run-scraper/gedik")
-async def run_gedik_scraper(request: Request):
+async def run_gedik_scraper(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     """Gedik scraper'ini admin panelden manuel tetikle."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
@@ -861,10 +953,16 @@ async def run_gedik_scraper(request: Request):
     try:
         from app.scrapers.gedik_scraper import scrape_gedik
         await scrape_gedik()
-        return RedirectResponse(url="/admin/?success=Gedik scraper basariyla calisti!", status_code=303)
+
+        # Rapor olustur
+        summary = await _scraper_ipo_report(db, "Gedik")
+        if len(summary) > 500:
+            summary = summary[:497] + "..."
+
+        return RedirectResponse(url=f"/admin/?success={summary}", status_code=303)
     except Exception as e:
         logger.error(f"Admin: Gedik scraper tetikleme hatasi — {e}")
-        return RedirectResponse(url=f"/admin/?success=Scraper hatasi: {str(e)[:80]}", status_code=303)
+        return RedirectResponse(url=f"/admin/?error=Gedik hatasi: {str(e)[:100]}", status_code=303)
 
 
 # -------------------------------------------------------
