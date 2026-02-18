@@ -547,13 +547,24 @@ async def delete_ipo(
 
     # Kara listeye ekle — scraper ayni sirketi tekrar eklemesin
     from app.models import DeletedIPO
+    from app.models.spk_application import SPKApplication
     deleted_record = DeletedIPO(
         company_name=ipo.company_name,
         ticker=ipo.ticker,
     )
     db.add(deleted_record)
 
-    logger.info(f"Admin: IPO siliniyor — {ipo.company_name} (ID: {ipo.id}) → kara listeye eklendi")
+    # SPK tablosundaki kaydı da "deleted" yap — scraper tekrar pending yapmasın
+    spk_result = await db.execute(
+        select(SPKApplication).where(
+            SPKApplication.company_name == ipo.company_name
+        )
+    )
+    spk_app = spk_result.scalar_one_or_none()
+    if spk_app:
+        spk_app.status = "deleted"
+
+    logger.info(f"Admin: IPO siliniyor — {ipo.company_name} (ID: {ipo.id}) → kara listeye + SPK deleted")
     await db.delete(ipo)
     await db.flush()
 
@@ -749,9 +760,10 @@ async def delete_spk_application(
         return RedirectResponse(url="/admin/spk?error=not_found", status_code=303)
 
     company_name = app.company_name
-    await db.delete(app)
+    # Status'u "deleted" yap — DB'den silme, yoksa scraper tekrar ekler
+    app.status = "deleted"
     await db.flush()
-    logger.info(f"Admin: SPK basvuru silindi — {company_name} (id={app_id})")
+    logger.info(f"Admin: SPK basvuru deleted yapildi — {company_name} (id={app_id})")
 
     return RedirectResponse(url="/admin/spk?success=deleted", status_code=303)
 
