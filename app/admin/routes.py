@@ -1060,7 +1060,12 @@ async def broadcast_send(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Broadcast bildirim gonder — background task olarak."""
+    """Broadcast bildirim gonder — SENKRON (request icinde).
+
+    Background task sorunlari (event loop blocking, task GC, session)
+    yuzunden dogrudan request icinde gonderim yapar.
+    18 kullanici icin ~40 saniye surer (2sn throttle).
+    """
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
@@ -1098,24 +1103,119 @@ async def broadcast_send(
             status_code=303,
         )
 
-    # Tahmini alici sayisi (admin bilgisi icin)
-    estimated = await count_recipients(db, audience)
-
     # Cooldown baslat
     mark_broadcast_sent()
 
-    # Arka plan gorevi baslat
+    # --- SENKRON GONDERIM (request icinde) ---
     import asyncio
-    from app.services.broadcast import broadcast_background_task
-    asyncio.create_task(
-        broadcast_background_task(title, body, audience, deep_link_target)
-    )
+    import functools
 
-    audience_labels = {"all": "tum kullanicilara", "paid": "ucretli abonelere", "free": "ucretsiz kullanicilara"}
-    return RedirectResponse(
-        url=f"/admin/broadcast?success=Broadcast baslatildi! Tahmini {estimated} {audience_labels.get(audience, 'kullaniciya')} gonderiliyor...",
-        status_code=303,
-    )
+    from app.services.notification import _init_firebase, is_firebase_initialized
+    _init_firebase()
+
+    if not is_firebase_initialized():
+        return RedirectResponse(
+            url="/admin/broadcast?error=Firebase baslatılamadı — bildirim gonderilemez",
+            status_code=303,
+        )
+
+    from app.services.broadcast import _get_target_users
+    users = await _get_target_users(db, audience)
+    total = len(users)
+
+    if total == 0:
+        return RedirectResponse(
+            url="/admin/broadcast?error=Hedef kitle bos — bildirim gonderilecek kullanici yok",
+            status_code=303,
+        )
+
+    from firebase_admin import messaging
+
+    safe_data = {
+        "type": "announcement",
+        "target": str(deep_link_target),
+    }
+
+    sent = 0
+    failed = 0
+    error_details: list[str] = []
+
+    for user in users:
+        try:
+            token = (user.fcm_token or "").strip()
+            if not token:
+                failed += 1
+                error_details.append(f"User {user.id}: token bos")
+                continue
+
+            message = messaging.Message(
+                notification=messaging.Notification(
+                    title=title,
+                    body=body,
+                ),
+                data=safe_data,
+                token=token,
+                android=messaging.AndroidConfig(
+                    priority="high",
+                    notification=messaging.AndroidNotification(
+                        sound="default",
+                        channel_id="default_v2",
+                        default_vibrate_timings=True,
+                        notification_priority="PRIORITY_MAX",
+                        visibility="PUBLIC",
+                    ),
+                ),
+                apns=messaging.APNSConfig(
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            sound="default",
+                            badge=1,
+                        ),
+                    ),
+                ),
+            )
+
+            # Thread pool'da calistir — async event loop'u bloke etmesin
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, functools.partial(messaging.send, message)
+            )
+            sent += 1
+            logger.info("Broadcast: User %d OK — %s", user.id, response)
+
+            # Throttle
+            await asyncio.sleep(1)
+
+        except Exception as e:
+            error_name = type(e).__name__
+            error_msg = str(e)[:120]
+            failed += 1
+            error_details.append(f"User {user.id} ({error_name}): {error_msg}")
+            logger.warning(
+                "Broadcast: User %d FAILED (%s): %s",
+                user.id, error_name, error_msg,
+            )
+
+    # Telegram rapor
+    from app.services.broadcast import _send_telegram_report
+    try:
+        await _send_telegram_report(
+            title, audience, deep_link_target, total, sent, failed, error_details,
+        )
+    except Exception:
+        pass
+
+    if sent > 0:
+        return RedirectResponse(
+            url=f"/admin/broadcast?success=Broadcast tamamlandi! {sent}/{total} basarili, {failed} basarisiz.",
+            status_code=303,
+        )
+    else:
+        err_summary = "; ".join(error_details[:3]) if error_details else "Bilinmeyen hata"
+        return RedirectResponse(
+            url=f"/admin/broadcast?error=Broadcast basarisiz: 0/{total}. Hata: {err_summary[:200]}",
+            status_code=303,
+        )
 
 
 # -------------------------------------------------------
