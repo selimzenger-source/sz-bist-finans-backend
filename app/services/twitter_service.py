@@ -382,6 +382,7 @@ _DEFAULTS = {
     "T13_BASLIK": "\U0001F4CB Halka Arz Hakkında",
     "T14_ACIKLAMA": "Güncel listeyi uygulamamızdan takip edebilirsiniz.",
     "T15_BASLIK": "📊 Öğle Arası",
+    "T16_BASLIK": "📊 Yeni Halka Arzlar — Açılış Bilgileri",
     "LOT_DISCLAIMER": "tahmini değerdir",
 }
 
@@ -1370,4 +1371,80 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
         return result
     except Exception as e:
         logger.error(f"tweet_market_snapshot hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 16. YENI HALKA ARZLAR ACILIS BILGILERI (Excel sync sonrasi)
+# ================================================================
+def tweet_opening_summary(stocks: list) -> bool:
+    """Ilk 5 gun icindeki hisselerin acilis bilgilerini tweet atar.
+
+    Excel sync bittiginde /admin/trigger-opening-tweet endpoint'i calistirir.
+
+    Args:
+        stocks: [
+            {
+                "ticker": "ASELS",
+                "company_name": "Aselsan A.Ş.",
+                "trading_day": 3,
+                "ipo_price": 38.00,
+                "open_price": 42.50,
+                "pct_change": +11.8,
+                "durum": "tavan",
+                "ceiling_days": 2,
+                "floor_days": 0,
+                "normal_days": 1,
+            }
+        ]
+    """
+    try:
+        if not stocks:
+            logger.info("tweet_opening_summary: Ilk 5 gun icinde hisse yok, tweet atilmadi.")
+            return False
+
+        # Gorsel olustur
+        from app.services.chart_image_generator import generate_opening_summary_image
+        image_path = generate_opening_summary_image(stocks)
+
+        # Tweet metni
+        lines = []
+        for s in stocks:
+            pct = float(s.get("pct_change", 0))
+            emoji = "\U0001F7E2" if pct >= 0 else "\U0001F534"
+            durum = s.get("durum", "")
+            durum_tag = ""
+            if durum == "tavan":
+                durum_tag = " (Tavan)"
+            elif durum == "taban":
+                durum_tag = " (Taban)"
+            lines.append(
+                f"{emoji} #{s['ticker']} {s['trading_day']}. Gün | "
+                f"Açılış: {float(s['open_price']):.2f} TL | "
+                f"%{pct:+.1f}{durum_tag}"
+            )
+
+        text = (
+            f"{_get_setting('T16_BASLIK')}\n\n"
+            + "\n".join(lines) + "\n\n"
+            f"📲 {APP_LINK}\n"
+            f"#HalkaArz #BIST #Borsa"
+        )
+
+        # Kuyruk modunda temp dosyayi silme
+        from app.config import get_settings
+        auto_send = get_settings().TWITTER_AUTO_SEND
+
+        result = _safe_tweet_with_media(text, image_path) if image_path else _safe_tweet(text)
+
+        # Temp dosya temizligi
+        if auto_send and image_path:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
+
+        return result
+    except Exception as e:
+        logger.error(f"tweet_opening_summary hatasi: {e}")
         return False

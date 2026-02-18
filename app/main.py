@@ -1869,6 +1869,128 @@ async def bulk_ceiling_track(
 
 
 # -------------------------------------------------------
+# T16 — Yeni Halka Arzlar Acilis Bilgileri Tweet Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-opening-tweet")
+@limiter.limit("5/minute")
+async def trigger_opening_tweet(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Excel sync sonrasi cagirilir — ilk 5 gun icindeki hisselerin
+    acilis bilgilerini tweet + gorsel olarak atar.
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from datetime import date as date_type
+    from app.models.ipo import IPO, IPOCeilingTrack
+
+    today = date_type.today()
+
+    # trading_day <= 5 olan aktif hisseleri bul
+    result = await db.execute(
+        select(IPO).where(
+            and_(
+                IPO.status == "trading",
+                IPO.archived == False,
+                IPO.ticker.isnot(None),
+                IPO.ceiling_tracking_active == True,
+            )
+        )
+    )
+    trading_ipos = list(result.scalars().all())
+
+    stocks = []
+    for ipo in trading_ipos:
+        # Bu hissenin tüm ceiling track verisini al
+        tracks_result = await db.execute(
+            select(IPOCeilingTrack).where(
+                IPOCeilingTrack.ipo_id == ipo.id
+            ).order_by(IPOCeilingTrack.trading_day.asc())
+        )
+        tracks = list(tracks_result.scalars().all())
+
+        if not tracks:
+            continue
+
+        # Son trading_day (en son giren veri)
+        latest = tracks[-1]
+        current_day = latest.trading_day
+
+        # Sadece ilk 5 gun icindekiler
+        if current_day > 5:
+            continue
+
+        # Bugünün verisini bul (open_price olan)
+        today_track = None
+        for t in tracks:
+            if t.trade_date == today:
+                today_track = t
+                break
+
+        if not today_track or not today_track.open_price:
+            continue
+
+        # Tavan / Taban / Normal sayıları (tüm günlerden)
+        ceiling_days = sum(1 for t in tracks if t.hit_ceiling)
+        floor_days = sum(1 for t in tracks if t.hit_floor)
+        normal_days = len(tracks) - ceiling_days - floor_days
+
+        # Açılış % = (open_price - ipo_price) / ipo_price * 100
+        ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+        open_price = float(today_track.open_price)
+        pct_change = ((open_price - ipo_price) / ipo_price * 100) if ipo_price > 0 else 0
+
+        # Durum (bugünün açılışına göre basit eşik)
+        if pct_change >= 9.5:
+            durum = "tavan"
+        elif pct_change <= -9.5:
+            durum = "taban"
+        elif pct_change > 0:
+            durum = "alici_kapatti"
+        elif pct_change < 0:
+            durum = "satici_kapatti"
+        else:
+            durum = "not_kapatti"
+
+        stocks.append({
+            "ticker": ipo.ticker,
+            "company_name": ipo.company_name,
+            "trading_day": current_day,
+            "ipo_price": ipo_price,
+            "open_price": open_price,
+            "pct_change": round(pct_change, 2),
+            "durum": durum,
+            "ceiling_days": ceiling_days,
+            "floor_days": floor_days,
+            "normal_days": normal_days,
+        })
+
+    if not stocks:
+        return {"status": "ok", "message": "Ilk 5 gun icinde hisse yok, tweet atilmadi.", "stocks": []}
+
+    # Tweet at
+    from app.services.twitter_service import tweet_opening_summary
+    from app.services.admin_telegram import notify_tweet_sent
+
+    tickers_str = ", ".join(s["ticker"] for s in stocks)
+    tw_ok = tweet_opening_summary(stocks)
+    await notify_tweet_sent("acilis_ozet", tickers_str, tw_ok, f"{len(stocks)} hisse")
+
+    return {
+        "status": "ok",
+        "tweet_sent": tw_ok,
+        "stocks_count": len(stocks),
+        "stocks": stocks,
+    }
+
+
+# -------------------------------------------------------
 # BIST 30 SEED — adsiz.txt'den son 10 BIST 30 mesaji
 # -------------------------------------------------------
 

@@ -1189,6 +1189,8 @@ _TWEET_TEMPLATES = [
     ("T14_ACIKLAMA", "Açıklama", "Güncel listeyi uygulamamızdan takip edebilirsiniz.", "14", "SPK Bekleyenler (Aylık)"),
     # 15. Öğle Arası Market Snapshot
     ("T15_BASLIK", "Başlık", "\U0001F4CA Öğle Arası", "15", "Öğle Arası Market Snapshot"),
+    # 16. Yeni Halka Arzlar Açılış Bilgileri
+    ("T16_BASLIK", "Başlık", "\U0001F4CA Yeni Halka Arzlar — Açılış Bilgileri", "16", "Açılış Bilgileri (İlk 5 Gün)"),
 ]
 
 # Her tweet grubunun örnek formatı (★ = admin'den düzenlenebilir)
@@ -1322,6 +1324,16 @@ _TWEET_EXAMPLES = {
         "Tavan: {tavan} | Taban: {taban}\n\n"
         "📲 ★{APP_LINK}\n"
         "#HalkaArz #BIST #Borsa"
+    ),
+    "16": (
+        "★{T16_BASLIK}\n\n"
+        "🟢 #AKHAN 2. Gün | Açılış: 28.86 TL | %+9.5 (Tavan)\n"
+        "🟢 #NETCD 3. Gün | Açılış: 108.50 TL | %+5.2\n"
+        "🔴 #BESTE 1. Gün | Açılış: 25.80 TL | %-0.8\n\n"
+        "📲 ★{APP_LINK}\n"
+        "#HalkaArz #BIST #Borsa\n\n"
+        "📷 Yatay sütunlu görsel otomatik eklenir\n"
+        "(HA fiyat, Açılış, %, Durum, T/Tb/N istatistikleri)"
     ),
 }
 

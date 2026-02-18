@@ -802,3 +802,222 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
     except Exception as e:
         logger.error("Market snapshot gorsel hatasi: %s", e)
         return None
+
+
+# ══════════════════════════════════════════════════════════════
+# T16 — Yeni Halka Arzlar Ilk 5 Gun Acilis Bilgileri (09:57)
+# ══════════════════════════════════════════════════════════════
+
+# Ek renkler
+LIGHT_BLUE = (96, 165, 250)    # #60a5fa
+DARK_CARD_BG = (20, 20, 40)   # koyu kart ici
+
+
+def generate_opening_summary_image(stocks: list) -> Optional[str]:
+    """Ilk 5 gun icindeki hisselerin acilis bilgilerini sutunlu yatay gorsel olarak olusturur.
+
+    Args:
+        stocks: Her hisse icin dict:
+            [
+                {
+                    "ticker": "ASELS",
+                    "company_name": "Aselsan A.Ş.",
+                    "trading_day": 3,
+                    "ipo_price": 38.00,
+                    "open_price": 42.50,
+                    "pct_change": +11.8,         # acilis vs HA fiyat %
+                    "durum": "tavan",             # bugunun acilis durumu
+                    "ceiling_days": 2,
+                    "floor_days": 0,
+                    "normal_days": 1,
+                }
+            ]
+
+    Returns:
+        PNG dosya yolu veya None
+    """
+    try:
+        if not stocks:
+            return None
+
+        num_cols = len(stocks)
+        if num_cols > 8:
+            stocks = stocks[:8]  # max 8 sutun
+            num_cols = 8
+
+        # ── Boyutlar ────────────────────────────
+        col_width = 200
+        min_width = 1200
+        width = max(min_width, num_cols * col_width + 80)
+        padding = 40
+
+        header_h = 90
+        col_header_h = 50
+        data_h = 220
+        footer_h = 50
+        total_h = header_h + col_header_h + data_h + footer_h + 20
+
+        # ── Fontlar ─────────────────────────────
+        font_title = _load_font(22, bold=True)
+        font_sub = _load_font(14)
+        font_ticker = _load_font(20, bold=True)
+        font_day = _load_font(13)
+        font_data = _load_font(15, bold=True)
+        font_label = _load_font(11)
+        font_small = _load_font(12)
+        font_footer = _load_font(14, bold=True)
+
+        # ── Canvas ──────────────────────────────
+        img = Image.new("RGB", (width, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        # ── Header ──────────────────────────────
+        draw.rectangle([(0, 0), (width, header_h)], fill=HEADER_BG)
+
+        title_text = "📊  YENİ HALKA ARZLAR — AÇILIŞ BİLGİLERİ"
+        draw.text((padding, 18), title_text, fill=GOLD, font=font_title)
+
+        date_text = datetime.now().strftime("%d.%m.%Y")
+        draw.text((padding, 52), date_text, fill=GRAY, font=font_sub)
+
+        count_text = f"{num_cols} Hisse  |  İlk 5 İşlem Günü"
+        ct_bbox = font_sub.getbbox(count_text)
+        ct_w = ct_bbox[2] - ct_bbox[0]
+        draw.text((width - padding - ct_w, 52), count_text, fill=GRAY, font=font_sub)
+
+        # ── Sütun hesaplama ─────────────────────
+        usable_w = width - 2 * padding
+        actual_col_w = usable_w // num_cols
+        col_start_x = padding
+
+        # ── Sütun Başlıkları ────────────────────
+        sh_y = header_h + 5
+        for i, stock in enumerate(stocks):
+            cx = col_start_x + i * actual_col_w
+            mid_x = cx + actual_col_w // 2
+
+            # Ticker
+            ticker_text = f"#{stock['ticker']}"
+            tb = font_ticker.getbbox(ticker_text)
+            tw = tb[2] - tb[0]
+            draw.text((mid_x - tw // 2, sh_y + 5), ticker_text, fill=WHITE, font=font_ticker)
+
+            # Gün
+            day_text = f"{stock['trading_day']}. Gün"
+            db = font_day.getbbox(day_text)
+            dw = db[2] - db[0]
+            draw.text((mid_x - dw // 2, sh_y + 30), day_text, fill=GRAY, font=font_day)
+
+            # Sütun ayırıcı (son hariç)
+            if i < num_cols - 1:
+                sep_x = cx + actual_col_w
+                draw.line([(sep_x, sh_y), (sep_x, sh_y + col_header_h + data_h)],
+                          fill=DIVIDER, width=1)
+
+        # Yatay ayırıcı
+        divider_y = sh_y + col_header_h
+        draw.line([(padding, divider_y), (width - padding, divider_y)],
+                  fill=DIVIDER, width=2)
+
+        # ── Veri Satırları ──────────────────────
+        data_y = divider_y + 10
+
+        for i, stock in enumerate(stocks):
+            cx = col_start_x + i * actual_col_w
+            mid_x = cx + actual_col_w // 2
+
+            pct = float(stock.get("pct_change", 0))
+            durum = stock.get("durum", "")
+
+            # HA Fiyat
+            ipo_price = float(stock.get("ipo_price", 0))
+            _draw_centered(draw, mid_x, data_y, "HA Fiyat", font_label, GRAY)
+            _draw_centered(draw, mid_x, data_y + 14, f"{ipo_price:.2f} TL",
+                           font_data, LIGHT_BLUE)
+
+            # Açılış Fiyat
+            open_price = float(stock.get("open_price", 0))
+            _draw_centered(draw, mid_x, data_y + 42, "Açılış", font_label, GRAY)
+            price_color = GREEN if pct >= 0 else RED
+            _draw_centered(draw, mid_x, data_y + 56, f"{open_price:.2f} TL",
+                           font_data, price_color)
+
+            # Yüzde Değişim
+            pct_text = f"%{pct:+.1f}"
+            _draw_centered(draw, mid_x, data_y + 84, pct_text, font_data, price_color)
+
+            # Durum etiketi
+            durum_text, durum_color = _durum_label(durum)
+            _draw_centered(draw, mid_x, data_y + 108, durum_text, font_small, durum_color)
+
+            # Ayırıcı çizgi
+            sep_y2 = data_y + 130
+            draw.line([(cx + 10, sep_y2), (cx + actual_col_w - 10, sep_y2)],
+                      fill=DIVIDER, width=1)
+
+            # Tavan / Taban / Normal (önceki günlerden)
+            ceiling_d = stock.get("ceiling_days", 0)
+            floor_d = stock.get("floor_days", 0)
+            normal_d = stock.get("normal_days", 0)
+
+            stats_y = sep_y2 + 8
+            _draw_centered(draw, mid_x, stats_y,
+                           f"T:{ceiling_d}  Tb:{floor_d}  N:{normal_d}",
+                           font_small, GRAY)
+
+            # Küçük açıklama
+            _draw_centered(draw, mid_x, stats_y + 18,
+                           "Tavan|Taban|Normal",
+                           font_label, (80, 80, 100))
+
+        # ── Footer ──────────────────────────────
+        footer_y = total_h - footer_h
+        draw.line([(padding, footer_y - 5), (width - padding, footer_y - 5)],
+                  fill=DIVIDER, width=2)
+        draw.rectangle([(0, footer_y), (width, total_h)], fill=HEADER_BG)
+
+        # Disclaimer sol
+        disc_text = "⚠ YZ destekli bildirimdir"
+        draw.text((padding, footer_y + 15), disc_text, fill=GRAY, font=font_small)
+
+        # szalgo.net.tr orta
+        site_text = "szalgo.net.tr"
+        sb = font_footer.getbbox(site_text)
+        sw = sb[2] - sb[0]
+        draw.text(((width - sw) // 2, footer_y + 13), site_text,
+                  fill=ORANGE, font=font_footer)
+
+        # Watermark
+        _draw_bg_watermark(img, width, total_h)
+
+        # Kaydet
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"opening_summary_{ts}.png"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        logger.info("Opening summary gorsel olusturuldu: %s (%d hisse)", filepath, num_cols)
+        return filepath
+
+    except Exception as e:
+        logger.error("Opening summary gorsel hatasi: %s", e)
+        return None
+
+
+def _draw_centered(draw, center_x: int, y: int, text: str,
+                   font, color: tuple):
+    """Metni verilen center_x'e göre ortalar."""
+    bbox = font.getbbox(text)
+    tw = bbox[2] - bbox[0]
+    draw.text((center_x - tw // 2, y), text, fill=color, font=font)
+
+
+def _durum_label(durum: str) -> tuple:
+    """Durum kodundan okunabilir etiket + renk doner."""
+    mapping = {
+        "tavan": ("🟢 TAVAN", GREEN),
+        "alici_kapatti": ("🟢 ALICI", GREEN),
+        "not_kapatti": ("🟡 NÖTR", GOLD),
+        "satici_kapatti": ("🔴 SATICI", RED),
+        "taban": ("🔴 TABAN", RED),
+    }
+    return mapping.get(durum, ("—", GRAY))
