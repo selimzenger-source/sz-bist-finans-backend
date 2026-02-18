@@ -161,6 +161,7 @@ async def broadcast_background_task(
     sent = 0
     failed = 0
     total = 0
+    error_details: list[str] = []  # Hata detaylari — Telegram raporuna eklenir
 
     try:
         async with async_session() as db:
@@ -170,7 +171,7 @@ async def broadcast_background_task(
 
             if total == 0:
                 logger.info("Broadcast: Hedef kitle bos — hicbir bildirim gonderilmedi")
-                await _send_telegram_report(title, audience, deep_link_target, 0, 0, 0)
+                await _send_telegram_report(title, audience, deep_link_target, 0, 0, 0, [])
                 return
 
             # Firebase dogrudan kullan — NotificationService yerine
@@ -180,7 +181,10 @@ async def broadcast_background_task(
 
             if not is_firebase_initialized():
                 logger.error("Broadcast: Firebase baslatılamadı — iptal")
-                await _send_telegram_report(title, audience, deep_link_target, total, 0, total)
+                await _send_telegram_report(
+                    title, audience, deep_link_target, total, 0, total,
+                    ["Firebase baslatılamadı"],
+                )
                 return
 
             from firebase_admin import messaging
@@ -204,7 +208,14 @@ async def broadcast_background_task(
                             "Broadcast: User %d FCM token bos — atlaniyor", user.id
                         )
                         failed += 1
+                        error_details.append(f"User {user.id}: token bos")
                         continue
+
+                    # Token debug — ilk 30 karakteri logla
+                    logger.info(
+                        "Broadcast: User %d gonderiliyor (token: %s...%s, len=%d)",
+                        user.id, token[:15], token[-5:], len(token),
+                    )
 
                     message = messaging.Message(
                         notification=messaging.Notification(
@@ -245,10 +256,14 @@ async def broadcast_background_task(
 
                 except Exception as e:
                     error_name = type(e).__name__
+                    error_msg = str(e)[:120]
                     failed += 1
+                    error_details.append(
+                        f"User {user.id} ({error_name}): {error_msg}"
+                    )
                     logger.warning(
                         "Broadcast: User %d FAILED (%s): %s (token: %s...)",
-                        user.id, error_name, str(e)[:100], token[:20],
+                        user.id, error_name, error_msg, token[:20],
                     )
 
         logger.info(
@@ -258,9 +273,10 @@ async def broadcast_background_task(
 
     except Exception as e:
         logger.error("Broadcast background task hatasi: %s", e)
+        error_details.append(f"GENEL HATA: {type(e).__name__}: {e}")
 
-    # Telegram rapor
-    await _send_telegram_report(title, audience, deep_link_target, total, sent, failed)
+    # Telegram rapor — hata detaylari ile
+    await _send_telegram_report(title, audience, deep_link_target, total, sent, failed, error_details)
 
 
 async def _send_telegram_report(
@@ -270,8 +286,9 @@ async def _send_telegram_report(
     total: int,
     sent: int,
     failed: int,
+    error_details: list[str] | None = None,
 ):
-    """Broadcast sonucunu admin Telegram'a raporla."""
+    """Broadcast sonucunu admin Telegram'a raporla (hata detaylari dahil)."""
     audience_labels = {"all": "Tum Kullanicilar", "paid": "Ucretli Aboneler", "free": "Ucretsiz Kullanicilar"}
     target_labels = {
         "none": "Yok",
@@ -280,16 +297,27 @@ async def _send_telegram_report(
         "ayarlar": "Ayarlar",
     }
 
+    msg = (
+        f"📢 <b>Broadcast Gonderildi</b>\n\n"
+        f"<b>Baslik:</b> {title}\n"
+        f"<b>Hedef:</b> {audience_labels.get(audience, audience)}\n"
+        f"<b>Yonlendirme:</b> {target_labels.get(deep_link_target, deep_link_target)}\n"
+        f"<b>Toplam hedef:</b> {total}\n"
+        f"<b>Basarili:</b> {sent}\n"
+        f"<b>Basarisiz:</b> {failed}"
+    )
+
+    # Hata detaylari varsa ekle (ilk 5 hatayi goster — Telegram mesaj limiti)
+    if error_details:
+        shown = error_details[:5]
+        msg += "\n\n<b>Hata Detaylari:</b>\n"
+        for err in shown:
+            msg += f"• <code>{err[:150]}</code>\n"
+        if len(error_details) > 5:
+            msg += f"... ve {len(error_details) - 5} hata daha"
+
     try:
         from app.services.admin_telegram import send_admin_message
-        await send_admin_message(
-            f"📢 <b>Broadcast Gonderildi</b>\n\n"
-            f"<b>Baslik:</b> {title}\n"
-            f"<b>Hedef:</b> {audience_labels.get(audience, audience)}\n"
-            f"<b>Yonlendirme:</b> {target_labels.get(deep_link_target, deep_link_target)}\n"
-            f"<b>Toplam hedef:</b> {total}\n"
-            f"<b>Basarili:</b> {sent}\n"
-            f"<b>Basarisiz:</b> {failed}"
-        )
+        await send_admin_message(msg)
     except Exception as e:
         logger.warning("Broadcast Telegram rapor hatasi: %s", e)

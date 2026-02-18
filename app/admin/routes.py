@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, desc, func as sa_func
+from sqlalchemy import select, desc, and_, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1116,3 +1116,124 @@ async def broadcast_send(
         url=f"/admin/broadcast?success=Broadcast baslatildi! Tahmini {estimated} {audience_labels.get(audience, 'kullaniciya')} gonderiliyor...",
         status_code=303,
     )
+
+
+# -------------------------------------------------------
+# DEBUG: FCM Token Durumu
+# -------------------------------------------------------
+
+@router.get("/debug/tokens")
+async def debug_tokens(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicilarin FCM token durumlarini kontrol et (JSON)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.user import User
+
+    result = await db.execute(
+        select(User).where(
+            and_(
+                User.notifications_enabled == True,
+                User.deleted == False,
+            )
+        )
+    )
+    users = list(result.scalars().all())
+
+    user_data = []
+    for u in users:
+        fcm = (u.fcm_token or "").strip()
+        expo = (u.expo_push_token or "").strip()
+        user_data.append({
+            "id": u.id,
+            "device_id": u.device_id[:12] + "..." if u.device_id else None,
+            "platform": u.platform,
+            "fcm_token": f"{fcm[:20]}...{fcm[-8:]}" if len(fcm) > 30 else fcm,
+            "fcm_len": len(fcm),
+            "fcm_prefix": fcm[:20] if fcm else None,
+            "expo_token": expo[:30] + "..." if len(expo) > 30 else expo,
+            "expo_len": len(expo),
+            "notifications_enabled": u.notifications_enabled,
+            "app_version": u.app_version,
+        })
+
+    from starlette.responses import JSONResponse
+    return JSONResponse({
+        "total_users": len(users),
+        "with_fcm": sum(1 for u in user_data if u["fcm_len"] > 0),
+        "with_expo": sum(1 for u in user_data if u["expo_len"] > 0),
+        "users": user_data,
+    })
+
+
+@router.post("/debug/test-push/{user_id}")
+async def debug_test_push(
+    request: Request,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir kullaniciya test bildirimi gonder (debug)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.user import User
+    from app.services.notification import _init_firebase, is_firebase_initialized
+
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "Kullanici bulunamadi"}, status_code=404)
+
+    _init_firebase()
+    if not is_firebase_initialized():
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "Firebase baslatılamadı"}, status_code=500)
+
+    token = (user.fcm_token or "").strip()
+    if not token:
+        from starlette.responses import JSONResponse
+        return JSONResponse({
+            "error": "FCM token bos",
+            "user_id": user.id,
+            "expo_token": (user.expo_push_token or "")[:30],
+        })
+
+    from firebase_admin import messaging
+
+    try:
+        message = messaging.Message(
+            notification=messaging.Notification(
+                title="Test Bildirimi",
+                body="Bu bir admin debug test bildirimidir.",
+            ),
+            data={"type": "test"},
+            token=token,
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    channel_id="default_v2",
+                ),
+            ),
+        )
+        response = messaging.send(message)
+        from starlette.responses import JSONResponse
+        return JSONResponse({
+            "success": True,
+            "user_id": user.id,
+            "fcm_response": response,
+            "token_prefix": token[:20],
+        })
+    except Exception as e:
+        from starlette.responses import JSONResponse
+        return JSONResponse({
+            "success": False,
+            "user_id": user.id,
+            "error": f"{type(e).__name__}: {str(e)[:200]}",
+            "token_prefix": token[:20],
+            "token_len": len(token),
+        })
