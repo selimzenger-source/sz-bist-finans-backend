@@ -70,7 +70,12 @@ PRICE_TOLERANCE = Decimal("0.02")
 def log(msg):
     """Zaman damgali log."""
     ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{ts}] {msg}")
+    try:
+        print(f"[{ts}] {msg}")
+    except UnicodeEncodeError:
+        # Windows console charmap sorunu — ASCII'ye donustur
+        safe = msg.encode("ascii", errors="replace").decode("ascii")
+        print(f"[{ts}] {safe}")
 
 
 def parse_price(val):
