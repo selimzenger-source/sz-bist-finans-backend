@@ -18,31 +18,75 @@
     </div>
     {% endif %}
 
-    <form method="post" action="/admin/tweet-settings" class="space-y-4">
-        {% for setting in settings %}
-        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
-            <label class="block text-sm font-bold text-gray-300 mb-1">
-                {{ setting.label }}
-                <span class="text-xs text-gray-500 font-normal ml-2">{{ setting.key }}</span>
-            </label>
-            {% if setting.key in ['DISCLAIMER', 'DISCLAIMER_SHORT'] %}
-            <textarea name="{{ setting.key }}" rows="2"
-                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-            >{{ setting.value }}</textarea>
-            {% else %}
-            <input type="text" name="{{ setting.key }}" value="{{ setting.value }}"
-                class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-            />
-            {% endif %}
-            <p class="text-xs text-gray-500 mt-1">Varsayılan: {{ setting.default }}</p>
+    <form method="post" action="/admin/tweet-settings" class="space-y-6">
+
+        <!-- ═══ GLOBAL AYARLAR ═══ -->
+        <div class="bg-gray-800 rounded-lg border border-indigo-600 p-4">
+            <h2 class="text-lg font-bold text-indigo-400 mb-3">🌐 Global Ayarlar</h2>
+            <p class="text-xs text-gray-400 mb-4">Tüm tweetlerde kullanılan ortak değerler.</p>
+            <div class="space-y-3">
+                {% for s in global_settings %}
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">
+                        {{ s.label }}
+                        <span class="text-xs text-gray-500 font-normal ml-1">({{ s.key }})</span>
+                    </label>
+                    {% if 'DISCLAIMER' in s.key %}
+                    <textarea name="{{ s.key }}" rows="2"
+                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none">{{ s.value }}</textarea>
+                    {% else %}
+                    <input type="text" name="{{ s.key }}" value="{{ s.value }}"
+                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-indigo-500 focus:outline-none" />
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- ═══ TWEET ŞABLONLARI ═══ -->
+        <h2 class="text-lg font-bold text-yellow-400 flex items-center gap-2">
+            🐦 Tweet Şablonları (14 Tip)
+            <span class="text-xs text-gray-500 font-normal">Değiştirilebilir sabit metinler</span>
+        </h2>
+
+        {% for group in tweet_groups %}
+        <div class="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
+            <!-- Grup Başlığı -->
+            <div class="px-4 py-2 bg-gray-750 border-b border-gray-700 cursor-pointer flex items-center justify-between"
+                 onclick="this.nextElementSibling.classList.toggle('hidden')">
+                <h3 class="font-bold text-sm text-yellow-300">
+                    #{{ group.id }} {{ group.label }}
+                </h3>
+                <span class="text-gray-500 text-xs">▼ tıkla</span>
+            </div>
+            <!-- Alanlar (açılır/kapanır) -->
+            <div class="px-4 py-3 space-y-3 hidden">
+                {% for f in group.fields %}
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">
+                        {{ f.label }}
+                        <span class="text-gray-600 ml-1">({{ f.key }})</span>
+                    </label>
+                    {% if f.key.endswith('_ACIKLAMA') or f.key.endswith('_TANITIM') or f.key.endswith('_CTA') %}
+                    <textarea name="{{ f.key }}" rows="2"
+                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none">{{ f.value }}</textarea>
+                    {% else %}
+                    <input type="text" name="{{ f.key }}" value="{{ f.value }}"
+                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none" />
+                    {% endif %}
+                    <p class="text-xs text-gray-600 mt-0.5">Varsayılan: {{ f.default }}</p>
+                </div>
+                {% endfor %}
+            </div>
         </div>
         {% endfor %}
 
-        <div class="flex items-center gap-3">
+        <!-- KAYDET -->
+        <div class="flex items-center gap-3 sticky bottom-4 bg-gray-900 p-3 rounded-lg border border-gray-700">
             <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-6 py-2 rounded transition">
-                💾 Kaydet
+                💾 Tümünü Kaydet
             </button>
-            <span class="text-xs text-gray-500">Değişiklikler anında tweetlere yansır (5dk cache).</span>
+            <span class="text-xs text-gray-500">Değişiklikler max 5dk içinde tweetlere yansır.</span>
         </div>
     </form>
 </div>

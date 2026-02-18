@@ -1137,13 +1137,54 @@ async def toggle_auto_send(request: Request):
 # TWEET AYARLARI — Sabit degerler (APP_LINK, SLOGAN vb.)
 # -------------------------------------------------------
 
-_TWEET_SETTING_KEYS = [
+# Global ayarlar — tüm tweetlerde kullanılır
+_GLOBAL_SETTINGS = [
     ("APP_LINK", "Uygulama Linki", "szalgo.net.tr"),
     ("SLOGAN", "Slogan", "\U0001F514 İlk bilen siz olun!"),
     ("DISCLAIMER", "Yasal Uyarı (Uzun)", "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
     ("DISCLAIMER_SHORT", "Yasal Uyarı (Kısa)", "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
     ("HASHTAGS", "Hashtagler", "#HalkaArz #BIST #Borsa"),
 ]
+
+# 14 tweet tipinin düzenlenebilir sabit metinleri
+# (key, label, default, group_name, group_label)
+_TWEET_TEMPLATES = [
+    # 1. Yeni Halka Arz
+    ("T1_BASLIK", "Başlık", "\U0001F6A8 SPK Bülteni Yayımlandı!", "1", "Yeni Halka Arz (SPK Onayı)"),
+    ("T1_ACIKLAMA", "Açıklama", "için halka arz başvurusu SPK tarafından onaylandı.", "1", None),
+    ("T1_CTA", "CTA (çağrı)", "\U0001F4F2 Bilgiler geldikçe bildirim göndereceğiz.", "1", None),
+    # 2. Dağıtıma Çıkış
+    ("T2_BASLIK", "Başlık", "\U0001F4CB Halka Arz Başvuruları Başladı!", "2", "Dağıtıma Çıkış"),
+    ("T2_ACIKLAMA", "Açıklama", "için talep toplama süreci başlamıştır.", "2", None),
+    # 3. Dağıtım Sonuçları
+    ("T3_BASLIK", "Başlık", "✅ Kesinleşen Dağıtım Sonuçları", "3", "Kesinleşen Dağıtım Sonuçları"),
+    # 4. Son 4 Saat
+    ("T4_BASLIK", "Başlık", "\u23F0 Son 4 Saat!", "4", "Son 4 Saat Hatırlatma"),
+    ("T4_ACIKLAMA", "Açıklama", "halka arz başvurusu için kapanışa son 4 saat kaldı!", "4", None),
+    # 5. Son 30 Dakika
+    ("T5_BASLIK", "Başlık", "\U0001F6A8 Son 30 Dakika!", "5", "Son 30 Dakika Hatırlatma"),
+    ("T5_ACIKLAMA", "Açıklama", "halka arz başvurusu kapanmak üzere!", "5", None),
+    # 6. İlk İşlem Günü
+    ("T6_BASLIK", "Başlık", "\U0001F514 Gong Çalıyor!", "6", "İlk İşlem Günü (Gong)"),
+    ("T6_ACIKLAMA", "Açıklama", "bugün borsada işleme başlıyor!", "6", None),
+    ("T6_CTA", "CTA", "25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.", "6", None),
+    # 7. Açılış Fiyatı
+    ("T7_BASLIK", "Başlık", "\U0001F4C8 Açılış Fiyatı Belli Oldu!", "7", "Açılış Fiyatı"),
+    # 8-10 çoğunlukla dinamik
+    # 11. BIST50 KAP
+    ("T11_TANITIM", "Tanıtım Metni", "350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!", "11", "BIST50 KAP Haberi"),
+    ("T11_CTA", "CTA", "Ücretsiz BIST 50 bildirimleri için:", "11", None),
+    # 12. Son Gün Sabah
+    ("T12_BASLIK", "Başlık", "\U0001F4E2 Son Başvuru Günü!", "12", "Son Gün Sabah"),
+    ("T12_CTA", "CTA", "\u23F0 Son anlara kadar hatırlatma yapacağız.", "12", None),
+    # 13. Şirket Tanıtım
+    ("T13_BASLIK", "Başlık", "\U0001F4CB Halka Arz Hakkında", "13", "Şirket Tanıtım"),
+    # 14. SPK Bekleyenler
+    ("T14_ACIKLAMA", "Açıklama", "Güncel listeyi uygulamamızdan takip edebilirsiniz.", "14", "SPK Bekleyenler (Aylık)"),
+]
+
+# Birleşik liste (eski uyumluluk)
+_TWEET_SETTING_KEYS = _GLOBAL_SETTINGS + [(k, l, d) for k, l, d, *_ in _TWEET_TEMPLATES]
 
 
 @router.get("/tweet-settings", response_class=HTMLResponse)
@@ -1152,7 +1193,7 @@ async def tweet_settings_page(
     success: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Tweet sabit ayarlarını gösterir."""
+    """Tweet sabit ayarlarını gösterir — global + 14 tweet tipi."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
@@ -1161,18 +1202,35 @@ async def tweet_settings_page(
     result = await db.execute(select(AppSetting))
     db_settings = {s.key: s.value for s in result.scalars().all()}
 
-    settings_list = []
-    for key, label, default in _TWEET_SETTING_KEYS:
-        settings_list.append({
+    # Global ayarlar
+    global_settings = []
+    for key, label, default in _GLOBAL_SETTINGS:
+        global_settings.append({
             "key": key,
             "label": label,
             "value": db_settings.get(key, default),
             "default": default,
         })
 
+    # Tweet şablonları — gruplara ayır
+    tweet_groups = []
+    current_group = None
+    for key, label, default, group_id, group_label in _TWEET_TEMPLATES:
+        if group_label:
+            current_group = {"id": group_id, "label": group_label, "fields": []}
+            tweet_groups.append(current_group)
+        if current_group:
+            current_group["fields"].append({
+                "key": key,
+                "label": label,
+                "value": db_settings.get(key, default),
+                "default": default,
+            })
+
     return templates.TemplateResponse("admin/tweet_settings.html", {
         "request": request,
-        "settings": settings_list,
+        "global_settings": global_settings,
+        "tweet_groups": tweet_groups,
         "success": success,
     })
 

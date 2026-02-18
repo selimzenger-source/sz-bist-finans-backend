@@ -360,6 +360,27 @@ _DEFAULTS = {
     "DISCLAIMER": "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
     "DISCLAIMER_SHORT": "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
     "HASHTAGS": "#HalkaArz #BIST #Borsa",
+    # Tweet şablonları
+    "T1_BASLIK": "\U0001F6A8 SPK Bülteni Yayımlandı!",
+    "T1_ACIKLAMA": "için halka arz başvurusu SPK tarafından onaylandı.",
+    "T1_CTA": "\U0001F4F2 Bilgiler geldikçe bildirim göndereceğiz.",
+    "T2_BASLIK": "\U0001F4CB Halka Arz Başvuruları Başladı!",
+    "T2_ACIKLAMA": "için talep toplama süreci başlamıştır.",
+    "T3_BASLIK": "✅ Kesinleşen Dağıtım Sonuçları",
+    "T4_BASLIK": "\u23F0 Son 4 Saat!",
+    "T4_ACIKLAMA": "halka arz başvurusu için kapanışa son 4 saat kaldı!",
+    "T5_BASLIK": "\U0001F6A8 Son 30 Dakika!",
+    "T5_ACIKLAMA": "halka arz başvurusu kapanmak üzere!",
+    "T6_BASLIK": "\U0001F514 Gong Çalıyor!",
+    "T6_ACIKLAMA": "bugün borsada işleme başlıyor!",
+    "T6_CTA": "25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.",
+    "T7_BASLIK": "\U0001F4C8 Açılış Fiyatı Belli Oldu!",
+    "T11_TANITIM": "350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!",
+    "T11_CTA": "Ücretsiz BIST 50 bildirimleri için:",
+    "T12_BASLIK": "\U0001F4E2 Son Başvuru Günü!",
+    "T12_CTA": "\u23F0 Son anlara kadar hatırlatma yapacağız.",
+    "T13_BASLIK": "\U0001F4CB Halka Arz Hakkında",
+    "T14_ACIKLAMA": "Güncel listeyi uygulamamızdan takip edebilirsiniz.",
 }
 
 # Settings cache — 5 dk
@@ -441,10 +462,10 @@ def tweet_new_ipo(ipo) -> bool:
             price_text = f"\n\U0001F4B0 Halka arz fiyatı: {ipo.ipo_price} TL"
 
         text = (
-            f"\U0001F6A8 SPK Bülteni Yayımlandı!\n\n"
-            f"{ipo.company_name}{ticker_text} için halka arz başvurusu SPK tarafından onaylandı."
+            f"{_get_setting('T1_BASLIK')}\n\n"
+            f"{ipo.company_name}{ticker_text} {_get_setting('T1_ACIKLAMA')}"
             f"{price_text}\n\n"
-            f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
+            f"{_get_setting('T1_CTA')}\n"
             f"Detaylar için: {APP_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
@@ -479,11 +500,11 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             lines.append(f"✅ {ipo.company_name}{price}")
 
         text = (
-            f"\U0001F6A8 SPK Bülteni Yayımlandı!\n\n"
+            f"{_get_setting('T1_BASLIK')}\n\n"
             f"{bulletin_no} Bülteninde {len(ipos)} adet onaylanan halka arz "
-            f"için halka arz başvurusu SPK tarafından onaylandı.\n\n"
+            f"{_get_setting('T1_ACIKLAMA')}\n\n"
             + "\n".join(lines) + "\n\n"
-            f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
+            f"{_get_setting('T1_CTA')}\n"
             f"Detaylar için: {APP_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
@@ -513,8 +534,8 @@ def tweet_distribution_start(ipo) -> bool:
             lot_text = f"\n\U0001F4CA Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
 
         text = (
-            f"\U0001F4CB Halka Arz Başvuruları Başladı!\n\n"
-            f"{ipo.company_name}{ticker_text} için talep toplama süreci başlamıştır."
+            f"{_get_setting('T2_BASLIK')}\n\n"
+            f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
             f"{price_text}{end_date}{lot_text}\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
@@ -600,7 +621,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             applicant_text = f"\n📊 Toplam başvuran: {int(total_applicants):,}".replace(",", ".") + " kişi"
 
         text = (
-            f"✅ Kesinleşen Dağıtım Sonuçları\n\n"
+            f"{_get_setting('T3_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text}\n\n"
             f"{table_text}"
             f"{bireysel_text}"
@@ -633,9 +654,9 @@ def tweet_last_4_hours(ipo) -> bool:
                 end_hour = parts[-1].strip()
 
         text = (
-            f"\u23F0 Son 4 Saat!\n\n"
-            f"{ipo.company_name}{ticker_text} halka arz başvurusu için"
-            f" kapanışa son 4 saat kaldı!\n\n"
+            f"{_get_setting('T4_BASLIK')}\n\n"
+            f"{ipo.company_name}{ticker_text} "
+            f"{_get_setting('T4_ACIKLAMA')}\n\n"
             f"⏳ Başvurular saat {end_hour}'a kadar devam ediyor.\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
@@ -664,8 +685,8 @@ def tweet_last_30_min(ipo) -> bool:
                 end_hour = parts[-1].strip()
 
         text = (
-            f"\U0001F6A8 Son 30 Dakika!\n\n"
-            f"{ipo.company_name}{ticker_text} halka arz başvurusu kapanmak üzere!\n\n"
+            f"{_get_setting('T5_BASLIK')}\n\n"
+            f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}\n\n"
             f"Saat {end_hour}'da başvurular kapanıyor, acele edin!\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
@@ -690,10 +711,10 @@ def tweet_first_trading_day(ipo) -> bool:
             price_text = f"\n\U0001F4B0 Halka arz fiyatı: {ipo.ipo_price} TL"
 
         text = (
-            f"\U0001F514 Gong Çalıyor!\n\n"
-            f"{ipo.company_name}{ticker_text} bugün borsada işleme başlıyor!"
+            f"{_get_setting('T6_BASLIK')}\n\n"
+            f"{ipo.company_name}{ticker_text} {_get_setting('T6_ACIKLAMA')}"
             f"{price_text}\n\n"
-            f"25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.\n\n"
+            f"{_get_setting('T6_CTA')}\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
@@ -723,7 +744,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             durum = f"\U0001F534 %{pct_change:+.2f} düşüşle açıldı"
 
         text = (
-            f"\U0001F4C8 Açılış Fiyatı Belli Oldu!\n\n"
+            f"{_get_setting('T7_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text}\n\n"
             f"\u2022 Halka arz fiyatı: {ipo_price:.2f} TL\n"
             f"\u2022 Açılış fiyatı: {open_price:.2f} TL\n"
@@ -986,8 +1007,8 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
             f"{emoji} #{ticker} \u2014 Haber Bildirimi\n\n"
             f"Anlık Haber Yakalandı {now_str}\n\n"
             f"İlişkili Kelime : {clean_kw}\n\n"
-            f"350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!\n\n"
-            f"Ücretsiz BIST 50 bildirimleri için:\n"
+            f"{_get_setting('T11_TANITIM')}\n\n"
+            f"{_get_setting('T11_CTA')}\n"
             f"\U0001F4F2 {APP_LINK}\n\n"
             f"#BIST50 #{ticker} #KAP #Borsa"
         )
@@ -1025,11 +1046,11 @@ def tweet_last_day_morning(ipo) -> bool:
         price_text = f"\n💰 Fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
         text = (
-            f"📢 Son Başvuru Günü!\n\n"
+            f"{_get_setting('T12_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} için halka arz başvuruları"
             f" bugün saat {end_hour}'a kadar devam ediyor."
             f"{price_text}\n\n"
-            f"⏰ Son anlara kadar hatırlatma yapacağız.\n\n"
+            f"{_get_setting('T12_CTA')}\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
@@ -1106,7 +1127,7 @@ def tweet_company_intro(ipo) -> bool:
             price_text = f"\n💰 Halka arz fiyatı: {ipo.ipo_price} TL"
 
         text = (
-            f"📋 Halka Arz Hakkında\n\n"
+            f"{_get_setting('T13_BASLIK')}\n\n"
             f"{clean_name}{ticker_text}"
             f"{spk_text}{sector_text}{price_text}"
             f"{desc_text}\n\n"
@@ -1133,7 +1154,7 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         text = (
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
-            f"Güncel listeyi uygulamamızdan takip edebilirsiniz.\n\n"
+            f"{_get_setting('T14_ACIKLAMA')}\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SPK #BIST #Borsa"
         )
