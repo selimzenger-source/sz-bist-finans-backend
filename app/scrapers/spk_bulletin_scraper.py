@@ -209,13 +209,12 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
             )
             continue
 
-        # "Satis Fiyati" / "fiyat" kontrolu — en azindan full_text'te olmali
-        has_fiyat_in_header = "fiyat" in expanded_header
-        has_fiyat_in_context = "fiyat" in full_text.lower()
-
-        if not has_fiyat_in_header and not has_fiyat_in_context:
+        # "Satis Fiyati" / "fiyat" kontrolu — SADECE tablo header'inda olmali
+        # full_text fallback KALDIRILDI: Baska bolumde "fiyat" gecerse
+        # yeniden degerleme tablolarini yanlis yakaliyordu (orn: 2025/68)
+        if "fiyat" not in expanded_header:
             logger.info(
-                "SPK PDF: Tabloda 'fiyat' bulunamadi, Ilk Halka Arz degil, atlaniyor"
+                "SPK PDF: Tablo header'inda 'fiyat' yok, Ilk Halka Arz degil, atlaniyor"
             )
             continue
 
@@ -248,11 +247,16 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
             # Sirket adinda "(1)" veya "kaynak" gecebilir — onu ATLAMA.
             lower_name = company_name.lower()
             # Tamamen dipnot veya aciklama satiri mi?
+            # Ayrica teblig/yonetmelik isimleri sirket degildir
             is_junk_row = (
                 lower_name.startswith("kaynak")
                 or lower_name.startswith("not:")
                 or lower_name.startswith("toplam")
                 or re.match(r"^\(\d+\)\s*$", company_name)  # Sadece "(1)" gibi
+                or "tebliğ" in lower_name  # Teblig isimleri sirket degil
+                or "tebliği" in lower_name
+                or "esaslar" in lower_name  # "...İlişkin Esaslar Tebliği"
+                or "yönetmelik" in lower_name
             )
             if is_junk_row:
                 continue
