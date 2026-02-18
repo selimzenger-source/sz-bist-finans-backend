@@ -1941,10 +1941,28 @@ async def trigger_opening_tweet(
         floor_days = sum(1 for t in tracks if t.hit_floor)
         normal_days = len(tracks) - ceiling_days - floor_days
 
-        # Açılış % = (open_price - ipo_price) / ipo_price * 100
+        # Dünkü kapanış — bir önceki günün close_price'i
+        prev_close = 0.0
+        for t in tracks:
+            if t.trade_date < today and t.close_price:
+                prev_close = float(t.close_price)  # en son günü alacak (sorted asc)
+
+        # Eğer dünkü kapanış yoksa (1. gün) → HA fiyatını kullan
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+        if prev_close <= 0:
+            prev_close = ipo_price
+
         open_price = float(today_track.open_price)
+
+        # Açılış % = açılış vs HA fiyat
         pct_change = ((open_price - ipo_price) / ipo_price * 100) if ipo_price > 0 else 0
+
+        # Günlük % = açılış vs dünkü kapanış
+        daily_pct = ((open_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+
+        # Alış/satış lot (bugünkü track'den)
+        alis_lot = today_track.alis_lot or 0
+        satis_lot = today_track.satis_lot or 0
 
         # Durum (bugünün açılışına göre basit eşik)
         if pct_change >= 9.5:
@@ -1964,11 +1982,15 @@ async def trigger_opening_tweet(
             "trading_day": current_day,
             "ipo_price": ipo_price,
             "open_price": open_price,
+            "prev_close": round(prev_close, 2),
             "pct_change": round(pct_change, 2),
+            "daily_pct": round(daily_pct, 2),
             "durum": durum,
             "ceiling_days": ceiling_days,
             "floor_days": floor_days,
             "normal_days": normal_days,
+            "alis_lot": alis_lot,
+            "satis_lot": satis_lot,
         })
 
     if not stocks:

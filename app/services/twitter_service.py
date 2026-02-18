@@ -1407,22 +1407,24 @@ def tweet_opening_summary(stocks: list) -> bool:
         from app.services.chart_image_generator import generate_opening_summary_image
         image_path = generate_opening_summary_image(stocks)
 
-        # Tweet metni
+        # Tweet metni — lot + daily % bilgili
         lines = []
         for s in stocks:
-            pct = float(s.get("pct_change", 0))
-            emoji = "\U0001F7E2" if pct >= 0 else "\U0001F534"
+            daily_pct = float(s.get("daily_pct", s.get("pct_change", 0)))
+            emoji = "\U0001F7E2" if daily_pct >= 0 else "\U0001F534"
             durum = s.get("durum", "")
             durum_tag = ""
             if durum == "tavan":
-                durum_tag = " (Tavan)"
+                durum_tag = " TAVAN"
             elif durum == "taban":
-                durum_tag = " (Taban)"
-            lines.append(
+                durum_tag = " TABAN"
+
+            line = (
                 f"{emoji} #{s['ticker']} {s['trading_day']}. Gün | "
                 f"Açılış: {float(s['open_price']):.2f} TL | "
-                f"%{pct:+.1f}{durum_tag}"
+                f"%{daily_pct:+.1f}{durum_tag}"
             )
+            lines.append(line)
 
         text = (
             f"{_get_setting('T16_BASLIK')}\n\n"
