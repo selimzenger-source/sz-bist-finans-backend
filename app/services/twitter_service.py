@@ -381,6 +381,8 @@ _DEFAULTS = {
     "T12_CTA": "\u23F0 Son anlara kadar hatırlatma yapacağız.",
     "T13_BASLIK": "\U0001F4CB Halka Arz Hakkında",
     "T14_ACIKLAMA": "Güncel listeyi uygulamamızdan takip edebilirsiniz.",
+    "T15_BASLIK": "📊 Öğle Arası",
+    "LOT_DISCLAIMER": "tahmini değerdir",
 }
 
 # Settings cache — 5 dk
@@ -653,10 +655,16 @@ def tweet_last_4_hours(ipo) -> bool:
             if len(parts) >= 2:
                 end_hour = parts[-1].strip()
 
+        # Tahmini lot bilgisi varsa ekle
+        lot_text = ""
+        if getattr(ipo, 'estimated_lots_per_person', None):
+            lot_text = f"\n📊 Tahmini: ~{ipo.estimated_lots_per_person} lot/kişi ({_get_setting('LOT_DISCLAIMER')})"
+
         text = (
             f"{_get_setting('T4_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} "
-            f"{_get_setting('T4_ACIKLAMA')}\n\n"
+            f"{_get_setting('T4_ACIKLAMA')}"
+            f"{lot_text}\n\n"
             f"⏳ Başvurular saat {end_hour}'a kadar devam ediyor.\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
@@ -684,9 +692,15 @@ def tweet_last_30_min(ipo) -> bool:
             if len(parts) >= 2:
                 end_hour = parts[-1].strip()
 
+        # Tahmini lot bilgisi varsa ekle
+        lot_text = ""
+        if getattr(ipo, 'estimated_lots_per_person', None):
+            lot_text = f"\n📊 Tahmini: ~{ipo.estimated_lots_per_person} lot/kişi ({_get_setting('LOT_DISCLAIMER')})"
+
         text = (
             f"{_get_setting('T5_BASLIK')}\n\n"
-            f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}\n\n"
+            f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}"
+            f"{lot_text}\n\n"
             f"Saat {end_hour}'da başvurular kapanıyor, acele edin!\n\n"
             f"📲 {APP_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
@@ -1333,7 +1347,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
             lines.append(f"{emoji} #{s['ticker']} {s['trading_day']}/25 %{pct:+.1f}")
 
         text = (
-            f"\U0001F4CA Ogle Arasi — {count} Hisse\n\n"
+            f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
             + "\n".join(lines) + "\n\n"
             f"Tavan: {tavan_count} | Taban: {taban_count}\n\n"
             f"\U0001F4F2 {APP_LINK}\n"

@@ -1144,10 +1144,11 @@ _GLOBAL_SETTINGS = [
     ("DISCLAIMER", "Yasal Uyarı (Uzun)", "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
     ("DISCLAIMER_SHORT", "Yasal Uyarı (Kısa)", "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
     ("HASHTAGS", "Hashtagler", "#HalkaArz #BIST #Borsa"),
+    ("LOT_DISCLAIMER", "Lot Uyarısı", "tahmini değerdir"),
 ]
 
-# 14 tweet tipinin düzenlenebilir sabit metinleri
-# (key, label, default, group_name, group_label)
+# 15 tweet tipinin düzenlenebilir sabit metinleri
+# (key, label, default, group_id, group_label)
 _TWEET_TEMPLATES = [
     # 1. Yeni Halka Arz
     ("T1_BASLIK", "Başlık", "\U0001F6A8 SPK Bülteni Yayımlandı!", "1", "Yeni Halka Arz (SPK Onayı)"),
@@ -1170,7 +1171,12 @@ _TWEET_TEMPLATES = [
     ("T6_CTA", "CTA", "25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.", "6", None),
     # 7. Açılış Fiyatı
     ("T7_BASLIK", "Başlık", "\U0001F4C8 Açılış Fiyatı Belli Oldu!", "7", "Açılış Fiyatı"),
-    # 8-10 çoğunlukla dinamik
+    # 8. Günlük Takip (çoğunlukla dinamik)
+    ("T8_INFO", "_info", "Tamamı dinamik — düzenlenebilir alan yok", "8", "Günlük Takip (18:20)"),
+    # 9. 25 Gün Performans (çoğunlukla dinamik)
+    ("T9_INFO", "_info", "Tamamı dinamik — düzenlenebilir alan yok", "9", "25 Gün Performans Özeti"),
+    # 10. Ay Sonu Rapor (çoğunlukla dinamik)
+    ("T10_INFO", "_info", "Tamamı dinamik — düzenlenebilir alan yok", "10", "Ay Sonu Halka Arz Raporu"),
     # 11. BIST50 KAP
     ("T11_TANITIM", "Tanıtım Metni", "350+ hisse senedini tarayan sistemimiz çok yakında AppStore ve GoogleStore'da!", "11", "BIST50 KAP Haberi"),
     ("T11_CTA", "CTA", "Ücretsiz BIST 50 bildirimleri için:", "11", None),
@@ -1181,10 +1187,148 @@ _TWEET_TEMPLATES = [
     ("T13_BASLIK", "Başlık", "\U0001F4CB Halka Arz Hakkında", "13", "Şirket Tanıtım"),
     # 14. SPK Bekleyenler
     ("T14_ACIKLAMA", "Açıklama", "Güncel listeyi uygulamamızdan takip edebilirsiniz.", "14", "SPK Bekleyenler (Aylık)"),
+    # 15. Öğle Arası Market Snapshot
+    ("T15_BASLIK", "Başlık", "\U0001F4CA Öğle Arası", "15", "Öğle Arası Market Snapshot"),
 ]
 
-# Birleşik liste (eski uyumluluk)
-_TWEET_SETTING_KEYS = _GLOBAL_SETTINGS + [(k, l, d) for k, l, d, *_ in _TWEET_TEMPLATES]
+# Her tweet grubunun örnek formatı (★ = admin'den düzenlenebilir)
+_TWEET_EXAMPLES = {
+    "1": (
+        "★{T1_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) ★{T1_ACIKLAMA}\n"
+        "Fiyat: {fiyat} TL\n\n"
+        "★{T1_CTA}\n"
+        "Detaylar için: ★{APP_LINK}\n\n"
+        "#HalkaArz #BIST #Borsa"
+    ),
+    "2": (
+        "★{T2_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) ★{T2_ACIKLAMA}\n"
+        "Fiyat: {fiyat} TL\n"
+        "Son başvuru: {tarih}\n"
+        "Tahmini: ~{lot} lot/kişi (★{LOT_DISCLAIMER})\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #BIST #{ticker}"
+    ),
+    "3": (
+        "★{T3_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker})\n\n"
+        "Bireysel: {lot} lot | {başvuru_sayısı} kişi\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #{ticker}"
+    ),
+    "4": (
+        "★{T4_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) ★{T4_ACIKLAMA}\n"
+        "📊 Tahmini: ~{lot} lot/kişi (★{LOT_DISCLAIMER})\n\n"
+        "⏳ Başvurular saat {saat}'a kadar devam ediyor.\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #SonGün #{ticker}"
+    ),
+    "5": (
+        "★{T5_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) ★{T5_ACIKLAMA}\n"
+        "📊 Tahmini: ~{lot} lot/kişi (★{LOT_DISCLAIMER})\n\n"
+        "Saat {saat}'da başvurular kapanıyor, acele edin!\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #SonDakika #{ticker}"
+    ),
+    "6": (
+        "★{T6_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) ★{T6_ACIKLAMA}\n"
+        "Halka arz fiyatı: {fiyat} TL\n\n"
+        "★{T6_CTA}\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #BIST #{ticker}"
+    ),
+    "7": (
+        "★{T7_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker})\n\n"
+        "• Halka arz fiyatı: {fiyat} TL\n"
+        "• Açılış fiyatı: {açılış_fiyatı} TL\n"
+        "• Durum: {durum}\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #{ticker}"
+    ),
+    "8": (
+        "📊 #{ticker} — {gün}/25 Gün Sonu\n\n"
+        "Halka Arz: {fiyat} TL\n"
+        "Kapanış: {kapanış} TL | %{değişim} | {durum}\n"
+        "Kümülatif: %{kümülatif}\n\n"
+        "Tavan: {tavan_gün} | Taban: {taban_gün} | Normal: {normal}\n\n"
+        "📲 ★{APP_LINK}\n"
+        "#HalkaArz #{ticker}\n\n"
+        "⚠️ T8 çoğunlukla dinamik — düzenlenebilir alan yok"
+    ),
+    "9": (
+        "📋 #{ticker} — 25 Günü Bitirdi\n\n"
+        "Halka Arz: {fiyat} TL\n"
+        "Kişi Başı Ort Lot: {lot}\n\n"
+        "Tavan: {tavan_gün} | Taban: {taban_gün} | Normal: {normal}\n\n"
+        "📲 ★{APP_LINK}\n"
+        "#HalkaArz #BIST #{ticker}\n\n"
+        "⚠️ T9 çoğunlukla dinamik — düzenlenebilir alan yok"
+    ),
+    "10": (
+        "📊 {yıl} Halka Arz — {ay} Sonu Raporu\n\n"
+        "• Toplam halka arz: {toplam}\n"
+        "• 25 günü doldu: {tamamlanan}\n"
+        "• Ort. getiri: %{getiri}\n"
+        "• En iyi: #{en_iyi} (%{en_iyi_getiri})\n\n"
+        "📲 ★{APP_LINK}\n"
+        "#HalkaArz #BIST #AySonuRaporu\n\n"
+        "⚠️ T10 çoğunlukla dinamik — düzenlenebilir alan yok"
+    ),
+    "11": (
+        "{emoji} #{ticker} — Haber Bildirimi\n\n"
+        "Anlık Haber Yakalandı {tarih_saat}\n\n"
+        "İlişkili Kelime: {anahtar_kelime}\n\n"
+        "★{T11_TANITIM}\n\n"
+        "★{T11_CTA}\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#BIST50 #{ticker} #KAP #Borsa"
+    ),
+    "12": (
+        "★{T12_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker}) için halka arz başvuruları\n"
+        "bugün saat {saat}'a kadar devam ediyor.\n"
+        "Fiyat: {fiyat} TL\n\n"
+        "★{T12_CTA}\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #{ticker}"
+    ),
+    "13": (
+        "★{T13_BASLIK}\n\n"
+        "{şirket_adı} (#{ticker})\n"
+        "SPK Onay: {spk_tarih}\n"
+        "Sektör: {sektör}\n"
+        "Fiyat: {fiyat} TL\n"
+        "{açıklama_metni}\n\n"
+        "📲 Detaylar: ★{APP_LINK}\n\n"
+        "#HalkaArz #{ticker}"
+    ),
+    "14": (
+        "📊 SPK Onay Bekleyenler\n\n"
+        "Şu an {adet} şirket SPK onayı beklemektedir.\n\n"
+        "★{T14_ACIKLAMA}\n\n"
+        "📲 ★{APP_LINK}\n\n"
+        "#HalkaArz #SPK #BIST #Borsa"
+    ),
+    "15": (
+        "★{T15_BASLIK} — {hisse_sayısı} Hisse\n\n"
+        "🟢 #ASELS 5/25 %+2.3\n"
+        "🔴 #SZALG 12/25 %-1.1\n"
+        "...\n\n"
+        "Tavan: {tavan} | Taban: {taban}\n\n"
+        "📲 ★{APP_LINK}\n"
+        "#HalkaArz #BIST #Borsa"
+    ),
+}
+
+# Birleşik liste (eski uyumluluk) — _info alanları hariç
+_TWEET_SETTING_KEYS = _GLOBAL_SETTINGS + [
+    (k, l, d) for k, l, d, *_ in _TWEET_TEMPLATES if l != "_info"
+]
 
 
 @router.get("/tweet-settings", response_class=HTMLResponse)
@@ -1193,7 +1337,7 @@ async def tweet_settings_page(
     success: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Tweet sabit ayarlarını gösterir — global + 14 tweet tipi."""
+    """Tweet sabit ayarlarını gösterir — global + 15 tweet tipi."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
@@ -1217,7 +1361,12 @@ async def tweet_settings_page(
     current_group = None
     for key, label, default, group_id, group_label in _TWEET_TEMPLATES:
         if group_label:
-            current_group = {"id": group_id, "label": group_label, "fields": []}
+            current_group = {
+                "id": group_id,
+                "label": group_label,
+                "fields": [],
+                "example": _TWEET_EXAMPLES.get(group_id, ""),
+            }
             tweet_groups.append(current_group)
         if current_group:
             current_group["fields"].append({

@@ -45,8 +45,8 @@
 
         <!-- ═══ TWEET ŞABLONLARI ═══ -->
         <h2 class="text-lg font-bold text-yellow-400 flex items-center gap-2">
-            🐦 Tweet Şablonları (14 Tip)
-            <span class="text-xs text-gray-500 font-normal">Değiştirilebilir sabit metinler</span>
+            🐦 Tweet Şablonları (15 Tip)
+            <span class="text-xs text-gray-500 font-normal">★ = admin'den değiştirilebilir</span>
         </h2>
 
         {% for group in tweet_groups %}
@@ -59,24 +59,43 @@
                 </h3>
                 <span class="text-gray-500 text-xs">▼ tıkla</span>
             </div>
-            <!-- Alanlar (açılır/kapanır) -->
+            <!-- Alanlar + Örnek Format (açılır/kapanır) -->
             <div class="px-4 py-3 space-y-3 hidden">
                 {% for f in group.fields %}
-                <div>
-                    <label class="block text-xs font-medium text-gray-400 mb-1">
-                        {{ f.label }}
-                        <span class="text-gray-600 ml-1">({{ f.key }})</span>
-                    </label>
-                    {% if f.key.endswith('_ACIKLAMA') or f.key.endswith('_TANITIM') or f.key.endswith('_CTA') %}
-                    <textarea name="{{ f.key }}" rows="2"
-                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none">{{ f.value }}</textarea>
+                    {% if f.label == '_info' %}
+                    <!-- Dinamik tip — düzenlenebilir alan yok -->
+                    <div class="bg-gray-900 border border-gray-700 rounded p-2">
+                        <p class="text-xs text-gray-500 italic">ℹ️ {{ f.default }}</p>
+                    </div>
                     {% else %}
-                    <input type="text" name="{{ f.key }}" value="{{ f.value }}"
-                        class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none" />
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-1">
+                            {{ f.label }}
+                            <span class="text-gray-600 ml-1">({{ f.key }})</span>
+                        </label>
+                        {% if f.key.endswith('_ACIKLAMA') or f.key.endswith('_TANITIM') or f.key.endswith('_CTA') %}
+                        <textarea name="{{ f.key }}" rows="2"
+                            class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none">{{ f.value }}</textarea>
+                        {% else %}
+                        <input type="text" name="{{ f.key }}" value="{{ f.value }}"
+                            class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:border-yellow-500 focus:outline-none" />
+                        {% endif %}
+                        <p class="text-xs text-gray-600 mt-0.5">Varsayılan: {{ f.default }}</p>
+                    </div>
                     {% endif %}
-                    <p class="text-xs text-gray-600 mt-0.5">Varsayılan: {{ f.default }}</p>
-                </div>
                 {% endfor %}
+
+                <!-- Örnek Tweet Formatı -->
+                {% if group.example %}
+                <div class="bg-gray-900 border border-gray-700 rounded p-3 mt-3">
+                    <p class="text-xs text-gray-500 mb-2 font-medium">📝 Örnek Tweet Formatı:</p>
+                    <pre class="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed font-mono">{{ group.example }}</pre>
+                    <div class="flex items-center gap-3 mt-2 text-xs">
+                        <span class="text-yellow-600">★ = değiştirilebilir</span>
+                        <span class="text-gray-600">{...} = otomatik veri</span>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}
