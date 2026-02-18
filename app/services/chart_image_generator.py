@@ -1035,8 +1035,8 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             left_mid = cx + card_w // 4
             right_mid = cx + 3 * card_w // 4
 
-            _draw_centered(draw, left_mid, y, "Dünkü Kpn", font_small, (100, 100, 120))
-            _draw_centered(draw, right_mid, y, "HA Fiyat", font_small, (100, 100, 120))
+            _draw_centered(draw, left_mid, y, "Dünkü Kapanış", font_small, (100, 100, 120))
+            _draw_centered(draw, right_mid, y, "HA Fiyatı", font_small, (100, 100, 120))
             y += 15
             _draw_centered(draw, left_mid, y, f"{prev_close:.2f}", font_value, LIGHT_BLUE)
             _draw_centered(draw, right_mid, y, f"{ipo_price:.2f}", font_value, CYAN)
@@ -1048,16 +1048,20 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             y += 28
 
             # ─ Lot bilgileri ─
-            if durum == "tavan" and alis_lot:
-                lot_text = f"Alış Bekleyen: {_format_lot(alis_lot)} lot"
+            # Satis 0 ise tavanda bekliyor anlamina gelir
+            _alis = alis_lot or 0
+            _satis = satis_lot or 0
+
+            if durum == "tavan" or (_satis == 0 and _alis > 0):
+                lot_text = f"Alış Bekleyen: {_format_lot(_alis)} lot"
                 _draw_centered(draw, mid_x, y, lot_text, font_lot, GREEN)
-            elif durum == "taban" and satis_lot:
-                lot_text = f"Satış Bekleyen: {_format_lot(satis_lot)} lot"
+            elif durum == "taban" or (_alis == 0 and _satis > 0):
+                lot_text = f"Satış Bekleyen: {_format_lot(_satis)} lot"
                 _draw_centered(draw, mid_x, y, lot_text, font_lot, RED)
             else:
-                # Normal islem — her iki lot'u goster
-                a_text = f"A: {_format_lot(alis_lot)}"
-                s_text = f"S: {_format_lot(satis_lot)}"
+                # Normal islem — Alış Kademesi / Satış Kademesi
+                a_text = f"Alış: {_format_lot(_alis)}"
+                s_text = f"Satış: {_format_lot(_satis)}"
                 _draw_centered(draw, left_mid, y, a_text, font_lot, GREEN)
                 _draw_centered(draw, right_mid, y, s_text, font_lot, RED)
             y += 18
