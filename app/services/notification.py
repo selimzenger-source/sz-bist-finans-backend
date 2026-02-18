@@ -250,13 +250,14 @@ class NotificationService:
     ) -> bool:
         """FCM veya Expo token ile kullaniciya bildirim gonderir.
 
-        FCM token varsa Firebase, ExponentPushToken varsa Expo Push API kullanilir.
+        FCM token varsa Firebase, basarisiz olursa Expo fallback.
+        ExponentPushToken varsa Expo Push API kullanilir.
         """
         fcm = (user.fcm_token or "").strip()
         expo = (user.expo_push_token or "").strip()
 
         if fcm:
-            return await self.send_to_device(
+            result = await self.send_to_device(
                 fcm_token=fcm,
                 title=title,
                 body=body,
@@ -264,6 +265,19 @@ class NotificationService:
                 channel_id=channel_id,
                 delay=delay,
             )
+            if result:
+                return True
+            # FCM basarisiz — Expo fallback dene
+            logger.info(f"FCM basarisiz, Expo fallback deneniyor: user_id={user.id}")
+            if expo and expo.startswith("ExponentPushToken"):
+                return await self.send_to_expo_device(
+                    expo_token=expo,
+                    title=title,
+                    body=body,
+                    data=data,
+                    delay=delay,
+                )
+            return False
         elif expo and expo.startswith("ExponentPushToken"):
             return await self.send_to_expo_device(
                 expo_token=expo,
