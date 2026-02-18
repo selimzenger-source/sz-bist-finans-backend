@@ -1037,16 +1037,29 @@ async def trigger_snapshot_from_admin(
 
     try:
         from app.scheduler import market_snapshot_tweet
-        await market_snapshot_tweet()
-        logger.info("[ADMIN] T15 Market snapshot tweet manuel tetiklendi")
+        result = await market_snapshot_tweet()
+        if result and result.get("error"):
+            logger.error("[ADMIN] T15 hatasi: %s", result["error"])
+            from urllib.parse import quote
+            msg = quote(f"T15 Hata: {result['error'][:150]}")
+            return RedirectResponse(
+                url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0",
+                status_code=303,
+            )
+        msg_text = result.get("message", "Başarılı!") if result else "Başarılı!"
+        from urllib.parse import quote
+        msg = quote(f"T15: {msg_text}")
+        logger.info("[ADMIN] T15 tetiklendi: %s", msg_text)
         return RedirectResponse(
-            url="/admin/tweets?trigger_msg=T15 Gün Ortası raporu başarıyla tetiklendi!&trigger_ok=1",
+            url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1",
             status_code=303,
         )
     except Exception as e:
         logger.error("[ADMIN] T15 tetikleme hatasi: %s", e)
+        from urllib.parse import quote
+        msg = quote(f"T15 Hata: {str(e)[:100]}")
         return RedirectResponse(
-            url=f"/admin/tweets?trigger_msg=T15 Hata: {str(e)[:100]}&trigger_ok=0",
+            url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0",
             status_code=303,
         )
 

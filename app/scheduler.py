@@ -1357,136 +1357,186 @@ async def push_health_report_job():
         logger.error(f"Push health report hatasi: {e}")
 
 
+async def _market_snapshot_attempt(retry_num: int = 0):
+    """Tek bir snapshot denemesi — retry mantigi market_snapshot_tweet'te.
+
+    Returns dict with "message", "error", or "retry" key.
+    """
+    from sqlalchemy import select, and_, func
+    from decimal import Decimal
+    from datetime import date as date_type
+    from app.models.ipo import IPO, IPOCeilingTrack
+
+    async with async_session() as db:
+        # Status = "trading" olan tum IPO'lari bul
+        result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "trading",
+                    IPO.archived == False,
+                    IPO.trading_start.isnot(None),
+                )
+            )
+        )
+        active_ipos = result.scalars().all()
+
+        if not active_ipos:
+            logger.info("Ogle arasi snapshot: Aktif islem goren IPO yok")
+            return {"error": "Aktif islem goren IPO yok (status=trading)"}
+
+        today = date_type.today()
+        snapshot_data = []
+        skip_reasons = []
+        no_today_track_count = 0  # Bugunku track'i olmayan hisse sayisi
+
+        for ipo in active_ipos:
+            if not ipo.ticker:
+                skip_reasons.append(f"[?] ticker yok (id={ipo.id})")
+                continue
+
+            # 25 gun dolmus IPO'lar snapshot'ta olmasin (25/25 dahil)
+            if ipo.trading_day_count and ipo.trading_day_count >= 25:
+                skip_reasons.append(f"[{ipo.ticker}] trading_day_count={ipo.trading_day_count} >=25 skip")
+                continue
+
+            # trading_day: IPO tablosundaki trading_day_count + 1 (bugun icin)
+            # Bu deger sync script'ten bagimsiz, admin panelden yonetiliyor
+            real_trading_day = (ipo.trading_day_count or 0) + 1
+
+            # Bugunun trading_day'i 25+ ise atla
+            if real_trading_day >= 26:
+                skip_reasons.append(f"[{ipo.ticker}] real_trading_day={real_trading_day} >=26 skip")
+                continue
+
+            # Bugunun ceiling track kaydini al
+            track_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    and_(
+                        IPOCeilingTrack.ipo_id == ipo.id,
+                        IPOCeilingTrack.trade_date == today,
+                    )
+                )
+            )
+            today_track = track_result.scalar_one_or_none()
+
+            # Track yoksa son track'i dene (belki sync henuz calismadi)
+            if not today_track:
+                no_today_track_count += 1
+                last_track_result = await db.execute(
+                    select(IPOCeilingTrack).where(
+                        IPOCeilingTrack.ipo_id == ipo.id,
+                    ).order_by(IPOCeilingTrack.trading_day.desc()).limit(1)
+                )
+                last_track = last_track_result.scalar_one_or_none()
+                if not last_track:
+                    # Hic track yok — bu hisseyi gosterme
+                    skip_reasons.append(f"[{ipo.ticker}] hic track yok (today={today})")
+                    continue
+                # Son track'in trade_date bugun degilse → borsa kapali veya sync calismadi
+                # Yine de goster, son bilinen veriyle
+                today_track = last_track
+                skip_reasons.append(f"[{ipo.ticker}] bugun track yok, son track={last_track.trade_date} kullanildi")
+
+            # Kumulatif % hesapla (HA fiyatindan)
+            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+            close_price = float(today_track.close_price) if today_track.close_price else 0
+            cum_pct = 0.0
+            if ipo_price > 0 and close_price > 0:
+                cum_pct = ((close_price - ipo_price) / ipo_price) * 100
+
+            # Gunluk % — H sutunundan (pct_change) anlik geliyor
+            daily_pct = float(today_track.pct_change) if today_track.pct_change is not None else 0.0
+
+            # Durum
+            durum = today_track.durum or "not_kapatti"
+
+            snapshot_data.append({
+                "ticker": ipo.ticker,
+                "trading_day": real_trading_day,
+                "close_price": close_price,
+                "pct_change": daily_pct,
+                "cum_pct": cum_pct,
+                "durum": durum,
+                "alis_lot": today_track.alis_lot,
+                "satis_lot": today_track.satis_lot,
+                "ipo_price": ipo_price,
+            })
+
+        # Eger hic bugunku track yoksa ve henuz retry hakki varsa → "retry" sinyali don
+        eligible_count = len(snapshot_data) + no_today_track_count
+        if no_today_track_count > 0 and no_today_track_count == eligible_count and retry_num < 2:
+            msg = f"Hic bugunku track yok ({no_today_track_count} hisse), veri bekleniyor... (deneme {retry_num+1}/3)"
+            logger.info("Ogle arasi snapshot: %s", msg)
+            return {"retry": msg}
+
+        if not snapshot_data:
+            msg = f"Bugun islem goren hisse yok (today={today}, aktif={len(active_ipos)})"
+            if skip_reasons:
+                msg += " | " + "; ".join(skip_reasons[:10])
+            logger.info("Ogle arasi snapshot: %s", msg)
+            return {"error": msg}
+
+        logger.info(
+            "Ogle arasi snapshot: %d hisse — %s",
+            len(snapshot_data),
+            ", ".join(s["ticker"] for s in snapshot_data),
+        )
+        if skip_reasons:
+            logger.info("Snapshot skip detay: %s", "; ".join(skip_reasons[:10]))
+
+        # Gorsel olustur
+        from app.services.chart_image_generator import generate_market_snapshot_image
+        image_path = generate_market_snapshot_image(snapshot_data)
+
+        if not image_path:
+            logger.error("Ogle arasi snapshot: Gorsel olusturulamadi")
+            return {"error": "Gorsel olusturulamadi (generate_market_snapshot_image None dondu)"}
+
+        # Tweet at
+        from app.services.twitter_service import tweet_market_snapshot
+        from app.services.admin_telegram import notify_tweet_sent
+        tw_ok = tweet_market_snapshot(snapshot_data, image_path)
+        await notify_tweet_sent("piyasa_snapshot", f"{len(snapshot_data)} hisse", tw_ok)
+
+        tickers_str = ", ".join(s["ticker"] for s in snapshot_data)
+        if tw_ok:
+            logger.info("Ogle arasi snapshot tweet basarili: %d hisse", len(snapshot_data))
+            return {"message": f"Tweet olusturuldu — {len(snapshot_data)} hisse ({tickers_str})"}
+        else:
+            logger.error("Ogle arasi snapshot tweet BASARISIZ — tw_ok=False")
+            return {"error": f"tweet_market_snapshot False dondu — {len(snapshot_data)} hisse ({tickers_str})"}
+
+
 async def market_snapshot_tweet():
     """Ogle arasi market snapshot tweet — 14:00 TR (UTC 11:00).
 
     Islemde olan tum halka arz hisselerinin anlik durumunu
     kart bazli gorsel ile tweet atar.
 
-    Borsa kapali kontrolu: Bugunun tarihine ait IPOCeilingTrack kaydı yoksa
-    (yani Excel sync bugunku tarihle veri göndermediyse) borsa kapalidir, tweet atilmaz.
+    Veri henuz gelmemisse (bugunun trade_date'i yoksa) 60sn bekleyip
+    2 kez daha dener (toplam 3 deneme, maks ~2dk bekleme).
+
+    Returns dict with "message" or "error" key for debug.
     """
-    try:
-        from sqlalchemy import select, and_, func
-        from decimal import Decimal
-        from datetime import date as date_type
-        from app.models.ipo import IPO, IPOCeilingTrack
+    import asyncio
 
-        async with async_session() as db:
-            # Status = "trading" olan tum IPO'lari bul
-            result = await db.execute(
-                select(IPO).where(
-                    and_(
-                        IPO.status == "trading",
-                        IPO.archived == False,
-                        IPO.trading_start.isnot(None),
-                    )
-                )
-            )
-            active_ipos = result.scalars().all()
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            result = await _market_snapshot_attempt(retry_num=attempt)
 
-            if not active_ipos:
-                logger.info("Ogle arasi snapshot: Aktif islem goren IPO yok")
-                return
+            if result and result.get("retry"):
+                logger.info("Snapshot retry %d/3 — 60sn bekleniyor: %s", attempt + 1, result["retry"])
+                await asyncio.sleep(60)
+                continue
 
-            today = date_type.today()
-            snapshot_data = []
+            return result
 
-            for ipo in active_ipos:
-                if not ipo.ticker:
-                    continue
+        except Exception as e:
+            logger.error(f"Ogle arasi snapshot hatasi (deneme {attempt+1}): {e}", exc_info=True)
+            return {"error": f"Exception: {str(e)}"}
 
-                # 25 gun dolmus IPO'lar snapshot'ta olmasin (25/25 dahil)
-                if ipo.trading_day_count and ipo.trading_day_count >= 25:
-                    continue
-
-                # trading_day: IPO tablosundaki trading_day_count + 1 (bugun icin)
-                # Bu deger sync script'ten bagimsiz, admin panelden yonetiliyor
-                real_trading_day = (ipo.trading_day_count or 0) + 1
-
-                # Bugunun ceiling track kaydini al
-                track_result = await db.execute(
-                    select(IPOCeilingTrack).where(
-                        and_(
-                            IPOCeilingTrack.ipo_id == ipo.id,
-                            IPOCeilingTrack.trade_date == today,
-                        )
-                    )
-                )
-                today_track = track_result.scalar_one_or_none()
-
-                # Track yoksa son track'i dene (belki sync henuz calismadi)
-                if not today_track:
-                    last_track_result = await db.execute(
-                        select(IPOCeilingTrack).where(
-                            IPOCeilingTrack.ipo_id == ipo.id,
-                        ).order_by(IPOCeilingTrack.trading_day.desc()).limit(1)
-                    )
-                    last_track = last_track_result.scalar_one_or_none()
-                    if not last_track:
-                        # Hic track yok — bu hisseyi gosterme
-                        continue
-                    # Son track'in trade_date bugun degilse → borsa kapali veya sync calismadi
-                    # Yine de goster, son bilinen veriyle
-                    today_track = last_track
-
-                # Bugunun trading_day'i 25+ ise atla
-                if real_trading_day >= 26:
-                    continue
-
-                # Kumulatif % hesapla (HA fiyatindan)
-                ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-                close_price = float(today_track.close_price) if today_track.close_price else 0
-                cum_pct = 0.0
-                if ipo_price > 0 and close_price > 0:
-                    cum_pct = ((close_price - ipo_price) / ipo_price) * 100
-
-                # Gunluk % — H sutunundan (pct_change) anlik geliyor
-                daily_pct = float(today_track.pct_change) if today_track.pct_change is not None else 0.0
-
-                # Durum
-                durum = today_track.durum or "not_kapatti"
-
-                snapshot_data.append({
-                    "ticker": ipo.ticker,
-                    "trading_day": real_trading_day,
-                    "close_price": close_price,
-                    "pct_change": daily_pct,
-                    "cum_pct": cum_pct,
-                    "durum": durum,
-                    "alis_lot": today_track.alis_lot,
-                    "satis_lot": today_track.satis_lot,
-                    "ipo_price": ipo_price,
-                })
-
-            if not snapshot_data:
-                logger.info("Ogle arasi snapshot: Bugun islem goren hisse yok (borsa kapali olabilir)")
-                return
-
-            logger.info(
-                "Ogle arasi snapshot: %d hisse — %s",
-                len(snapshot_data),
-                ", ".join(s["ticker"] for s in snapshot_data),
-            )
-
-            # Gorsel olustur
-            from app.services.chart_image_generator import generate_market_snapshot_image
-            image_path = generate_market_snapshot_image(snapshot_data)
-
-            if not image_path:
-                logger.error("Ogle arasi snapshot: Gorsel olusturulamadi")
-                return
-
-            # Tweet at
-            from app.services.twitter_service import tweet_market_snapshot
-            from app.services.admin_telegram import notify_tweet_sent
-            tw_ok = tweet_market_snapshot(snapshot_data, image_path)
-            await notify_tweet_sent("piyasa_snapshot", f"{len(snapshot_data)} hisse", tw_ok)
-
-            logger.info("Ogle arasi snapshot tweet basarili: %d hisse", len(snapshot_data))
-
-    except Exception as e:
-        logger.error(f"Ogle arasi snapshot hatasi: {e}")
+    return {"error": f"3 deneme sonrasi veri gelmedi — tweet olusturulamadi"}
 
 
 async def daily_ceiling_update():

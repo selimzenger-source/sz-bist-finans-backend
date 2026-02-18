@@ -1883,8 +1883,10 @@ async def trigger_snapshot_tweet(
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     from app.scheduler import market_snapshot_tweet
-    await market_snapshot_tweet()
-    return {"status": "ok", "message": "Market snapshot tweet tetiklendi"}
+    result = await market_snapshot_tweet()
+    if result and result.get("error"):
+        return {"status": "error", "message": result["error"]}
+    return {"status": "ok", "message": result.get("message", "Market snapshot tweet tetiklendi") if result else "Market snapshot tweet tetiklendi"}
 
 
 # -------------------------------------------------------
