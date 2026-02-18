@@ -521,7 +521,7 @@ def send_ceiling_data_to_backend(stock: StockState, hit_ceiling: bool, hit_floor
             "hit_floor": hit_floor,
             "alis_lot": stock.alis_lot,
             "satis_lot": stock.satis_lot,
-            "pct_change": stock.gun_fark,  # Excel'den direkt gunluk % degisim
+            "pct_change": round(stock.gun_fark, 2),  # Excel H sutunu — gunluk % degisim
         }
         if state.day_open_price > 0:
             payload["open_price"] = state.day_open_price
@@ -874,8 +874,8 @@ def print_stock_table(stocks: list[StockState]):
     """Hisse durumlarini tablo olarak goster."""
     now = dt.datetime.now()
     print(f"\n[{now.strftime('%H:%M:%S')}] {len(stocks)} hisse okundu:")
-    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'G.HIGH':>8s} {'ALIS K.':>10s} {'SATIS K.':>10s} {'A.LOT':>10s} {'S.LOT':>10s} {'DURUM'}")
-    print(f"  {'-'*100}")
+    print(f"  {'HISSE':<8s} {'TAVAN':>8s} {'TABAN':>8s} {'SON':>8s} {'G.HIGH':>8s} {'%G FARK':>8s} {'ALIS K.':>10s} {'SATIS K.':>10s} {'A.LOT':>10s} {'S.LOT':>10s} {'DURUM'}")
+    print(f"  {'-'*110}")
     for s in stocks:
         durum = ""
         if s.is_ceiling_locked:
@@ -890,6 +890,9 @@ def print_stock_table(stocks: list[StockState]):
         al = f"{s.alis_lot:,}".replace(",", ".") if s.alis_lot else "-"
         sl = f"{s.satis_lot:,}".replace(",", ".") if s.satis_lot else "-"
 
+        # H sutunu: %G FARK (gunluk yuzde degisim)
+        gf = f"%{s.gun_fark:+.2f}" if s.gun_fark != 0 else "-"
+
         # %4/%7 dusus durumunu goster (J sutunundan gun_en_yuksek)
         gun_high = s.gun_en_yuksek
         if gun_high > 0 and s.son_fiyat > 0:
@@ -897,7 +900,7 @@ def print_stock_table(stocks: list[StockState]):
             if drop >= 1.0:
                 durum += f" (-%{drop:.1f})"
 
-        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {gun_high:>8.2f} {ak:>10s} {sk:>10s} {al:>10s} {sl:>10s} {durum}")
+        print(f"  {s.ticker:<8s} {s.tavan:>8.2f} {s.taban:>8.2f} {s.son_fiyat:>8.2f} {gun_high:>8.2f} {gf:>8s} {ak:>10s} {sk:>10s} {al:>10s} {sl:>10s} {durum}")
 
 
 def is_market_hours() -> bool:
