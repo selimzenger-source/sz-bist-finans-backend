@@ -15,6 +15,7 @@ Kaynak: https://halkarz.com
 import json
 import re
 import logging
+import unicodedata
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -157,10 +158,28 @@ class HalkArzDetailParser:
                 self.data["market_segment"] = self._normalize_market(value)
 
             # Bist Ilk Islem Tarihi — "11 Şubat 2026"
-            elif "bist" in label and "işlem" in label:
+            # Not: Turkce İ (U+0130) .lower() sonucu 'i\u0307' olur (2 karakter),
+            # bu nedenle "işlem" string match basarisiz olur. ASCII normalize ile kontrol.
+            elif "bist" in label and self._label_contains_islem(label):
                 d = self._parse_single_date(value)
                 if d:
                     self.data["trading_start"] = d
+
+    @staticmethod
+    def _label_contains_islem(label: str) -> bool:
+        """Turkce 'işlem' kelimesini label icinde arar.
+
+        Problem: Python'da İ (U+0130).lower() → 'i\\u0307' (2 karakter) olur,
+        bu yuzden 'işlem' string match calismaz.
+        Cozum: Label'i ASCII-ye normalize edip 'islem' arar.
+        """
+        # 1. Direkt kontrol (ASCII i ile yazilmissa)
+        if "işlem" in label or "islem" in label:
+            return True
+        # 2. Unicode normalize — combining mark temizle
+        nfkd = unicodedata.normalize("NFKD", label)
+        ascii_label = "".join(c for c in nfkd if not unicodedata.combining(c))
+        return "islem" in ascii_label
 
     # --- BOLUM 3: Sonuc Tablosu (as-table) ---
     def _parse_results_table(self):

@@ -775,6 +775,103 @@ async def check_spk_ihrac_data():
             pass
 
 
+async def check_trading_start_halkarz():
+    """Saatlik islem tarihi kontrolu — sadece awaiting_trading IPO'lar icin.
+
+    HalkArz.com detay sayfasindan 'Bist Ilk Islem Tarihi' alanini kontrol eder.
+    Tespit edilince trading_start alanini set eder + Telegram'a bildirir.
+    auto_update_statuses sonraki calismasinda IPO'yu 'trading'e gecirir.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from app.scrapers.halkarz_scraper import HalkArzScraper
+
+        async with async_session() as db:
+            # Sadece awaiting_trading + trading_start bos olan IPO'lar
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status == "awaiting_trading",
+                        IPO.archived == False,
+                        IPO.trading_start.is_(None),
+                    )
+                )
+            )
+            ipos = list(result.scalars().all())
+
+            if not ipos:
+                return  # Kontrol edilecek IPO yok
+
+            logger.info(
+                "Trading start kontrolu: %d awaiting_trading IPO kontrol edilecek",
+                len(ipos),
+            )
+
+            scraper = HalkArzScraper()
+            try:
+                # WP API'den postlari al
+                posts = await scraper.fetch_all_posts()
+                if not posts:
+                    return
+
+                updated = 0
+                for ipo in ipos:
+                    # Eslesen postu bul
+                    matched_post = None
+                    for post in posts:
+                        if scraper.match_post_to_ipo(post["title"], ipo.company_name):
+                            matched_post = post
+                            break
+
+                    if not matched_post:
+                        continue
+
+                    # Detay sayfasina git
+                    detail = await scraper.fetch_detail_page(matched_post["link"])
+                    if not detail:
+                        continue
+
+                    trading_start = detail.get("trading_start")
+                    if trading_start and not ipo.trading_start:
+                        ipo.trading_start = trading_start
+                        ipo.expected_trading_date = trading_start
+                        ipo.updated_at = datetime.utcnow()
+                        updated += 1
+                        logger.info(
+                            "HalkArz islem tarihi tespit: %s → %s",
+                            ipo.ticker or ipo.company_name,
+                            trading_start,
+                        )
+
+                        # Telegram bildir
+                        try:
+                            from app.services.admin_telegram import send_admin_message
+                            await send_admin_message(
+                                f"📊 <b>İşlem Tarihi Tespit Edildi</b>\n\n"
+                                f"<b>{ipo.ticker or 'N/A'}</b> — {ipo.company_name}\n"
+                                f"<b>Bist İlk İşlem:</b> {trading_start}\n"
+                                f"<b>Kaynak:</b> HalkArz.com"
+                            )
+                        except Exception:
+                            pass
+
+                if updated > 0:
+                    await db.commit()
+                    logger.info("HalkArz trading start: %d IPO guncellendi", updated)
+
+            finally:
+                await scraper.close()
+
+    except Exception as e:
+        logger.error("HalkArz trading start kontrol hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("HalkArz Trading Start Kontrol", str(e))
+        except Exception:
+            pass
+
+
 async def scrape_infoyatirim():
     """InfoYatirim.com — halka arz detay bilgileri (2. alternatif kaynak).
 
@@ -1921,6 +2018,16 @@ def _setup_scheduler_impl():
         IntervalTrigger(hours=2),
         id="spk_ihrac_checker",
         name="SPK Ihrac Verileri (Islem Tarihi)",
+        replace_existing=True,
+    )
+
+    # 10b. HalkArz Trading Start Kontrol — her saat
+    # awaiting_trading + trading_start bos IPO'lar icin saatlik kontrol
+    scheduler.add_job(
+        check_trading_start_halkarz,
+        IntervalTrigger(hours=1),
+        id="halkarz_trading_start_checker",
+        name="HalkArz Islem Tarihi Kontrol (Saatlik)",
         replace_existing=True,
     )
 
