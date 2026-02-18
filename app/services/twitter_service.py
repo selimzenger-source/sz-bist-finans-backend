@@ -1341,12 +1341,12 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
         taban_count = sum(1 for s in snapshot_data if s.get("durum") == "taban")
         normal_count = count - tavan_count - taban_count
 
-        # Tum hisseleri tek satirda yan yana (cift boslukla ayrilmis)
-        parts = []
+        # Her hisse icin 2 satirlik blok (ticker+gun / pct), aralarinda bos satir
+        blocks = []
         for s in snapshot_data:
             pct = float(s.get("pct_change", 0))
-            parts.append(f"#{s['ticker']} {s['trading_day']}/25 %{pct:+.1f}")
-        hisse_satiri = "  ".join(parts)
+            blocks.append(f"#{s['ticker']}  {s['trading_day']}. Gün/25\n%{pct:+.1f}")
+        hisse_satiri = "\n\n".join(blocks)
 
         text = (
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"

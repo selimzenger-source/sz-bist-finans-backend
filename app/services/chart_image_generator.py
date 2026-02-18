@@ -640,6 +640,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         font_data = _load_font(24, bold=False)
         font_data_bold = _load_font(24, bold=True)
         font_lot = _load_font(20, bold=False)
+        font_badge_sm = _load_font(17, bold=False)  # Uzun badge etiketleri icin (HAFİF ALICILI vs.)
         font_cum_val = _load_font(16, bold=True)   # G. Toplam yuzde degeri (kucuk)
         font_footer = _load_font(22, bold=False)
         font_footer_bold = _load_font(24, bold=True)
@@ -755,15 +756,20 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             durum_labels = {
                 "tavan": "TAVAN",
                 "taban": "TABAN",
-                "alici_kapatti": "ALICILI",
-                "satici_kapatti": "SATICILI",
-                "not_kapatti": "Normal İşlem",
+                "alici_kapatti": "HAFİF ALICILI",
+                "satici_kapatti": "HAFİF SATICILI",
+                "not_kapatti": "NORMAL",
             }
             d_label = durum_labels.get(durum, durum.upper() if durum else "—")
             d_color = _pct_to_color(daily_fark)  # gunluk % bazli gradyan renk
 
-            # Badge arka plan kutusu
-            font_badge = font_lot if len(d_label) > 8 else font_data_bold  # uzun etiketler icin kucuk font
+            # Badge arka plan kutusu — uzunluga gore font secimi
+            if len(d_label) > 10:
+                font_badge = font_badge_sm   # HAFİF ALICILI / HAFİF SATICILI icin 17pt
+            elif len(d_label) > 8:
+                font_badge = font_lot        # 20pt
+            else:
+                font_badge = font_data_bold  # 24pt
             d_bbox = font_badge.getbbox(d_label)
             d_w = d_bbox[2] - d_bbox[0]
             badge_x = width - padding - d_w - 16
