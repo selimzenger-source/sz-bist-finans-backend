@@ -1218,7 +1218,7 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
         from app.scrapers.spk_bulletin_scraper import (
             SPKBulletinScraper, _get_last_bulletin_no, is_newer,
             bulletin_no_str, extract_text_from_pdf, extract_tables_from_pdf,
-            find_ilk_halka_arz_table,
+            find_ilk_halka_arz_table, parse_bulletin_no,
         )
         from datetime import date as _date
 
@@ -1226,10 +1226,15 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
 
         scraper = SPKBulletinScraper()
         try:
-            # 1. Son numarayi al
-            last_no = await _get_last_bulletin_no(db)
-            debug_info["last_bulletin_no"] = bulletin_no_str(*last_no) if last_no else None
-            debug_info["steps"].append(f"1. DB son bulten: {debug_info['last_bulletin_no']}")
+            # 1. Son numarayi al — override varsa kullan
+            override_no = payload.get("force_last_no")  # orn: "2026/8"
+            if override_no:
+                last_no = parse_bulletin_no(override_no)
+                debug_info["last_bulletin_no"] = override_no + " (override)"
+            else:
+                last_no = await _get_last_bulletin_no(db)
+                debug_info["last_bulletin_no"] = bulletin_no_str(*last_no) if last_no else None
+            debug_info["steps"].append(f"1. Son bulten: {debug_info['last_bulletin_no']}")
 
             # 2. Bulten listesini al
             current_year = _date.today().year
