@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, and_, or_, func, union_all
+from sqlalchemy import select, and_, func, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, UserSubscription, StockNotificationSubscription
@@ -51,14 +51,17 @@ def mark_broadcast_sent():
 # -------------------------------------------------------
 
 def _base_filter():
-    """Tum broadcast sorgularinda ortak filtre."""
+    """Tum broadcast sorgularinda ortak filtre.
+
+    Sadece FCM token'i olan kullanicilari dahil et.
+    Expo Push Token tek basina bildirim gondermek icin yeterli degil
+    — Firebase (FCM) uzerinden gonderim yapiyoruz.
+    """
     return and_(
         User.notifications_enabled == True,
         User.deleted == False,
-        or_(
-            and_(User.fcm_token.isnot(None), User.fcm_token != ""),
-            and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
-        ),
+        User.fcm_token.isnot(None),
+        User.fcm_token != "",
     )
 
 
@@ -187,8 +190,11 @@ async def broadcast_background_task(
 
             for user in users:
                 try:
-                    token = user.fcm_token or ""
-                    if not token.strip():
+                    token = (user.fcm_token or "").strip()
+                    if not token:
+                        logger.warning(
+                            "Broadcast: User %d FCM token bos — atlaniyor", user.id
+                        )
                         failed += 1
                         continue
 
@@ -202,10 +208,20 @@ async def broadcast_background_task(
                     )
                     if success:
                         sent += 1
+                        logger.info(
+                            "Broadcast: User %d OK (token: %s...)",
+                            user.id, token[:20],
+                        )
                     else:
                         failed += 1
+                        logger.warning(
+                            "Broadcast: User %d FAILED (token: %s...)",
+                            user.id, token[:20],
+                        )
                 except Exception as e:
-                    logger.warning("Broadcast: Kullanici %d gonderim hatasi: %s", user.id, e)
+                    logger.warning(
+                        "Broadcast: User %d exception: %s", user.id, e
+                    )
                     failed += 1
 
         logger.info(
