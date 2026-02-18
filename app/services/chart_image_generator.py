@@ -681,9 +681,9 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             card_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
             draw.rectangle([(0, card_y), (width, card_y + card_h)], fill=card_bg)
 
-            # Sol kenar renk accent (pozitif=GREEN, negatif=RED)
-            pct = float(stock.get("pct_change", 0))
-            accent_color = GREEN if pct >= 0 else RED
+            # Sol kenar renk accent (kumulatif'e gore)
+            cum_pct = float(stock.get("cum_pct", 0))
+            accent_color = GREEN if cum_pct >= 0 else RED
             draw.rectangle([(0, card_y), (accent_w, card_y + card_h)], fill=accent_color)
 
             # ─ Satir 1: Ticker | Gun | Fiyat | Gunluk% | Durum ─
@@ -700,12 +700,12 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             price_text = f"{float(stock['close_price']):.2f} TL"
             draw.text((420, row1_y), price_text, fill=WHITE, font=font_data_bold)
 
-            # Gunluk % (orta-sag)
-            pct_color = GREEN if pct >= 0 else RED
-            pct_text = f"%{pct:+.2f}"
-            draw.text((620, row1_y), pct_text, fill=pct_color, font=font_data_bold)
+            # Kumulatif % (orta-sag) — HA fiyatindan bugune toplam degisim
+            cum_color = GREEN if cum_pct >= 0 else RED
+            cum_text = f"%{cum_pct:+.2f}"
+            draw.text((620, row1_y), cum_text, fill=cum_color, font=font_data_bold)
 
-            # Gunluk Fark — H sutunundan gelen pct_change
+            # Gunluk Fark — dunku kapanisa gore bugunun degisimi
             daily_fark = float(stock.get("pct_change", 0))
             # Label kismi duz GRAY
             fark_label = "Günlük Fark: "
