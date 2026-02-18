@@ -33,6 +33,12 @@ GOLD = (250, 204, 21)            # #facc15
 DIVIDER = (55, 55, 80)           # #373750
 ORANGE = (251, 146, 60)          # #fb923c
 
+# Durum renkleri — tavan/taban belirgin, alicili/saticili silik
+TAVAN_GREEN = (0, 230, 64)       # #00e640 parlak / koyu yesil — tavan
+MUTED_GREEN = (74, 140, 96)      # #4a8c60 silik/soluk yesil — alicili
+MUTED_RED = (160, 80, 80)        # #a05050 silik/soluk kirmizi — saticili
+TABAN_RED = (255, 40, 40)        # #ff2828 parlak / koyu kirmizi — taban
+
 # ── Font ───────────────────────────────────────────────────
 # Render (Linux) DejaVu fontlari mevcut
 _FONT_PATHS = [
@@ -297,10 +303,10 @@ def generate_25day_image(
                 "not_kapatti": "Normal İşlem",
             }
             durum_color_map = {
-                "tavan": GREEN,
-                "alici_kapatti": GREEN,
-                "satici_kapatti": RED,
-                "taban": RED,
+                "tavan": TAVAN_GREEN,
+                "alici_kapatti": MUTED_GREEN,
+                "satici_kapatti": MUTED_RED,
+                "taban": TABAN_RED,
                 "not_kapatti": ORANGE,
             }
             durum_label = durum_label_map.get(durum_raw, "")
@@ -501,8 +507,8 @@ def generate_daily_tracking_image(
                 "satici_kapatti": "SATICILI", "taban": "TABAN", "not_kapatti": "NORMAL",
             }
             durum_color_map = {
-                "tavan": GREEN, "alici_kapatti": GREEN,
-                "satici_kapatti": RED, "taban": RED, "not_kapatti": ORANGE,
+                "tavan": TAVAN_GREEN, "alici_kapatti": MUTED_GREEN,
+                "satici_kapatti": MUTED_RED, "taban": TABAN_RED, "not_kapatti": ORANGE,
             }
             durum_label = durum_label_map.get(durum_raw, "")
             durum_color = durum_color_map.get(durum_raw, GRAY)
@@ -681,9 +687,16 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             card_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
             draw.rectangle([(0, card_y), (width, card_y + card_h)], fill=card_bg)
 
-            # Sol kenar renk accent (kumulatif'e gore)
+            # Sol kenar renk accent (durum'a gore)
             cum_pct = float(stock.get("cum_pct", 0))
-            accent_color = GREEN if cum_pct >= 0 else RED
+            durum = stock.get("durum", "")
+            accent_map = {
+                "tavan": TAVAN_GREEN,
+                "taban": TABAN_RED,
+                "alici_kapatti": MUTED_GREEN,
+                "satici_kapatti": MUTED_RED,
+            }
+            accent_color = accent_map.get(durum, GREEN if cum_pct >= 0 else RED)
             draw.rectangle([(0, card_y), (accent_w, card_y + card_h)], fill=accent_color)
 
             # ─ Satir 1: Ticker | Gun | Fiyat | Gunluk% | Durum ─
@@ -726,10 +739,10 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
                 "not_kapatti": "Normal İşlem",
             }
             durum_colors = {
-                "tavan": GREEN,
-                "taban": RED,
-                "alici_kapatti": GREEN,
-                "satici_kapatti": RED,
+                "tavan": TAVAN_GREEN,
+                "taban": TABAN_RED,
+                "alici_kapatti": MUTED_GREEN,
+                "satici_kapatti": MUTED_RED,
                 "not_kapatti": ORANGE,
             }
             d_label = durum_labels.get(durum, durum.upper() if durum else "—")
@@ -758,12 +771,12 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             if durum == "tavan":
                 # Tavandaysa sadece alis lot goster
                 lot_text = f"Tavanda Bekleyen Alış: {_format_lot(alis_lot)}"
-                lot_color = GREEN
+                lot_color = TAVAN_GREEN
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             elif durum == "taban":
                 # Tabandaysa sadece satis lot goster
                 lot_text = f"Tabanda Bekleyen Satış: {_format_lot(satis_lot)}"
-                lot_color = RED
+                lot_color = TABAN_RED
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             # Normal durum — lot bilgisi gosterilmez
 
@@ -826,11 +839,11 @@ def _draw_centered(draw, center_x: int, y: int, text: str,
 def _durum_label(durum: str) -> tuple:
     """Durum kodundan okunabilir etiket + renk doner."""
     mapping = {
-        "tavan": ("TAVAN", GREEN),
-        "alici_kapatti": ("ALICILI", GREEN),
+        "tavan": ("TAVAN", TAVAN_GREEN),
+        "alici_kapatti": ("ALICILI", MUTED_GREEN),
         "not_kapatti": ("NORMAL", GOLD),
-        "satici_kapatti": ("SATICILI", RED),
-        "taban": ("TABAN", RED),
+        "satici_kapatti": ("SATICILI", MUTED_RED),
+        "taban": ("TABAN", TABAN_RED),
     }
     return mapping.get(durum, ("—", GRAY))
 
@@ -1047,12 +1060,12 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
                 _draw_centered(draw, mid_x, y, "Tavanda Alış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_alis)} lot",
-                               font_value, GREEN)
+                               font_value, TAVAN_GREEN)
             elif durum == "taban" or (_alis == 0 and _satis > 0):
                 _draw_centered(draw, mid_x, y, "Tabanda Satış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
-                               font_value, RED)
+                               font_value, TABAN_RED)
             else:
                 _draw_centered(draw, mid_x, y, "Normal İşlem Kademesi", font_small, (100, 100, 120))
                 y += 16
