@@ -1198,16 +1198,109 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
 @app.post("/api/v1/admin/trigger-spk-check")
 @limiter.limit("3/minute")
 async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
-    """Admin: SPK bulten monitor'u manuel tetikle."""
+    """Admin: SPK bulten monitor'u manuel tetikle — detayli debug."""
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
+    debug_mode = payload.get("debug", False)
+
+    if not debug_mode:
+        try:
+            from app.scrapers.spk_bulletin_scraper import check_spk_bulletins
+            await check_spk_bulletins()
+            return {"status": "ok", "message": "SPK bulten kontrolu tamamlandi"}
+        except Exception as e:
+            import traceback
+            return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+
+    # Debug mode — adim adim isle ve sonuclari dondur
     try:
-        from app.scrapers.spk_bulletin_scraper import check_spk_bulletins
-        await check_spk_bulletins()
-        return {"status": "ok", "message": "SPK bulten kontrolu tamamlandi"}
+        from app.scrapers.spk_bulletin_scraper import (
+            SPKBulletinScraper, _get_last_bulletin_no, is_newer,
+            bulletin_no_str, extract_text_from_pdf, extract_tables_from_pdf,
+            find_ilk_halka_arz_table,
+        )
+        from datetime import date as _date
+
+        debug_info = {"steps": []}
+
+        scraper = SPKBulletinScraper()
+        try:
+            # 1. Son numarayi al
+            last_no = await _get_last_bulletin_no(db)
+            debug_info["last_bulletin_no"] = bulletin_no_str(*last_no) if last_no else None
+            debug_info["steps"].append(f"1. DB son bulten: {debug_info['last_bulletin_no']}")
+
+            # 2. Bulten listesini al
+            current_year = _date.today().year
+            bulletins = await scraper.fetch_bulletin_list(year=current_year)
+            debug_info["total_bulletins"] = len(bulletins)
+            debug_info["bulletin_list"] = [
+                {"no": bulletin_no_str(*b["bulletin_no"]), "url": b["pdf_url"][:80]}
+                for b in bulletins[-5:]  # Son 5 bulten
+            ]
+            debug_info["steps"].append(f"2. {len(bulletins)} bulten listelendi")
+
+            # 3. Yeni bultenleri filtrele
+            new_bulletins = [b for b in bulletins if is_newer(b["bulletin_no"], last_no)]
+            debug_info["new_bulletins"] = [bulletin_no_str(*b["bulletin_no"]) for b in new_bulletins]
+            debug_info["steps"].append(f"3. {len(new_bulletins)} yeni bulten: {debug_info['new_bulletins']}")
+
+            if not new_bulletins:
+                debug_info["steps"].append("SONUC: Yeni bulten yok")
+                return {"status": "ok", "debug": debug_info}
+
+            # 4. Ilk yeni bulteni isle (debug)
+            bulletin = sorted(new_bulletins, key=lambda x: x["bulletin_no"])[0]
+            bno = bulletin["bulletin_no"]
+            pdf_url = bulletin["pdf_url"]
+            debug_info["processing_bulletin"] = bulletin_no_str(*bno)
+            debug_info["pdf_url"] = pdf_url
+
+            # PDF indir
+            pdf_bytes = await scraper.download_pdf(pdf_url)
+            if not pdf_bytes:
+                debug_info["steps"].append("4. PDF indirilemedi!")
+                return {"status": "error", "debug": debug_info}
+
+            debug_info["pdf_size"] = len(pdf_bytes)
+            debug_info["steps"].append(f"4. PDF indirildi: {len(pdf_bytes)} bytes")
+
+            # PDF parse
+            full_text = extract_text_from_pdf(pdf_bytes)
+            tables = extract_tables_from_pdf(pdf_bytes)
+            debug_info["text_length"] = len(full_text)
+            debug_info["table_count"] = len(tables)
+            debug_info["text_preview"] = full_text[:500] if full_text else "BOS"
+            debug_info["steps"].append(f"5. PDF parse: {len(full_text)} char, {len(tables)} tablo")
+
+            # Tablo detayi
+            for i, table in enumerate(tables):
+                rows = len(table) if table else 0
+                header_preview = ""
+                if table and len(table) > 0:
+                    header_preview = " | ".join(str(c or "")[:20] for c in table[0])
+                debug_info[f"table_{i}"] = {
+                    "rows": rows,
+                    "header": header_preview[:200],
+                }
+
+            # Ilk halka arz tablosu
+            ipo_approvals = find_ilk_halka_arz_table(tables, full_text)
+            debug_info["ipo_approvals"] = [
+                {"company": a["company_name"], "price": str(a.get("sale_price"))}
+                for a in ipo_approvals
+            ]
+            debug_info["steps"].append(f"6. {len(ipo_approvals)} halka arz tespit edildi")
+
+            return {"status": "ok", "debug": debug_info}
+
+        finally:
+            await scraper.close()
+
     except Exception as e:
-        return {"status": "error", "message": str(e)[:500]}
+        import traceback
+        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1500:]}
 
 
 @app.post("/api/v1/admin/reset-spk-bulletin-no")
