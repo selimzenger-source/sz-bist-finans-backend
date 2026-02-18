@@ -6,6 +6,7 @@ Kullanici tablosuna hicbir yazma islemi yapmaz.
 """
 
 import asyncio
+import functools
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -244,7 +245,12 @@ async def broadcast_background_task(
                         ),
                     )
 
-                    response = messaging.send(message)
+                    # messaging.send() senkron blocking I/O — thread pool'da calistir
+                    # (async event loop'u bloke etmesin)
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(
+                        None, functools.partial(messaging.send, message)
+                    )
                     sent += 1
                     logger.info(
                         "Broadcast: User %d OK — %s",
