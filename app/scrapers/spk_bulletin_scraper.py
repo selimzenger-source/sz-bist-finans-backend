@@ -243,9 +243,18 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
             if cn_lower.strip() in ("ortaklık", "ortaklik", "ortaklık adı"):
                 continue
 
-            # "Kaynak", "Not", dipnot satirlarini atla
+            # Dipnot / kaynak / toplam satirlarini atla
+            # DIKKAT: Sadece satirin TAMAMI bu kelimelerden olusuyorsa atla.
+            # Sirket adinda "(1)" veya "kaynak" gecebilir — onu ATLAMA.
             lower_name = company_name.lower()
-            if any(skip in lower_name for skip in ["kaynak", "(1)", "(2)", "not:", "toplam"]):
+            # Tamamen dipnot veya aciklama satiri mi?
+            is_junk_row = (
+                lower_name.startswith("kaynak")
+                or lower_name.startswith("not:")
+                or lower_name.startswith("toplam")
+                or re.match(r"^\(\d+\)\s*$", company_name)  # Sadece "(1)" gibi
+            )
+            if is_junk_row:
                 continue
 
             existing_capital = None
