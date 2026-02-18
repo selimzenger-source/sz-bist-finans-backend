@@ -158,7 +158,8 @@ class NotificationService:
             # UnregisteredError: Cihaz artik kayitli degil
             # InvalidArgumentError: Token formati gecersiz
             # SenderIdMismatchError: Token farkli bir Firebase projesine ait
-            if error_name in ("UnregisteredError", "InvalidArgumentError", "SenderIdMismatchError"):
+            # NotFoundError: Token bulunamadi (FCM'den kaldirilmis)
+            if error_name in ("UnregisteredError", "InvalidArgumentError", "SenderIdMismatchError", "NotFoundError"):
                 await self._clear_stale_token(fcm_token)
 
             return False

@@ -1104,7 +1104,17 @@ async def admin_test_notification(
             delay=False,
         )
 
-        method = "FCM" if fcm else "Expo"
+        # method tespiti: FCM basarisiz olup Expo fallback yaptiysa farkli goster
+        fcm_error = getattr(notif_service, '_last_send_error', None)
+        if fcm and success and fcm_error:
+            method = "Expo (FCM fallback)"
+        elif fcm and success:
+            method = "FCM"
+        elif not fcm and success:
+            method = "Expo"
+        else:
+            method = "FCM+Expo" if fcm and expo else ("FCM" if fcm else "Expo")
+
         if success:
             return {
                 "status": "ok",
@@ -1115,10 +1125,10 @@ async def admin_test_notification(
         else:
             return {
                 "status": "error",
-                "message": f"{method} test bildirimi basarisiz — token gecersiz olabilir",
+                "message": f"Test bildirimi basarisiz — tum tokenlar gecersiz",
                 "token_info": token_info,
                 "method": method,
-                "last_error": getattr(notif_service, '_last_send_error', None),
+                "last_error": fcm_error,
             }
     except Exception as e:
         import traceback
