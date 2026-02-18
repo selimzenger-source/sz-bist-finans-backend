@@ -1,6 +1,7 @@
 """Admin panel route'lari — IPO CRUD + Dagitim Sonuclari + SPK Yonetimi."""
 
 import logging
+import os
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -1130,6 +1131,121 @@ async def toggle_auto_send(request: Request):
     )
 
     return RedirectResponse(url="/admin/tweets", status_code=303)
+
+
+# -------------------------------------------------------
+# TWEET AYARLARI — Sabit degerler (APP_LINK, SLOGAN vb.)
+# -------------------------------------------------------
+
+_TWEET_SETTING_KEYS = [
+    ("APP_LINK", "Uygulama Linki", "szalgo.net.tr"),
+    ("SLOGAN", "Slogan", "\U0001F514 İlk bilen siz olun!"),
+    ("DISCLAIMER", "Yasal Uyarı (Uzun)", "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
+    ("DISCLAIMER_SHORT", "Yasal Uyarı (Kısa)", "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
+    ("HASHTAGS", "Hashtagler", "#HalkaArz #BIST #Borsa"),
+]
+
+
+@router.get("/tweet-settings", response_class=HTMLResponse)
+async def tweet_settings_page(
+    request: Request,
+    success: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet sabit ayarlarını gösterir."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+
+    result = await db.execute(select(AppSetting))
+    db_settings = {s.key: s.value for s in result.scalars().all()}
+
+    settings_list = []
+    for key, label, default in _TWEET_SETTING_KEYS:
+        settings_list.append({
+            "key": key,
+            "label": label,
+            "value": db_settings.get(key, default),
+            "default": default,
+        })
+
+    return templates.TemplateResponse("admin/tweet_settings.html", {
+        "request": request,
+        "settings": settings_list,
+        "success": success,
+    })
+
+
+@router.post("/tweet-settings")
+async def update_tweet_settings(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet sabit ayarlarını günceller."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+
+    form = await request.form()
+
+    for key, label, default in _TWEET_SETTING_KEYS:
+        value = form.get(key, default).strip()
+        # Upsert
+        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.value = value
+        else:
+            db.add(AppSetting(key=key, value=value))
+
+    await db.commit()
+
+    # Cache temizle
+    from app.services.twitter_service import clear_settings_cache
+    clear_settings_cache()
+
+    logger.info("[ADMIN] Tweet ayarları güncellendi")
+    return RedirectResponse(url="/admin/tweet-settings?success=1", status_code=303)
+
+
+# -------------------------------------------------------
+# TWEET GORSEL ONIZLEME — Admin panelde gorsel goster
+# -------------------------------------------------------
+
+@router.get("/tweet-image/{tweet_id}")
+async def tweet_image(
+    request: Request,
+    tweet_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet görseli serve eder (admin panel önizleme)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.pending_tweet import PendingTweet
+    from fastapi.responses import FileResponse
+
+    result = await db.execute(select(PendingTweet).where(PendingTweet.id == tweet_id))
+    tweet = result.scalar_one_or_none()
+
+    if not tweet or not tweet.image_path:
+        from fastapi.responses import Response
+        return Response(status_code=404)
+
+    image_path = tweet.image_path
+
+    if not os.path.exists(image_path):
+        from fastapi.responses import Response
+        return Response(status_code=404)
+
+    # MIME type belirle
+    ext = os.path.splitext(image_path)[1].lower()
+    media_types = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+    media_type = media_types.get(ext, "image/png")
+
+    return FileResponse(image_path, media_type=media_type)
 
 
 # -------------------------------------------------------

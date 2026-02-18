@@ -14,6 +14,7 @@ from app.models.dividend import Dividend, DividendHistory
 from app.models.telegram_news import TelegramNews
 from app.models.scraper_state import ScraperState
 from app.models.pending_tweet import PendingTweet
+from app.models.app_setting import AppSetting
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -30,4 +31,5 @@ __all__ = [
     "TelegramNews",
     "ScraperState",
     "PendingTweet",
+    "AppSetting",
 ]

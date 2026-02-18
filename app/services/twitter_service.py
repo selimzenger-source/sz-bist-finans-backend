@@ -352,14 +352,79 @@ def _safe_tweet(text: str, source: str = "unknown") -> bool:
 
 
 # ================================================================
-# APP LINK — store'a yuklenince gercek link ile degistirilecek
+# APP LINK & SABIT DEGERLER — Admin panelden duzenlenebilir
 # ================================================================
-APP_LINK = "szalgo.net.tr"
+_DEFAULTS = {
+    "APP_LINK": "szalgo.net.tr",
+    "SLOGAN": "\U0001F514 İlk bilen siz olun!",
+    "DISCLAIMER": "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
+    "DISCLAIMER_SHORT": "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
+    "HASHTAGS": "#HalkaArz #BIST #Borsa",
+}
 
-# Standart footer — slogan + yasal uyari
-SLOGAN = "\U0001F514 İlk bilen siz olun!"
-DISCLAIMER = "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."
-DISCLAIMER_SHORT = "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."
+# Settings cache — 5 dk
+_settings_cache: dict[str, str] = {}
+_settings_cache_ts: float = 0
+_SETTINGS_CACHE_TTL = 300  # 5 dakika
+
+
+def _get_setting(key: str) -> str:
+    """DB'den ayar degerini okur (5dk cache). Yoksa default doner."""
+    global _settings_cache, _settings_cache_ts
+    import time as _t
+
+    now = _t.time()
+    if now - _settings_cache_ts > _SETTINGS_CACHE_TTL:
+        # Cache expired — DB'den yenile
+        try:
+            from app.config import get_settings
+            db_url = str(get_settings().DATABASE_URL)
+            sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
+
+            from sqlalchemy import create_engine, text as sa_text
+            engine = create_engine(sync_url, pool_pre_ping=True)
+            with engine.connect() as conn:
+                rows = conn.execute(sa_text("SELECT key, value FROM app_settings")).fetchall()
+                _settings_cache = {r[0]: r[1] for r in rows}
+            engine.dispose()
+            _settings_cache_ts = now
+        except Exception as e:
+            logger.debug("AppSetting cache yenilenemedi (default kullanılacak): %s", e)
+            _settings_cache_ts = now  # Hata durumunda da cache'i sifirla, surekli retry yapmasin
+
+    return _settings_cache.get(key, _DEFAULTS.get(key, ""))
+
+
+def clear_settings_cache():
+    """Admin ayar değiştirdiğinde cache'i sıfırla."""
+    global _settings_cache_ts
+    _settings_cache_ts = 0
+
+
+# Backward-compatible property'ler
+class _DynSetting:
+    """Lazy ayar okuyucu — APP_LINK gibi kullanildiginda DB'den guncel degeri doner."""
+    def __init__(self, key: str):
+        self._key = key
+    def __str__(self):
+        return _get_setting(self._key)
+    def __repr__(self):
+        return _get_setting(self._key)
+    def __format__(self, format_spec):
+        return format(_get_setting(self._key), format_spec)
+    def __eq__(self, other):
+        return str(self) == str(other)
+    def __add__(self, other):
+        return str(self) + str(other)
+    def __radd__(self, other):
+        return str(other) + str(self)
+
+
+# f-string icinde {APP_LINK} yazildiginda otomatik DB'den okur
+APP_LINK = _DynSetting("APP_LINK")
+SLOGAN = _DynSetting("SLOGAN")
+DISCLAIMER = _DynSetting("DISCLAIMER")
+DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")
 
 
 # ================================================================

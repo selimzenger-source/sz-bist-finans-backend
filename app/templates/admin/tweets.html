@@ -80,14 +80,20 @@
             </span>
         </div>
 
-        <!-- Tweet metni -->
-        <div class="px-4 py-3">
-            <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed">{{ tweet.text }}</pre>
-        </div>
-
-        <!-- Karakter sayısı -->
-        <div class="px-4 pb-2">
-            <span class="text-xs text-gray-500">{{ tweet.text|length }} karakter</span>
+        <!-- Tweet metni + görsel önizleme -->
+        <div class="px-4 py-3 flex gap-3">
+            <div class="flex-1">
+                <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed">{{ tweet.text }}</pre>
+                <span class="text-xs text-gray-500">{{ tweet.text|length }} karakter</span>
+            </div>
+            {% if tweet.image_path %}
+            <div class="flex-shrink-0">
+                <img src="/admin/tweet-image/{{ tweet.id }}" alt="Banner"
+                     class="w-20 h-20 object-cover rounded border border-gray-600"
+                     onerror="this.style.display='none'"
+                     loading="lazy" />
+            </div>
+            {% endif %}
         </div>
 
         <!-- Aksiyonlar -->
