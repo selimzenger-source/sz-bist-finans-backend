@@ -36,23 +36,19 @@
         <h3 class="font-bold text-lg text-indigo-400 mb-3">🚀 Manuel Tweet Tetikle</h3>
         <div class="flex flex-wrap gap-3">
             <!-- T15: Öğle Arası Market Snapshot -->
-            <form method="post" action="/admin/tweets/trigger-snapshot" style="display:inline">
-                <button type="submit"
-                        class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2"
-                        onclick="this.disabled=true; this.innerHTML='⏳ Gönderiliyor...'; return true;">
-                    📊 Gün Ortası Rapor (T15)
-                </button>
-            </form>
+            <button id="btn-t15" onclick="triggerTweet('/admin/tweets/trigger-snapshot', this, 'res-t15')"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
+                📊 Gün Ortası Rapor (T15)
+            </button>
             <!-- T16: Açılış Bilgileri -->
-            <form method="post" action="/admin/tweets/trigger-opening" style="display:inline">
-                <button type="submit"
-                        class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2"
-                        onclick="this.disabled=true; this.innerHTML='⏳ Gönderiliyor...'; return true;">
-                    🔔 Açılış Bilgileri (T16)
-                </button>
-            </form>
+            <button id="btn-t16" onclick="triggerTweet('/admin/tweets/trigger-opening', this, 'res-t16')"
+                    class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
+                🔔 Açılış Bilgileri (T16)
+            </button>
         </div>
-        <p class="text-xs text-gray-500 mt-2">Tıklayınca ilgili tweet hemen oluşturulup gönderilir.</p>
+        <p class="text-xs text-gray-500 mt-2">Tıklayınca ilgili tweet hemen oluşturulup gönderilir (30sn kadar sürebilir).</p>
+        <div id="res-t15" class="mt-2 hidden"></div>
+        <div id="res-t16" class="mt-2 hidden"></div>
         {% if trigger_message %}
         <div class="mt-2 px-3 py-2 rounded text-sm {{ 'bg-green-900 text-green-300' if trigger_success else 'bg-red-900 text-red-300' }}">
             {{ trigger_message }}
@@ -187,5 +183,43 @@ document.addEventListener('keydown', function(e) {
         document.querySelectorAll('[id^="lightbox-"]').forEach(el => el.classList.add('hidden'));
     }
 });
+
+async function triggerTweet(url, btn, resId) {
+    const origHTML = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Gönderiliyor...';
+    const resDiv = document.getElementById(resId);
+    resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-gray-700 text-gray-300';
+    resDiv.textContent = 'Tweet oluşturuluyor, lütfen bekleyin...';
+    resDiv.classList.remove('hidden');
+
+    try {
+        const resp = await fetch(url, {method: 'POST', redirect: 'follow'});
+        const finalUrl = resp.url || '';
+        if (finalUrl.includes('trigger_ok=1')) {
+            const msg = decodeURIComponent((finalUrl.match(/trigger_msg=([^&]*)/)||[])[1]||'Başarılı!');
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-green-900 text-green-300';
+            resDiv.textContent = '✅ ' + msg;
+            btn.innerHTML = '✅ Gönderildi!';
+        } else if (finalUrl.includes('trigger_ok=0')) {
+            const msg = decodeURIComponent((finalUrl.match(/trigger_msg=([^&]*)/)||[])[1]||'Hata oluştu');
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-red-900 text-red-300';
+            resDiv.textContent = '❌ ' + msg;
+            btn.disabled = false;
+            btn.innerHTML = origHTML;
+        } else {
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-green-900 text-green-300';
+            resDiv.textContent = '✅ İstek gönderildi!';
+            btn.innerHTML = '✅ Gönderildi!';
+        }
+    } catch(err) {
+        resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-red-900 text-red-300';
+        resDiv.textContent = '❌ Bağlantı hatası: ' + err.message;
+        btn.disabled = false;
+        btn.innerHTML = origHTML;
+    }
+
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = origHTML; }, 10000);
+}
 </script>
 {% endblock %}
