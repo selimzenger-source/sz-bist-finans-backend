@@ -173,14 +173,22 @@ async def broadcast_background_task(
                 await _send_telegram_report(title, audience, deep_link_target, 0, 0, 0)
                 return
 
-            # NotificationService olustur
-            from app.services.notification import NotificationService
-            notif_service = NotificationService(db)
+            # Firebase dogrudan kullan — NotificationService yerine
+            # (NotificationService._clear_stale_token session sorunlari onlemek icin)
+            from app.services.notification import _init_firebase, is_firebase_initialized
+            _init_firebase()
 
-            # Data payload
-            data = {
+            if not is_firebase_initialized():
+                logger.error("Broadcast: Firebase baslatılamadı — iptal")
+                await _send_telegram_report(title, audience, deep_link_target, total, 0, total)
+                return
+
+            from firebase_admin import messaging
+
+            # Data payload — tum value'lar STRING olmali
+            safe_data = {
                 "type": "announcement",
-                "target": deep_link_target,
+                "target": str(deep_link_target),
             }
 
             logger.info(
@@ -198,31 +206,50 @@ async def broadcast_background_task(
                         failed += 1
                         continue
 
-                    success = await notif_service.send_to_device(
-                        fcm_token=token,
-                        title=title,
-                        body=body,
-                        data=data,
-                        delay=True,  # 2sn throttle — Firebase rate limit koruması
-                        channel_id="default_v2",
+                    message = messaging.Message(
+                        notification=messaging.Notification(
+                            title=title,
+                            body=body,
+                        ),
+                        data=safe_data,
+                        token=token,
+                        android=messaging.AndroidConfig(
+                            priority="high",
+                            notification=messaging.AndroidNotification(
+                                sound="default",
+                                channel_id="default_v2",
+                                default_vibrate_timings=True,
+                                notification_priority="PRIORITY_MAX",
+                                visibility="PUBLIC",
+                            ),
+                        ),
+                        apns=messaging.APNSConfig(
+                            payload=messaging.APNSPayload(
+                                aps=messaging.Aps(
+                                    sound="default",
+                                    badge=1,
+                                ),
+                            ),
+                        ),
                     )
-                    if success:
-                        sent += 1
-                        logger.info(
-                            "Broadcast: User %d OK (token: %s...)",
-                            user.id, token[:20],
-                        )
-                    else:
-                        failed += 1
-                        logger.warning(
-                            "Broadcast: User %d FAILED (token: %s...)",
-                            user.id, token[:20],
-                        )
+
+                    response = messaging.send(message)
+                    sent += 1
+                    logger.info(
+                        "Broadcast: User %d OK — %s",
+                        user.id, response,
+                    )
+
+                    # 2sn throttle — Firebase rate limit koruması
+                    await asyncio.sleep(2)
+
                 except Exception as e:
-                    logger.warning(
-                        "Broadcast: User %d exception: %s", user.id, e
-                    )
+                    error_name = type(e).__name__
                     failed += 1
+                    logger.warning(
+                        "Broadcast: User %d FAILED (%s): %s (token: %s...)",
+                        user.id, error_name, str(e)[:100], token[:20],
+                    )
 
         logger.info(
             "Broadcast tamamlandi: '%s' — %d/%d basarili, %d basarisiz",
