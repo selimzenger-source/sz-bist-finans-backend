@@ -126,6 +126,7 @@ class NotificationService:
                         default_vibrate_timings=True,
                         notification_priority="PRIORITY_MAX",
                         visibility="PUBLIC",
+                        icon="notification_icon",
                     ),
                 ),
                 apns=messaging.APNSConfig(
@@ -231,6 +232,7 @@ class NotificationService:
                     notification=messaging.AndroidNotification(
                         sound="default",
                         channel_id="default_v2",
+                        icon="notification_icon",
                     ),
                 ),
                 apns=messaging.APNSConfig(
