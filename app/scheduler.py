@@ -1441,26 +1441,8 @@ async def market_snapshot_tweet():
                 if ipo_price > 0 and close_price > 0:
                     cum_pct = ((close_price - ipo_price) / ipo_price) * 100
 
-                # Gunluk % hesapla (bugunun son fiyati vs dunku kapanis)
-                # Dunku kapanisi bul — bir onceki gunun track'i
-                prev_track_result = await db.execute(
-                    select(IPOCeilingTrack).where(
-                        and_(
-                            IPOCeilingTrack.ipo_id == ipo.id,
-                            IPOCeilingTrack.trade_date < today,
-                        )
-                    ).order_by(IPOCeilingTrack.trade_date.desc()).limit(1)
-                )
-                prev_track = prev_track_result.scalar_one_or_none()
-
-                daily_pct = 0.0
-                if prev_track and prev_track.close_price and close_price > 0:
-                    prev_close = float(prev_track.close_price)
-                    if prev_close > 0:
-                        daily_pct = ((close_price - prev_close) / prev_close) * 100
-                elif ipo_price > 0 and close_price > 0:
-                    # 1. gun — dunku kapanis yok, HA fiyatindan hesapla
-                    daily_pct = cum_pct
+                # Gunluk % — H sutunundan (pct_change) anlik geliyor
+                daily_pct = float(today_track.pct_change) if today_track.pct_change is not None else 0.0
 
                 # Durum
                 durum = today_track.durum or "not_kapatti"
