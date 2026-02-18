@@ -1408,14 +1408,14 @@ async def _market_snapshot_attempt(retry_num: int = 0):
                 skip_reasons.append(f"[{ipo.ticker}] real_trading_day={real_trading_day} >=26 skip")
                 continue
 
-            # Bugunun ceiling track kaydini al
+            # Bugunun ceiling track kaydini al (en son guncellenen)
             track_result = await db.execute(
                 select(IPOCeilingTrack).where(
                     and_(
                         IPOCeilingTrack.ipo_id == ipo.id,
                         IPOCeilingTrack.trade_date == today,
                     )
-                )
+                ).order_by(IPOCeilingTrack.id.desc()).limit(1)
             )
             today_track = track_result.scalar_one_or_none()
 
@@ -1425,7 +1425,7 @@ async def _market_snapshot_attempt(retry_num: int = 0):
                 last_track_result = await db.execute(
                     select(IPOCeilingTrack).where(
                         IPOCeilingTrack.ipo_id == ipo.id,
-                    ).order_by(IPOCeilingTrack.trading_day.desc()).limit(1)
+                    ).order_by(IPOCeilingTrack.id.desc()).limit(1)
                 )
                 last_track = last_track_result.scalar_one_or_none()
                 if not last_track:
@@ -2031,7 +2031,7 @@ async def monthly_yearly_summary_tweet():
                             IPOCeilingTrack.ipo_id == ipo.id,
                             IPOCeilingTrack.trading_day == 25,
                         )
-                    )
+                    ).order_by(IPOCeilingTrack.id.desc()).limit(1)
                 )
                 track_25 = track_result.scalar_one_or_none()
 
