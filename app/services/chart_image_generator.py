@@ -578,6 +578,32 @@ def _format_lot(lot_val) -> str:
     return f"{int(lot_val):,}".replace(",", ".")
 
 
+def _pct_to_color(pct: float) -> tuple:
+    """Yuzde degerine gore gradyan renk doner.
+
+    Tavan/taban parlak, orta degerler silik, nötr turuncu.
+    Hem yesil hem kirmizi tarafta 4 kademe var.
+    """
+    if pct >= 9.5:
+        return (0, 230, 64)       # tavan — cok parlak yesil
+    elif pct >= 5.0:
+        return (34, 197, 94)      # belirgin yesil
+    elif pct >= 2.0:
+        return (74, 140, 96)      # silik yesil
+    elif pct > 0:
+        return (60, 110, 75)      # cok silik yesil (hafif alicili)
+    elif pct == 0.0:
+        return (251, 146, 60)     # notr — turuncu
+    elif pct > -2.0:
+        return (110, 70, 70)      # cok silik kirmizi (hafif saticili)
+    elif pct > -5.0:
+        return (160, 80, 80)      # silik kirmizi
+    elif pct > -9.5:
+        return (239, 68, 68)      # belirgin kirmizi
+    else:
+        return (255, 40, 40)      # taban — cok parlak kirmizi
+
+
 def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
     """Ogle arasi market snapshot gorseli olusturur — kart (card) bazli layout.
 
@@ -668,7 +694,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         tavan_c = sum(1 for s in snapshot_data if s.get("durum") == "tavan")
         taban_c = sum(1 for s in snapshot_data if s.get("durum") == "taban")
         normal_c = num_cards - tavan_c - taban_c
-        summary = f"Tavan: {tavan_c}  Taban: {taban_c}  Normal İşlem: {normal_c}"
+        summary = f"Tavan: {tavan_c}  |  Taban: {taban_c}  |  Normal İşlem Kademesi: {normal_c}"
         bbox = font_subtitle.getbbox(summary)
         sw = bbox[2] - bbox[0]
         draw.text((width - padding - sw, y + 56), summary, fill=GOLD, font=font_subtitle)
@@ -687,16 +713,11 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             card_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
             draw.rectangle([(0, card_y), (width, card_y + card_h)], fill=card_bg)
 
-            # Sol kenar renk accent (durum'a gore)
+            # Sol kenar renk accent (gunluk % degerine gore gradyan)
             cum_pct = float(stock.get("cum_pct", 0))
+            daily_fark_for_accent = float(stock.get("pct_change", 0))
             durum = stock.get("durum", "")
-            accent_map = {
-                "tavan": TAVAN_GREEN,
-                "taban": TABAN_RED,
-                "alici_kapatti": MUTED_GREEN,
-                "satici_kapatti": MUTED_RED,
-            }
-            accent_color = accent_map.get(durum, GREEN if cum_pct >= 0 else RED)
+            accent_color = _pct_to_color(daily_fark_for_accent)
             draw.rectangle([(0, card_y), (accent_w, card_y + card_h)], fill=accent_color)
 
             # ─ Satir 1: Ticker | Gun | Fiyat | Gunluk% | Durum ─
@@ -713,23 +734,23 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             price_text = f"{float(stock['close_price']):.2f} TL"
             draw.text((420, row1_y), price_text, fill=WHITE, font=font_data_bold)
 
-            # Kumulatif % (orta-sag) — HA fiyatindan bugune toplam degisim
-            cum_color = GREEN if cum_pct >= 0 else RED
+            # Kumulatif % (orta-sag) — HA fiyatindan bugune toplam degisim (gradyan renk)
+            cum_color = _pct_to_color(cum_pct)
             cum_text = f"%{cum_pct:+.2f}"
             draw.text((620, row1_y), cum_text, fill=cum_color, font=font_data_bold)
 
-            # Gunluk Fark — dunku kapanisa gore bugunun degisimi
+            # Gunluk Fark — dunku kapanisa gore bugunun degisimi (gradyan renk)
             daily_fark = float(stock.get("pct_change", 0))
             # Label kismi duz GRAY
             fark_label = "Günlük Fark: "
             draw.text((750, row1_y + 6), fark_label, fill=GRAY, font=font_lot)
-            # Yuzde kismi renkli
+            # Yuzde kismi renkli (gradyan)
             label_w = font_lot.getbbox(fark_label)[2] - font_lot.getbbox(fark_label)[0]
-            fark_color = GREEN if daily_fark >= 0 else RED
+            fark_color = _pct_to_color(daily_fark)
             fark_val = f"%{daily_fark:+.2f}"
             draw.text((750 + label_w, row1_y + 8), fark_val, fill=fark_color, font=font_cum_val)
 
-            # Durum badge (sag kenar)
+            # Durum badge (sag kenar) — renk gunluk % bazli gradyan
             durum = stock.get("durum", "")
             durum_labels = {
                 "tavan": "TAVAN",
@@ -738,15 +759,8 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
                 "satici_kapatti": "SATICILI",
                 "not_kapatti": "Normal İşlem",
             }
-            durum_colors = {
-                "tavan": TAVAN_GREEN,
-                "taban": TABAN_RED,
-                "alici_kapatti": MUTED_GREEN,
-                "satici_kapatti": MUTED_RED,
-                "not_kapatti": ORANGE,
-            }
             d_label = durum_labels.get(durum, durum.upper() if durum else "—")
-            d_color = durum_colors.get(durum, GRAY)
+            d_color = _pct_to_color(daily_fark)  # gunluk % bazli gradyan renk
 
             # Badge arka plan kutusu
             font_badge = font_lot if len(d_label) > 8 else font_data_bold  # uzun etiketler icin kucuk font
@@ -770,13 +784,13 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
 
             if durum == "tavan":
                 # Tavandaysa sadece alis lot goster
-                lot_text = f"Tavanda Bekleyen Alış: {_format_lot(alis_lot)}"
-                lot_color = TAVAN_GREEN
+                lot_text = f"Tavanda Bekleyen Lot: {_format_lot(alis_lot)}"
+                lot_color = _pct_to_color(daily_fark)
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             elif durum == "taban":
                 # Tabandaysa sadece satis lot goster
-                lot_text = f"Tabanda Bekleyen Satış: {_format_lot(satis_lot)}"
-                lot_color = TABAN_RED
+                lot_text = f"Tabanda Bekleyen Lot: {_format_lot(satis_lot)}"
+                lot_color = _pct_to_color(daily_fark)
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             # Normal durum — lot bilgisi gosterilmez
 

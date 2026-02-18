@@ -1339,18 +1339,19 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
         count = len(snapshot_data)
         tavan_count = sum(1 for s in snapshot_data if s.get("durum") == "tavan")
         taban_count = sum(1 for s in snapshot_data if s.get("durum") == "taban")
+        normal_count = count - tavan_count - taban_count
 
-        # Her hisse icin kisa ozet satiri
-        lines = []
+        # Tum hisseleri tek satirda yan yana (cift boslukla ayrilmis)
+        parts = []
         for s in snapshot_data:
             pct = float(s.get("pct_change", 0))
-            emoji = "\U0001F7E2" if pct >= 0 else "\U0001F534"
-            lines.append(f"{emoji} #{s['ticker']} {s['trading_day']}/25 %{pct:+.1f}")
+            parts.append(f"#{s['ticker']} {s['trading_day']}/25 %{pct:+.1f}")
+        hisse_satiri = "  ".join(parts)
 
         text = (
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
-            + "\n".join(lines) + "\n\n"
-            f"Tavan: {tavan_count} | Taban: {taban_count}\n\n"
+            f"{hisse_satiri}\n\n"
+            f"Tavan: {tavan_count} | Taban: {taban_count} | Normal İşlem Kademesi: {normal_count}\n\n"
             f"\U0001F4F2 {APP_LINK}\n"
             f"#HalkaArz #BIST #Borsa"
         )
