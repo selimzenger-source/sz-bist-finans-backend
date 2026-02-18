@@ -986,6 +986,8 @@ async def run_gedik_scraper(
 async def tweets_page(
     request: Request,
     status: str = "pending",
+    trigger_msg: Optional[str] = None,
+    trigger_ok: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Bekleyen tweetleri listeler."""
@@ -1019,7 +1021,161 @@ async def tweets_page(
         "pending_count": pending_count,
         "current_status": status,
         "auto_send": auto_send,
+        "trigger_message": trigger_msg,
+        "trigger_success": trigger_ok == "1",
     })
+
+
+@router.post("/tweets/trigger-snapshot")
+async def trigger_snapshot_from_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden T15 ogle arasi market snapshot tweet'ini tetikler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.scheduler import market_snapshot_tweet
+        await market_snapshot_tweet()
+        logger.info("[ADMIN] T15 Market snapshot tweet manuel tetiklendi")
+        return RedirectResponse(
+            url="/admin/tweets?trigger_msg=T15 Gün Ortası raporu başarıyla tetiklendi!&trigger_ok=1",
+            status_code=303,
+        )
+    except Exception as e:
+        logger.error("[ADMIN] T15 tetikleme hatasi: %s", e)
+        return RedirectResponse(
+            url=f"/admin/tweets?trigger_msg=T15 Hata: {str(e)[:100]}&trigger_ok=0",
+            status_code=303,
+        )
+
+
+@router.post("/tweets/trigger-opening")
+async def trigger_opening_from_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden T16 acilis bilgileri tweet'ini tetikler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from datetime import date as date_type
+        from sqlalchemy import and_
+
+        today = date_type.today()
+
+        # trading_day <= 5 olan aktif hisseleri bul
+        result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "trading",
+                    IPO.archived == False,
+                    IPO.ticker.isnot(None),
+                    IPO.ceiling_tracking_active == True,
+                )
+            )
+        )
+        trading_ipos = list(result.scalars().all())
+
+        stocks = []
+        for ipo in trading_ipos:
+            tracks_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    IPOCeilingTrack.ipo_id == ipo.id
+                ).order_by(IPOCeilingTrack.trading_day.asc())
+            )
+            tracks = list(tracks_result.scalars().all())
+            if not tracks:
+                continue
+
+            latest = tracks[-1]
+            current_day = latest.trading_day
+            if current_day > 5:
+                continue
+
+            today_track = None
+            for t in tracks:
+                if t.trade_date == today:
+                    today_track = t
+                    break
+
+            if not today_track or not today_track.open_price:
+                continue
+
+            ceiling_days = sum(1 for t in tracks if t.hit_ceiling)
+            floor_days = sum(1 for t in tracks if t.hit_floor)
+            normal_days = len(tracks) - ceiling_days - floor_days
+
+            prev_close = 0.0
+            for t in tracks:
+                if t.trade_date < today and t.close_price:
+                    prev_close = float(t.close_price)
+
+            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+            if prev_close <= 0:
+                prev_close = ipo_price
+
+            open_price = float(today_track.open_price)
+            pct_change = ((open_price - ipo_price) / ipo_price * 100) if ipo_price > 0 else 0
+            daily_pct = ((open_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
+
+            alis_lot = today_track.alis_lot or 0
+            satis_lot = today_track.satis_lot or 0
+
+            if pct_change >= 9.5:
+                durum = "tavan"
+            elif pct_change <= -9.5:
+                durum = "taban"
+            elif pct_change > 0:
+                durum = "alici_kapatti"
+            elif pct_change < 0:
+                durum = "satici_kapatti"
+            else:
+                durum = "not_kapatti"
+
+            stocks.append({
+                "ticker": ipo.ticker,
+                "company_name": ipo.company_name,
+                "trading_day": current_day,
+                "ipo_price": ipo_price,
+                "open_price": open_price,
+                "prev_close": round(prev_close, 2),
+                "pct_change": round(pct_change, 2),
+                "daily_pct": round(daily_pct, 2),
+                "durum": durum,
+                "ceiling_days": ceiling_days,
+                "floor_days": floor_days,
+                "normal_days": normal_days,
+                "alis_lot": alis_lot,
+                "satis_lot": satis_lot,
+            })
+
+        if not stocks:
+            return RedirectResponse(
+                url="/admin/tweets?trigger_msg=T16: İlk 5 gün içinde hisse yok, tweet atılmadı.&trigger_ok=0",
+                status_code=303,
+            )
+
+        from app.services.twitter_service import tweet_opening_summary
+        from app.services.admin_telegram import notify_tweet_sent
+
+        tickers_str = ", ".join(s["ticker"] for s in stocks)
+        tw_ok = tweet_opening_summary(stocks)
+        await notify_tweet_sent("acilis_ozet", tickers_str, tw_ok, f"{len(stocks)} hisse")
+
+        logger.info("[ADMIN] T16 Acilis bilgileri tweet manuel tetiklendi — %d hisse", len(stocks))
+        return RedirectResponse(
+            url=f"/admin/tweets?trigger_msg=T16 Açılış Bilgileri tetiklendi! {len(stocks)} hisse.&trigger_ok=1",
+            status_code=303,
+        )
+    except Exception as e:
+        logger.error("[ADMIN] T16 tetikleme hatasi: %s", e)
+        return RedirectResponse(
+            url=f"/admin/tweets?trigger_msg=T16 Hata: {str(e)[:100]}&trigger_ok=0",
+            status_code=303,
+        )
 
 
 @router.post("/tweets/{tweet_id}/approve")
