@@ -174,9 +174,14 @@ class IPODetailOut(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    # Araci kurum
+    lead_broker: Optional[str] = None
+    participation_description: Optional[str] = None
+
     # Iliskiler
     allocations: list[IPOAllocationOut] = []
     ceiling_tracks: list[IPOCeilingTrackOut] = []
+    brokers: list[IPOBrokerOut] = []
 
     model_config = ConfigDict(from_attributes=True)
 

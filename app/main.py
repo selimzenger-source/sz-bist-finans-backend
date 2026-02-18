@@ -389,6 +389,7 @@ async def get_ipo_detail(ipo_id: int, db: AsyncSession = Depends(get_db)):
         .options(
             selectinload(IPO.allocations),
             selectinload(IPO.ceiling_tracks),
+            selectinload(IPO.brokers),
         )
         .where(IPO.id == ipo_id)
     )
