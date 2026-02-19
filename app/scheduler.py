@@ -24,6 +24,15 @@ import asyncio
 import logging
 import random
 from datetime import datetime, date, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+# Turkiye saat dilimi — tum tarih islemlerinde bu kullanilmali
+_TR_TZ = ZoneInfo("Europe/Istanbul")
+
+
+def _today_tr() -> date:
+    """Turkiye saatine gore bugunun tarihini dondurur (UTC yerine)."""
+    return datetime.now(_TR_TZ).date()
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -491,7 +500,7 @@ async def tweet_distribution_morning_job():
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
 
-        today = date.today()
+        today = _today_tr()
 
         async with async_session() as db:
             # Bugun dagitima baslayan IPO'lar (subscription_start == today)
@@ -549,7 +558,7 @@ async def archive_old_ipos():
 
         async with async_session() as db:
             # ~37 takvim gunu ~ 25 is gunu
-            cutoff = date.today() - timedelta(days=37)
+            cutoff = _today_tr() - timedelta(days=37)
 
             result = await db.execute(
                 select(IPO).where(
@@ -573,7 +582,7 @@ async def archive_old_ipos():
 
             archived_count = 0
             # Eski IPO filtresi: 40 takvim gunundan once baslayanlar "eski" sayilir
-            fresh_cutoff = date.today() - timedelta(days=40)
+            fresh_cutoff = _today_tr() - timedelta(days=40)
 
             for ipo in result.scalars().all():
                 # --- 25/25 Performans Tweeti (arsivlemeden once) ---
@@ -723,13 +732,13 @@ def _timing_already_sent(ipo_id: int, event_type: str) -> bool:
     """Bu IPO + event bugün zaten gönderildi mi?"""
     key = f"ipo_{ipo_id}_{event_type}"
     sent_date = _timing_sent.get(key)
-    return sent_date == date.today()
+    return sent_date == _today_tr()
 
 
 def _timing_mark_sent(ipo_id: int, event_type: str):
     """Bu IPO + event'i bugün gönderildi olarak işaretle."""
     key = f"ipo_{ipo_id}_{event_type}"
-    _timing_sent[key] = date.today()
+    _timing_sent[key] = _today_tr()
 
 
 def _get_active_reminder(remaining_minutes: float) -> str | None:
@@ -766,7 +775,7 @@ async def check_reminders():
         TR_TZ = ZoneInfo("Europe/Istanbul")
 
         async with async_session() as db:
-            today = date.today()
+            today = _today_tr()
             now_tr = datetime.now(TR_TZ)
             from datetime import time as Time
 
@@ -898,7 +907,7 @@ async def check_morning_tweets():
 
         TR_TZ = ZoneInfo("Europe/Istanbul")
         now_tr = datetime.now(TR_TZ)
-        today = date.today()
+        today = _today_tr()
 
         async with async_session() as db:
             # Bugun dagitima baslayan VEYA bugun son gun olan IPO'lar
@@ -1310,7 +1319,7 @@ async def tweet_last_day_morning_job():
         from app.models.ipo import IPO
 
         async with async_session() as db:
-            today = date.today()
+            today = _today_tr()
             result = await db.execute(
                 select(IPO).where(
                     and_(
@@ -1351,7 +1360,7 @@ async def tweet_company_intro_job():
         from datetime import timedelta
 
         async with async_session() as db:
-            yesterday = date.today() - timedelta(days=1)
+            yesterday = _today_tr() - timedelta(days=1)
             result = await db.execute(
                 select(IPO).where(
                     and_(
@@ -2133,7 +2142,7 @@ async def send_first_trading_day_notifications():
         from app.services.notification import NotificationService
 
         async with async_session() as db:
-            today = date.today()
+            today = _today_tr()
 
             # Bugun isleme baslayan IPO'lari bul
             result = await db.execute(
@@ -2203,7 +2212,7 @@ async def tweet_opening_price_job():
         from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper
 
         async with async_session() as db:
-            today = date.today()
+            today = _today_tr()
             result = await db.execute(
                 select(IPO).where(
                     and_(

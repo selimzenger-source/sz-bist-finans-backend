@@ -9,6 +9,7 @@ import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -530,7 +531,8 @@ class IPOService:
         - active → in_distribution   (one-time migration)
         - completed → trading        (eger trading_start varsa, one-time migration)
         """
-        today = date.today()
+        # TR saatine gore bugunun tarihini al (UTC 21:05 = TR 00:05 dogru calismali)
+        today = datetime.now(ZoneInfo("Europe/Istanbul")).date()
 
         # ==========================================
         # TUTARSIZLIK DUZELTME — status ile tarihler uyusmuyor
@@ -715,14 +717,27 @@ class IPOService:
                 )
             except Exception:
                 pass
-            # Tweet #2: Dagitima Cikis
+            # Push #1: Basvuru basladi bildirimi (kullanicilara)
             try:
-                from app.services.twitter_service import tweet_distribution_start
+                from app.services.notification import NotificationService
+                notif_service = NotificationService(self.db)
+                sent = await notif_service.notify_ipo_subscription_start(ipo)
+                logger.info(f"Basvuru basladi bildirimi: {ipo.ticker} — {sent} kisi")
+            except Exception as e:
+                logger.warning(f"Basvuru basladi bildirim hatasi: {e}")
+
+            # Tweet #2: Dagitima Cikis — SABAH TWEETI ile atilir
+            # (check_morning_tweets acilisa 1 saat kala tweet atar, burada atilmaz
+            #  cunku gece yarisi atilan tweet kimseye ulasmaz)
+            # Sadece admin telegram bildirimi gonder
+            try:
                 from app.services.admin_telegram import notify_tweet_sent
-                tw_ok = tweet_distribution_start(ipo)
-                await notify_tweet_sent("dagitim_baslangic", ipo.ticker or ipo.company_name, tw_ok)
+                await notify_tweet_sent(
+                    "dagitim_status_gecis", ipo.ticker or ipo.company_name,
+                    True, "Sabah tweeti check_morning_tweets ile atilacak",
+                )
             except Exception:
-                pass  # Tweet hatasi sistemi etkilemez
+                pass
 
         # ==========================================
         # 2. in_distribution → awaiting_trading
@@ -785,7 +800,7 @@ class IPOService:
 
     async def get_last_day_ipos(self) -> list[IPO]:
         """Yarin son gunu olan dagitim surecindeki halka arzlari dondurur."""
-        tomorrow = date.today() + timedelta(days=1)
+        tomorrow = datetime.now(ZoneInfo("Europe/Istanbul")).date() + timedelta(days=1)
         result = await self.db.execute(
             select(IPO).where(
                 and_(
