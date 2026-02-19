@@ -928,7 +928,7 @@ async def check_morning_tweets():
             if not ipos:
                 return
 
-            from app.services.twitter_service import tweet_distribution_start, tweet_last_day_morning
+            from app.services.twitter_service import tweet_distribution_start
             from app.services.admin_telegram import notify_tweet_sent
 
             tweet_idx = 0
@@ -955,20 +955,8 @@ async def check_morning_tweets():
                         ipo.ticker or ipo.company_name, int(minutes_to_open),
                     )
 
-                # --- Son gun sabah tweeti: acilisa 55-65 dk kala (1 saat) ---
-                if (ipo.subscription_end == today
-                        and 55 <= minutes_to_open <= 65
-                        and not _timing_already_sent(ipo.id, "last_day_morning_tweet")):
-                    if tweet_idx > 0:
-                        await asyncio.sleep(random.uniform(50, 55))
-                    tw_ok = tweet_last_day_morning(ipo)
-                    await notify_tweet_sent("son_gun_sabah_timing", ipo.ticker or ipo.company_name, tw_ok)
-                    _timing_mark_sent(ipo.id, "last_day_morning_tweet")
-                    tweet_idx += 1
-                    logger.info(
-                        "Son gun sabah tweeti (timing): %s — acilisa %d dk",
-                        ipo.ticker or ipo.company_name, int(minutes_to_open),
-                    )
+                # --- Son gun sabah tweeti: artik send_last_day_warnings() icinde 09:00 TR'de ---
+                # Bildirim ve tweet ayni anda atilir (check_morning_tweets yerine)
 
         if tweet_idx > 0:
             logger.info("Sabah tweet kontrolu: %d tweet atildi", tweet_idx)
@@ -1203,10 +1191,13 @@ async def scrape_infoyatirim():
 
 
 async def send_last_day_warnings():
-    """BUGUN son gunu olan halka arzlar icin sabah uyarisi gonder.
+    """BUGUN son gunu olan halka arzlar icin sabah uyarisi + tweet gonder.
 
-    Eski mantik: yarin son gun olanlara aksam oncesi bildirim (TR 12:00 / 20:00)
-    Yeni mantik: bugun son gun olanlara sabah 09:00 TR'de bildirim
+    Sabah 09:00 TR'de (UTC 06:00) calisir:
+    1. Push bildirim: "BUGUN son gun!" (notify_ipo_last_day)
+    2. Tweet: son basvuru gunu gorseli ile X'e tweet (tweet_last_day_morning)
+
+    Ikisi de ayni anda atilir — kullanici hem bildirim hem tweet alir.
     """
     try:
         from sqlalchemy import select, and_
@@ -1226,10 +1217,22 @@ async def send_last_day_warnings():
             last_day_ipos = list(result.scalars().all())
 
             if last_day_ipos:
+                # 1. Push bildirimler
                 notif_service = NotificationService(db)
                 for ipo in last_day_ipos:
                     await notif_service.notify_ipo_last_day(ipo)
                 await db.commit()
+
+                # 2. Son gun sabah tweeti — bildirimle ayni anda
+                from app.services.twitter_service import tweet_last_day_morning
+                from app.services.admin_telegram import notify_tweet_sent
+                for idx, ipo in enumerate(last_day_ipos):
+                    if idx > 0:
+                        await asyncio.sleep(random.uniform(50, 55))
+                    tw_ok = tweet_last_day_morning(ipo)
+                    await notify_tweet_sent("son_gun_sabah", ipo.ticker or ipo.company_name, tw_ok)
+                    _timing_mark_sent(ipo.id, "last_day_morning_tweet")
+                    logger.info("Son gun sabah tweeti: %s", ipo.ticker or ipo.company_name)
 
         logger.info(f"Son gun uyarisi: {len(last_day_ipos)} halka arz (bugun son gun)")
 
