@@ -851,9 +851,9 @@ async def cleanup_spk_duplicates(
 # ============================================================
 
 async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
-    """Scraper sonrasi aktif IPO durum raporunu olusturur.
+    """Scraper sonrasi aktif IPO durum raporu — kisa format.
 
-    Dashboard + Telegram: Status gruplarına gore IPO sayisi + eksik alanlar.
+    Telegram: Ticker + dolu alan sayisi / eksik alanlar (max ~30 kar/satir).
     """
     result = await db.execute(
         select(IPO).where(
@@ -869,12 +869,6 @@ async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
         return f"{source}: Aktif IPO yok"
 
     # Status gruplari
-    status_labels = {
-        "newly_approved": "SPK Onayli",
-        "in_distribution": "Dagitimda",
-        "awaiting_trading": "Islem Bekliyor",
-        "trading": "Islem Goruyor",
-    }
     status_emojis = {
         "newly_approved": "🆕",
         "in_distribution": "📋",
@@ -885,56 +879,64 @@ async def _scraper_ipo_report(db: AsyncSession, source: str) -> str:
     for ipo in active_ipos:
         status_groups.setdefault(ipo.status, []).append(ipo)
 
-    # Onemli alanlar
+    # Kontrol edilecek onemli alanlar (kisa etiket)
     key_fields = {
-        "ipo_price": "Fiyat",
-        "subscription_start": "Basv.Bas",
-        "subscription_end": "Basv.Bit",
-        "trading_start": "Islem Tar",
+        "ipo_price": "Fyat",
+        "subscription_start": "Bşl",
+        "subscription_end": "Bts",
+        "trading_start": "İşl",
         "total_lots": "Lot",
-        "lead_broker": "Araci",
-        "distribution_method": "Dagitim",
+        "lead_broker": "Arcı",
     }
 
-    # Dashboard + Telegram
-    dashboard_parts = []
-    tg_sections = []
+    # Telegram rapor satirlari
+    tg_lines = []
+    # Header: kaynak + toplam
+    status_counts = []
+    for sk, ipos in status_groups.items():
+        e = status_emojis.get(sk, "📌")
+        status_counts.append(f"{e}{len(ipos)}")
+    tg_lines.append(
+        f"🔄 <b>{source}</b> ✓ {len(active_ipos)} IPO"
+        f" | {' '.join(status_counts)}"
+    )
 
-    for status_key, ipos in status_groups.items():
-        label = status_labels.get(status_key, status_key)
+    # Her grup icin kisa satirlar
+    for status_key in ["trading", "in_distribution", "awaiting_trading", "newly_approved"]:
+        ipos = status_groups.get(status_key)
+        if not ipos:
+            continue
         emoji = status_emojis.get(status_key, "📌")
-        dashboard_parts.append(f"{label}:{len(ipos)}")
 
-        tg_lines = [f"{emoji} <b>{label} ({len(ipos)})</b>"]
         for ipo in ipos:
             ticker = ipo.ticker or "?"
+            # Eksik alan kontrolu
             missing = []
+            filled = 0
             for field, flabel in key_fields.items():
                 val = getattr(ipo, field, None)
                 if val is None or (isinstance(val, str) and not val.strip()):
                     missing.append(flabel)
+                else:
+                    filled += 1
 
             if missing:
-                tg_lines.append(f"  ⚠️ {ticker} — eksik: {', '.join(missing)}")
+                # Kisa eksik listesi: max 30 kar
+                m_str = ",".join(missing)
+                if len(m_str) > 20:
+                    m_str = m_str[:18] + ".."
+                tg_lines.append(f"{emoji}{ticker} ⚠ -{m_str}")
             else:
-                tg_lines.append(f"  ✅ {ticker}")
-
-        tg_sections.append("\n".join(tg_lines))
+                tg_lines.append(f"{emoji}{ticker} ✅ {filled}/{len(key_fields)}")
 
     # Dashboard mesaji
-    summary = f"{source} OK! {len(active_ipos)} IPO — " + " | ".join(dashboard_parts)
+    summary = f"{source} OK! {len(active_ipos)} IPO"
 
-    # Telegram rapor — temiz format
+    # Telegram gonder
     try:
         from app.services.admin_telegram import send_admin_message
-        tg_msg = (
-            f"🔄 <b>{source} Scraper</b>\n"
-            f"━━━━━━━━━━━━━━━━\n"
-            f"Toplam: {len(active_ipos)} aktif IPO\n\n"
-            + "\n\n".join(tg_sections)
-        )
         import asyncio
-        asyncio.ensure_future(send_admin_message(tg_msg))
+        asyncio.ensure_future(send_admin_message("\n".join(tg_lines)))
     except Exception as tg_err:
         logger.warning("Scraper Telegram rapor hatasi: %s", tg_err)
 
