@@ -1374,7 +1374,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
         text = (
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
             f"{hisse_satiri}\n\n"
-            f"Tavan: {tavan_count} | Taban: {taban_count} | Normal İşlem Kademesi: {normal_count}\n\n"
+            f"Tavan: {tavan_count} | Taban: {taban_count} | Normal: {normal_count}\n\n"
             f"\U0001F4F2 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #Borsa"
         )

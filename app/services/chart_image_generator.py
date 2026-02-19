@@ -640,7 +640,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         font_data = _load_font(24, bold=False)
         font_data_bold = _load_font(24, bold=True)
         font_lot = _load_font(20, bold=False)
-        font_badge_sm = _load_font(17, bold=False)  # Uzun badge etiketleri icin (HAFİF ALICILI vs.)
+        font_badge_sm = _load_font(18, bold=False)  # Uzun badge etiketleri icin (SATICILI vs.)
         font_cum_val = _load_font(16, bold=True)   # G. Toplam yuzde degeri (kucuk)
         font_footer = _load_font(22, bold=False)
         font_footer_bold = _load_font(24, bold=True)
@@ -695,7 +695,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         tavan_c = sum(1 for s in snapshot_data if s.get("durum") == "tavan")
         taban_c = sum(1 for s in snapshot_data if s.get("durum") == "taban")
         normal_c = num_cards - tavan_c - taban_c
-        summary = f"Tavan: {tavan_c}  |  Taban: {taban_c}  |  Normal İşlem Kademesi: {normal_c}"
+        summary = f"Tavan: {tavan_c}  |  Taban: {taban_c}  |  Normal: {normal_c}"
         bbox = font_subtitle.getbbox(summary)
         sw = bbox[2] - bbox[0]
         draw.text((width - padding - sw, y + 56), summary, fill=GOLD, font=font_subtitle)
@@ -756,17 +756,18 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             durum_labels = {
                 "tavan": "TAVAN",
                 "taban": "TABAN",
-                "alici_kapatti": "HAFİF ALICILI",
-                "satici_kapatti": "HAFİF SATICILI",
+                "alici_kapatti": "ALICILI",
+                "satici_kapatti": "SATICILI",
                 "not_kapatti": "NORMAL",
+                "ilk_gun": "İLK GÜN",
             }
             d_label = durum_labels.get(durum, durum.upper() if durum else "—")
             d_color = _pct_to_color(daily_fark)  # gunluk % bazli gradyan renk
 
             # Badge arka plan kutusu — uzunluga gore font secimi
-            if len(d_label) > 10:
-                font_badge = font_badge_sm   # HAFİF ALICILI / HAFİF SATICILI icin 17pt
-            elif len(d_label) > 8:
+            if len(d_label) > 8:
+                font_badge = font_badge_sm   # SATICILI vb. icin 18pt
+            elif len(d_label) > 6:
                 font_badge = font_lot        # 20pt
             else:
                 font_badge = font_data_bold  # 24pt
@@ -774,7 +775,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             d_w = d_bbox[2] - d_bbox[0]
             badge_x = width - padding - d_w - 16
             badge_y = row1_y - 2
-            badge_h = 28 if len(d_label) > 8 else 32
+            badge_h = 30
             draw.rectangle(
                 [(badge_x, badge_y), (badge_x + d_w + 16, badge_y + badge_h)],
                 fill=(d_color[0], d_color[1], d_color[2]),
@@ -789,16 +790,13 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
             satis_lot = stock.get("satis_lot")
 
             if durum == "tavan":
-                # Tavandaysa sadece alis lot goster
-                lot_text = f"Tavanda Bekleyen Lot: {_format_lot(alis_lot)}"
+                lot_text = f"Alış Lot: {_format_lot(alis_lot)}"
                 lot_color = _pct_to_color(daily_fark)
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
             elif durum == "taban":
-                # Tabandaysa sadece satis lot goster
-                lot_text = f"Tabanda Bekleyen Lot: {_format_lot(satis_lot)}"
+                lot_text = f"Satış Lot: {_format_lot(satis_lot)}"
                 lot_color = _pct_to_color(daily_fark)
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
-            # Normal durum — lot bilgisi gosterilmez
 
             # Halka Arz fiyati (sag alt)
             ipo_price = stock.get("ipo_price")
@@ -1077,17 +1075,17 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             right_mid = cx + 3 * card_w // 4
 
             if durum == "tavan" or (_satis == 0 and _alis > 0):
-                _draw_centered(draw, mid_x, y, "Tavanda Alış Bekleyen", font_small, (100, 100, 120))
+                _draw_centered(draw, mid_x, y, "Alış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_alis)} lot",
                                font_value, TAVAN_GREEN)
             elif durum == "taban" or (_alis == 0 and _satis > 0):
-                _draw_centered(draw, mid_x, y, "Tabanda Satış Bekleyen", font_small, (100, 100, 120))
+                _draw_centered(draw, mid_x, y, "Satış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
                                font_value, TABAN_RED)
             else:
-                _draw_centered(draw, mid_x, y, "Normal İşlem Kademesi", font_small, (100, 100, 120))
+                _draw_centered(draw, mid_x, y, "Normal", font_small, (100, 100, 120))
                 y += 16
                 a_text = f"Alış: {_format_lot(_alis)}"
                 s_text = f"Satış: {_format_lot(_satis)}"
