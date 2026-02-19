@@ -7,7 +7,7 @@
 5. HalkArz + Gedik: her 2 saatte bir
 6. Telegram Poller: her 10 saniyede bir
 7. IPO Durum Guncelleme: her saat (5 bolumlu status gecisleri)
-8. 25 Is Gunu Arsiv: her gece 00:00
+8. 25 Is Gunu Arsiv + Tweet: her gun 12:00 TR (UTC 09:00)
 9. Hatirlatma Zamani Kontrol: her 15 dakika
 10. SPK Ihrac Verileri: her 2 saatte bir (islem tarihi tespiti)
 11. InfoYatirim: her 6 saatte bir (yedek veri kaynagi)
@@ -535,7 +535,7 @@ async def tweet_distribution_morning_job():
 async def archive_old_ipos():
     """25 is gunu gecen halka arzlari arsivler + 25/25 performans tweeti atar.
 
-    Her gece 00:00'da calisir.
+    Her gun 12:00 TR (UTC 09:00) calisir.
     Iki kosuldan biri yeterlii:
       1) trading_start tarihi ~37 takvim gunu oncesinde olan
       2) trading_day_count >= 25 olan (DB'de ceiling track verisi ile doldurulur)
@@ -2520,12 +2520,12 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 8. 25 Is Gunu Arsiv — her gece 00:00
+    # 8. 25 Is Gunu Arsiv + 25/25 Tweet — her gun 12:00 TR (UTC 09:00)
     scheduler.add_job(
         archive_old_ipos,
-        CronTrigger(hour=0, minute=0),
+        CronTrigger(hour=9, minute=0),
         id="ipo_archiver",
-        name="IPO Arsivleyici (25 Is Gunu)",
+        name="IPO Arsivleyici + 25 Gun Tweet (12:00 TR)",
         replace_existing=True,
     )
 

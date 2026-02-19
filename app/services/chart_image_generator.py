@@ -167,9 +167,9 @@ def generate_25day_image(
         # Header yuksekligini icerigi hesaplayarak belirle
         # Baslik(48) + sirket(36) + fiyat(40) + lot/toplam(~50) + bosluk(30)
         if lot_count > 0:
-            header_h = 48 + 36 + 40 + 40 + 38 + 30  # lot + kar bilgisi
+            header_h = 48 + 36 + 40 + 40 + 55 + 40  # lot + kar bilgisi (259px)
         else:
-            header_h = 48 + 36 + 40 + 50 + 30        # sadece toplam yuzde
+            header_h = 48 + 36 + 40 + 55 + 40        # sadece toplam yuzde (219px)
 
         table_h = col_header_h + (num_rows * row_h)
         total_h = banner_h + header_h + table_h + footer_h
@@ -228,13 +228,13 @@ def generate_25day_image(
             else:
                 profit_text = f"25. Gün Karnesi: {lot_profit:,.0f} TL (%{total_pct:+.1f})"
             draw.text((padding, y), profit_text, fill=profit_color, font=font_big)
-            y += 38
+            y += 55
         else:
             # Lot bilgisi yoksa sadece toplam yuzde
             pct_color = GREEN if total_pct >= 0 else RED
             draw.text((padding, y), f"25. Gün Toplam: %{total_pct:+.1f}",
                       fill=pct_color, font=font_big)
-            y += 50
+            y += 55
 
         # ── DIVIDER ────────────────────────────────────
         y = banner_h + header_h - 10
