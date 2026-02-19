@@ -447,6 +447,7 @@ class _DynSetting:
 
 # f-string icinde {APP_LINK} yazildiginda otomatik DB'den okur
 APP_LINK = _DynSetting("APP_LINK")
+HALKAARZ_LINK = "https://szalgo.net.tr/halkaarz"
 SLOGAN = _DynSetting("SLOGAN")
 DISCLAIMER = _DynSetting("DISCLAIMER")
 DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")
@@ -470,7 +471,7 @@ def tweet_new_ipo(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T1_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"Detaylar için: {APP_LINK}\n\n"
+            f"Detaylar için: {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
         return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
@@ -509,7 +510,7 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             f"{_get_setting('T1_ACIKLAMA')}\n\n"
             + "\n".join(lines) + "\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"Detaylar için: {APP_LINK}\n\n"
+            f"Detaylar için: {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #BIST #Borsa"
         )
         return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
@@ -541,7 +542,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"{_get_setting('T2_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
             f"{price_text}{end_date}{lot_text}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR)
@@ -630,7 +631,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"{table_text}"
             f"{bireysel_text}"
             f"{applicant_text}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
@@ -668,7 +669,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"{_get_setting('T4_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"⏳ Başvurular saat {end_hour}'a kadar devam ediyor.\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #SonGün #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_SON_4_SAAT)
@@ -704,7 +705,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"Saat {end_hour}'da başvurular kapanıyor, acele edin!\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #SonDakika #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA)
@@ -731,7 +732,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T6_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T6_CTA')}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR)
@@ -765,7 +766,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"\u2022 Halka arz fiyatı: {ipo_price:.2f} TL\n"
             f"\u2022 Açılış fiyatı: {open_price:.2f} TL\n"
             f"\u2022 {durum}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI)
@@ -822,7 +823,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
                 f"Kümülatif: %{cum_pct:+.1f}\n\n"
                 f"Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
-                f"\U0001F4F2 {APP_LINK}\n"
+                f"\U0001F4F2 {HALKAARZ_LINK}\n"
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
             banner = image_path
@@ -853,7 +854,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"Kümülatif Toplam:\n"
                 f"{table_text}"
                 f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
-                f"\U0001F4F2 Detaylar için: {APP_LINK}\n"
+                f"\U0001F4F2 Detaylar için: {HALKAARZ_LINK}\n"
                 f"#HalkaArz #{ipo.ticker or 'Borsa'}"
             )
             banner = BANNER_GUNLUK_TAKIP
@@ -926,7 +927,7 @@ def tweet_25_day_performance(
         text += lot_text
         text += (
             f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
-            f"\U0001F4F2 {APP_LINK}\n"
+            f"\U0001F4F2 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #{ticker}"
         )
 
@@ -986,7 +987,7 @@ def tweet_yearly_summary(
             f"\u2022 En iyi: #{best_ticker} (%{best_return_pct:+.1f})\n"
             f"\u2022 En kötü: #{worst_ticker} (%{worst_return_pct:+.1f})\n\n"
             f"\u26A0\uFE0F İlk 25 işlem günü baz alınmıştır.\n\n"
-            f"\U0001F4F2 {APP_LINK}\n"
+            f"\U0001F4F2 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #AySonuRaporu"
         )
         return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR)
@@ -1025,7 +1026,7 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
             f"İlişkili Kelime : {clean_kw}\n\n"
             f"{_get_setting('T11_TANITIM')}\n\n"
             f"{_get_setting('T11_CTA')}\n"
-            f"\U0001F4F2 {APP_LINK}\n\n"
+            f"\U0001F4F2 {HALKAARZ_LINK}\n\n"
             f"#BIST50 #{ticker} #KAP #Borsa"
         )
         
@@ -1067,7 +1068,7 @@ def tweet_last_day_morning(ipo) -> bool:
             f" bugün saat {end_hour}'a kadar devam ediyor."
             f"{price_text}\n\n"
             f"{_get_setting('T12_CTA')}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
         return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU)
@@ -1147,7 +1148,7 @@ def tweet_company_intro(ipo) -> bool:
             f"{clean_name}{ticker_text}"
             f"{spk_text}{sector_text}{price_text}"
             f"{desc_text}\n\n"
-            f"📲 Detaylar: {APP_LINK}\n\n"
+            f"📲 Detaylar: {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #{ipo.ticker or 'Borsa'}"
         )
 
@@ -1171,7 +1172,7 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
             f"{_get_setting('T14_ACIKLAMA')}\n\n"
-            f"📲 {APP_LINK}\n\n"
+            f"📲 {HALKAARZ_LINK}\n\n"
             f"#HalkaArz #SPK #BIST #Borsa"
         )
 
@@ -1325,7 +1326,7 @@ def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str
         f"{price_line}\n\n"
         f"📋 Bülten No: {bulletin_no}\n\n"
         f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
-        f"Detaylar için: {APP_LINK}"
+        f"Detaylar için: {HALKAARZ_LINK}"
     )
 
 
@@ -1362,7 +1363,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
             f"{hisse_satiri}\n\n"
             f"Tavan: {tavan_count} | Taban: {taban_count} | Normal İşlem Kademesi: {normal_count}\n\n"
-            f"\U0001F4F2 {APP_LINK}\n"
+            f"\U0001F4F2 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #Borsa"
         )
 
@@ -1440,7 +1441,7 @@ def tweet_opening_summary(stocks: list) -> bool:
         text = (
             f"{_get_setting('T16_BASLIK')}\n\n"
             + "\n".join(lines) + "\n\n"
-            f"📲 {APP_LINK}\n"
+            f"📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #Borsa"
         )
 
