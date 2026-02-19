@@ -417,6 +417,10 @@ def live_sync(filepath, interval=15):
     Bu fonksiyon Excel'i 'interval' saniyede bir okur,
     degisen fiyatlari tespit eder ve sadece degisenleri API'ye push eder.
 
+    Seans saatleri: Hafta ici 09:54 - 18:20 arasi calisir.
+    Hafta sonu ve seans disi saatlerde uyku moduna gecer.
+    Her yeni is gunu basinda cache temizlenir ve IPO listesi yenilenir.
+
     Ek olarak durum degisikliklerini tespit eder:
     - Tavan bozulma (tavan → normal/taban)
     - Taban acilma (taban → normal/tavan)
@@ -448,11 +452,57 @@ def live_sync(filepath, interval=15):
     prev_hit_floor = {}    # {ticker: bool}
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
     cycle = 0
+    last_session_date = None  # Seans gun degisiminde cache temizle + IPO yenile
 
     try:
         while True:
             cycle += 1
-            now = datetime.now().strftime("%H:%M:%S")
+            now_dt = datetime.now()
+            now = now_dt.strftime("%H:%M:%S")
+
+            # ── Seans disi calismayi engelle ──
+            # Hafta ici: 09:54 - 18:20 arasi calis
+            # Hafta sonu (Cumartesi=5, Pazar=6): hic calisma
+            weekday = now_dt.weekday()  # 0=Pzt ... 6=Pzr
+            hour_min = now_dt.hour * 100 + now_dt.minute  # 0954, 1820 gibi
+
+            if weekday >= 5:
+                # Hafta sonu — 10 dakikada bir kontrol et
+                if cycle == 1 or cycle % 40 == 0:
+                    log(f"[{now}] Hafta sonu — seans yok, bekleniyor...")
+                time.sleep(interval)
+                continue
+
+            if hour_min < 954:
+                # Seans oncesi — 09:54'u bekle
+                if cycle == 1 or cycle % 40 == 0:
+                    log(f"[{now}] Seans oncesi — 09:54'te baslanacak...")
+                time.sleep(interval)
+                continue
+
+            if hour_min > 1820:
+                # Seans sonrasi — 18:20'den sonra yapacak is yok
+                if cycle == 1 or cycle % 40 == 0:
+                    log(f"[{now}] Seans kapandi — yarin 09:54'te devam edilecek...")
+                time.sleep(interval)
+                continue
+
+            # ── Gun degisiminde cache temizle + IPO listesini yenile ──
+            today = date.today()
+            if last_session_date != today:
+                log(f"[{now}] Yeni seans gunu: {today.isoformat()} — cache temizleniyor, IPO listesi yenileniyor...")
+                prev_prices.clear()
+                prev_hit_ceiling.clear()
+                prev_hit_floor.clear()
+                pct_alerts_sent.clear()
+                try:
+                    fresh = get_active_trading_ipos()
+                    if fresh:
+                        active_ipos = fresh
+                        log(f"  {len(active_ipos)} aktif IPO: {', '.join(active_ipos.keys())}")
+                except Exception as e:
+                    log(f"  IPO yenileme hatasi (mevcut liste kullanilacak): {e}")
+                last_session_date = today
 
             try:
                 rows = read_matriks_excel_live(filepath)
@@ -465,8 +515,6 @@ def live_sync(filepath, interval=15):
                 log(f"[{now}] Excel bos — {interval}s sonra tekrar...")
                 time.sleep(interval)
                 continue
-
-            today = date.today()
             changed_tracks = []
 
             for row in rows:

@@ -17,6 +17,7 @@ from typing import Optional
 import hmac
 
 from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -3800,3 +3801,48 @@ async def admin_bist50_update(request: Request, payload: dict, db: AsyncSession 
         "added": sorted(added) if added else [],
         "removed": sorted(removed) if removed else [],
     }
+
+
+# -------------------------------------------------------
+# KULLANICI GERİ BİLDİRİM (Bize Yazın)
+# -------------------------------------------------------
+
+class FeedbackRequest(BaseModel):
+    name: str
+    surname: str
+    email: str
+    phone: Optional[str] = None
+    topic: str  # sorun, talep, gorüş, bilgi
+    message: str
+    device_id: Optional[str] = None
+
+@app.post("/api/v1/feedback")
+async def submit_feedback(body: FeedbackRequest):
+    """Kullanici geri bildirimi alir ve admin Telegram'a iletir."""
+    from app.services.admin_telegram import send_admin_message
+
+    topic_labels = {
+        "sorun": "🔴 Sorun Bildirimi",
+        "talep": "🟡 Özellik Talebi",
+        "gorus": "🟢 Görüş / Öneri",
+        "bilgi": "🔵 Bilgi Talebi",
+    }
+    topic_label = topic_labels.get(body.topic, f"📩 {body.topic}")
+
+    lines = [
+        f"<b>{topic_label}</b>",
+        "",
+        f"<b>İsim:</b> {body.name} {body.surname}",
+        f"<b>E-posta:</b> {body.email}",
+    ]
+    if body.phone:
+        lines.append(f"<b>Telefon:</b> {body.phone}")
+    if body.device_id:
+        lines.append(f"<b>Cihaz ID:</b> <code>{body.device_id[:16]}</code>")
+    lines.append("")
+    lines.append(f"<b>Mesaj:</b>\n{body.message}")
+
+    text = "\n".join(lines)
+    ok = await send_admin_message(text, parse_mode="HTML", silent=False)
+
+    return {"success": ok, "message": "Mesajınız iletildi." if ok else "Bir hata oluştu, lütfen tekrar deneyin."}

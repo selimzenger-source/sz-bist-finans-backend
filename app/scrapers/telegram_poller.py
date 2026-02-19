@@ -376,7 +376,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if matched_kw and matched_kw != ticker:
                 body_parts.append(matched_kw)
             if message_type == "seans_ici_pozitif" and pct_change:
-                body_parts.append(f"Değişim: {pct_change}")
+                body_parts.append(f"G.Fark: {pct_change}")
             elif message_type == "seans_disi_acilis" and gap is not None:
                 body_parts.append(f"Gap: %{gap}")
             elif message_type == "borsa_kapali" and expected_date:
