@@ -1023,9 +1023,9 @@ async def tweets_page(
     result = await db.execute(query)
     tweets = list(result.scalars().all())
 
-    # Auto-send durumu
-    from app.config import get_settings
-    auto_send = get_settings().TWITTER_AUTO_SEND
+    # Auto-send durumu — DB'den okunur (restart'a dayanıklı)
+    from app.services.twitter_service import is_auto_send
+    auto_send = is_auto_send()
 
     return templates.TemplateResponse("admin/tweets.html", {
         "request": request,
@@ -1128,20 +1128,14 @@ async def approve_tweet(
     if not tweet or tweet.status != "pending":
         return RedirectResponse(url="/admin/tweets", status_code=303)
 
-    # Tweet'i gercekten at
+    # Tweet'i gercekten at — force_send=True ile auto_send kontrolunu atla
     from app.services.twitter_service import _safe_tweet as real_tweet, _safe_tweet_with_media as real_tweet_media
-    from app.config import get_settings
 
-    # Gecici olarak auto_send'i True yap (bu tek tweet icin)
-    settings = get_settings()
-    original_val = settings.TWITTER_AUTO_SEND
     try:
-        settings.TWITTER_AUTO_SEND = True
-
         if tweet.image_path:
-            success = real_tweet_media(tweet.text, tweet.image_path, source="admin_approve")
+            success = real_tweet_media(tweet.text, tweet.image_path, source="admin_approve", force_send=True)
         else:
-            success = real_tweet(tweet.text, source="admin_approve")
+            success = real_tweet(tweet.text, source="admin_approve", force_send=True)
 
         if success:
             tweet.status = "sent"
@@ -1160,8 +1154,6 @@ async def approve_tweet(
     except Exception as e:
         tweet.status = "failed"
         tweet.error_message = str(e)[:500]
-    finally:
-        settings.TWITTER_AUTO_SEND = original_val
 
     tweet.reviewed_at = datetime.now(timezone.utc)
     await db.commit()
@@ -1197,24 +1189,44 @@ async def reject_tweet(
 
 
 @router.post("/tweets/toggle-auto-send")
-async def toggle_auto_send(request: Request):
-    """TWITTER_AUTO_SEND toggle — runtime'da degistirir.
+async def toggle_auto_send(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """TWITTER_AUTO_SEND toggle — DB'ye kaydeder, restart'a dayanıklı.
 
     True  → Otomatik mod (tweetler direkt X'e atilir)
     False → Onay modu (tweetler kuyruğa düşer, admin onaylar)
 
-    NOT: Render restart olunca .env'deki değere döner.
+    Değer app_settings tablosunda saklanır — Render restart olsa bile korunur.
     """
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
-    from app.config import get_settings
-    settings = get_settings()
-    settings.TWITTER_AUTO_SEND = not settings.TWITTER_AUTO_SEND
+    from app.models.app_setting import AppSetting
+    from app.services.twitter_service import clear_settings_cache, is_auto_send
+
+    # Mevcut durumu DB'den oku
+    current = is_auto_send()
+    new_val = "false" if current else "true"
+
+    # DB'ye yaz (upsert)
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "TWITTER_AUTO_SEND")
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = new_val
+    else:
+        db.add(AppSetting(key="TWITTER_AUTO_SEND", value=new_val))
+    await db.commit()
+
+    # Cache'i hemen sıfırla ki değişiklik anında yansısın
+    clear_settings_cache()
 
     logger.info(
-        "[ADMIN] TWITTER_AUTO_SEND -> %s (admin tarafından değiştirildi)",
-        settings.TWITTER_AUTO_SEND,
+        "[ADMIN] TWITTER_AUTO_SEND -> %s (DB'ye kaydedildi, restart'a dayanıklı)",
+        new_val,
     )
 
     return RedirectResponse(url="/admin/tweets", status_code=303)

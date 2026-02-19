@@ -1573,8 +1573,24 @@ async def _market_snapshot_attempt(retry_num: int = 0):
                 )
                 last_track = last_track_result.scalar_one_or_none()
                 if not last_track:
-                    # Hic track yok — bu hisseyi gosterme
-                    skip_reasons.append(f"[{ipo.ticker}] hic track yok (today={today})")
+                    # Hic track yok — ilk islem gunu olabilir (trading_day_count=0)
+                    # Yine de snapshot'a ekle, HA fiyati ve 0% ile goster
+                    if (ipo.trading_day_count or 0) == 0:
+                        ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                        snapshot_data.append({
+                            "ticker": ipo.ticker,
+                            "trading_day": real_trading_day,
+                            "close_price": ipo_price,  # Henuz kapanıs yok, HA fiyati goster
+                            "pct_change": 0.0,
+                            "cum_pct": 0.0,
+                            "durum": "ilk_gun",
+                            "alis_lot": None,
+                            "satis_lot": None,
+                            "ipo_price": ipo_price,
+                        })
+                        skip_reasons.append(f"[{ipo.ticker}] ilk islem gunu, track yok, HA fiyati ile eklendi")
+                    else:
+                        skip_reasons.append(f"[{ipo.ticker}] hic track yok (today={today})")
                     continue
                 # Son track'in trade_date bugun degilse → borsa kapali veya sync calismadi
                 # Yine de goster, son bilinen veriyle

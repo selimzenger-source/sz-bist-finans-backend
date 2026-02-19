@@ -288,11 +288,12 @@ def _notify_tweet_failure(text: str, error_detail: str):
         pass  # Telegram bildirimi de basarisiz olursa sessizce gec
 
 
-def _safe_tweet(text: str, source: str = "unknown") -> bool:
+def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
     Basarisiz olursa Telegram'a bildirim gonderir.
 
     TWITTER_AUTO_SEND=False iken tweet kuyruğa eklenir (admin onay bekler).
+    force_send=True ise auto_send kontrolunu atlar (admin onay'dan gonderim icin).
 
     httpx + OAuth 1.0a HMAC-SHA1 ile Twitter API v2 kullanir.
     tweepy gerektirmez — Python 3.13 uyumlu.
@@ -302,9 +303,8 @@ def _safe_tweet(text: str, source: str = "unknown") -> bool:
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
-        # Onay modu — kuyruğa ekle, direkt atma
-        from app.config import get_settings
-        if not get_settings().TWITTER_AUTO_SEND:
+        # Onay modu — kuyruğa ekle, direkt atma (DB'den okunur, restart'a dayanıklı)
+        if not force_send and not is_auto_send():
             # Caller fonksiyon adini otomatik tespit et
             import inspect
             caller = inspect.stack()[1].function if source == "unknown" else source
@@ -385,6 +385,8 @@ _DEFAULTS = {
     "T15_BASLIK": "📊 Öğle Arası",
     "T16_BASLIK": "📊 Yeni Halka Arzlar — Açılış Bilgileri",
     "LOT_DISCLAIMER": "tahmini değerdir",
+    # Tweet modu — "true" iken otomatik atılır, "false" iken kuyruğa düşer
+    "TWITTER_AUTO_SEND": "false",
 }
 
 # Settings cache — 5 dk
@@ -424,6 +426,18 @@ def clear_settings_cache():
     """Admin ayar değiştirdiğinde cache'i sıfırla."""
     global _settings_cache_ts
     _settings_cache_ts = 0
+
+
+def is_auto_send() -> bool:
+    """TWITTER_AUTO_SEND durumunu DB'den okur (5dk cache ile).
+
+    True  → Otomatik mod (tweetler direkt X'e atılır)
+    False → Onay modu (tweetler kuyruğa düşer, admin onaylar)
+
+    Restart'tan etkilenmez — değer app_settings tablosunda saklanır.
+    """
+    val = _get_setting("TWITTER_AUTO_SEND")
+    return val.lower() in ("true", "1", "yes")
 
 
 # Backward-compatible property'ler
@@ -860,8 +874,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
             banner = BANNER_GUNLUK_TAKIP
 
         # Kuyruk modunda temp dosyayi silme
-        from app.config import get_settings
-        auto_send = get_settings().TWITTER_AUTO_SEND
+        auto_send = is_auto_send()
 
         result = _safe_tweet_with_media(text, banner)
 
@@ -935,8 +948,7 @@ def tweet_25_day_performance(
         banner = image_path if image_path else BANNER_25_GUN_PERFORMANS
 
         # Kuyruk modunda temp dosyayi silme — admin onayindan sonra lazim
-        from app.config import get_settings
-        auto_send = get_settings().TWITTER_AUTO_SEND
+        auto_send = is_auto_send()
 
         result = _safe_tweet_with_media(text, banner)
 
@@ -1184,18 +1196,18 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         return False
 
 
-def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown") -> bool:
+def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", force_send: bool = False) -> bool:
     """Gorsel + metin tweeti atar.
 
     TWITTER_AUTO_SEND=False iken tweet kuyruğa eklenir (admin onay bekler).
+    force_send=True ise auto_send kontrolunu atlar (admin onay'dan gonderim icin).
 
     1. Twitter v1.1 media/upload ile gorseli yukle → media_id al
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
     try:
-        # Onay modu — kuyruğa ekle, direkt atma
-        from app.config import get_settings
-        if not get_settings().TWITTER_AUTO_SEND:
+        # Onay modu — kuyruğa ekle, direkt atma (DB'den okunur, restart'a dayanıklı)
+        if not force_send and not is_auto_send():
             import inspect
             caller = inspect.stack()[1].function if source == "unknown" else source
             # /tmp goruntusu deploy/restart ile silinir — kalici dizine kopyala
@@ -1368,8 +1380,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
         )
 
         # Kuyruk modunda temp dosyayi silme
-        from app.config import get_settings
-        auto_send = get_settings().TWITTER_AUTO_SEND
+        auto_send = is_auto_send()
 
         result = _safe_tweet_with_media(text, image_path)
 
@@ -1446,8 +1457,7 @@ def tweet_opening_summary(stocks: list) -> bool:
         )
 
         # Kuyruk modunda temp dosyayi silme
-        from app.config import get_settings
-        auto_send = get_settings().TWITTER_AUTO_SEND
+        auto_send = is_auto_send()
 
         result = _safe_tweet_with_media(text, image_path) if image_path else _safe_tweet(text)
 
