@@ -2426,6 +2426,102 @@ async def trigger_opening_tweet(
 
 
 # -------------------------------------------------------
+# 25 Gun Performans Tweet Trigger (Manuel — Admin)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-25day-tweet")
+@limiter.limit("3/minute")
+async def trigger_25day_tweet(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden belirli bir ticker icin 25 gun performans tweetini tetikler.
+
+    Body: {"admin_password": "...", "ticker": "FRMPL"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    ticker = (payload.get("ticker") or "").strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker gerekli")
+
+    from app.models.ipo import IPO, IPOCeilingTrack
+
+    result = await db.execute(
+        select(IPO).where(IPO.ticker == ticker)
+    )
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail=f"{ticker} bulunamadi")
+
+    # Ceiling track verilerini oku
+    track_result = await db.execute(
+        select(IPOCeilingTrack)
+        .where(IPOCeilingTrack.ipo_id == ipo.id)
+        .order_by(IPOCeilingTrack.trading_day.asc())
+        .limit(25)
+    )
+    tracks = track_result.scalars().all()
+
+    if not tracks:
+        raise HTTPException(status_code=404, detail=f"{ticker} icin ceiling track verisi yok")
+
+    ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+    if ipo_price <= 0:
+        raise HTTPException(status_code=400, detail=f"{ticker} ipo_price eksik")
+
+    days_data = []
+    for t in tracks:
+        days_data.append({
+            "trading_day": t.trading_day,
+            "date": t.trade_date,
+            "open": t.open_price or t.close_price,
+            "high": t.high_price or t.close_price,
+            "low": t.low_price or t.close_price,
+            "close": t.close_price,
+            "volume": 0,
+            "durum": t.durum or "",
+        })
+
+    last_close = float(days_data[-1]["close"])
+    total_pct = ((last_close - ipo_price) / ipo_price) * 100
+    ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+    floor_d = sum(1 for t in tracks if t.hit_floor)
+    avg_lot = float(ipo.estimated_lots_per_person) if ipo.estimated_lots_per_person else None
+
+    from app.services.twitter_service import tweet_25_day_performance
+    tw_ok = tweet_25_day_performance(
+        ipo, last_close, total_pct,
+        ceiling_d, floor_d, avg_lot,
+        days_data=days_data,
+    )
+
+    # Admin Telegram bildirim
+    try:
+        from app.services.admin_telegram import notify_tweet_sent
+        await notify_tweet_sent(
+            "25_gun_performans_manuel",
+            ticker,
+            tw_ok,
+            f"Toplam: %{total_pct:+.1f} | Tavan: {ceiling_d} | Taban: {floor_d}",
+        )
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "ticker": ticker,
+        "tweet_sent": tw_ok,
+        "total_pct": round(total_pct, 2),
+        "ceiling_days": ceiling_d,
+        "floor_days": floor_d,
+        "days_count": len(days_data),
+    }
+
+
+# -------------------------------------------------------
 # BIST 30 SEED — adsiz.txt'den son 10 BIST 30 mesaji
 # -------------------------------------------------------
 
