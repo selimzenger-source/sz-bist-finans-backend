@@ -1108,6 +1108,42 @@ async def trigger_opening_from_admin(
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
 
+@router.post("/tweets/trigger-distribution/{ipo_id}")
+async def trigger_distribution_tweet(
+    request: Request,
+    ipo_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden belirli bir IPO icin dagitim baslangic tweet'ini tetikler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from sqlalchemy import select
+        from app.models.ipo import IPO
+        from app.services.twitter_service import tweet_distribution_start
+
+        result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = result.scalar_one_or_none()
+        if not ipo:
+            msg = quote(f"IPO bulunamadi (id={ipo_id})")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        tw_ok = tweet_distribution_start(ipo)
+        if tw_ok:
+            msg = quote(f"Dagitim tweet'i tetiklendi: {ipo.ticker or ipo.company_name}")
+            logger.info("[ADMIN] Dagitim tweet tetiklendi: %s (id=%d)", ipo.ticker, ipo_id)
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1", status_code=303)
+        else:
+            msg = quote(f"Tweet olusturulamadi: {ipo.ticker or ipo.company_name}")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+    except Exception as e:
+        logger.error("[ADMIN] Dagitim tweet tetikleme hatasi: %s", e)
+        msg = quote(f"Hata: {str(e)[:100]}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
 @router.post("/tweets/{tweet_id}/approve")
 async def approve_tweet(
     request: Request,
