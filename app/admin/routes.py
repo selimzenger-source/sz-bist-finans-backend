@@ -1120,6 +1120,7 @@ async def trigger_distribution_tweet(
 
     try:
         from sqlalchemy import select
+        from urllib.parse import quote
         from app.models.ipo import IPO
         from app.services.twitter_service import tweet_distribution_start
 
