@@ -311,8 +311,9 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
             return _queue_tweet(text, image_path=None, source=caller)
 
         # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
+        # Zaten atilmis tweet "basarisiz" degil, atlanmali → True don
         if _is_duplicate_tweet(text):
-            return False
+            return True
 
         creds = _load_credentials()
         if not creds:
@@ -1250,8 +1251,9 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             return _queue_tweet(text, image_path=image_path, source=caller)
 
         # Duplicate kontrolu — ayni tweeti 24 saat icinde tekrar atma
+        # Zaten atilmis tweet "basarisiz" degil, atlanmali → True don
         if _is_duplicate_tweet(text):
-            return False
+            return True
 
         creds = _load_credentials()
         if not creds:
