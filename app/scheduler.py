@@ -11,7 +11,7 @@
 9. Hatirlatma Zamani Kontrol: her 15 dakika
 10. SPK Ihrac Verileri: her 2 saatte bir (islem tarihi tespiti)
 11. InfoYatirim: her 6 saatte bir (yedek veri kaynagi)
-12. Son Gun Uyarisi: her gun 09:00 ve 17:00
+12. Son Gun Uyarisi: her gun 09:00 TR (UTC 06:00) — bugun son gun bildirim
 13. Tavan Takip Gun Sonu: her gun 18:20 (UTC 15:20) Pzt-Cuma
 13b. Tavan Takip Retry: 18:30, 19:00, 20:00 ... 24:00 (basarisiz olursa)
 14. Sabah Scraper: her gun 09:00 (UTC 06:00) — tum scraper'lar + status update
@@ -1203,22 +1203,35 @@ async def scrape_infoyatirim():
 
 
 async def send_last_day_warnings():
-    """Yarin son gunu olan halka arzlar icin uyari gonder."""
+    """BUGUN son gunu olan halka arzlar icin sabah uyarisi gonder.
+
+    Eski mantik: yarin son gun olanlara aksam oncesi bildirim (TR 12:00 / 20:00)
+    Yeni mantik: bugun son gun olanlara sabah 09:00 TR'de bildirim
+    """
     try:
-        from app.services.ipo_service import IPOService
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
         from app.services.notification import NotificationService
 
         async with async_session() as db:
-            ipo_service = IPOService(db)
-            notif_service = NotificationService(db)
+            today = _today_tr()
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status.in_(["in_distribution", "active"]),
+                        IPO.subscription_end == today,
+                    )
+                )
+            )
+            last_day_ipos = list(result.scalars().all())
 
-            last_day_ipos = await ipo_service.get_last_day_ipos()
-            for ipo in last_day_ipos:
-                await notif_service.notify_ipo_last_day(ipo)
+            if last_day_ipos:
+                notif_service = NotificationService(db)
+                for ipo in last_day_ipos:
+                    await notif_service.notify_ipo_last_day(ipo)
+                await db.commit()
 
-            await db.commit()
-
-        logger.info(f"Son gun uyarisi: {len(last_day_ipos)} halka arz")
+        logger.info(f"Son gun uyarisi: {len(last_day_ipos)} halka arz (bugun son gun)")
 
     except Exception as e:
         logger.error(f"Son gun uyarisi hatasi: {e}")
@@ -2600,19 +2613,14 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 12. Son gun uyarisi — her gun 09:00 ve 17:00
+    # 12. Son gun uyarisi — BUGUN son gun olanlara sabah 09:00 TR (UTC 06:00)
+    # Eski: UTC 09:00 = TR 12:00 (gec) + UTC 17:00 = TR 20:00 (aksam oncesi gun)
+    # Yeni: tek job, gercek son gunde sabah 09:00 TR'de bildirim
     scheduler.add_job(
         send_last_day_warnings,
-        CronTrigger(hour=9, minute=0),
+        CronTrigger(hour=6, minute=0),  # UTC 06:00 = TR 09:00
         id="last_day_warning_morning",
-        name="Son Gun Uyarisi (Sabah)",
-        replace_existing=True,
-    )
-    scheduler.add_job(
-        send_last_day_warnings,
-        CronTrigger(hour=17, minute=0),
-        id="last_day_warning_evening",
-        name="Son Gun Uyarisi (Aksam)",
+        name="Son Gun Uyarisi (09:00 TR)",
         replace_existing=True,
     )
 

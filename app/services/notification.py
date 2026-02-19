@@ -511,7 +511,7 @@ class NotificationService:
     async def notify_ipo_last_day(self, ipo) -> int:
         """Son gun uyarisi — notify_ipo_last_day = True olanlara."""
         title = "⏰ Son Gün Uyarısı"
-        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu YARIN son gün!"
+        body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu BUGÜN son gün!"
 
         data = {
             "type": "ipo_last_day",
