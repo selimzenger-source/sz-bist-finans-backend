@@ -1129,6 +1129,10 @@ async def trigger_distribution_tweet(
             msg = quote(f"IPO bulunamadi (id={ipo_id})")
             return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
+        # Senkron tweet fonksiyonu async session disinda kullanacak — detach et
+        await db.refresh(ipo)
+        db.expunge(ipo)
+
         tw_ok = tweet_distribution_start(ipo)
         if tw_ok:
             msg = quote(f"Dagitim tweet'i tetiklendi: {ipo.ticker or ipo.company_name}")
