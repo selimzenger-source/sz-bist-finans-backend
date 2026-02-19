@@ -536,6 +536,26 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
 # ================================================================
 # 2. DAGITIMA CIKIS
 # ================================================================
+def _get_rejected_brokers(ipo_id: int) -> list[str]:
+    """IPO'ya ait katılınamayacak kurum isimlerini senkron DB ile çeker."""
+    try:
+        from app.config import get_settings
+        db_url = str(get_settings().DATABASE_URL)
+        sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
+        from sqlalchemy import create_engine, text as sa_text
+        engine = create_engine(sync_url, pool_pre_ping=True)
+        with engine.connect() as conn:
+            rows = conn.execute(
+                sa_text("SELECT broker_name FROM ipo_brokers WHERE ipo_id = :iid AND is_rejected = true"),
+                {"iid": ipo_id},
+            ).fetchall()
+        engine.dispose()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.debug("Rejected brokers alinamadi: %s", e)
+        return []
+
+
 def tweet_distribution_start(ipo) -> bool:
     """Dağıtım süreci başladığında tweet atar. Tahmini lot varsa ekler."""
     try:
@@ -552,10 +572,18 @@ def tweet_distribution_start(ipo) -> bool:
         if ipo.estimated_lots_per_person:
             lot_text = f"\n\U0001F4CA Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
 
+        # Katılınamayacak kurumlar
+        rejected_text = ""
+        rejected = _get_rejected_brokers(ipo.id) if ipo.id else []
+        if rejected:
+            names = ", ".join(rejected)
+            rejected_text = f"\n\n❌ Katılınamayacak Kurumlar:\n{names}"
+
         text = (
             f"{_get_setting('T2_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
-            f"{price_text}{end_date}{lot_text}\n\n"
+            f"{price_text}{end_date}{lot_text}"
+            f"{rejected_text}\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST #{ipo.ticker or 'Borsa'}"
         )
