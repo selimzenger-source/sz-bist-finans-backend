@@ -722,23 +722,59 @@ def _get_opening_time(ipo) -> tuple:
     return 9, 0  # default
 
 
-# In-memory dedup — ayni IPO + event tipi icin tekrar gonderim engelle
-# Key: "ipo_{id}_{event_type}" → Value: gonderim tarihi (date)
+# Dedup — ayni IPO + event tipi icin tekrar gonderim engelle
+# Key: "ipo_{id}_{event_type}" → Value: gonderim tarihi (date isoformat str)
 # Her gun sifirlanir (date farkliysa cache miss olur)
+# /tmp/reminder_dedup.json dosyasına persist edilir — restart-safe
 _timing_sent: dict[str, date] = {}
+_DEDUP_FILE = "/tmp/reminder_dedup.json"
+
+
+def _dedup_load():
+    """Dosyadan dedup kaydini yukle."""
+    global _timing_sent
+    try:
+        import json as _json
+        with open(_DEDUP_FILE, "r") as f:
+            raw = _json.load(f)
+        today_str = _today_tr().isoformat()
+        # Sadece bugünkü kayıtları yükle, eskiler atılsın
+        _timing_sent = {
+            k: date.fromisoformat(v)
+            for k, v in raw.items()
+            if v == today_str
+        }
+    except Exception:
+        _timing_sent = {}
+
+
+def _dedup_save():
+    """Dedup kaydini dosyaya kaydet."""
+    try:
+        import json as _json
+        raw = {k: v.isoformat() for k, v in _timing_sent.items()}
+        with open(_DEDUP_FILE, "w") as f:
+            _json.dump(raw, f)
+    except Exception:
+        pass
+
+
+# Baslangicta yukle
+_dedup_load()
 
 
 def _timing_already_sent(ipo_id: int, event_type: str) -> bool:
-    """Bu IPO + event bugün zaten gönderildi mi?"""
+    """Bu IPO + event bugün zaten gönderildi mi? (restart-safe)"""
     key = f"ipo_{ipo_id}_{event_type}"
     sent_date = _timing_sent.get(key)
     return sent_date == _today_tr()
 
 
 def _timing_mark_sent(ipo_id: int, event_type: str):
-    """Bu IPO + event'i bugün gönderildi olarak işaretle."""
+    """Bu IPO + event'i bugün gönderildi olarak işaretle ve dosyaya kaydet."""
     key = f"ipo_{ipo_id}_{event_type}"
     _timing_sent[key] = _today_tr()
+    _dedup_save()
 
 
 def _get_active_reminder(remaining_minutes: float) -> str | None:
@@ -897,6 +933,39 @@ async def check_reminders(
                 _timing_mark_sent(ipo.id, reminder_check)
 
                 # Tweet at — kullanici sayisindan bagimsiz her zaman atilir
+                # DB-level dedup: bugün aynı source'dan zaten kuyruktaysa/gönderildiyse atla
+                tweet_source_map = {
+                    "reminder_4h": "tweet_last_4_hours",
+                    "reminder_30min": "tweet_last_30_min",
+                }
+                tweet_source = tweet_source_map.get(reminder_check)
+                if tweet_source:
+                    try:
+                        from app.models.pending_tweet import PendingTweet
+                        from sqlalchemy import cast, Date as SADate, func as sqlfunc
+                        ticker_str = ipo.ticker or ""
+                        today_dt = _today_tr()
+                        # Bugün aynı source + ticker içeren pending/sent/approved tweet var mı?
+                        dup_result = await db.execute(
+                            select(PendingTweet).where(
+                                and_(
+                                    PendingTweet.source == tweet_source,
+                                    PendingTweet.status.in_(["pending", "approved", "sent"]),
+                                    cast(PendingTweet.created_at, SADate) == today_dt,
+                                    PendingTweet.text.contains(ticker_str) if ticker_str else True,
+                                )
+                            ).limit(1)
+                        )
+                        existing_tweet = dup_result.scalar_one_or_none()
+                        if existing_tweet and not force_reminder_type:
+                            logger.info(
+                                "Hatirlatma tweet DB-dedup: %s icin %s bugun zaten kuyrukte (id=%d), atlandi",
+                                ticker_name, tweet_source, existing_tweet.id,
+                            )
+                            continue
+                    except Exception as dd_err:
+                        logger.warning("Hatirlatma tweet DB-dedup kontrol hatasi: %s", dd_err)
+
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
                     from app.services.admin_telegram import notify_tweet_sent
