@@ -1393,8 +1393,13 @@ async def tweet_company_intro_job():
 
             from app.services.twitter_service import tweet_company_intro
             from app.services.admin_telegram import notify_tweet_sent
+
+            today = _today_tr()
             tweeted = 0
             for idx, ipo in enumerate(new_ipos):
+                # Dagitim son gunu veya gecmisse atla — son_gun_sabah tweeti zaten atiliyor
+                if ipo.subscription_end and ipo.subscription_end <= today:
+                    continue
                 if idx > 0:
                     import asyncio
                     await asyncio.sleep(random.uniform(2700, 2750))  # ~45 dk arayla tweet
