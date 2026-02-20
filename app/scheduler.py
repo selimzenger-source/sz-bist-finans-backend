@@ -1726,7 +1726,12 @@ async def market_snapshot_tweet():
 # ═══════════════════════════════════════════════════════════════
 
 async def _opening_summary_attempt(retry_num: int = 0):
-    """Tek bir acilis bilgileri denemesi — retry mantigi opening_summary_tweet'te."""
+    """Tek bir acilis bilgileri denemesi — retry mantigi opening_summary_tweet'te.
+
+    Gun ortasi snapshot modelini referans alir:
+    - today_track yoksa son track'i kullanir
+    - open_price yoksa close_price (anlik fiyat) kullanir
+    """
     from datetime import date as date_type
     from sqlalchemy import select, and_
     from app.database import AsyncSessionLocal
@@ -1765,13 +1770,24 @@ async def _opening_summary_attempt(retry_num: int = 0):
             if current_day > 5:
                 continue
 
+            # Bugunku track'i bul
             today_track = None
             for t in tracks:
                 if t.trade_date == today:
                     today_track = t
                     break
 
-            if not today_track or not today_track.open_price:
+            # Bugunku track yoksa son track'i kullan (gun ortasi modeli gibi)
+            if not today_track:
+                today_track = tracks[-1]  # En son track
+                if today_track.trade_date != today:
+                    # Son track bugun degil — belki sync henuz calismadi
+                    no_open_count += 1
+                    continue
+
+            # Acilis fiyati: open_price varsa onu, yoksa close_price (anlik son fiyat) kullan
+            raw_open = today_track.open_price or today_track.close_price
+            if not raw_open:
                 no_open_count += 1
                 continue
 
@@ -1788,7 +1804,7 @@ async def _opening_summary_attempt(retry_num: int = 0):
             if prev_close <= 0:
                 prev_close = ipo_price
 
-            open_price = float(today_track.open_price)
+            open_price = float(raw_open)
             pct_change = ((open_price - ipo_price) / ipo_price * 100) if ipo_price > 0 else 0
             daily_pct = ((open_price - prev_close) / prev_close * 100) if prev_close > 0 else 0
 
@@ -1823,7 +1839,7 @@ async def _opening_summary_attempt(retry_num: int = 0):
                 "satis_lot": satis_lot,
             })
 
-        if not stocks and no_open_count > 0 and retry_num < 2:
+        if not stocks and no_open_count > 0 and retry_num < 3:
             return {"retry": f"Acilis fiyati olan hisse yok ({no_open_count} hisse veri bekliyor)"}
 
         if not stocks:
