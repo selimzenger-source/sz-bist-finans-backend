@@ -1847,13 +1847,13 @@ async def _opening_summary_attempt(retry_num: int = 0):
 
 
 async def opening_summary_tweet():
-    """Acilis bilgileri tweet — 10:07 TR (UTC 07:07).
+    """Acilis bilgileri tweet — 09:58 TR (UTC 06:58).
 
     Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini
     grid layout gorsel ile tweet atar.
 
-    Borsa 10:00'da acilir, excel_sync ~2-3 dk icinde acilis verisini yazar.
-    10:07'de baslar, veri yoksa 90sn arayla 4 kez dener (~16:07'ye kadar).
+    Borsa 09:55'te acilir, excel_sync ~1 dk icinde acilis verisini yazar.
+    09:58'de baslar, veri yoksa 90sn arayla 4 kez dener.
 
     Returns dict with "message" or "error" key for debug.
     """
@@ -2683,13 +2683,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 16. Acilis Fiyati Tweet — her gun 10:05 Turkiye (UTC 07:05) Pzt-Cuma
-    # Borsa 10:00 acilis, Yahoo Finance ~2-3 dk sonra veri yazar
+    # 16. Acilis Fiyati Tweet — her gun 09:58 Turkiye (UTC 06:58) Pzt-Cuma
+    # Borsa 09:55 acilis, excel_sync ~1 dk icinde veriyi yazar
     scheduler.add_job(
         tweet_opening_price_job,
-        CronTrigger(hour=7, minute=5, day_of_week="mon-fri"),
+        CronTrigger(hour=6, minute=58, day_of_week="mon-fri"),
         id="opening_price_tweet",
-        name="Acilis Fiyati Tweet (10:05 TR)",
+        name="Acilis Fiyati Tweet (09:58 TR)",
         replace_existing=True,
     )
 
@@ -2747,14 +2747,14 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 22b. T16 Acilis Bilgileri — 10:07 TR (UTC 07:07) Pzt-Cuma
-    # Borsa 10:00 acilis, excel_sync ~2-3 dk sonra veriyi yazar
-    # 10:07'de baslar, veri yoksa 90sn arayla 4 kez dener
+    # 22b. T16 Acilis Bilgileri — 09:58 TR (UTC 06:58) Pzt-Cuma
+    # Borsa 09:55 acilis, excel_sync ~1 dk icinde veriyi yazar
+    # 09:58'de baslar, veri yoksa 90sn arayla 4 kez dener
     scheduler.add_job(
         opening_summary_tweet,
-        CronTrigger(hour=7, minute=7, day_of_week="mon-fri"),
+        CronTrigger(hour=6, minute=58, day_of_week="mon-fri"),
         id="opening_summary_tweet",
-        name="T16 Acilis Bilgileri (10:07 TR)",
+        name="T16 Acilis Bilgileri (09:58 TR)",
         replace_existing=True,
     )
 
