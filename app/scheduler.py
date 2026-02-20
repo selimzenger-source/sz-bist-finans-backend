@@ -942,19 +942,24 @@ async def check_reminders(
                 if tweet_source:
                     try:
                         from app.models.pending_tweet import PendingTweet
-                        from sqlalchemy import cast, Date as SADate, func as sqlfunc
                         ticker_str = ipo.ticker or ""
-                        today_dt = _today_tr()
+                        # Bugünün başlangıcı ve sonu (TR timezone → UTC)
+                        tr_tz = ZoneInfo("Europe/Istanbul")
+                        today_start_tr = datetime.now(tr_tz).replace(hour=0, minute=0, second=0, microsecond=0)
+                        today_end_tr = today_start_tr + timedelta(days=1)
+                        today_start_utc = today_start_tr.astimezone(timezone.utc)
+                        today_end_utc = today_end_tr.astimezone(timezone.utc)
                         # Bugün aynı source + ticker içeren pending/sent/approved tweet var mı?
+                        where_clauses = [
+                            PendingTweet.source == tweet_source,
+                            PendingTweet.status.in_(["pending", "approved", "sent"]),
+                            PendingTweet.created_at >= today_start_utc,
+                            PendingTweet.created_at < today_end_utc,
+                        ]
+                        if ticker_str:
+                            where_clauses.append(PendingTweet.text.contains(ticker_str))
                         dup_result = await db.execute(
-                            select(PendingTweet).where(
-                                and_(
-                                    PendingTweet.source == tweet_source,
-                                    PendingTweet.status.in_(["pending", "approved", "sent"]),
-                                    cast(PendingTweet.created_at, SADate) == today_dt,
-                                    PendingTweet.text.contains(ticker_str) if ticker_str else True,
-                                )
-                            ).limit(1)
+                            select(PendingTweet).where(and_(*where_clauses)).limit(1)
                         )
                         existing_tweet = dup_result.scalar_one_or_none()
                         if existing_tweet and not force_reminder_type:
