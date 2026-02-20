@@ -264,3 +264,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v22 migration: users.last_daily_checkin (gunluk giris puani)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_daily_checkin VARCHAR(20)")
+            )
+        except Exception:
+            pass

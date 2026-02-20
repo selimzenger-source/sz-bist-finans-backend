@@ -1430,6 +1430,59 @@ async def get_wallet(device_id: str, db: AsyncSession = Depends(get_db)):
     )
 
 
+@app.post("/api/v1/users/{device_id}/wallet/daily-checkin", response_model=WalletBalanceOut)
+@limiter.limit("10/minute")
+async def wallet_daily_checkin(
+    request: Request,
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Gunluk giris puani — her gun 1 puan, gunde 1 kere."""
+    result = await db.execute(
+        select(User).where(User.device_id == device_id).with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    _check_daily_reset(user)
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if user.last_daily_checkin == today_str:
+        # Bugun zaten giris yapilmis — sadece bakiye don
+        cooldown = _get_wallet_cooldown(user)
+        return WalletBalanceOut(
+            balance=user.wallet_balance or 0.0,
+            daily_ads_watched=user.daily_ads_watched or 0,
+            max_daily_ads=WALLET_MAX_DAILY_ADS,
+            cooldown_remaining=cooldown,
+            can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
+        )
+
+    # 1 puan ekle
+    user.wallet_balance = (user.wallet_balance or 0.0) + 1.0
+    user.last_daily_checkin = today_str
+
+    tx = WalletTransaction(
+        user_id=user.id,
+        amount=1.0,
+        tx_type="daily_checkin",
+        description="Gunluk giris puani",
+        balance_after=user.wallet_balance,
+    )
+    db.add(tx)
+    await db.flush()
+
+    cooldown = _get_wallet_cooldown(user)
+    return WalletBalanceOut(
+        balance=user.wallet_balance,
+        daily_ads_watched=user.daily_ads_watched or 0,
+        max_daily_ads=WALLET_MAX_DAILY_ADS,
+        cooldown_remaining=cooldown,
+        can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
+    )
+
+
 @app.post("/api/v1/users/{device_id}/wallet/earn", response_model=WalletBalanceOut)
 @limiter.limit("35/minute")
 async def wallet_earn(
