@@ -742,14 +742,18 @@ def _timing_mark_sent(ipo_id: int, event_type: str):
 
 
 def _get_active_reminder(remaining_minutes: float) -> str | None:
-    """Kalan dakikaya göre aktif hatırlatma tipini döndürür."""
-    if 25 <= remaining_minutes <= 35:
+    """Kalan dakikaya gore aktif hatirlatma tipini dondurur.
+
+    Pencereler 20 dakika genisliginde tutulur — scheduler 15 dk'da bir
+    calistiginda hicbir pencere atlanmasin.
+    """
+    if 20 <= remaining_minutes <= 40:
         return "reminder_30min"
-    elif 55 <= remaining_minutes <= 65:
+    elif 50 <= remaining_minutes <= 70:
         return "reminder_1h"
-    elif 115 <= remaining_minutes <= 125:
+    elif 110 <= remaining_minutes <= 130:
         return "reminder_2h"
-    elif 235 <= remaining_minutes <= 245:
+    elif 230 <= remaining_minutes <= 250:
         return "reminder_4h"
     return None
 
@@ -838,13 +842,10 @@ async def check_reminders():
                 )
                 users = list(users_result.scalars().all())
 
-                if not users:
-                    _timing_mark_sent(ipo.id, reminder_check)
-                    continue
-
                 time_label = time_labels.get(reminder_check, "")
                 close_time_str = f"{close_h:02d}:{close_m:02d}"
 
+                # Push bildirim — reminder_4h veya reminder_30min secmis kullanicilara
                 for user in users:
                     await notif_service._send_to_user(
                         user=user,
@@ -860,7 +861,7 @@ async def check_reminders():
 
                 _timing_mark_sent(ipo.id, reminder_check)
 
-                # Tweet at — Son 4 Saat veya Son 30 Dakika
+                # Tweet at — kullanici olup olmadıgından bagimsiz her zaman atılır
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
                     from app.services.admin_telegram import notify_tweet_sent
