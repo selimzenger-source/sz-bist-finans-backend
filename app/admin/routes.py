@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, desc, and_, func as sa_func
+from sqlalchemy import select, desc, and_, or_, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1107,6 +1107,140 @@ async def trigger_opening_from_admin(
     except Exception as e:
         logger.error("[ADMIN] T16 tetikleme hatasi: %s", e)
         msg = quote(f"T16 Hata: {str(e)[:100]}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
+@router.post("/tweets/trigger-opening-push")
+async def trigger_opening_push_from_admin(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden acilis push bildirimlerini tetikler.
+    Trading durumundaki hisselerin son fiyat verisine bakarak
+    her hisse icin gunluk_acilis_kapanis bildirimi gonderir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO, IPOCeilingTrack
+        from app.services.notification import NotificationService
+
+        # Trading durumundaki hisseleri bul
+        result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "trading",
+                    IPO.archived == False,
+                    IPO.ticker.isnot(None),
+                    IPO.ceiling_tracking_active == True,
+                )
+            )
+        )
+        trading_ipos = list(result.scalars().all())
+
+        if not trading_ipos:
+            msg = quote("Acilis Push: Trading durumunda hisse yok")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        notif_service = NotificationService(db)
+        from datetime import date as date_type
+        today = date_type.today()
+        sent_total = 0
+
+        for ipo in trading_ipos:
+            # Bugunun track verisini bul
+            track_result = await db.execute(
+                select(IPOCeilingTrack).where(
+                    and_(
+                        IPOCeilingTrack.ipo_id == ipo.id,
+                        IPOCeilingTrack.trade_date == today,
+                    )
+                )
+            )
+            today_track = track_result.scalar_one_or_none()
+
+            if today_track and today_track.close_price:
+                hit_ceiling = today_track.hit_ceiling or False
+                hit_floor = today_track.hit_floor or False
+            else:
+                # Track yoksa en son veriye bak
+                hit_ceiling = False
+                hit_floor = False
+
+            ticker = ipo.ticker
+            if hit_ceiling:
+                title = f"{ticker} Tavan Acti!"
+                body = f"{ticker} tavan acti!"
+            elif hit_floor:
+                title = f"{ticker} Taban Acti!"
+                body = f"{ticker} taban acti!"
+            else:
+                title = f"{ticker} Acilis"
+                body = f"{ticker} normal islem ile acildi"
+
+            # Bu IPO icin aktif aboneleri bul ve bildirim gonder
+            from app.models.user import StockNotificationSubscription, User
+            stock_notif_result = await db.execute(
+                select(StockNotificationSubscription).where(
+                    and_(
+                        or_(
+                            and_(
+                                StockNotificationSubscription.ipo_id == ipo.id,
+                                StockNotificationSubscription.notification_type == "gunluk_acilis_kapanis",
+                            ),
+                            StockNotificationSubscription.is_annual_bundle == True,
+                        ),
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.muted == False,
+                    )
+                )
+            )
+            active_subs = list(stock_notif_result.scalars().all())
+
+            notified_ids = set()
+            for sub in active_subs:
+                if sub.user_id in notified_ids:
+                    continue
+                user_result = await db.execute(select(User).where(User.id == sub.user_id))
+                user = user_result.scalar_one_or_none()
+                if not user:
+                    continue
+                fcm = (user.fcm_token or "").strip()
+                expo = (user.expo_push_token or "").strip()
+                if not fcm and not expo:
+                    continue
+                if not user.notifications_enabled:
+                    continue
+
+                try:
+                    success = await notif_service._send_to_user(
+                        user=user,
+                        title=title,
+                        body=body,
+                        data={
+                            "type": "stock_notification",
+                            "notification_type": "gunluk_acilis_kapanis",
+                            "ticker": ticker,
+                            "ipo_id": str(ipo.id),
+                        },
+                        channel_id="ceiling_alerts_v2",
+                    )
+                    if success:
+                        sent_total += 1
+                        notified_ids.add(sub.user_id)
+                except Exception:
+                    pass
+
+        tickers_str = ", ".join(ipo.ticker for ipo in trading_ipos)
+        msg = quote(f"Acilis Push: {sent_total} bildirim gonderildi ({tickers_str})")
+        logger.info("[ADMIN] Acilis push: %d bildirim — %s", sent_total, tickers_str)
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1", status_code=303)
+
+    except Exception as e:
+        logger.error("[ADMIN] Acilis push hatasi: %s", e, exc_info=True)
+        msg = quote(f"Push Hata: {str(e)[:100]}")
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
 

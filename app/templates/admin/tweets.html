@@ -45,10 +45,16 @@
                     class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
                 🔔 Açılış Bilgileri (T16)
             </button>
+            <!-- Push: Açılış Bildirimi -->
+            <button id="btn-push-opening" onclick="triggerTweet('/admin/tweets/trigger-opening-push', this, 'res-push-opening')"
+                    class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
+                📲 Acilis Push Bildirim
+            </button>
         </div>
-        <p class="text-xs text-gray-500 mt-2">Tıklayınca ilgili tweet hemen oluşturulup gönderilir (30sn kadar sürebilir).</p>
+        <p class="text-xs text-gray-500 mt-2">Tiklayinca ilgili tweet hemen olusturulup gonderilir (30sn kadar surebilir).</p>
         <div id="res-t15" class="mt-2 hidden"></div>
         <div id="res-t16" class="mt-2 hidden"></div>
+        <div id="res-push-opening" class="mt-2 hidden"></div>
         {% if trigger_message %}
         <div class="mt-2 px-3 py-2 rounded text-sm {{ 'bg-green-900 text-green-300' if trigger_success else 'bg-red-900 text-red-300' }}">
             {{ trigger_message }}

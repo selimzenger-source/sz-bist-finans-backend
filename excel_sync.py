@@ -451,6 +451,8 @@ def live_sync(filepath, interval=15):
     prev_hit_ceiling = {}  # {ticker: bool}
     prev_hit_floor = {}    # {ticker: bool}
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
+    opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
+    closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
     last_session_date = None  # Seans gun degisiminde cache temizle + IPO yenile
 
@@ -495,6 +497,8 @@ def live_sync(filepath, interval=15):
                 prev_hit_ceiling.clear()
                 prev_hit_floor.clear()
                 pct_alerts_sent.clear()
+                opening_notif_sent = False
+                closing_notif_sent = False
                 try:
                     fresh = get_active_trading_ipos()
                     if fresh:
@@ -658,6 +662,80 @@ def live_sync(filepath, interval=15):
                 # Her 4 donguede bir (1 dakika) sessiz log
                 if cycle % 4 == 0:
                     log(f"[{now}] #{cycle} — Degisiklik yok")
+
+            # ── Gunluk acilis bildirimi (09:56) ──
+            # Seans acilisinda abonelere push bildirim gonder
+            if not opening_notif_sent and 956 <= hour_min <= 1000 and prev_prices:
+                log(f"  {'='*50}")
+                log(f"  ACILIS BILDIRIMI GONDERILIYOR")
+                log(f"  {'='*50}")
+                opening_count = 0
+                for row in rows:
+                    ticker = row["ticker"]
+                    son = row.get("son")
+                    if son is None or son == 0:
+                        continue
+                    tavan_limit = row.get("tavan_limit")
+                    taban_limit = row.get("taban_limit")
+                    is_ceiling = bool(tavan_limit and son and abs(son - tavan_limit) <= PRICE_TOLERANCE)
+                    is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
+
+                    if is_ceiling:
+                        title = f"{ticker} Tavan Acti!"
+                        body = f"{ticker} tavan acti!"
+                        log(f"  {ticker}: TAVAN ACTI!")
+                    elif is_floor:
+                        title = f"{ticker} Taban Acti!"
+                        body = f"{ticker} taban acti!"
+                        log(f"  {ticker}: TABAN ACTI!")
+                    else:
+                        title = f"{ticker} Acilis"
+                        body = f"{ticker} normal islem ile acildi"
+                        log(f"  {ticker}: Normal acilis")
+
+                    _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
+                    opening_count += 1
+                if opening_count > 0:
+                    opening_notif_sent = True
+                    log(f"  Acilis bildirimi: {opening_count} hisse icin gonderildi")
+                log(f"  {'='*50}")
+
+            # ── Gunluk kapanis bildirimi (18:08) ──
+            # Seans kapanisinda abonelere push bildirim gonder
+            if not closing_notif_sent and 1808 <= hour_min <= 1820 and prev_prices:
+                log(f"  {'='*50}")
+                log(f"  KAPANIS BILDIRIMI GONDERILIYOR")
+                log(f"  {'='*50}")
+                closing_count = 0
+                for row in rows:
+                    ticker = row["ticker"]
+                    son = row.get("son")
+                    if son is None or son == 0:
+                        continue
+                    tavan_limit = row.get("tavan_limit")
+                    taban_limit = row.get("taban_limit")
+                    is_ceiling = bool(tavan_limit and son and abs(son - tavan_limit) <= PRICE_TOLERANCE)
+                    is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
+
+                    if is_ceiling:
+                        title = f"{ticker} Tavan Kapatti!"
+                        body = f"{ticker} tavan kapatti!"
+                        log(f"  {ticker}: TAVAN KAPATTI!")
+                    elif is_floor:
+                        title = f"{ticker} Taban Kapatti!"
+                        body = f"{ticker} taban kapatti!"
+                        log(f"  {ticker}: TABAN KAPATTI!")
+                    else:
+                        title = f"{ticker} Kapanis"
+                        body = f"{ticker} normal islem ile kapatti"
+                        log(f"  {ticker}: Normal kapanis")
+
+                    _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
+                    closing_count += 1
+                if closing_count > 0:
+                    closing_notif_sent = True
+                    log(f"  Kapanis bildirimi: {closing_count} hisse icin gonderildi")
+                log(f"  {'='*50}")
 
             time.sleep(interval)
 
