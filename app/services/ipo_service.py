@@ -399,6 +399,13 @@ class IPOService:
         OHLC fiyat verileri + tavan/taban durumu kaydedilir.
         Onceki gun tavan degildi ama bugun tavan ise → relock (tekrar kitlendi).
         """
+        # 25 gün sınırı — servis katmanında ikinci savunma hattı
+        if trading_day > 25:
+            raise ValueError(
+                f"trading_day={trading_day} maksimum 25 gün sınırını aşıyor. "
+                f"IPO ipo_id={ipo_id} için ceiling track kaydedilmedi."
+            )
+
         result = await self.db.execute(
             select(IPOCeilingTrack).where(
                 and_(

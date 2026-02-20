@@ -96,8 +96,8 @@ async def lifespan(app: FastAPI):
 
     # Arşivlenmiş ama ceiling_tracking_active=True kalan IPO'ları düzelt
     try:
-        from sqlalchemy import select, and_
-        from app.models.ipo import IPO
+        from sqlalchemy import select, and_, delete
+        from app.models.ipo import IPO, IPOCeilingTrack
         async with async_session() as db:
             stale_res = await db.execute(
                 select(IPO).where(
@@ -116,6 +116,25 @@ async def lifespan(app: FastAPI):
                 )
     except Exception as e:
         logger.warning("Startup ceiling düzeltici hatası: %s", e)
+
+    # 26+ gün verisi temizleyici — hiçbir IPO'da trading_day > 25 olmamalı
+    try:
+        from sqlalchemy import delete
+        from app.models.ipo import IPOCeilingTrack
+        async with async_session() as db:
+            del_result = await db.execute(
+                delete(IPOCeilingTrack).where(IPOCeilingTrack.trading_day > 25)
+            )
+            if del_result.rowcount > 0:
+                await db.commit()
+                logger.warning(
+                    "Startup 26+ gün temizleyici: %d adet trading_day>25 kayıt silindi!",
+                    del_result.rowcount,
+                )
+            else:
+                logger.info("Startup 26+ gün temizleyici: temiz, silinecek kayıt yok.")
+    except Exception as e:
+        logger.warning("Startup 26+ gün temizleyici hatası: %s", e)
 
     # Scheduler'i baslat
     try:
@@ -1833,6 +1852,34 @@ async def update_ceiling_track(
     ipo = await ipo_service.get_ipo_by_ticker(data.ticker)
     if not ipo:
         raise HTTPException(status_code=404, detail=f"IPO bulunamadi: {data.ticker}")
+
+    # ── 25 GÜN SINIRI KONTROLÜ ──────────────────────────────────────────
+    # Arşivlenmiş IPO'lara veri kabul etme
+    if ipo.archived:
+        logger.warning(
+            "ceiling-track REDDEDİLDİ: %s arşivlenmiş (trading_day_count=%s), gelen trading_day=%s",
+            data.ticker, ipo.trading_day_count, data.trading_day,
+        )
+        return {
+            "status": "skipped",
+            "reason": "archived",
+            "ticker": data.ticker,
+            "trading_day": data.trading_day,
+        }
+    # 25. günü aşan veri kabul etme
+    if data.trading_day > 25:
+        logger.warning(
+            "ceiling-track REDDEDİLDİ: %s trading_day=%s > 25 sınırı",
+            data.ticker, data.trading_day,
+        )
+        return {
+            "status": "skipped",
+            "reason": "trading_day_limit_exceeded",
+            "ticker": data.ticker,
+            "trading_day": data.trading_day,
+            "max_allowed": 25,
+        }
+    # ────────────────────────────────────────────────────────────────────
 
     try:
         track = await ipo_service.update_ceiling_track(
