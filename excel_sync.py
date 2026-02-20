@@ -598,49 +598,54 @@ def live_sync(filepath, interval=15):
 
                 # ── Anlik bildirim tespiti ──
 
-                # 1. Tavan bozulma: onceki dongu tavandaydi, simdi degil
+                # 1. Tavan Cozuldu: onceki dongu tavandaydi, simdi degil
                 was_ceiling = prev_hit_ceiling.get(ticker, False)
                 if was_ceiling and not hit_ceiling:
-                    log(f"  🔔 TAVAN BOZULMA: {ticker}")
+                    pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                    fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
+                    log(f"  🔔 TAVAN COZULDU: {ticker}")
                     _send_realtime_notification(
                         ticker, "tavan_bozulma",
-                        f"🔓 {ticker} Tavan Bozuldu!",
-                        f"{ticker} tavan fiyatindan dusmeye basladi. Son: {son} TL",
+                        f"{ticker} Tavan Cozuldu!",
+                        f"Anlik Fark: {fark_str}",
                     )
 
-                # 2. Taban acilma: onceki dongu tabandaydi, simdi degil
+                # 2. Taban Kalkti: onceki dongu tabandaydi, simdi degil
                 was_floor = prev_hit_floor.get(ticker, False)
                 if was_floor and not hit_floor:
-                    log(f"  🔔 TABAN ACILMA: {ticker}")
+                    pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                    fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
+                    log(f"  🔔 TABAN KALKTI: {ticker}")
                     _send_realtime_notification(
                         ticker, "taban_acilma",
-                        f"📈 {ticker} Taban Acildi!",
-                        f"{ticker} taban fiyatindan yukselmeye basladi. Son: {son} TL",
+                        f"{ticker} Taban Kalkti!",
+                        f"Anlik Fark: {fark_str}",
                     )
 
                 # 3. Yuzde dusus: %4 ve %7 esik (gun ici 1 kere)
                 if daily_pct is not None:
                     pct_val = float(daily_pct)
                     sent = pct_alerts_sent.get(ticker, set())
+                    fark_str = f"%-{abs(pct_val):.1f}"
 
                     if pct_val <= -7.0 and "pct7" not in sent:
                         log(f"  🔔 %7 DUSUS: {ticker} %{pct_val:.1f}")
                         _send_realtime_notification(
                             ticker, "yuzde_dusus",
-                            f"⚠️ {ticker} %7 Dusus!",
-                            f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                            f"{ticker} Gunluk %7 Dustu!",
+                            f"Anlik Fark: {fark_str}",
                             sub_event="pct7",
                         )
                         sent.add("pct7")
-                        sent.add("pct4")  # %7 geldiyse %4 de gonderilmis say
+                        sent.add("pct4")
                         pct_alerts_sent[ticker] = sent
 
                     elif pct_val <= -4.0 and "pct4" not in sent:
                         log(f"  🔔 %4 DUSUS: {ticker} %{pct_val:.1f}")
                         _send_realtime_notification(
                             ticker, "yuzde_dusus",
-                            f"⚠️ {ticker} %4 Dusus!",
-                            f"{ticker} halka arz fiyatina gore %{pct_val:.1f} dususte. Son: {son} TL",
+                            f"{ticker} Gunluk %4 Dustu!",
+                            f"Anlik Fark: {fark_str}",
                             sub_event="pct4",
                         )
                         sent.add("pct4")
@@ -683,26 +688,24 @@ def live_sync(filepath, interval=15):
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
-                        title = f"{ticker} Tavan Acti!"
+                        title = f"Seans Acilis: {ticker} Tavan Acti!"
                         body = f"{ticker} tavan fiyatindan acildi"
                         log(f"  {ticker}: TAVAN ACTI!")
                     elif is_floor:
-                        title = f"{ticker} Taban Acti!"
+                        title = f"Seans Acilis: {ticker} Taban Acti!"
                         body = f"{ticker} taban fiyatindan acildi"
                         log(f"  {ticker}: TABAN ACTI!")
                     else:
-                        # Alicili veya saticili — % fark ile goster
                         pct_val = float(daily_pct) if daily_pct is not None else 0.0
-                        pct_str = f"%{pct_val:+.2f}".replace("+", "+%").replace("-", "-%").replace("%%", "%")
-                        pct_str = f"+%{abs(pct_val):.2f}" if pct_val >= 0 else f"-%{abs(pct_val):.2f}"
+                        gap_str = f"%+{abs(pct_val):.2f}" if pct_val >= 0 else f"%-{abs(pct_val):.2f}"
                         if pct_val >= 0:
-                            title = f"{ticker} Alicili Acti"
-                            body = f"{ticker} alicili acildi — Acilis Gap: {pct_str}"
-                            log(f"  {ticker}: ALICILI ACTI {pct_str}")
+                            title = f"Seans Acilis: {ticker} Alicili Acti"
+                            body = f"Gap: {gap_str}"
+                            log(f"  {ticker}: ALICILI ACTI {gap_str}")
                         else:
-                            title = f"{ticker} Saticili Acti"
-                            body = f"{ticker} saticili acildi — Acilis Gap: {pct_str}"
-                            log(f"  {ticker}: SATICILI ACTI {pct_str}")
+                            title = f"Seans Acilis: {ticker} Saticili Acti"
+                            body = f"Gap: {gap_str}"
+                            log(f"  {ticker}: SATICILI ACTI {gap_str}")
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     opening_count += 1
@@ -731,25 +734,24 @@ def live_sync(filepath, interval=15):
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
-                        title = f"{ticker} Tavan Kapatti!"
+                        title = f"Gunsonu Kapanis: {ticker} Tavan Kapatti!"
                         body = f"{ticker} tavan fiyatindan kapatti"
                         log(f"  {ticker}: TAVAN KAPATTI!")
                     elif is_floor:
-                        title = f"{ticker} Taban Kapatti!"
+                        title = f"Gunsonu Kapanis: {ticker} Taban Kapatti!"
                         body = f"{ticker} taban fiyatindan kapatti"
                         log(f"  {ticker}: TABAN KAPATTI!")
                     else:
-                        # Alicili veya saticili kapanis — % fark ile goster
                         pct_val = float(daily_pct) if daily_pct is not None else 0.0
-                        pct_str = f"+%{abs(pct_val):.2f}" if pct_val >= 0 else f"-%{abs(pct_val):.2f}"
+                        fark_str = f"%+{abs(pct_val):.2f}" if pct_val >= 0 else f"%-{abs(pct_val):.2f}"
                         if pct_val >= 0:
-                            title = f"{ticker} Alicili Kapatti"
-                            body = f"{ticker} alicili kapatti — Gunsonu Fark: {pct_str}"
-                            log(f"  {ticker}: ALICILI KAPATTI {pct_str}")
+                            title = f"Gunsonu Kapanis: {ticker} Alicili Kapatti"
+                            body = f"Fark: {fark_str}"
+                            log(f"  {ticker}: ALICILI KAPATTI {fark_str}")
                         else:
-                            title = f"{ticker} Saticili Kapatti"
-                            body = f"{ticker} saticili kapatti — Gunsonu Fark: {pct_str}"
-                            log(f"  {ticker}: SATICILI KAPATTI {pct_str}")
+                            title = f"Gunsonu Kapanis: {ticker} Saticili Kapatti"
+                            body = f"Fark: {fark_str}"
+                            log(f"  {ticker}: SATICILI KAPATTI {fark_str}")
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     closing_count += 1
