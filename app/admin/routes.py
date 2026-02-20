@@ -1164,21 +1164,27 @@ async def trigger_opening_push_from_admin(
             if today_track and today_track.close_price:
                 hit_ceiling = today_track.hit_ceiling or False
                 hit_floor = today_track.hit_floor or False
+                pct_change = float(today_track.pct_change) if today_track.pct_change else 0.0
             else:
-                # Track yoksa en son veriye bak
                 hit_ceiling = False
                 hit_floor = False
+                pct_change = 0.0
 
             ticker = ipo.ticker
             if hit_ceiling:
                 title = f"{ticker} Tavan Acti!"
-                body = f"{ticker} tavan acti!"
+                body = f"{ticker} tavan fiyatindan acildi"
             elif hit_floor:
                 title = f"{ticker} Taban Acti!"
-                body = f"{ticker} taban acti!"
+                body = f"{ticker} taban fiyatindan acildi"
             else:
-                title = f"{ticker} Acilis"
-                body = f"{ticker} normal islem ile acildi"
+                pct_str = f"+%{abs(pct_change):.2f}" if pct_change >= 0 else f"-%{abs(pct_change):.2f}"
+                if pct_change >= 0:
+                    title = f"{ticker} Alicili Acti"
+                    body = f"{ticker} alicili acildi — Acilis Gap: {pct_str}"
+                else:
+                    title = f"{ticker} Saticili Acti"
+                    body = f"{ticker} saticili acildi — Acilis Gap: {pct_str}"
 
             # Bu IPO icin aktif aboneleri bul ve bildirim gonder
             from app.models.user import StockNotificationSubscription, User

@@ -256,3 +256,11 @@ async def init_db():
                 )
         except Exception:
             pass
+
+        # v21 migration: stock_notification_subscriptions.muted_types (bundle tip bazli mute)
+        try:
+            await conn.execute(
+                text("ALTER TABLE stock_notification_subscriptions ADD COLUMN IF NOT EXISTS muted_types TEXT")
+            )
+        except Exception:
+            pass

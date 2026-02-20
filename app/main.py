@@ -757,13 +757,18 @@ async def deactivate_all_stock_notifications(
 async def toggle_mute_stock_notification(
     device_id: str,
     sub_id: int,
+    notification_type: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Hisse bildirim aboneligini sessize al / sesi ac (toggle).
 
-    Kullanici tek tusla bildirimi pasif/aktif yapabilir.
-    muted=True ise bildirim gelmez, False ise gelir.
+    Tekli abonelik: muted=True/False toggle (eskisi gibi).
+    Bundle abonelik (notification_type='all'):
+      - notification_type query param verilirse → tip bazli mute (muted_types JSON)
+      - verilmezse → tum tipleri mute (eski davranis)
     """
+    import json
+
     user_result = await db.execute(
         select(User).where(User.device_id == device_id)
     )
@@ -781,6 +786,30 @@ async def toggle_mute_stock_notification(
     if not sub:
         raise HTTPException(status_code=404, detail="Abonelik bulunamadi")
 
+    # Bundle abonelikte tip bazli mute
+    if (sub.is_annual_bundle or sub.notification_type == "all") and notification_type:
+        current_muted = json.loads(sub.muted_types) if sub.muted_types else []
+        if notification_type in current_muted:
+            current_muted.remove(notification_type)
+            is_muted = False
+        else:
+            current_muted.append(notification_type)
+            is_muted = True
+        sub.muted_types = json.dumps(current_muted) if current_muted else None
+        # Master mute: hepsi mute ise muted=True, biri bile aciksa muted=False
+        all_types = ["tavan_bozulma", "taban_acilma", "gunluk_acilis_kapanis", "yuzde_dusus"]
+        sub.muted = len(current_muted) >= len(all_types)
+        await db.commit()
+        await db.refresh(sub)
+        return {
+            "status": "ok",
+            "subscription_id": sub.id,
+            "muted": is_muted,
+            "muted_types": current_muted,
+            "notification_type": notification_type,
+        }
+
+    # Tekli abonelik: basit toggle
     sub.muted = not sub.muted
     await db.commit()
     await db.refresh(sub)
@@ -1939,10 +1968,21 @@ async def send_realtime_notification(
     # Dedup — ayni kullaniciya 2 kere gonderme
     notified_user_ids: set = set()
 
+    import json as _json
+
     for sub in active_subs:
         # Paket aboneleri icin: "all" tipinde kayitli, her bildirim tipini alir
         if sub.is_annual_bundle and sub.notification_type != "all":
             pass
+
+        # Bundle aboneliklerde tip bazli mute kontrolu
+        if sub.muted_types:
+            try:
+                muted_list = _json.loads(sub.muted_types)
+                if data.notification_type in muted_list:
+                    continue  # Bu tip mute edilmis, atla
+            except (ValueError, TypeError):
+                pass
 
         if sub.user_id in notified_user_ids:
             continue

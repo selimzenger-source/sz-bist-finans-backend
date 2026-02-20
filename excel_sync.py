@@ -665,6 +665,7 @@ def live_sync(filepath, interval=15):
 
             # ── Gunluk acilis bildirimi (09:56) ──
             # Seans acilisinda abonelere push bildirim gonder
+            # Format: Tavan/Taban → direkt, Alicili/Saticili → Acilis Gap: +/-%X.XX
             if not opening_notif_sent and 956 <= hour_min <= 1000 and prev_prices:
                 log(f"  {'='*50}")
                 log(f"  ACILIS BILDIRIMI GONDERILIYOR")
@@ -677,21 +678,31 @@ def live_sync(filepath, interval=15):
                         continue
                     tavan_limit = row.get("tavan_limit")
                     taban_limit = row.get("taban_limit")
+                    daily_pct = row.get("daily_pct")
                     is_ceiling = bool(tavan_limit and son and abs(son - tavan_limit) <= PRICE_TOLERANCE)
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
                         title = f"{ticker} Tavan Acti!"
-                        body = f"{ticker} tavan acti!"
+                        body = f"{ticker} tavan fiyatindan acildi"
                         log(f"  {ticker}: TAVAN ACTI!")
                     elif is_floor:
                         title = f"{ticker} Taban Acti!"
-                        body = f"{ticker} taban acti!"
+                        body = f"{ticker} taban fiyatindan acildi"
                         log(f"  {ticker}: TABAN ACTI!")
                     else:
-                        title = f"{ticker} Acilis"
-                        body = f"{ticker} normal islem ile acildi"
-                        log(f"  {ticker}: Normal acilis")
+                        # Alicili veya saticili — % fark ile goster
+                        pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                        pct_str = f"%{pct_val:+.2f}".replace("+", "+%").replace("-", "-%").replace("%%", "%")
+                        pct_str = f"+%{abs(pct_val):.2f}" if pct_val >= 0 else f"-%{abs(pct_val):.2f}"
+                        if pct_val >= 0:
+                            title = f"{ticker} Alicili Acti"
+                            body = f"{ticker} alicili acildi — Acilis Gap: {pct_str}"
+                            log(f"  {ticker}: ALICILI ACTI {pct_str}")
+                        else:
+                            title = f"{ticker} Saticili Acti"
+                            body = f"{ticker} saticili acildi — Acilis Gap: {pct_str}"
+                            log(f"  {ticker}: SATICILI ACTI {pct_str}")
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     opening_count += 1
@@ -702,6 +713,7 @@ def live_sync(filepath, interval=15):
 
             # ── Gunluk kapanis bildirimi (18:08) ──
             # Seans kapanisinda abonelere push bildirim gonder
+            # Format: Tavan/Taban → direkt, Alicili/Saticili → Gunsonu Fark: +/-%X.XX
             if not closing_notif_sent and 1808 <= hour_min <= 1820 and prev_prices:
                 log(f"  {'='*50}")
                 log(f"  KAPANIS BILDIRIMI GONDERILIYOR")
@@ -714,21 +726,30 @@ def live_sync(filepath, interval=15):
                         continue
                     tavan_limit = row.get("tavan_limit")
                     taban_limit = row.get("taban_limit")
+                    daily_pct = row.get("daily_pct")
                     is_ceiling = bool(tavan_limit and son and abs(son - tavan_limit) <= PRICE_TOLERANCE)
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
                         title = f"{ticker} Tavan Kapatti!"
-                        body = f"{ticker} tavan kapatti!"
+                        body = f"{ticker} tavan fiyatindan kapatti"
                         log(f"  {ticker}: TAVAN KAPATTI!")
                     elif is_floor:
                         title = f"{ticker} Taban Kapatti!"
-                        body = f"{ticker} taban kapatti!"
+                        body = f"{ticker} taban fiyatindan kapatti"
                         log(f"  {ticker}: TABAN KAPATTI!")
                     else:
-                        title = f"{ticker} Kapanis"
-                        body = f"{ticker} normal islem ile kapatti"
-                        log(f"  {ticker}: Normal kapanis")
+                        # Alicili veya saticili kapanis — % fark ile goster
+                        pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                        pct_str = f"+%{abs(pct_val):.2f}" if pct_val >= 0 else f"-%{abs(pct_val):.2f}"
+                        if pct_val >= 0:
+                            title = f"{ticker} Alicili Kapatti"
+                            body = f"{ticker} alicili kapatti — Gunsonu Fark: {pct_str}"
+                            log(f"  {ticker}: ALICILI KAPATTI {pct_str}")
+                        else:
+                            title = f"{ticker} Saticili Kapatti"
+                            body = f"{ticker} saticili kapatti — Gunsonu Fark: {pct_str}"
+                            log(f"  {ticker}: SATICILI KAPATTI {pct_str}")
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     closing_count += 1

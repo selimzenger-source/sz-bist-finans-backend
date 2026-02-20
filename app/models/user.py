@@ -288,6 +288,11 @@ class StockNotificationSubscription(Base):
         Boolean, default=False,
         comment="Kullanici tek tusla sessiz moda alabilir"
     )
+    # Bundle aboneliklerde tip bazli mute (JSON array: ["tavan_bozulma","taban_acilma"])
+    muted_types: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default=None,
+        comment="Bundle icin tip bazli mute — JSON array"
+    )
 
     user: Mapped["User"] = relationship(back_populates="stock_notifications")
 
