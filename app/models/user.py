@@ -346,6 +346,6 @@ WALLET_COUPONS: dict[str, float] = {
 }
 
 # Reklam ayarlari
-WALLET_REWARD_AMOUNT = 1.0    # Reklam basina kazanilan puan
+WALLET_REWARD_AMOUNT = 2.0    # Reklam basina kazanilan puan
 WALLET_COOLDOWN_SECONDS = 180  # 3 dakika bekleme
 WALLET_MAX_DAILY_ADS = 30     # Gunluk max reklam
