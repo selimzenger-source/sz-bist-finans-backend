@@ -29,6 +29,9 @@ import urllib.parse
 import uuid
 import json
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
+
+_TR_TZ = ZoneInfo("Europe/Istanbul")
 from typing import Optional
 
 import os
@@ -1048,8 +1051,8 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
         if not os.path.exists(img_path):
             img_path = None  # Gorsel yoksa sadece text at
 
-        # Anlik zaman (TS: saniyesine kadar)
-        now_str = datetime.now().strftime("%H:%M:%S")
+        # Anlik zaman — Turkiye saati (UTC+3)
+        now_str = datetime.now(_TR_TZ).strftime("%H:%M:%S")
 
         if sentiment == "positive":
             emoji = "\U0001F7E2"  # Yesil top

@@ -7,7 +7,10 @@ Sadece POZiTiF sentiment tespiti yapar — negatif haber filtrelenmez.
 
 import logging
 from datetime import datetime, time
+from zoneinfo import ZoneInfo
 from typing import Optional
+
+_TR_TZ = ZoneInfo("Europe/Istanbul")
 
 logger = logging.getLogger(__name__)
 
@@ -437,8 +440,8 @@ class NewsFilterService:
         if not matched_keyword:
             return None
 
-        # Seans ici/disi tespiti
-        now = datetime.now()
+        # Seans ici/disi tespiti — Turkiye saati (UTC+3)
+        now = datetime.now(_TR_TZ)
         news_type = self._determine_session_type(now)
 
         return {
