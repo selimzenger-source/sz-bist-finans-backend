@@ -1250,6 +1250,48 @@ async def trigger_opening_push_from_admin(
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
 
+@router.post("/reminders/trigger-now")
+async def trigger_reminder_now(
+    request: Request,
+    reminder_type: str = "reminder_4h",
+    ticker: str = "",
+):
+    """Admin panelden hatirlatma tweet + push bildirimini aninda tetikler.
+
+    reminder_type: reminder_4h | reminder_30min | reminder_1h | reminder_2h
+    ticker: sadece bu ticker icin tetikle (bos = bugun son gun olan tum IPO'lar)
+
+    Dedup bypass edilir — zaten gonderilmis olsa bile tekrar gonderir.
+    Zamanlama penceresi kontrolu atlanir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    valid_types = ["reminder_4h", "reminder_30min", "reminder_1h", "reminder_2h"]
+    if reminder_type not in valid_types:
+        msg = quote(f"Gecersiz reminder_type: {reminder_type}. Gecerli: {', '.join(valid_types)}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+    try:
+        from app.scheduler import check_reminders
+        logger.info(
+            "[ADMIN] Hatirlatma force tetikleniyor: type=%s ticker=%s",
+            reminder_type, ticker or "(hepsi)",
+        )
+        await check_reminders(
+            force_reminder_type=reminder_type,
+            force_ticker=ticker.strip().upper() if ticker.strip() else None,
+        )
+        ticker_info = f" ({ticker.upper()})" if ticker.strip() else ""
+        msg = quote(f"Hatirlatma tetiklendi: {reminder_type}{ticker_info}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1", status_code=303)
+
+    except Exception as e:
+        logger.error("[ADMIN] Hatirlatma tetikleme hatasi: %s", e, exc_info=True)
+        msg = quote(f"Hatirlatma Hata: {str(e)[:100]}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
 @router.post("/tweets/{tweet_id}/approve")
 async def approve_tweet(
     request: Request,

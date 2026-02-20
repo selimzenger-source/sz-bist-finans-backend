@@ -55,6 +55,34 @@
         <div id="res-t15" class="mt-2 hidden"></div>
         <div id="res-t16" class="mt-2 hidden"></div>
         <div id="res-push-opening" class="mt-2 hidden"></div>
+    </div>
+
+    <!-- Hatırlatma Tetikleyici -->
+    <div class="bg-gray-800 rounded-lg border border-orange-600 p-4">
+        <h3 class="font-bold text-lg text-orange-400 mb-3">⏰ Hatırlatma Tweet + Push (Manuel)</h3>
+        <div class="flex flex-wrap gap-3 items-end">
+            <div class="flex flex-col gap-1">
+                <label class="text-xs text-gray-400">Hatırlatma Tipi</label>
+                <select id="reminder-type" class="bg-gray-700 border border-gray-600 text-white text-sm rounded px-3 py-2">
+                    <option value="reminder_4h">⏳ Son 4 Saat</option>
+                    <option value="reminder_30min">🔥 Son 30 Dakika</option>
+                    <option value="reminder_1h">🕐 Son 1 Saat</option>
+                    <option value="reminder_2h">🕑 Son 2 Saat</option>
+                </select>
+            </div>
+            <div class="flex flex-col gap-1">
+                <label class="text-xs text-gray-400">Ticker (boş = hepsi)</label>
+                <input id="reminder-ticker" type="text" placeholder="örn: EMPAE"
+                       class="bg-gray-700 border border-gray-600 text-white text-sm rounded px-3 py-2 w-28 uppercase"
+                       oninput="this.value=this.value.toUpperCase()">
+            </div>
+            <button id="btn-reminder" onclick="triggerReminder(this)"
+                    class="bg-orange-600 hover:bg-orange-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
+                🚨 Şimdi Tetikle
+            </button>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">Dedup bypass edilir — zaman penceresinden bağımsız anında gönderir. Tweet + push bildirim birlikte çalışır.</p>
+        <div id="res-reminder" class="mt-2 hidden"></div>
         {% if trigger_message %}
         <div class="mt-2 px-3 py-2 rounded text-sm {{ 'bg-green-900 text-green-300' if trigger_success else 'bg-red-900 text-red-300' }}">
             {{ trigger_message }}
@@ -226,6 +254,50 @@ async function triggerTweet(url, btn, resId) {
     }
 
     setTimeout(() => { btn.disabled = false; btn.innerHTML = origHTML; }, 10000);
+}
+
+async function triggerReminder(btn) {
+    const reminderType = document.getElementById('reminder-type').value;
+    const ticker = document.getElementById('reminder-ticker').value.trim().toUpperCase();
+    const resDiv = document.getElementById('res-reminder');
+    const origHTML = btn.innerHTML;
+
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Tetikleniyor...';
+    resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-gray-700 text-gray-300';
+    resDiv.textContent = `${reminderType}${ticker ? ' (' + ticker + ')' : ''} tetikleniyor, lütfen bekleyin...`;
+    resDiv.classList.remove('hidden');
+
+    const params = new URLSearchParams({ reminder_type: reminderType });
+    if (ticker) params.append('ticker', ticker);
+
+    try {
+        const resp = await fetch(`/admin/reminders/trigger-now?${params.toString()}`, {method: 'POST', redirect: 'follow'});
+        const finalUrl = resp.url || '';
+        if (finalUrl.includes('trigger_ok=1')) {
+            const msg = decodeURIComponent((finalUrl.match(/trigger_msg=([^&]*)/)||[])[1]||'Başarılı!');
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-green-900 text-green-300';
+            resDiv.textContent = '✅ ' + msg;
+            btn.innerHTML = '✅ Tetiklendi!';
+        } else if (finalUrl.includes('trigger_ok=0')) {
+            const msg = decodeURIComponent((finalUrl.match(/trigger_msg=([^&]*)/)||[])[1]||'Hata oluştu');
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-red-900 text-red-300';
+            resDiv.textContent = '❌ ' + msg;
+            btn.disabled = false;
+            btn.innerHTML = origHTML;
+        } else {
+            resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-green-900 text-green-300';
+            resDiv.textContent = '✅ İstek gönderildi!';
+            btn.innerHTML = '✅ Tetiklendi!';
+        }
+    } catch(err) {
+        resDiv.className = 'mt-2 px-3 py-2 rounded text-sm bg-red-900 text-red-300';
+        resDiv.textContent = '❌ Bağlantı hatası: ' + err.message;
+        btn.disabled = false;
+        btn.innerHTML = origHTML;
+    }
+
+    setTimeout(() => { btn.disabled = false; btn.innerHTML = origHTML; }, 15000);
 }
 </script>
 {% endblock %}

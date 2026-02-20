@@ -758,7 +758,10 @@ def _get_active_reminder(remaining_minutes: float) -> str | None:
     return None
 
 
-async def check_reminders():
+async def check_reminders(
+    force_reminder_type: str | None = None,
+    force_ticker: str | None = None,
+):
     """Hatirlatma zamani kontrolu — subscription_hours bazli.
 
     Her IPO'nun kendi kapanis saatine gore hesaplar:
@@ -768,6 +771,10 @@ async def check_reminders():
     - 4 saat oncesi (kapanis - 4h)
 
     Ayrica tweet atar: 4h kala + 30dk kala (resimli).
+
+    force_reminder_type: Belirtilirse zaman penceresi kontrolu atlanir,
+        o tip zorla tetiklenir (ornek: "reminder_4h"). Dedup da bypass edilir.
+    force_ticker: Sadece bu ticker icin tetikle (bos = hepsi).
     """
     try:
         from zoneinfo import ZoneInfo
@@ -781,7 +788,6 @@ async def check_reminders():
         async with async_session() as db:
             today = _today_tr()
             now_tr = datetime.now(TR_TZ)
-            from datetime import time as Time
 
             result = await db.execute(
                 select(IPO).where(
@@ -794,6 +800,7 @@ async def check_reminders():
             last_day_ipos = list(result.scalars().all())
 
             if not last_day_ipos:
+                logger.info("Hatirlatma: bugun son gun IPO yok, atlandi")
                 return
 
             notif_service = NotificationService(db)
@@ -808,6 +815,12 @@ async def check_reminders():
             _r_tweet_idx = 0
 
             for ipo in last_day_ipos:
+                ticker_name = ipo.ticker or ipo.company_name
+
+                # force_ticker filtresi
+                if force_ticker and (ipo.ticker or "").upper() != force_ticker.upper():
+                    continue
+
                 # Her IPO'nun kendi kapanis saati
                 close_h, close_m = _get_closing_time(ipo)
                 closing_time = now_tr.replace(
@@ -816,17 +829,25 @@ async def check_reminders():
                 remaining_minutes = (closing_time - now_tr).total_seconds() / 60
 
                 if remaining_minutes < 0:
+                    logger.info("Hatirlatma: %s suresi dolmus (remaining=%.0f), atlandi", ticker_name, remaining_minutes)
                     continue  # Bu IPO'nun suresi dolmus
 
-                reminder_check = _get_active_reminder(remaining_minutes)
-                if not reminder_check:
+                # force_reminder_type varsa pencere kontrolunu atla
+                if force_reminder_type:
+                    reminder_check = force_reminder_type
+                    logger.info("Hatirlatma FORCE: %s icin %s zorla tetikleniyor (remaining=%.0f dk)", ticker_name, reminder_check, remaining_minutes)
+                else:
+                    reminder_check = _get_active_reminder(remaining_minutes)
+                    if not reminder_check:
+                        logger.debug("Hatirlatma: %s pencere yok (remaining=%.0f dk)", ticker_name, remaining_minutes)
+                        continue
+
+                # Dedup — force modda bypass et
+                if not force_reminder_type and _timing_already_sent(ipo.id, reminder_check):
+                    logger.info("Hatirlatma: %s %s zaten gonderildi, atlandi", ticker_name, reminder_check)
                     continue
 
-                # Dedup — bu IPO + bu reminder bugün zaten gönderildi mi?
-                if _timing_already_sent(ipo.id, reminder_check):
-                    continue
-
-                # Bu reminder tipini seçmiş kullanıcıları bul (FCM veya Expo token)
+                # Bu reminder tipini secmis kullanicilari bul (FCM veya Expo token)
                 users_result = await db.execute(
                     select(User).where(
                         and_(
@@ -845,42 +866,65 @@ async def check_reminders():
                 time_label = time_labels.get(reminder_check, "")
                 close_time_str = f"{close_h:02d}:{close_m:02d}"
 
-                # Push bildirim — reminder_4h veya reminder_30min secmis kullanicilara
+                logger.info(
+                    "Hatirlatma: %s | %s | %d kullanici | kapanisa %.0f dk kaldi",
+                    ticker_name, reminder_check, len(users), remaining_minutes,
+                )
+
+                # Push bildirim — ilgili reminder tipini secmis kullanicilara
+                push_sent = 0
+                push_fail = 0
                 for user in users:
-                    await notif_service._send_to_user(
-                        user=user,
-                        title=f"Son Gun Hatirlatma",
-                        body=f"{ipo.ticker or ipo.company_name} icin basvuru son gun! Saat {close_time_str}'a {time_label} kaldi.",
-                        data={
-                            "type": "reminder",
-                            "ipo_id": str(ipo.id),
-                            "ticker": ipo.ticker or "",
-                        },
-                        channel_id="ipo_alerts_v2",
-                    )
+                    try:
+                        await notif_service._send_to_user(
+                            user=user,
+                            title="Son Gün Hatırlatması",
+                            body=f"{ticker_name} için başvuru son gün! Saat {close_time_str}'a {time_label} kaldı.",
+                            data={
+                                "type": "reminder",
+                                "ipo_id": str(ipo.id),
+                                "ticker": ipo.ticker or "",
+                            },
+                            channel_id="ipo_alerts_v2",
+                        )
+                        push_sent += 1
+                    except Exception as pu_err:
+                        push_fail += 1
+                        logger.warning("Hatirlatma push hatasi (user=%s): %s", getattr(user, 'device_id', '?'), pu_err)
+
+                logger.info("Hatirlatma push: %s icin %d gonderildi, %d basarisiz", ticker_name, push_sent, push_fail)
 
                 _timing_mark_sent(ipo.id, reminder_check)
 
-                # Tweet at — kullanici olup olmadıgından bagimsiz her zaman atılır
+                # Tweet at — kullanici sayisindan bagimsiz her zaman atilir
                 try:
                     from app.services.twitter_service import tweet_last_4_hours, tweet_last_30_min
                     from app.services.admin_telegram import notify_tweet_sent
                     if _r_tweet_idx > 0:
                         jitter = random.uniform(50, 55)
-                        logger.info("Hatirlatma tweet jitter: %.1f sn (%s)", jitter, ipo.ticker or ipo.company_name)
+                        logger.info("Hatirlatma tweet jitter: %.1f sn (%s)", jitter, ticker_name)
                         await asyncio.sleep(jitter)
                     if reminder_check == "reminder_4h":
                         tw_ok = tweet_last_4_hours(ipo)
                         _r_tweet_idx += 1
-                        await notify_tweet_sent("son_4_saat", ipo.ticker or ipo.company_name, tw_ok)
+                        logger.info("Hatirlatma tweet: son_4_saat %s -> %s", ticker_name, "OK" if tw_ok else "FAIL")
+                        await notify_tweet_sent("son_4_saat", ticker_name, tw_ok)
                     elif reminder_check == "reminder_30min":
                         tw_ok = tweet_last_30_min(ipo)
                         _r_tweet_idx += 1
-                        await notify_tweet_sent("son_30_dk", ipo.ticker or ipo.company_name, tw_ok)
-                except Exception:
-                    pass
+                        logger.info("Hatirlatma tweet: son_30_dk %s -> %s", ticker_name, "OK" if tw_ok else "FAIL")
+                        await notify_tweet_sent("son_30_dk", ticker_name, tw_ok)
+                    else:
+                        logger.debug("Hatirlatma tweet: %s icin tweet yok (%s)", ticker_name, reminder_check)
+                except Exception as tw_err:
+                    logger.error("Hatirlatma tweet hatasi (%s): %s", ticker_name, tw_err)
 
-            logger.info(f"Hatirlatma: {len(last_day_ipos)} IPO kontrol edildi (TR: {now_tr.strftime('%H:%M')})")
+            logger.info(
+                "Hatirlatma tamamlandi: %d IPO kontrol edildi (TR: %s)%s",
+                len(last_day_ipos),
+                now_tr.strftime("%H:%M"),
+                f" [FORCE={force_reminder_type}]" if force_reminder_type else "",
+            )
 
     except Exception as e:
         logger.error(f"Hatirlatma kontrol hatasi: {e}")
