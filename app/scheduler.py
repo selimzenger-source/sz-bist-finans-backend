@@ -1847,25 +1847,26 @@ async def _opening_summary_attempt(retry_num: int = 0):
 
 
 async def opening_summary_tweet():
-    """Acilis bilgileri tweet — 09:57 TR (UTC 06:57).
+    """Acilis bilgileri tweet — 10:07 TR (UTC 07:07).
 
     Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini
     grid layout gorsel ile tweet atar.
 
-    Veri henuz gelmemisse 60sn bekleyip 2 kez daha dener.
+    Borsa 10:00'da acilir, excel_sync ~2-3 dk icinde acilis verisini yazar.
+    10:07'de baslar, veri yoksa 90sn arayla 4 kez dener (~16:07'ye kadar).
 
     Returns dict with "message" or "error" key for debug.
     """
     import asyncio
 
-    max_retries = 3
+    max_retries = 4
     for attempt in range(max_retries):
         try:
             result = await _opening_summary_attempt(retry_num=attempt)
 
             if result and result.get("retry"):
-                logger.info("T16 retry %d/3 — 60sn bekleniyor: %s", attempt + 1, result["retry"])
-                await asyncio.sleep(60)
+                logger.info("T16 retry %d/%d — 90sn bekleniyor: %s", attempt + 1, max_retries, result["retry"])
+                await asyncio.sleep(90)
                 continue
 
             return result
@@ -1874,7 +1875,7 @@ async def opening_summary_tweet():
             logger.error(f"T16 acilis bilgileri hatasi (deneme {attempt+1}): {e}", exc_info=True)
             return {"error": f"Exception: {str(e)}"}
 
-    return {"error": "T16: 3 deneme sonrasi veri gelmedi — tweet olusturulamadi"}
+    return {"error": f"T16: {max_retries} deneme sonrasi veri gelmedi — tweet olusturulamadi"}
 
 
 async def daily_ceiling_update():
@@ -2682,13 +2683,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 16. Acilis Fiyati Tweet — her gun 09:56 Turkiye (UTC 06:56) Pzt-Cuma
-    # Sadece ilk islem gunu olan IPO'lar icin acilis fiyati tweeti
+    # 16. Acilis Fiyati Tweet — her gun 10:05 Turkiye (UTC 07:05) Pzt-Cuma
+    # Borsa 10:00 acilis, Yahoo Finance ~2-3 dk sonra veri yazar
     scheduler.add_job(
         tweet_opening_price_job,
-        CronTrigger(hour=6, minute=56, day_of_week="mon-fri"),
+        CronTrigger(hour=7, minute=5, day_of_week="mon-fri"),
         id="opening_price_tweet",
-        name="Acilis Fiyati Tweet (09:56 TR)",
+        name="Acilis Fiyati Tweet (10:05 TR)",
         replace_existing=True,
     )
 
@@ -2746,14 +2747,14 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 22b. T16 Acilis Bilgileri — 09:57 TR (UTC 06:57) Pzt-Cuma
-    # Ilk 5 islem gunundeki hisselerin acilis fiyatlarini gorsel tweet atar
-    # Sync verisi gelmemisse 60sn bekleyip 2 kez daha dener
+    # 22b. T16 Acilis Bilgileri — 10:07 TR (UTC 07:07) Pzt-Cuma
+    # Borsa 10:00 acilis, excel_sync ~2-3 dk sonra veriyi yazar
+    # 10:07'de baslar, veri yoksa 90sn arayla 4 kez dener
     scheduler.add_job(
         opening_summary_tweet,
-        CronTrigger(hour=6, minute=57, day_of_week="mon-fri"),
+        CronTrigger(hour=7, minute=7, day_of_week="mon-fri"),
         id="opening_summary_tweet",
-        name="T16 Acilis Bilgileri (09:57 TR)",
+        name="T16 Acilis Bilgileri (10:07 TR)",
         replace_existing=True,
     )
 
