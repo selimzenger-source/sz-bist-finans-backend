@@ -557,6 +557,25 @@ async def archive_old_ipos():
         from app.models.ipo import IPO, IPOCeilingTrack
 
         async with async_session() as db:
+            # Tek seferlik düzeltici: arşivlenmiş ama ceiling_tracking_active=True olan IPO'ları kapat
+            stale_result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.archived == True,
+                        IPO.ceiling_tracking_active == True,
+                    )
+                )
+            )
+            stale_ipos = list(stale_result.scalars().all())
+            if stale_ipos:
+                for stale in stale_ipos:
+                    stale.ceiling_tracking_active = False
+                    logger.info(
+                        "Arsiv duzeltici: %s ceiling_tracking_active=False yapildi (archived=True idi)",
+                        stale.ticker or stale.company_name,
+                    )
+                await db.commit()
+                logger.info("Arsiv duzeltici: %d IPO duzeltildi", len(stale_ipos))
             # ~37 takvim gunu ~ 25 is gunu
             cutoff = _today_tr() - timedelta(days=37)
 
@@ -665,6 +684,8 @@ async def archive_old_ipos():
                 # --- Arsivle ---
                 ipo.archived = True
                 ipo.archived_at = datetime.now(timezone.utc)
+                # Arşivlenen IPO için takibi durdur — bildirim + snapshot'tan çıkar
+                ipo.ceiling_tracking_active = False
                 # 26 = "kayit tamamlandi" marker (25 gun verisi alindi, arsivlendi)
                 if ipo.trading_day_count and ipo.trading_day_count <= 25:
                     ipo.trading_day_count = 26

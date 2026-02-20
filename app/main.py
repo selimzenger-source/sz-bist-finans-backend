@@ -94,6 +94,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("BIST50 cache yukleme hatasi (fallback kullanilacak): %s", e)
 
+    # Arşivlenmiş ama ceiling_tracking_active=True kalan IPO'ları düzelt
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        async with async_session() as db:
+            stale_res = await db.execute(
+                select(IPO).where(
+                    and_(IPO.archived == True, IPO.ceiling_tracking_active == True)
+                )
+            )
+            stale_list = list(stale_res.scalars().all())
+            if stale_list:
+                for s in stale_list:
+                    s.ceiling_tracking_active = False
+                await db.commit()
+                logger.info(
+                    "Startup düzeltici: %d IPO ceiling_tracking_active=False yapıldı: %s",
+                    len(stale_list),
+                    [s.ticker for s in stale_list],
+                )
+    except Exception as e:
+        logger.warning("Startup ceiling düzeltici hatası: %s", e)
+
     # Scheduler'i baslat
     try:
         setup_scheduler()
@@ -1891,6 +1914,15 @@ async def send_realtime_notification(
     ipo = await ipo_service.get_ipo_by_ticker(data.ticker)
     if not ipo:
         raise HTTPException(status_code=404, detail=f"IPO bulunamadi: {data.ticker}")
+
+    # Arşivlenmiş veya takibi kapalı IPO'lara bildirim gönderme
+    if ipo.archived or not ipo.ceiling_tracking_active:
+        return {
+            "status": "skipped",
+            "reason": "archived" if ipo.archived else "ceiling_tracking_inactive",
+            "ticker": data.ticker,
+            "notifications_sent": 0,
+        }
 
     notif_service = NotificationService(db)
 
