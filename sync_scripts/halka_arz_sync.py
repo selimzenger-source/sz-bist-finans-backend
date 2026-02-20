@@ -734,7 +734,7 @@ def process_stock(stock: StockState, now: dt.datetime):
 def send_opening_notifications(stocks: list[StockState]):
     """
     Her sabah 09:56'da acilis bildirimi gonder.
-    Her hisse icin: "AKHAN tavan acti!", "NETCD normal islem ile acildi"
+    Her hisse icin: "AKHAN tavan açtı!", "NETCD normal işlem ile açıldı"
 
     Bildirim tipi: gunluk_acilis_kapanis
     FIYAT BILGISI YOK!
@@ -760,25 +760,25 @@ def send_opening_notifications(stocks: list[StockState]):
 
         # Acilis durumu
         if stock.is_ceiling_locked:
-            title = f"{ticker} Tavan Acti!"
-            body = f"{ticker} tavan acti!"
+            title = f"{ticker} Tavan Açtı!"
+            body = f"{ticker} tavan açtı!"
             # Acilista tavandaysa gun ici "tavana kitledi" bildirimi atma (zaten bildirdik)
             state.notified_ceiling_first_lock = True
             state.was_ceiling_locked = True
             state.last_ceiling_notif_at = dt.datetime.now()
-            log(f"  {ticker}: TAVAN ACTI!")
+            log(f"  {ticker}: TAVAN AÇTI!")
         elif stock.is_floor_locked:
-            title = f"{ticker} Taban Acti!"
-            body = f"{ticker} taban acti!"
+            title = f"{ticker} Taban Açtı!"
+            body = f"{ticker} taban açtı!"
             # Acilista tabandaysa gun ici "tabana kitledi" bildirimi atma (zaten bildirdik)
             state.notified_floor_first_lock = True
             state.was_floor_locked = True
             state.last_floor_notif_at = dt.datetime.now()
-            log(f"  {ticker}: TABAN ACTI!")
+            log(f"  {ticker}: TABAN AÇTI!")
         else:
-            title = f"{ticker} Acilis"
-            body = f"{ticker} normal islem ile acildi"
-            log(f"  {ticker}: Normal acilis")
+            title = f"{ticker} Açılış"
+            body = f"{ticker} normal işlem ile açıldı"
+            log(f"  {ticker}: Normal açılış")
 
         send_notification_to_backend(ticker, "gunluk_acilis_kapanis", title, body)
         state.opening_notified = True
@@ -810,17 +810,17 @@ def send_closing_notifications(stocks: list[StockState]):
 
         # Kapanis durumu
         if stock.is_ceiling_locked:
-            title = f"{ticker} Tavan Kapatti!"
-            body = f"{ticker} tavan kapatti!"
+            title = f"{ticker} Tavan Kapattı!"
+            body = f"{ticker} tavan kapattı!"
             log(f"  {ticker}: TAVAN KAPATTI!")
         elif stock.is_floor_locked:
-            title = f"{ticker} Taban Kapatti!"
-            body = f"{ticker} taban kapatti!"
+            title = f"{ticker} Taban Kapattı!"
+            body = f"{ticker} taban kapattı!"
             log(f"  {ticker}: TABAN KAPATTI!")
         else:
-            title = f"{ticker} Kapanis"
-            body = f"{ticker} normal islem ile kapatti"
-            log(f"  {ticker}: Normal kapanis")
+            title = f"{ticker} Kapanış"
+            body = f"{ticker} normal işlem ile kapattı"
+            log(f"  {ticker}: Normal kapanış")
 
         send_notification_to_backend(ticker, "gunluk_acilis_kapanis", title, body)
         state.closing_notified = True
