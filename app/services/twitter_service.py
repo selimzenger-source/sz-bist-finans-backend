@@ -1165,23 +1165,26 @@ def tweet_company_intro(ipo) -> bool:
             if ipo.spk_bulletin_no:
                 spk_text += f" (Bülten {ipo.spk_bulletin_no})"
 
-        # Sirket aciklamasi — ilk paragraf, cumle bazli kisaltma
+        # Sirket aciklamasi — paragraf gecisleri korunarak ilk 1-2 paragraf
         desc_text = ""
         if ipo.company_description:
             full_desc = str(ipo.company_description).strip()
-            # Ilk paragrafi al (ilk bos satira kadar)
-            first_para = full_desc.split("\n")[0].strip()
-            if not first_para:
-                first_para = full_desc[:200]
+            # Paragraf ayirici olarak \n\n kullan (baslik ile metin arasindaski)
+            # Hem \n\n hem de tek \n ile ayrilmis olabilir, ikisini de destekle
+            raw_paragraphs = [p.strip() for p in full_desc.split("\n\n") if p.strip()]
+            if not raw_paragraphs:
+                raw_paragraphs = [p.strip() for p in full_desc.split("\n") if p.strip()]
 
-            # Max karakter limiti (tweet icinde ~130 char yer var)
-            # Max karakter limiti (tweet icinde ~3000 char yer var)
-            max_desc_len = 3000
-            
-            if len(first_para) > max_desc_len:
-                first_para = first_para[:max_desc_len - 3] + "..."
-            
-            desc_text = f"\n\n{first_para}"
+            # Tweette en fazla ilk 2 paragraf — baslik varsa o da dahil
+            selected = raw_paragraphs[:2]
+            tweet_desc = "\n\n".join(selected)
+
+            # Max 1200 karakter (tweet icinde gorsel + diger bilgilerle birlikte)
+            max_desc_len = 1200
+            if len(tweet_desc) > max_desc_len:
+                tweet_desc = tweet_desc[:max_desc_len - 3] + "..."
+
+            desc_text = f"\n\n{tweet_desc}"
 
         price_text = ""
         if ipo.ipo_price:

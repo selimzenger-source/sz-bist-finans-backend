@@ -360,19 +360,25 @@ class HalkArzDetailParser:
         if fund_usage:
             self.data["fund_usage"] = json.dumps(fund_usage, ensure_ascii=False)
 
-        # Sirket Hakkinda — accordion icinden en uzun <p> paragrafini al
-        # (ilk <p> bazen sadece sirket adi olabiliyor)
+        # Sirket Hakkinda — accordion icinden tum <p> paragraflarini birlestir
+        # Paragraf gecisleri ve basliklar korunur (\n\n ayirici)
         for summary_el in self.soup.find_all("summary", class_="acc-header"):
             if "irket" in summary_el.get_text() and "akkında" in summary_el.get_text():
                 acc_body = summary_el.find_next_sibling("div", class_="acc-body")
                 if acc_body:
-                    best = ""
-                    for p in acc_body.find_all("p"):
-                        txt = p.get_text(strip=True)
-                        if len(txt) > len(best):
-                            best = txt
-                    if len(best) > 50:
-                        self.data["company_description"] = best
+                    paragraphs = []
+                    for el in acc_body.find_all(["p", "h2", "h3", "h4", "h5", "h6"]):
+                        txt = el.get_text(strip=True)
+                        if not txt:
+                            continue
+                        # Baslik elementleri buyuk harf/kalın gibi gosterilir
+                        if el.name in ("h2", "h3", "h4", "h5", "h6"):
+                            paragraphs.append(f"**{txt}**")
+                        else:
+                            paragraphs.append(txt)
+                    combined = "\n\n".join(paragraphs)
+                    if len(combined) > 50:
+                        self.data["company_description"] = combined
                 break
 
     # --- PDF Linkleri ---
