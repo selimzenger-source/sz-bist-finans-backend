@@ -1311,6 +1311,42 @@ async def admin_backfill_ai_scores(
     }
 
 
+@app.post("/api/v1/admin/test-ai-scorer")
+@limiter.limit("5/minute")
+async def admin_test_ai_scorer(
+    request: Request,
+    payload: dict,
+):
+    """Admin: AI scorer debug — API key ve tek mesaj testi."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.services.ai_news_scorer import _get_api_key, _ABACUS_URL, score_news
+
+    api_key = _get_api_key()
+    key_preview = (api_key[:8] + "...") if api_key else "EMPTY"
+
+    # Test mesaji
+    test_text = payload.get("text", "BIMAS bedelsiz sermaye artirimi karari aldi. Yonetim kurulu 1:1 oraninda bedelsiz sermaye artirimi karari almistir.")
+    test_ticker = payload.get("ticker", "BIMAS")
+
+    test_result = None
+    test_error = None
+    try:
+        result = await score_news(test_ticker, test_text)
+        test_result = result
+    except Exception as e:
+        test_error = str(e)
+
+    return {
+        "api_key_preview": key_preview,
+        "abacus_url": _ABACUS_URL,
+        "test_ticker": test_ticker,
+        "test_result": test_result,
+        "test_error": test_error,
+    }
+
+
 @app.post("/api/v1/admin/spk-bulletin-status")
 @limiter.limit("10/minute")
 async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
