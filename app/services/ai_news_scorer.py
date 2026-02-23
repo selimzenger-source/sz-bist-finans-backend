@@ -19,7 +19,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 # Abacus AI RouteLLM endpoint (OpenAI uyumlu)
-_ABACUS_URL = "https://api.abacus.ai/api/v0/openai/chat/completions"
+_ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _TIMEOUT = 15  # saniye
 
 
