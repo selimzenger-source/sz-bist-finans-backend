@@ -424,29 +424,38 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             new_count += 1
 
             # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
-            try:
-                from app.services.notification import NotificationService
-                notif = NotificationService(db=session)
-
-                # 3 Tip: seans_ici, seans_disi, seans_disi_acilis
-                if message_type == "seans_ici_pozitif":
-                    news_type = "seans_ici"
-                elif message_type == "seans_disi_acilis":
-                    news_type = "seans_disi_acilis"
-                else:
-                    news_type = "seans_disi"
-                await notif.notify_kap_news(
-                    ticker=ticker or "",
-                    price=None,
-                    kap_id=kap_id or "",
-                    matched_keyword=matched_kw,
-                    sentiment="positive",
-                    news_type=news_type,
-                    pct_change=pct_change if message_type == "seans_ici_pozitif" else None,
+            # AI skoru notr veya olumsuz ise bildirim gonderme (gereksiz bildirim engelle)
+            # ai_score None = AI basarisiz → guvenlisyeni gonder, ai_score >= 6 = pozitif
+            should_notify = (ai_score is None) or (ai_score >= 6)
+            if not should_notify:
+                logger.info(
+                    "AI skoru dusuk (%s), bildirim atlanıyor: %s — %s",
+                    ai_score, ticker, title,
                 )
-                logger.info("Push bildirim gonderildi: %s — %s", ticker, title)
-            except Exception as notif_err:
-                logger.error("Push bildirim hatasi: %s", notif_err)
+            else:
+                try:
+                    from app.services.notification import NotificationService
+                    notif = NotificationService(db=session)
+
+                    # 3 Tip: seans_ici, seans_disi, seans_disi_acilis
+                    if message_type == "seans_ici_pozitif":
+                        news_type = "seans_ici"
+                    elif message_type == "seans_disi_acilis":
+                        news_type = "seans_disi_acilis"
+                    else:
+                        news_type = "seans_disi"
+                    await notif.notify_kap_news(
+                        ticker=ticker or "",
+                        price=None,
+                        kap_id=kap_id or "",
+                        matched_keyword=matched_kw,
+                        sentiment="positive",
+                        news_type=news_type,
+                        pct_change=pct_change if message_type == "seans_ici_pozitif" else None,
+                    )
+                    logger.info("Push bildirim gonderildi: %s — skor=%s — %s", ticker, ai_score, title)
+                except Exception as notif_err:
+                    logger.error("Push bildirim hatasi: %s", notif_err)
 
             logger.info(
                 "Telegram haber kaydedildi: [%s] %s — %s",
