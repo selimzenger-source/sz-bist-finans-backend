@@ -1356,7 +1356,7 @@ async def admin_test_ai_scorer(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    from app.services.ai_news_scorer import _get_api_key, _ABACUS_URL, _AI_MODEL, analyze_news
+    from app.services.ai_news_scorer import _get_api_key, _ABACUS_URL, _AI_MODEL, analyze_news, _SCORER_VERSION
 
     api_key = _get_api_key()
     key_preview = (api_key[:8] + "...") if api_key else "EMPTY"
@@ -1380,6 +1380,7 @@ async def admin_test_ai_scorer(
         "api_key_preview": key_preview,
         "abacus_url": _ABACUS_URL,
         "ai_model": _AI_MODEL,
+        "scorer_version": _SCORER_VERSION,
         "test_ticker": test_ticker,
         "test_result": test_result,
         "test_error": test_error,

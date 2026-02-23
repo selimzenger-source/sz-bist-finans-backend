@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # Abacus AI RouteLLM endpoint (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
+# Versiyon — deploy dogrulama icin
+_SCORER_VERSION = "v3-tradingview"
+
 # AI model — gpt-4o guclu analiz icin
 _AI_MODEL = "gpt-4o"
 
