@@ -588,6 +588,34 @@ class NotificationService:
             channel_id="ipo_alerts_v2",
         )
 
+    async def notify_trading_date_detected(self, ipo) -> int:
+        """Ilk islem tarihi tespit bildirimi — notify_first_trading_day = True olanlara."""
+        pazar_map = {
+            "yildiz_pazar": "Yıldız Pazar",
+            "ana_pazar": "Ana Pazar",
+            "alt_pazar": "Alt Pazar",
+        }
+        pazar = pazar_map.get(ipo.market_segment or "", "")
+        pazar_text = f" ({pazar})" if pazar else ""
+
+        title = "📊 İşlem Tarihi Tespit Edildi"
+        body = f"{ipo.ticker or ipo.company_name}{pazar_text} borsada işlem görmeye başlıyor!"
+        if ipo.trading_start:
+            body += f" İlk işlem: {ipo.trading_start.strftime('%d.%m.%Y')}"
+
+        data = {
+            "type": "trading_date_detected",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+        }
+
+        return await self._send_filtered(
+            "notify_first_trading_day",   # Aynı filtre: notify_first_trading_day = True
+            title, body, data,
+            f"Islem tarihi tespit: {ipo.ticker or ipo.company_name}",
+            channel_id="ipo_alerts_v2",
+        )
+
     async def notify_ceiling_broken(self, ipo) -> int:
         """Tavan bozuldu bildirimi — notify_ceiling_break = True olanlara."""
         title = "🔓 Tavan Çözüldü"

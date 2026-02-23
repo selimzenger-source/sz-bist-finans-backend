@@ -272,3 +272,14 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v23 migration: telegram_news AI puanlama alanlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE telegram_news ADD COLUMN IF NOT EXISTS ai_score INTEGER")
+            )
+            await conn.execute(
+                text("ALTER TABLE telegram_news ADD COLUMN IF NOT EXISTS ai_summary TEXT")
+            )
+        except Exception:
+            pass

@@ -55,7 +55,7 @@ scheduler = AsyncIOScheduler()
 # Yeni IPO tespit edilince halkarz+gedik scraper'i 12 saat boyunca 15dk'da 1 calistirir
 BOOST_INTERVAL_MINUTES = 15
 BOOST_DURATION_HOURS = 12
-NORMAL_INTERVAL_HOURS = 2
+NORMAL_INTERVAL_HOURS = 1
 _boost_active = False
 
 
@@ -2673,10 +2673,10 @@ def _setup_scheduler_impl():
         next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS),
     )
 
-    # 5. HalkArz + Gedik — her 2 saatte bir (trading_start hizli tespiti icin)
+    # 5. HalkArz + Gedik — her 1 saatte bir (trading_start hizli tespiti icin)
     scheduler.add_job(
         scrape_halkarz_gedik,
-        IntervalTrigger(hours=2),
+        IntervalTrigger(hours=1),
         id="halkarz_gedik_scraper",
         name="HalkArz + Gedik Scraper",
         replace_existing=True,

@@ -383,6 +383,21 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 body_parts.append(f"Beklenen İşlem Günü: {expected_date.isoformat()}")
             parsed_body = "\n".join(body_parts)
 
+            # --- AI Puanlama (KAP icerik + Abacus AI) ---
+            ai_score = None
+            ai_summary = None
+            if ticker:
+                try:
+                    from app.services.ai_news_scorer import fetch_kap_content, score_news
+                    kap_content = await fetch_kap_content(kap_id)
+                    ai_result = await score_news(ticker, text, kap_content)
+                    ai_score = ai_result.get("score")
+                    ai_summary = ai_result.get("summary")
+                    if ai_score:
+                        logger.info("AI puanlama: %s — skor=%s", ticker, ai_score)
+                except Exception as ai_err:
+                    logger.warning("AI puanlama hatasi (%s): %s", ticker, ai_err)
+
             # DB'ye kaydet — fiyat yok
             news = TelegramNews(
                 telegram_message_id=telegram_message_id,
@@ -400,6 +415,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 prev_close_price=None,  # Fiyat kaydedilmez
                 theoretical_open=None,  # Fiyat kaydedilmez
                 message_date=msg_date,
+                ai_score=ai_score,
+                ai_summary=ai_summary,
             )
             session.add(news)
             new_count += 1

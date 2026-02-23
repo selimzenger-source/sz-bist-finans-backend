@@ -230,6 +230,8 @@ class TelegramNewsOut(BaseModel):
     gap_pct: Optional[Decimal] = None
     prev_close_price: Optional[Decimal] = None
     theoretical_open: Optional[Decimal] = None
+    ai_score: Optional[int] = None
+    ai_summary: Optional[str] = None
     message_date: Optional[datetime] = None
     created_at: Optional[datetime] = None
 

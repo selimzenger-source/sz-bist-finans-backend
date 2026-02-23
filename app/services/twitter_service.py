@@ -101,6 +101,7 @@ BANNER_SON_30_DAKIKA = os.path.join(_IMG_DIR, "son_30_dakika_banner.png")
 BANNER_SPK_ONAYI = os.path.join(_IMG_DIR, "spk_onayi_banner.png")
 BANNER_AY_SONU_RAPOR = os.path.join(_IMG_DIR, "ay_sonu_rapor_banner.png")
 BANNER_OGLE_ARASI = os.path.join(_IMG_DIR, "ogle_arasi_banner.png")
+BANNER_TRADING_DATE_TESPIT = os.path.join(_IMG_DIR, "trading_date_tespit_banner.png")
 
 # Credentials cache — lazy init
 _credentials = None
@@ -784,6 +785,48 @@ def tweet_first_trading_day(ipo) -> bool:
         return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR)
     except Exception as e:
         logger.error(f"tweet_first_trading_day hatasi: {e}")
+        return False
+
+
+# ================================================================
+# 6b. ISLEM TARIHI TESPIT (scraper'dan aninda — trading_start ilk set)
+# ================================================================
+def tweet_trading_date_detected(ipo) -> bool:
+    """Ilk islem tarihi tespit edildi tweeti — HalkArz scraper'dan hemen."""
+    try:
+        ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
+
+        # Pazar bilgisi
+        pazar_map = {
+            "yildiz_pazar": "Yildiz Pazar",
+            "ana_pazar": "Ana Pazar",
+            "alt_pazar": "Alt Pazar",
+        }
+        pazar = pazar_map.get(ipo.market_segment or "", "")
+        pazar_line = f"\n\U0001F4CD {pazar}'da islem gorecek" if pazar else ""
+
+        # Tarih formati — Turkce
+        _AYLAR = ["Ocak", "Subat", "Mart", "Nisan", "Mayis", "Haziran",
+                  "Temmuz", "Agustos", "Eylul", "Ekim", "Kasim", "Aralik"]
+        tarih_line = ""
+        if ipo.trading_start:
+            d = ipo.trading_start
+            tarih_line = f"\n\U0001F4C5 Ilk islem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
+
+        text = (
+            f"\U0001F4CA Islem Tarihi Tespit Edildi\n\n"
+            f"{ipo.company_name}{ticker_text}"
+            f"{tarih_line}"
+            f"{pazar_line}\n\n"
+            f"Borsada islem gormeye basliyor! \U0001F514\n"
+            f"#HalkaArz #BIST"
+        )
+        if ipo.ticker:
+            text += f" #{ipo.ticker}"
+
+        return _safe_tweet_with_media(text, BANNER_TRADING_DATE_TESPIT)
+    except Exception as e:
+        logger.error(f"tweet_trading_date_detected hatasi: {e}")
         return False
 
 

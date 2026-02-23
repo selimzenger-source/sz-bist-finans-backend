@@ -67,6 +67,14 @@ class TelegramNews(Base):
         Numeric(12, 2), comment="Teorik acilis fiyati"
     )
 
+    # AI Puanlama
+    ai_score: Mapped[int | None] = mapped_column(
+        Integer, comment="AI puan (1-10, yuksek=olumlu)"
+    )
+    ai_summary: Mapped[str | None] = mapped_column(
+        Text, comment="AI tarafindan uretilen 2 cumle ozet"
+    )
+
     # Zaman
     message_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="Telegram mesaj zamani"

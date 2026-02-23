@@ -110,6 +110,11 @@ class HalkArzDetailParser:
 
             # Halka Arz Tarihi — "19-20 Şubat 2026  09:00-17:00"
             if "halka arz tarihi" in label:
+                # Ham metin sakla (AI dogrulama icin)
+                if "_raw_texts" not in self.data:
+                    self.data["_raw_texts"] = {}
+                self.data["_raw_texts"]["subscription_dates"] = value
+
                 dates = self._parse_date_range(value)
                 if dates.get("start"):
                     self.data["subscription_start"] = dates["start"]
@@ -161,6 +166,11 @@ class HalkArzDetailParser:
             # Not: Turkce İ (U+0130) .lower() sonucu 'i\u0307' olur (2 karakter),
             # bu nedenle "işlem" string match basarisiz olur. ASCII normalize ile kontrol.
             elif "bist" in label and self._label_contains_islem(label):
+                # Ham metin sakla (AI dogrulama icin)
+                if "_raw_texts" not in self.data:
+                    self.data["_raw_texts"] = {}
+                self.data["_raw_texts"]["trading_start"] = value
+
                 d = self._parse_single_date(value)
                 if d:
                     self.data["trading_start"] = d
@@ -466,15 +476,23 @@ class HalkArzDetailParser:
     # ============================================================
 
     def _parse_date_range(self, text: str) -> dict:
-        """'19-20 Şubat 2026' veya '5-6 Şubat 2026' formatini parse eder."""
+        """'19-20 Şubat 2026' veya '5-6 Şubat 2026' formatini parse eder.
+
+        Guclendirilmis v2: Saat kaliplari (09:00, 17:00), yil (2026) ve
+        sira numarasi gibi tarih-disi sayilar artik gun olarak alinmiyor.
+        Sadece ay adinin hemen oncesindeki ardisik sayi grubu gun olarak kabul edilir.
+        """
         result = {}
 
         # Ay ve yil bul
         month = None
         year = None
+        month_pos = -1
         for month_name, month_num in TR_MONTHS.items():
-            if month_name in text.lower():
+            pos = text.lower().find(month_name)
+            if pos != -1:
                 month = month_num
+                month_pos = pos
                 break
 
         year_match = re.search(r"(20\d{2})", text)
@@ -496,9 +514,27 @@ class HalkArzDetailParser:
                         pass
             return result
 
-        # Gunleri bul: "19-20" veya "5-6-7"
-        days = re.findall(r"\b(\d{1,2})\b", text.split(str(year))[0] if str(year) in text else text)
-        days = [int(d) for d in days if 1 <= int(d) <= 31]
+        # Ay adinin hemen oncesindeki metni al — gun sayilari burada
+        before_month = text[:month_pos].strip()
+
+        # Saat kaliplarini cikar (09:00, 17:00 gibi — gun olarak alinmasin)
+        before_month = re.sub(r"\d{1,2}:\d{2}", "", before_month)
+        # Yil'i da cikar (2026 gibi 4 haneli sayinin parcalari alinmasin)
+        before_month = before_month.replace(str(year), "")
+        before_month = before_month.strip()
+
+        # Ay adinin hemen oncesindeki ardisik gun grubunu bul (sondan esle)
+        # "26-27" → [26, 27],  "5,6,7" → [5, 6, 7],  "26" → [26]
+        # Onemli: $ ile sondan eslesir — basta baska sayi varsa (sira no vs) almaz
+        day_range_match = re.search(
+            r"(\d{1,2}(?:\s*[-\u2013,/]\s*\d{1,2})*)\s*$",
+            before_month,
+        )
+        if day_range_match:
+            matched = day_range_match.group(1)
+            days = [int(d) for d in re.findall(r"\d{1,2}", matched) if 1 <= int(d) <= 31]
+        else:
+            days = []
 
         if days:
             try:
@@ -847,6 +883,9 @@ async def scrape_halkarz():
                     "katilim_endeksi": "katilim_endeksi",
                 }
 
+                # trading_start ilk kez set ediliyorsa tweet + bildirim icin flag
+                trading_start_newly_detected = False
+
                 for scrape_key, db_field in field_mapping.items():
                     if scrape_key in safe_data and safe_data[scrape_key] is not None:
                         if db_field is None:
@@ -856,8 +895,127 @@ async def scrape_halkarz():
 
                         # Sadece bos alanlari doldur VEYA guncelleme varsa yaz
                         if current_val is None or current_val != new_val:
+                            # trading_start ilk kez set ediliyorsa isaretle
+                            if db_field == "trading_start" and current_val is None:
+                                trading_start_newly_detected = True
                             setattr(ipo, db_field, new_val)
                             update_fields[db_field] = new_val
+
+                # --- Tarih dogrulama: sanity check + AI ---
+                _DATE_FIELDS = {"subscription_start", "subscription_end", "trading_start"}
+                changed_dates = _DATE_FIELDS & set(update_fields.keys())
+
+                if changed_dates and update_fields:
+                    try:
+                        from app.services.ai_validator import sanity_check_dates, validate_ipo_dates
+
+                        # 1. Hizli sanity check
+                        check_vals = {f: update_fields[f] for f in changed_dates}
+                        # Mevcut degerlerle birlikte kontrol (end olmadan start kontrolu yanlis olur)
+                        for f in _DATE_FIELDS:
+                            if f not in check_vals:
+                                v = getattr(ipo, f, None)
+                                if v:
+                                    check_vals[f] = v
+
+                        sanity = sanity_check_dates(check_vals)
+
+                        if not sanity["passed"]:
+                            logger.warning(
+                                "HalkArz: %s — TARIH SANITY HATASI: %s",
+                                ipo.ticker or ipo.company_name,
+                                sanity["issues"],
+                            )
+
+                            # 2. AI dogrulama cagir
+                            raw_texts = safe_data.get("_raw_texts", {})
+                            ai_result = await validate_ipo_dates(
+                                raw_texts=raw_texts,
+                                parsed_values=check_vals,
+                                company_name=ipo.ticker or ipo.company_name,
+                            )
+
+                            # Duzeltme oncesi degerleri sakla (rapor icin)
+                            _wrong_vals = {f: str(check_vals.get(f, "?")) for f in changed_dates}
+
+                            if not ai_result["valid"] and ai_result["corrections"]:
+                                # AI duzeltme onerdi — duzeltilmis degerleri uygula
+                                _corrected_vals = {}
+                                for field_name, corrected_val in ai_result["corrections"].items():
+                                    if field_name in _DATE_FIELDS and corrected_val:
+                                        try:
+                                            corrected_date = date.fromisoformat(corrected_val)
+                                            setattr(ipo, field_name, corrected_date)
+                                            update_fields[field_name] = corrected_date
+                                            _corrected_vals[field_name] = str(corrected_date)
+                                        except (ValueError, TypeError):
+                                            pass
+
+                                logger.warning(
+                                    "HalkArz: %s — AI DUZELTME: %s -> %s (neden: %s)",
+                                    ipo.ticker or ipo.company_name,
+                                    _wrong_vals, _corrected_vals,
+                                    ai_result["reason"],
+                                )
+
+                                # Telegram raporu — AI duzeltme yapti
+                                try:
+                                    from app.services.admin_telegram import send_admin_message
+                                    lines = [f"🤖 AI Tarih Duzeltmesi — {ipo.ticker or ipo.company_name}"]
+                                    lines.append(f"Ham veri: {raw_texts.get('subscription_dates', '-')}")
+                                    for f in changed_dates:
+                                        old = _wrong_vals.get(f, "?")
+                                        new = _corrected_vals.get(f, old)
+                                        if old != new:
+                                            lines.append(f"  {f}: {old} ❌ → {new} ✅")
+                                        else:
+                                            lines.append(f"  {f}: {old} (degismedi)")
+                                    lines.append(f"Neden: {ai_result.get('reason', '-')}")
+                                    await send_admin_message("\n".join(lines))
+                                except Exception:
+                                    pass
+
+                            elif not ai_result["valid"]:
+                                # AI gecersiz dedi ama duzeltme yok — tarihleri yazma
+                                logger.warning(
+                                    "HalkArz: %s — AI REDDETTI, tarih guncellenmeyecek: %s",
+                                    ipo.ticker or ipo.company_name,
+                                    ai_result["reason"],
+                                )
+                                for field_name in changed_dates:
+                                    if field_name in update_fields:
+                                        del update_fields[field_name]
+
+                                # Telegram raporu — AI reddetti
+                                try:
+                                    from app.services.admin_telegram import send_admin_message
+                                    lines = [f"🚫 AI Tarih Reddi — {ipo.ticker or ipo.company_name}"]
+                                    lines.append(f"Ham veri: {raw_texts.get('subscription_dates', '-')}")
+                                    for f in changed_dates:
+                                        lines.append(f"  {f}: {_wrong_vals.get(f, '?')} ❌ yazilmadi")
+                                    lines.append(f"Neden: {ai_result.get('reason', '-')}")
+                                    lines.append("Admin panelden kontrol edin!")
+                                    await send_admin_message("\n".join(lines))
+                                except Exception:
+                                    pass
+
+                            else:
+                                # AI onayladi (veya devre disi) — sadece sanity uyarisi gonder
+                                try:
+                                    from app.services.admin_telegram import send_admin_message
+                                    alert_msg = (
+                                        f"⚠️ Tarih Sanity Uyarisi — {ipo.ticker or ipo.company_name}\n"
+                                        f"Sorunlar: {', '.join(sanity['issues'])}\n"
+                                        f"AI: {'Onayladi' if ai_result.get('ai_used') else 'Devre disi (API key yok)'}"
+                                    )
+                                    await send_admin_message(alert_msg)
+                                except Exception:
+                                    pass
+
+                    except ImportError:
+                        logger.debug("AI Validator modulu yuklenemedi, dogrulama atlaniyor")
+                    except Exception as val_err:
+                        logger.warning("HalkArz: %s — dogrulama hatasi: %s", ipo.ticker or ipo.company_name, val_err)
 
                 if update_fields:
                     ipo.updated_at = datetime.utcnow()
@@ -867,6 +1025,24 @@ async def scrape_halkarz():
                         ipo.ticker or ipo.company_name,
                         list(update_fields.keys()),
                     )
+
+                # trading_start yeni tespit: aninda tweet + bildirim
+                if trading_start_newly_detected:
+                    await db.flush()
+                    try:
+                        from app.services.twitter_service import tweet_trading_date_detected
+                        from app.services.admin_telegram import notify_tweet_sent
+                        tw_ok = tweet_trading_date_detected(ipo)
+                        await notify_tweet_sent("trading_date_tespit", ipo.ticker or ipo.company_name, tw_ok)
+                    except Exception as tw_err:
+                        logger.warning("HalkArz: %s — trading date tweet hatasi: %s", ipo.ticker or ipo.company_name, tw_err)
+                    try:
+                        from app.services.notification import NotificationService
+                        notif_svc = NotificationService(db)
+                        sent = await notif_svc.notify_trading_date_detected(ipo)
+                        logger.info("HalkArz: %s — trading date bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
+                    except Exception as notif_err:
+                        logger.warning("HalkArz: %s — trading date bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
 
                 # 7. Rejected broker listesini senkronize et (admin kilidi: "brokers")
                 # Sadece basvurulamaz broker'lar kaydedilir (kullaniciya uyari icin)
