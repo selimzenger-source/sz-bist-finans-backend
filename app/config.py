@@ -49,8 +49,8 @@ class Settings(BaseSettings):
     # True yapilinca otomatik atilir (sistem oturunca)
     TWITTER_AUTO_SEND: bool = False
 
-    # Abacus AI (RouteLLM) — scraper veri dogrulama
-    ABACUS_API_KEY: str = ""
+    # Abacus AI (RouteLLM) — scraper veri dogrulama + haber puanlama
+    ABACUS_API_KEY: str = "s2_7dd1a20a70d14d01ae4f2838ce862da8"
 
     # Scraping intervals (saniye)
     KAP_SCRAPE_INTERVAL_SECONDS: int = 1800   # 30 dakika — halka arz
