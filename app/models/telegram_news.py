@@ -6,7 +6,7 @@ Telegram Bot API uzerinden cekilen mesajlar burada depolanir.
 
 from datetime import date, datetime
 from decimal import Decimal
-from sqlalchemy import String, Text, Integer, BigInteger, Boolean, Date, DateTime, Numeric, Index
+from sqlalchemy import String, Text, Integer, Float, BigInteger, Boolean, Date, DateTime, Numeric, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -67,9 +67,9 @@ class TelegramNews(Base):
         Numeric(12, 2), comment="Teorik acilis fiyati"
     )
 
-    # AI Puanlama
-    ai_score: Mapped[int | None] = mapped_column(
-        Integer, comment="AI puan (1-10, yuksek=olumlu)"
+    # AI Puanlama (V4: ondalik skor — 8.7, 6.3 gibi)
+    ai_score: Mapped[float | None] = mapped_column(
+        Float, comment="AI puan (1.0-10.0, ondalik, yuksek=olumlu)"
     )
     ai_summary: Mapped[str | None] = mapped_column(
         Text, comment="AI tarafindan uretilen 2 cumle ozet"

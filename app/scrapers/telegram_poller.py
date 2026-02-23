@@ -503,7 +503,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         from app.services.admin_telegram import notify_tweet_sent
                         await notify_tweet_sent(
                             "bist50_kap_haber", ticker, tw_success,
-                            f"Anahtar: {tweet_kw} | AI: {ai_score}/10",
+                            f"Anahtar: {tweet_kw} | AI: {ai_score}/10" if ai_score is None else f"Anahtar: {tweet_kw} | AI: {ai_score:.1f}/10",
                         )
 
                 except Exception as tw_err:

@@ -291,3 +291,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v25 migration: ai_score INTEGER → FLOAT (V4 ondalik puanlama: 8.7, 6.3 gibi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE telegram_news ALTER COLUMN ai_score TYPE FLOAT USING ai_score::float")
+            )
+        except Exception:
+            pass

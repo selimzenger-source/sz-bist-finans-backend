@@ -1,10 +1,15 @@
-"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi V3.
+"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi V4.
 
 Akis:
 1. Telegram'dan Matriks HaberId (kap_notification_id) gelir
 2. TradingView'dan haber icerigini cek (matriks:{id}:0/ URL)
-3. Abacus AI (gpt-4o) ile 1-10 puan + 2 cumle Turkce ozet uret
-4. Sonuc: {"score": int, "summary": str, "kap_url": str|None}
+3. Abacus AI (gpt-4o) ile 1.0-10.0 ondalik puan + 2 cumle Turkce ozet uret
+4. Sonuc: {"score": float, "summary": str, "kap_url": str|None}
+
+V4 Degisiklikler:
+- Ondalik skor (8.7, 6.3 gibi) — daha hassas ayirim
+- Gelismis prompt — detayli analiz kurallari
+- %100 artis vs %32 artis farkli puan alir
 
 Icerik Kaynagi (Oncelik sirasi):
 - Oncelik 1: TradingView haber sayfasi (matriks ID ile)
@@ -27,14 +32,14 @@ logger = logging.getLogger(__name__)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
 # Versiyon — deploy dogrulama icin
-_SCORER_VERSION = "v3-tradingview"
+_SCORER_VERSION = "v4-decimal"
 
 # AI model — gpt-4o guclu analiz icin
 _AI_MODEL = "gpt-4o"
 
 # Timeouts
 _TV_TIMEOUT = 15   # TradingView icin
-_AI_TIMEOUT = 20   # AI icin (gpt-4o daha yavas)
+_AI_TIMEOUT = 25   # AI icin (detayli analiz daha uzun surebilir)
 
 # TradingView base URL
 TV_NEWS_BASE = "https://tr.tradingview.com/news"
@@ -175,7 +180,7 @@ async def score_news(
         kap_url: TradingView/KAP linki (varsa)
 
     Returns:
-        {"score": int|None, "summary": str|None, "kap_url": str|None}
+        {"score": float|None, "summary": str|None, "kap_url": str|None}
         Hata durumunda score+summary None olur — akis kirilmaz.
     """
     api_key = _get_api_key()
@@ -199,28 +204,44 @@ async def score_news(
 Hisse: {ticker}
 Kaynak: {source_info}
 
---- ICERIK ---
+--- ICERIK BASLANGIC ---
 {content}
---- ICERIK SONU ---
+--- ICERIK BITIS ---
 
-ANALIZ KURALLARI:
-1. Bu haberin HISSE FIYATINA muhtemel etkisini 1-10 arasi puanla:
-   1-2: Ciddi olumsuz (zarar, ceza, iflas, sermaye erimesi)
-   3-4: Olumsuz veya belirsiz (borcluluk artisi, dava, risk)
-   5: Notr — rutin bildirim, etki belirsiz
-   6-7: Hafif olumlu (yeni sozlesme, is birligi, buyume sinyali)
-   8-9: Guclu olumlu (rekor kar, bedelsiz, temettuu, buyuk ihale)
-   10: Cok guclu olumlu (sektoru degistirecek haber)
+PUANLAMA SISTEMI (1.0 — 10.0 arasi, 0.1 hassasiyetle):
 
-2. DIKKAT: Sadece "pozitif haber" etiketi tasimasi YETMEZ.
-   - Rutin bildirimler (SPK onay, genel kurul) → 5
-   - Personel alimi gibi standart isler → 5-6
-   - Gercek impact analizi yap: haberin sirket degerine etkisini dusun
+OLUMSUZ BOLGESI (1.0 — 4.9):
+  1.0-2.0: Ciddi olumsuz — iflas, agir ceza, sermaye erimesi, buyuk zarar
+  2.1-3.5: Olumsuz — net donem zarari, yuksek borcluluk, dava/ceza riski
+  3.6-4.9: Hafif olumsuz veya belirsiz — kredi kullanimi, kucuk zarar, belirsiz sonuc
 
-3. Haberi yatirimci bakis acisiyla Turkce 2 cumle ile ozetle.
+NOTR BOLGESI (5.0 — 5.9):
+  5.0-5.4: Tam notr — rutin bildirim, SPK onay, genel kurul, yonetim kadrosu degisikligi
+  5.5-5.9: Notr+ — detayi belli olmayan bildirim, personel alimi, kurumsal uyum raporu
 
-SADECE asagidaki JSON formatinda yanit ver:
-{{"score": 7, "summary": "Iki cumlelik Turkce ozet."}}"""
+OLUMLU BOLGESI (6.0 — 10.0):
+  6.0-6.4: Hafif olumlu — kucuk ihale kazanimi (<50M TL), kucuk sozlesme, standart dis ticaret
+  6.5-6.9: Olumlu — orta olcekli sozlesme (50-200M TL), yeni is birligi, ihracat anlasmasi
+  7.0-7.4: Iyi — buyuk sozlesme (200M-1 milyar TL), guclu ihracat artisi, onemli ihale
+  7.5-7.9: Cok iyi — %20-40 arasi kar artisi, buyuk ihale (>1 milyar TL), onemli ortaklik
+  8.0-8.4: Guclu olumlu — %40-70 kar artisi, buyuk bedelsiz (<=%50), yuksek temettu
+  8.5-8.9: Cok guclu — %70-100 kar artisi, buyuk bedelsiz (%50-100), sektor liderligi
+  9.0-9.4: Olaganustu — %100+ kar artisi, %100+ bedelsiz sermaye artirimi, mega ihale
+  9.5-10.0: Tarihsel — sektoru degistirecek haber, devasa birlesme, rekor kar + bedelsiz birlikte
+
+KRITIK KURALLAR:
+- Haberin GERCEK BUYUKLUGUNU deger — rakamsal verileri kullan
+- %100 bedelsiz ≠ %30 kar artisi → FARKLI puanlar verilmeli
+- Ihale tutari onemli: 10M TL = 6.2, 200M TL = 7.0, 1 milyar TL = 7.8
+- Bir sirketin buyuklugune gore degerlendir (BIMAS icin 600M TL sermaye artirimi ≠ kucuk sirket icin)
+- Sadece "pozitif" etiketi tasimasi YETMEZ — gercek etkiyi ol
+- Kaynak "Telegram Ozeti" ise ve detay yoksa: 5.0-5.5 arasi ver (belirsiz)
+
+Haberi yatirimci bakis acisiyla Turkce 2 cumle ile ozetle.
+Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
+
+SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
+{{"score": 7.3, "summary": "Iki cumlelik Turkce ozet."}}"""
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
@@ -236,16 +257,18 @@ SADECE asagidaki JSON formatinda yanit ver:
                         {
                             "role": "system",
                             "content": (
-                                "Sen deneyimli bir Borsa Istanbul yatirimci analistisin. "
-                                "KAP bildirimlerini objektif analiz edersin. "
-                                "Her habere yuksek puan vermezsin — gercek etkiyi degerlendirirsin. "
+                                "Sen 15+ yillik deneyime sahip bir Borsa Istanbul kurumsal yatirimci analistisin. "
+                                "KAP bildirimlerini son derece detayli ve objektif analiz edersin. "
+                                "Haberdeki rakamlari, oranlari ve buyuklukleri dikkatlice degerlendirirsin. "
+                                "Puanlaman cok hassas olmali — 0.1 hassasiyetle score ver. "
+                                "Benzer gorunen ama farkli buyuklukte haberler FARKLI puan almali. "
                                 "Sadece JSON formatinda yanit ver."
                             ),
                         },
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": 0,
-                    "max_tokens": 400,
+                    "temperature": 0.1,  # Biraz yaraticilik — daha dogal puanlama
+                    "max_tokens": 500,
                 },
             )
             resp.raise_for_status()
@@ -264,9 +287,9 @@ SADECE asagidaki JSON formatinda yanit ver:
         score = result.get("score")
         summary = result.get("summary")
 
-        # Score validation: 1-10 arasinda olmali
-        if isinstance(score, (int, float)) and 1 <= score <= 10:
-            score = int(score)
+        # Score validation: 1.0-10.0 arasinda olmali (ondalik)
+        if isinstance(score, (int, float)) and 1.0 <= score <= 10.0:
+            score = round(float(score), 1)  # 1 ondalik basamak
         else:
             logger.warning("AI News Scorer: Gecersiz skor=%s (%s)", score, ticker)
             score = None
@@ -310,7 +333,7 @@ async def analyze_news(
 
     Returns:
         {
-            "score": int | None,
+            "score": float | None,
             "summary": str | None,
             "kap_url": str | None,
         }

@@ -1090,7 +1090,7 @@ def tweet_bist30_news(
     ticker: str,
     matched_keyword: str,
     sentiment: str,
-    ai_score: int | None = None,
+    ai_score: float | None = None,
     ai_summary: str | None = None,
     kap_url: str | None = None,
 ) -> bool:
@@ -1129,7 +1129,7 @@ def tweet_bist30_news(
         # AI bolumu (varsa)
         ai_section = ""
         if ai_score is not None:
-            ai_section += f"\n{score_emoji} AI Analiz: {ai_score}/10\n"
+            ai_section += f"\n{score_emoji} AI Analiz: {ai_score:.1f}/10\n"
         if ai_summary:
             # Tweet karakter limiti — ozeti 120 karakterle sinirla
             summary_text = ai_summary[:120]
@@ -1158,7 +1158,7 @@ def tweet_bist30_news(
             # AI ozeti kaldir, sadece skor birak
             ai_section_short = ""
             if ai_score is not None:
-                ai_section_short = f"\n{score_emoji} AI: {ai_score}/10\n"
+                ai_section_short = f"\n{score_emoji} AI: {ai_score:.1f}/10\n"
             text = (
                 f"{emoji} #{ticker} — Haber Bildirimi\n\n"
                 f"Anlık Haber Yakalandı {now_str}\n\n"
