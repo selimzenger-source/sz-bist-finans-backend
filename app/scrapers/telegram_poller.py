@@ -383,22 +383,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 body_parts.append(f"Beklenen İşlem Günü: {expected_date.isoformat()}")
             parsed_body = "\n".join(body_parts)
 
-            # --- AI Puanlama (KAP icerik + Abacus AI) ---
+            # --- AI Puanlama V2 (KAP eslestirme + Abacus AI gpt-4o) ---
             # Sadece seans_ici ve borsa_kapali icin AI yorum uret
             # seans_disi_acilis sadece gap verisi — AI yoruma gerek yok
             ai_score = None
             ai_summary = None
+            kap_url = None
             if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
-                    from app.services.ai_news_scorer import fetch_kap_content, score_news
-                    kap_content = await fetch_kap_content(kap_id)
-                    ai_result = await score_news(ticker, text, kap_content)
+                    from app.services.ai_news_scorer import analyze_news
+                    ai_result = await analyze_news(ticker, text)
                     ai_score = ai_result.get("score")
                     ai_summary = ai_result.get("summary")
+                    kap_url = ai_result.get("kap_url")
                     if ai_score:
-                        logger.info("AI puanlama: %s — skor=%s", ticker, ai_score)
+                        logger.info(
+                            "AI puanlama: %s — skor=%s, kap=%s",
+                            ticker, ai_score, "var" if kap_url else "yok",
+                        )
                 except Exception as ai_err:
                     logger.warning("AI puanlama hatasi (%s): %s", ticker, ai_err)
+
+            # KAP URL yoksa TradingView + Matriks ID ile olustur
+            if not kap_url and kap_id:
+                kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
 
             # DB'ye kaydet — fiyat yok
             news = TelegramNews(
@@ -419,6 +427,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 message_date=msg_date,
                 ai_score=ai_score,
                 ai_summary=ai_summary,
+                kap_url=kap_url,
             )
             session.add(news)
             new_count += 1

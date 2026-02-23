@@ -1264,7 +1264,7 @@ async def admin_backfill_ai_scores(
     limit = min(payload.get("limit", 35), 50)
 
     from app.models.telegram_news import TelegramNews
-    from app.services.ai_news_scorer import score_news
+    from app.services.ai_news_scorer import analyze_news
 
     # ai_score NULL + seans_ici/borsa_kapali + ticker var
     result = await db.execute(
@@ -1285,16 +1285,29 @@ async def admin_backfill_ai_scores(
 
     for record in records:
         try:
-            ai_result = await score_news(record.ticker, record.raw_text)
+            ai_result = await analyze_news(record.ticker, record.raw_text)
             s = ai_result.get("score")
             sm = ai_result.get("summary")
+            kurl = ai_result.get("kap_url")
+
+            # KAP URL yoksa TradingView + Matriks ID ile olustur
+            if not kurl and record.kap_notification_id:
+                kurl = f"https://tr.tradingview.com/news/matriks:{record.kap_notification_id}:0/"
+
             if s is not None:
                 record.ai_score = s
                 record.ai_summary = sm
+                record.kap_url = kurl
                 scored += 1
-                details.append({"ticker": record.ticker, "score": s, "summary": (sm or "")[:80]})
+                details.append({
+                    "ticker": record.ticker, "score": s,
+                    "summary": (sm or "")[:80], "kap_url": kurl,
+                })
             else:
                 failed += 1
+                # kap_url yine kaydedilsin (skor olmasa bile link olsun)
+                if kurl:
+                    record.kap_url = kurl
                 details.append({"ticker": record.ticker, "score": None, "error": "AI skoru uretilmedi"})
         except Exception as e:
             failed += 1

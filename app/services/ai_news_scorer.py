@@ -1,18 +1,26 @@
-"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi.
+"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi V2.
 
-Telegram poller'dan gelen haberleri AI ile puanlar ve yorumlar.
-KAP bildirim detayina erisebilirse onu kullanir, yoksa Telegram ham metnini.
+Akis:
+1. Telegram'dan hisse kodu (ticker) gelir
+2. KAP'tan son bildirimleri cek → ticker ile esleseni bul
+3. Eslesen KAP bildiriminin tam metnini al
+4. Abacus AI (gpt-4o) ile 1-10 puan + 2 cumle Turkce ozet uret
+5. Sonuc: {"score": int, "summary": str, "kap_url": str|None}
 
-Kullanim:
-    kap_content = await fetch_kap_content(kap_id)
-    result = await score_news("ENDAE", raw_text, kap_content)
-    # result = {"score": 8, "summary": "Iki cumlelik ozet."}
+KAP Eslestirme Stratejisi:
+- Oncelik 1: KAP API → bugunun bildirimlerinden ticker ile filtrele
+- Oncelik 2: KAP detay sayfasi HTML scrape
+- Fallback: Telegram ham metni ile AI analiz (KAP bulunamazsa)
 
-Abacus AI RouteLLM: OpenAI uyumlu API, ucretsiz tier yeterli.
+Hata Toleransi:
+- KAP erisimi basarisiz → Telegram metniyle devam
+- AI basarisiz → score=None, summary=None don
+- Hicbir hata akisi durdurmaz
 """
 
 import json
 import logging
+from datetime import date
 
 import httpx
 
@@ -20,7 +28,25 @@ logger = logging.getLogger(__name__)
 
 # Abacus AI RouteLLM endpoint (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_TIMEOUT = 15  # saniye
+
+# AI model — gpt-4o guclu analiz icin (gpt-4o-mini yetersizdi)
+_AI_MODEL = "gpt-4o"
+
+# Timeouts
+_KAP_TIMEOUT = 12  # KAP icin
+_AI_TIMEOUT = 20   # AI icin (gpt-4o daha yavas)
+
+# KAP base
+KAP_BASE = "https://www.kap.org.tr"
+KAP_API_BASE = f"{KAP_BASE}/tr/api"
+
+KAP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "tr-TR,tr;q=0.9",
+    "Referer": f"{KAP_BASE}/tr/bildirim-sorgu",
+    "X-Requested-With": "XMLHttpRequest",
+}
 
 
 def _get_api_key() -> str | None:
@@ -33,38 +59,157 @@ def _get_api_key() -> str | None:
         return None
 
 
-async def fetch_kap_content(kap_id: str | None) -> str | None:
-    """KAP bildirim detay sayfasindan icerik cek.
+# -------------------------------------------------------
+# ADIM 1: KAP'tan Ticker ile Bildirim Bul
+# -------------------------------------------------------
+
+async def find_kap_disclosure_by_ticker(ticker: str) -> dict | None:
+    """KAP'tan ticker'a gore son bildirimi bul.
+
+    Strateji:
+    1. KAP API (memberDisclosureQuery) → bugunun tum bildirimlerini cek,
+       ticker ile filtrele
+    2. Eslesen bildirimin detay sayfasini cek (full_text)
+    3. KAP URL'yi olustur
 
     Args:
-        kap_id: KAP bildirim ID (orn: "1234567")
+        ticker: Hisse kodu (orn: "ENDAE", "BIMAS")
 
     Returns:
-        Bildirim tam metni veya None (hata/bulunamadiysa)
+        {
+            "full_text": str,        # KAP bildirim tam metni
+            "kap_url": str,          # KAP bildirim linki
+            "kap_id": str,           # Gercek KAP bildirim ID
+            "subject": str,          # Bildirim basligi
+        }
+        Bulunamazsa None doner.
     """
-    if not kap_id:
+    if not ticker:
         return None
 
     try:
-        from app.scrapers.kap_scraper import KAPScraper
-        scraper = KAPScraper()
-        try:
-            detail = await scraper.fetch_disclosure_detail(kap_id)
-            if detail and detail.get("full_text"):
-                logger.info("KAP icerik alindi: %s (%d karakter)", kap_id, len(detail["full_text"]))
-                return detail["full_text"]
-            return None
-        finally:
-            await scraper.close()
+        async with httpx.AsyncClient(timeout=_KAP_TIMEOUT, headers=KAP_HEADERS, follow_redirects=True) as client:
+            # --- KAP API: Bugunun tum bildirimlerini cek ---
+            matched_disclosure = await _search_kap_api(client, ticker)
+
+            if not matched_disclosure:
+                logger.info("KAP API'de %s icin bildirim bulunamadi", ticker)
+                return None
+
+            kap_id = matched_disclosure.get("kap_id")
+            if not kap_id:
+                return None
+
+            # --- KAP detay sayfasindan tam metni cek ---
+            full_text = await _fetch_kap_detail_text(client, kap_id)
+            kap_url = f"{KAP_BASE}/tr/Bildirim/{kap_id}"
+
+            if full_text:
+                logger.info(
+                    "KAP eslestirme basarili: %s → KAP#%s (%d karakter)",
+                    ticker, kap_id, len(full_text),
+                )
+                return {
+                    "full_text": full_text,
+                    "kap_url": kap_url,
+                    "kap_id": kap_id,
+                    "subject": matched_disclosure.get("subject", ""),
+                }
+            else:
+                # Detay alinamazsa en azindan URL ve subject dondur
+                logger.warning("KAP detay alinamadi (%s), sadece URL donuluyor", kap_id)
+                return {
+                    "full_text": matched_disclosure.get("subject", ""),
+                    "kap_url": kap_url,
+                    "kap_id": kap_id,
+                    "subject": matched_disclosure.get("subject", ""),
+                }
+
     except Exception as e:
-        logger.warning("KAP icerik cekme hatasi (%s): %s", kap_id, e)
+        logger.warning("KAP ticker arama hatasi (%s): %s", ticker, e)
         return None
 
+
+async def _search_kap_api(client: httpx.AsyncClient, ticker: str) -> dict | None:
+    """KAP API ile bugunun bildirimlerinden ticker eslestir.
+
+    KAP memberDisclosureQuery POST endpoint'i ile bugunun
+    tum bildirimlerini cekip ticker ile filtreliyoruz.
+    """
+    try:
+        today_str = date.today().strftime("%Y-%m-%d")
+        resp = await client.post(
+            f"{KAP_API_BASE}/memberDisclosureQuery",
+            json={
+                "fromDate": today_str,
+                "toDate": today_str,
+            },
+        )
+
+        if resp.status_code != 200:
+            logger.warning("KAP API status: %s", resp.status_code)
+            return None
+
+        data = resp.json()
+        disclosures = data if isinstance(data, list) else data.get("data", [])
+
+        # Ticker ile eslestir — en son (en guncel) olanı al
+        ticker_upper = ticker.upper()
+        for d in disclosures:
+            stock_code = (d.get("stockCode", "") or d.get("memberCode", "") or "").upper()
+            if stock_code == ticker_upper:
+                kap_id = str(d.get("disclosureIndex", d.get("id", "")))
+                subject = d.get("disclosureTitle", d.get("subject", ""))
+                return {
+                    "kap_id": kap_id,
+                    "subject": subject,
+                    "company_name": d.get("companyName", d.get("memberName", "")),
+                }
+
+        return None
+
+    except Exception as e:
+        logger.warning("KAP API arama hatasi: %s", e)
+        return None
+
+
+async def _fetch_kap_detail_text(client: httpx.AsyncClient, kap_id: str) -> str | None:
+    """KAP bildirim detay sayfasindan tam metni cek (HTML scrape)."""
+    try:
+        url = f"{KAP_BASE}/tr/Bildirim/{kap_id}"
+        resp = await client.get(url)
+        if resp.status_code != 200:
+            return None
+
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # Bildirim metin icerigini al
+        content_div = soup.select_one(".disclosure-content, .sub-content, #divContent, [class*='disclosure']")
+        if content_div:
+            return content_div.get_text(separator="\n", strip=True)
+
+        # Fallback: body icindeki ana metni al
+        main = soup.select_one("main, article, .content")
+        if main:
+            return main.get_text(separator="\n", strip=True)[:5000]
+
+        return None
+
+    except Exception as e:
+        logger.warning("KAP detay cekme hatasi (%s): %s", kap_id, e)
+        return None
+
+
+# -------------------------------------------------------
+# ADIM 2: AI Puanlama (Abacus RouteLLM — gpt-4o)
+# -------------------------------------------------------
 
 async def score_news(
     ticker: str,
     raw_text: str,
     kap_content: str | None = None,
+    kap_url: str | None = None,
 ) -> dict:
     """Haberi AI ile puanla ve yorumla.
 
@@ -72,43 +217,58 @@ async def score_news(
         ticker: Hisse kodu (orn: "ENDAE")
         raw_text: Telegram mesajinin ham metni
         kap_content: KAP bildirim tam metni (varsa)
+        kap_url: KAP bildirim linki (varsa)
 
     Returns:
-        {"score": int|None, "summary": str|None}
-        Hata durumunda her iki deger None olur — akis kirilmaz.
+        {"score": int|None, "summary": str|None, "kap_url": str|None}
+        Hata durumunda score+summary None olur — akis kirilmaz.
     """
     api_key = _get_api_key()
     if not api_key:
         logger.debug("AI News Scorer: ABACUS_API_KEY bos, devre disi")
-        return {"score": None, "summary": None}
+        return {"score": None, "summary": None, "kap_url": kap_url}
 
-    # KAP icerigi varsa onu kullan, yoksa Telegram ham metnini
-    content = kap_content if kap_content else raw_text
-    # Cok uzun metinleri kes (token limiti icin)
-    content = content[:3000] if content else ""
+    # KAP icerigi varsa birincil kaynak, yoksa Telegram metni
+    has_kap = bool(kap_content and len(kap_content.strip()) > 50)
+    content = kap_content if has_kap else raw_text
+    content = content[:4000] if content else ""  # gpt-4o daha uzun metin isleyebilir
 
     if not content.strip():
-        return {"score": None, "summary": None}
+        return {"score": None, "summary": None, "kap_url": kap_url}
 
-    prompt = f"""Borsa Istanbul KAP bildirimi analizi:
+    # Kaynak bilgisini prompt'a ekle
+    source_info = "KAP Bildirim Tam Metni" if has_kap else "Telegram Kanal Ozeti (KAP erisilemedi)"
+
+    prompt = f"""Borsa Istanbul (BIST) KAP bildirimi analizi.
 
 Hisse: {ticker}
-Icerik:
-{content}
+Kaynak: {source_info}
 
-GOREV:
-1. Bu haberin hisse fiyatina etkisini 1-10 arasi puanla:
-   1-3: Olumsuz etki (kotu haber)
-   4-5: Notr / belirsiz
-   6-7: Hafif olumlu
-   8-10: Cok olumlu (iyi haber)
-2. Haberi Turkce 2 cumle ile ozetle (yatirimci bakis acisiyla)
+--- ICERIK ---
+{content}
+--- ICERIK SONU ---
+
+ANALIZ KURALLARI:
+1. Bu haberin HISSE FIYATINA muhtemel etkisini 1-10 arasi puanla:
+   1-2: Ciddi olumsuz (zarar, ceza, iflas, sermaye erimesi)
+   3-4: Olumsuz veya belirsiz (borcluluk artisi, dava, risk)
+   5: Notr — rutin bildirim, etki belirsiz
+   6-7: Hafif olumlu (yeni sozlesme, is birligi, buyume sinyali)
+   8-9: Guclu olumlu (rekor kar, bedelsiz, temettuu, buyuk ihale)
+   10: Cok guclu olumlu (sektoru degistirecek haber)
+
+2. DIKKAT: Sadece "pozitif haber" etiketi tasimasi YETMEZ.
+   - Rutin bildirimler (SPK onay, genel kurul) → 5
+   - Personel alimi gibi standart isler → 5-6
+   - Gercek impact analizi yap: haberin sirket degerine etkisini dusun
+
+3. Haberi yatirimci bakis acisiyla Turkce 2 cumle ile ozetle.
 
 SADECE asagidaki JSON formatinda yanit ver:
-{{"score": 8, "summary": "Iki cumlelik Turkce ozet."}}"""
+{{"score": 7, "summary": "Iki cumlelik Turkce ozet."}}"""
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
             resp = await client.post(
                 _ABACUS_URL,
                 headers={
@@ -116,16 +276,21 @@ SADECE asagidaki JSON formatinda yanit ver:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "gpt-4o-mini",
+                    "model": _AI_MODEL,
                     "messages": [
                         {
                             "role": "system",
-                            "content": "Sen bir borsa haberi analiz uzmanisin. Sadece JSON formatinda yanit ver.",
+                            "content": (
+                                "Sen deneyimli bir Borsa Istanbul yatirimci analistisin. "
+                                "KAP bildirimlerini objektif analiz edersin. "
+                                "Her habere yuksek puan vermezsin — gercek etkiyi degerlendirirsin. "
+                                "Sadece JSON formatinda yanit ver."
+                            ),
                         },
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0,
-                    "max_tokens": 300,
+                    "max_tokens": 400,
                 },
             )
             resp.raise_for_status()
@@ -156,12 +321,56 @@ SADECE asagidaki JSON formatinda yanit ver:
             summary = None
 
         logger.info(
-            "AI News Scorer: %s — skor=%s, ozet=%s",
-            ticker, score, (summary[:60] + "...") if summary and len(summary) > 60 else summary,
+            "AI News Scorer: %s — skor=%s, kaynak=%s, ozet=%s",
+            ticker, score,
+            "KAP" if has_kap else "Telegram",
+            (summary[:60] + "...") if summary and len(summary) > 60 else summary,
         )
 
-        return {"score": score, "summary": summary}
+        return {"score": score, "summary": summary, "kap_url": kap_url}
 
     except Exception as e:
         logger.warning("AI News Scorer: Abacus hatasi (%s) — %s", ticker, e)
-        return {"score": None, "summary": None}
+        return {"score": None, "summary": None, "kap_url": kap_url}
+
+
+# -------------------------------------------------------
+# MASTER FONKSIYON: KAP Bul + AI Puanla (Tek Cagri)
+# -------------------------------------------------------
+
+async def analyze_news(ticker: str, raw_text: str) -> dict:
+    """Tam AI analiz pipeline'i: KAP ara → icerik cek → AI puanla.
+
+    telegram_poller.py bu fonksiyonu cagirir.
+
+    Args:
+        ticker: Hisse kodu
+        raw_text: Telegram ham mesaj metni
+
+    Returns:
+        {
+            "score": int | None,
+            "summary": str | None,
+            "kap_url": str | None,
+        }
+    """
+    kap_content = None
+    kap_url = None
+
+    # Adim 1: KAP'tan bildirimi bul
+    try:
+        kap_result = await find_kap_disclosure_by_ticker(ticker)
+        if kap_result:
+            kap_content = kap_result.get("full_text")
+            kap_url = kap_result.get("kap_url")
+            logger.info("KAP eslestirme: %s → %s", ticker, kap_url)
+    except Exception as e:
+        logger.warning("KAP eslestirme hatasi (%s): %s", ticker, e)
+
+    # Adim 2: AI puanlama (KAP icerigi veya Telegram metni ile)
+    try:
+        result = await score_news(ticker, raw_text, kap_content, kap_url)
+        return result
+    except Exception as e:
+        logger.warning("AI puanlama hatasi (%s): %s", ticker, e)
+        return {"score": None, "summary": None, "kap_url": kap_url}

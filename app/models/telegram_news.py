@@ -74,6 +74,9 @@ class TelegramNews(Base):
     ai_summary: Mapped[str | None] = mapped_column(
         Text, comment="AI tarafindan uretilen 2 cumle ozet"
     )
+    kap_url: Mapped[str | None] = mapped_column(
+        Text, comment="KAP bildirim linki veya TradingView linki"
+    )
 
     # Zaman
     message_date: Mapped[datetime | None] = mapped_column(

@@ -283,3 +283,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v24 migration: telegram_news.kap_url (KAP bildirim linki)
+        try:
+            await conn.execute(
+                text("ALTER TABLE telegram_news ADD COLUMN IF NOT EXISTS kap_url TEXT")
+            )
+        except Exception:
+            pass

@@ -232,6 +232,7 @@ class TelegramNewsOut(BaseModel):
     theoretical_open: Optional[Decimal] = None
     ai_score: Optional[int] = None
     ai_summary: Optional[str] = None
+    kap_url: Optional[str] = None
     message_date: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
