@@ -1086,8 +1086,19 @@ def tweet_yearly_summary(
 # ================================================================
 # 11. BIST 50 KAP HABERI
 # ================================================================
-def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool:
-    """BIST 50 hissesi icin KAP haberi tweeti."""
+def tweet_bist30_news(
+    ticker: str,
+    matched_keyword: str,
+    sentiment: str,
+    ai_score: int | None = None,
+    ai_summary: str | None = None,
+    kap_url: str | None = None,
+) -> bool:
+    """BIST 50 hissesi icin KAP haberi tweeti.
+
+    AI skoru ve ozeti varsa tweet'e dahil edilir.
+    AI skoru yoksa eski formata fallback.
+    """
     try:
         # Görsel yolu
         img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
@@ -1107,16 +1118,68 @@ def tweet_bist30_news(ticker: str, matched_keyword: str, sentiment: str) -> bool
         if not clean_kw or "BULUNAMADI" in clean_kw.upper() or clean_kw == ticker:
             clean_kw = "Yeni KAP Bildirimi"
 
+        # AI skoru emojisi
+        if ai_score and ai_score >= 8:
+            score_emoji = "🔥"
+        elif ai_score and ai_score >= 6:
+            score_emoji = "📊"
+        else:
+            score_emoji = ""
+
+        # AI bolumu (varsa)
+        ai_section = ""
+        if ai_score is not None:
+            ai_section += f"\n{score_emoji} AI Analiz: {ai_score}/10\n"
+        if ai_summary:
+            # Tweet karakter limiti — ozeti 120 karakterle sinirla
+            summary_text = ai_summary[:120]
+            if len(ai_summary) > 120:
+                summary_text += "..."
+            ai_section += f"💬 {summary_text}\n"
+
+        # KAP link bolumu (varsa)
+        kap_section = ""
+        if kap_url:
+            kap_section = f"\n📎 KAP: {kap_url}\n"
+
         text = (
-            f"{emoji} #{ticker} \u2014 Haber Bildirimi\n\n"
+            f"{emoji} #{ticker} — Haber Bildirimi\n\n"
             f"Anlık Haber Yakalandı {now_str}\n\n"
-            f"İlişkili Kelime : {clean_kw}\n\n"
-            f"{_get_setting('T11_TANITIM')}\n\n"
+            f"İlişkili Kelime : {clean_kw}\n"
+            f"{ai_section}"
+            f"{kap_section}\n"
             f"{_get_setting('T11_CTA')}\n"
-            f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
+            f"📲 {HALKAARZ_LINK}\n"
             f"#BIST50 #{ticker} #KAP #Borsa"
         )
-        
+
+        # Twitter 280 karakter limiti — asarsa ozeti kirp
+        if len(text) > 280:
+            # AI ozeti kaldir, sadece skor birak
+            ai_section_short = ""
+            if ai_score is not None:
+                ai_section_short = f"\n{score_emoji} AI: {ai_score}/10\n"
+            text = (
+                f"{emoji} #{ticker} — Haber Bildirimi\n\n"
+                f"Anlık Haber Yakalandı {now_str}\n\n"
+                f"İlişkili Kelime : {clean_kw}\n"
+                f"{ai_section_short}"
+                f"{kap_section}\n"
+                f"{_get_setting('T11_CTA')}\n"
+                f"📲 {HALKAARZ_LINK}\n"
+                f"#BIST50 #{ticker} #KAP #Borsa"
+            )
+
+        # Hala 280'i asarsa kap linkini de kaldir
+        if len(text) > 280:
+            text = (
+                f"{emoji} #{ticker} — Haber\n\n"
+                f"{now_str} | {clean_kw}\n"
+                f"{ai_section_short if ai_score else ''}"
+                f"\n📲 {HALKAARZ_LINK}\n"
+                f"#BIST50 #{ticker} #KAP"
+            )
+
         if img_path:
             return _safe_tweet_with_media(text, img_path)
         else:

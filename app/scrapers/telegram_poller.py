@@ -473,29 +473,39 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             # ----------------------------------------------------------------
             # TWITTER ENTEGRASYONU (Sadece BIST 50)
+            # AI skoru dusukse tweet de atilmaz (notr/olumsuz haber)
             # ----------------------------------------------------------------
-            try:
-                # BIST 50 kontrolu icin import — lazy import (dongu icinde ama performans sorunu olmaz)
-                from app.services.news_service import get_bist50_tickers_sync
-                from app.services.twitter_service import tweet_bist30_news
+            if should_notify:  # AI skor filtresi: ai_score >= 6 veya None
+                try:
+                    from app.services.news_service import get_bist50_tickers_sync
+                    from app.services.twitter_service import tweet_bist30_news
 
-                if ticker and ticker.upper() in get_bist50_tickers_sync():
-                    # Tweet metni icin keyword temizligi
-                    tweet_kw = matched_kw
-                    if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
-                        tweet_kw = "Yeni KAP Bildirimi"
+                    if ticker and ticker.upper() in get_bist50_tickers_sync():
+                        tweet_kw = matched_kw
+                        if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
+                            tweet_kw = "Yeni KAP Bildirimi"
 
-                    # Sentiment hep positive kabul ediliyor bu poller'da
-                    # tweet_bist30_news senkron fonksiyon — _safe_tweet exception yutar.
-                    tw_success = tweet_bist30_news(ticker, tweet_kw, "positive")
-                    logger.info("Twitter BIST50 tweet atildi: %s (basarili=%s)", ticker, tw_success)
+                        tw_success = tweet_bist30_news(
+                            ticker,
+                            tweet_kw,
+                            "positive",
+                            ai_score=ai_score,
+                            ai_summary=ai_summary,
+                            kap_url=kap_url,
+                        )
+                        logger.info(
+                            "Twitter BIST50 tweet atildi: %s (basarili=%s, ai_score=%s)",
+                            ticker, tw_success, ai_score,
+                        )
 
-                    # Admin Telegram bildirimi
-                    from app.services.admin_telegram import notify_tweet_sent
-                    await notify_tweet_sent("bist50_kap_haber", ticker, tw_success, f"Anahtar: {tweet_kw}")
+                        from app.services.admin_telegram import notify_tweet_sent
+                        await notify_tweet_sent(
+                            "bist50_kap_haber", ticker, tw_success,
+                            f"Anahtar: {tweet_kw} | AI: {ai_score}/10",
+                        )
 
-            except Exception as tw_err:
-                logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)
+                except Exception as tw_err:
+                    logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)
 
         if new_count > 0:
             await session.commit()
