@@ -338,14 +338,16 @@ SADECE asagidaki JSON formatinda yanit ver:
 # MASTER FONKSIYON: KAP Bul + AI Puanla (Tek Cagri)
 # -------------------------------------------------------
 
-async def analyze_news(ticker: str, raw_text: str) -> dict:
+async def analyze_news(ticker: str, raw_text: str, max_retries: int = 3) -> dict:
     """Tam AI analiz pipeline'i: KAP ara → icerik cek → AI puanla.
 
+    KAP'a ilk seferde ulasilamazsa 5 saniye aralikla 2 kez daha dener.
     telegram_poller.py bu fonksiyonu cagirir.
 
     Args:
         ticker: Hisse kodu
         raw_text: Telegram ham mesaj metni
+        max_retries: KAP arama deneme sayisi (varsayilan: 3)
 
     Returns:
         {
@@ -354,18 +356,39 @@ async def analyze_news(ticker: str, raw_text: str) -> dict:
             "kap_url": str | None,
         }
     """
+    import asyncio
+
     kap_content = None
     kap_url = None
 
-    # Adim 1: KAP'tan bildirimi bul
-    try:
-        kap_result = await find_kap_disclosure_by_ticker(ticker)
-        if kap_result:
-            kap_content = kap_result.get("full_text")
-            kap_url = kap_result.get("kap_url")
-            logger.info("KAP eslestirme: %s → %s", ticker, kap_url)
-    except Exception as e:
-        logger.warning("KAP eslestirme hatasi (%s): %s", ticker, e)
+    # Adim 1: KAP'tan bildirimi bul (retry ile — 5 sn aralikla)
+    for attempt in range(1, max_retries + 1):
+        try:
+            kap_result = await find_kap_disclosure_by_ticker(ticker)
+            if kap_result and kap_result.get("full_text"):
+                kap_content = kap_result.get("full_text")
+                kap_url = kap_result.get("kap_url")
+                logger.info(
+                    "KAP eslestirme basarili (deneme %d/%d): %s → %s",
+                    attempt, max_retries, ticker, kap_url,
+                )
+                break  # Basarili — donguden cik
+            else:
+                if attempt < max_retries:
+                    logger.info(
+                        "KAP bulunamadi (%s), %d sn sonra tekrar deneniyor (%d/%d)...",
+                        ticker, 5, attempt, max_retries,
+                    )
+                    await asyncio.sleep(5)  # 5 saniye bekle, tekrar dene
+                else:
+                    logger.info(
+                        "KAP %d denemede bulunamadi (%s), Telegram metniyle devam",
+                        max_retries, ticker,
+                    )
+        except Exception as e:
+            logger.warning("KAP arama hatasi (deneme %d): %s — %s", attempt, ticker, e)
+            if attempt < max_retries:
+                await asyncio.sleep(5)
 
     # Adim 2: AI puanlama (KAP icerigi veya Telegram metni ile)
     try:

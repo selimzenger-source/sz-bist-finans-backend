@@ -1256,26 +1256,28 @@ async def admin_backfill_ai_scores(
 ):
     """Admin: Mevcut telegram_news kayitlarini AI ile puanla (bir seferlik backfill).
 
-    Sadece ai_score=NULL ve message_type seans_ici/borsa_kapali olanlari isler.
+    force=true: Zaten puanlanmis kayitlari da yeniden puanla (V2 upgrade icin).
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     limit = min(payload.get("limit", 35), 50)
+    force = payload.get("force", False)
 
     from app.models.telegram_news import TelegramNews
     from app.services.ai_news_scorer import analyze_news
 
-    # ai_score NULL + seans_ici/borsa_kapali + ticker var
+    # Query: seans_ici/borsa_kapali + ticker var
+    query = select(TelegramNews).where(
+        TelegramNews.message_type.in_(["seans_ici_pozitif", "borsa_kapali"]),
+        TelegramNews.ticker.isnot(None),
+    )
+    # force=false: sadece ai_score NULL olanlari isle
+    if not force:
+        query = query.where(TelegramNews.ai_score.is_(None))
+
     result = await db.execute(
-        select(TelegramNews)
-        .where(
-            TelegramNews.ai_score.is_(None),
-            TelegramNews.message_type.in_(["seans_ici_pozitif", "borsa_kapali"]),
-            TelegramNews.ticker.isnot(None),
-        )
-        .order_by(TelegramNews.created_at.desc())
-        .limit(limit)
+        query.order_by(TelegramNews.created_at.desc()).limit(limit)
     )
     records = list(result.scalars().all())
 
@@ -1334,7 +1336,7 @@ async def admin_test_ai_scorer(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    from app.services.ai_news_scorer import _get_api_key, _ABACUS_URL, score_news
+    from app.services.ai_news_scorer import _get_api_key, _ABACUS_URL, _AI_MODEL, analyze_news
 
     api_key = _get_api_key()
     key_preview = (api_key[:8] + "...") if api_key else "EMPTY"
@@ -1346,7 +1348,8 @@ async def admin_test_ai_scorer(
     test_result = None
     test_error = None
     try:
-        result = await score_news(test_ticker, test_text)
+        # analyze_news: KAP arama + AI puanlama (tam pipeline, retry=1 test icin)
+        result = await analyze_news(test_ticker, test_text, max_retries=1)
         test_result = result
     except Exception as e:
         test_error = str(e)
@@ -1354,6 +1357,7 @@ async def admin_test_ai_scorer(
     return {
         "api_key_preview": key_preview,
         "abacus_url": _ABACUS_URL,
+        "ai_model": _AI_MODEL,
         "test_ticker": test_ticker,
         "test_result": test_result,
         "test_error": test_error,
