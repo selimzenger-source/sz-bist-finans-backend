@@ -384,9 +384,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             parsed_body = "\n".join(body_parts)
 
             # --- AI Puanlama (KAP icerik + Abacus AI) ---
+            # Sadece seans_ici ve borsa_kapali icin AI yorum uret
+            # seans_disi_acilis sadece gap verisi — AI yoruma gerek yok
             ai_score = None
             ai_summary = None
-            if ticker:
+            if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import fetch_kap_content, score_news
                     kap_content = await fetch_kap_content(kap_id)

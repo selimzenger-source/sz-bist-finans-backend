@@ -1247,6 +1247,70 @@ async def admin_test_kap_notification(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/backfill-ai-scores")
+@limiter.limit("3/minute")
+async def admin_backfill_ai_scores(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Mevcut telegram_news kayitlarini AI ile puanla (bir seferlik backfill).
+
+    Sadece ai_score=NULL ve message_type seans_ici/borsa_kapali olanlari isler.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    limit = min(payload.get("limit", 35), 50)
+
+    from app.models.telegram_news import TelegramNews
+    from app.services.ai_news_scorer import score_news
+
+    # ai_score NULL + seans_ici/borsa_kapali + ticker var
+    result = await db.execute(
+        select(TelegramNews)
+        .where(
+            TelegramNews.ai_score.is_(None),
+            TelegramNews.message_type.in_(["seans_ici_pozitif", "borsa_kapali"]),
+            TelegramNews.ticker.isnot(None),
+        )
+        .order_by(TelegramNews.created_at.desc())
+        .limit(limit)
+    )
+    records = list(result.scalars().all())
+
+    scored = 0
+    failed = 0
+    details = []
+
+    for record in records:
+        try:
+            ai_result = await score_news(record.ticker, record.raw_text)
+            s = ai_result.get("score")
+            sm = ai_result.get("summary")
+            if s is not None:
+                record.ai_score = s
+                record.ai_summary = sm
+                scored += 1
+                details.append({"ticker": record.ticker, "score": s, "summary": (sm or "")[:80]})
+            else:
+                failed += 1
+                details.append({"ticker": record.ticker, "score": None, "error": "AI skoru uretilmedi"})
+        except Exception as e:
+            failed += 1
+            details.append({"ticker": record.ticker, "score": None, "error": str(e)[:100]})
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "total": len(records),
+        "scored": scored,
+        "failed": failed,
+        "details": details,
+    }
+
+
 @app.post("/api/v1/admin/spk-bulletin-status")
 @limiter.limit("10/minute")
 async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
