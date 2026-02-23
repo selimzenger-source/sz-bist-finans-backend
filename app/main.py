@@ -1301,7 +1301,10 @@ async def admin_backfill_ai_scores(
 
     for record in records:
         try:
-            ai_result = await analyze_news(record.ticker, record.raw_text)
+            ai_result = await analyze_news(
+                record.ticker, record.raw_text,
+                matriks_id=record.kap_notification_id,
+            )
             s = ai_result.get("score")
             sm = ai_result.get("summary")
             kurl = ai_result.get("kap_url")
@@ -1362,11 +1365,13 @@ async def admin_test_ai_scorer(
     test_text = payload.get("text", "BIMAS bedelsiz sermaye artirimi karari aldi. Yonetim kurulu 1:1 oraninda bedelsiz sermaye artirimi karari almistir.")
     test_ticker = payload.get("ticker", "BIMAS")
 
+    test_matriks_id = payload.get("matriks_id", None)
+
     test_result = None
     test_error = None
     try:
-        # analyze_news: KAP arama + AI puanlama (tam pipeline, retry=1 test icin)
-        result = await analyze_news(test_ticker, test_text, max_retries=1)
+        # analyze_news V3: TradingView icerik + AI puanlama
+        result = await analyze_news(test_ticker, test_text, matriks_id=test_matriks_id)
         test_result = result
     except Exception as e:
         test_error = str(e)

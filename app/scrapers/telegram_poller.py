@@ -383,7 +383,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 body_parts.append(f"Beklenen İşlem Günü: {expected_date.isoformat()}")
             parsed_body = "\n".join(body_parts)
 
-            # --- AI Puanlama V2 (KAP eslestirme + Abacus AI gpt-4o) ---
+            # --- AI Puanlama V3 (TradingView icerik + Abacus AI gpt-4o) ---
             # Sadece seans_ici ve borsa_kapali icin AI yorum uret
             # seans_disi_acilis sadece gap verisi — AI yoruma gerek yok
             ai_score = None
@@ -392,14 +392,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import analyze_news
-                    ai_result = await analyze_news(ticker, text)
+                    ai_result = await analyze_news(
+                        ticker, text, matriks_id=kap_id,
+                    )
                     ai_score = ai_result.get("score")
                     ai_summary = ai_result.get("summary")
                     kap_url = ai_result.get("kap_url")
                     if ai_score:
                         logger.info(
                             "AI puanlama: %s — skor=%s, kap=%s",
-                            ticker, ai_score, "var" if kap_url else "yok",
+                            ticker, ai_score, kap_url or "yok",
                         )
                 except Exception as ai_err:
                     logger.warning("AI puanlama hatasi (%s): %s", ticker, ai_err)
