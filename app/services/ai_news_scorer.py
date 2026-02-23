@@ -390,9 +390,37 @@ async def analyze_news(ticker: str, raw_text: str, max_retries: int = 3) -> dict
             if attempt < max_retries:
                 await asyncio.sleep(5)
 
+    # KAP bulunamazsa admin'e Telegram bildirimi gonder
+    if not kap_content:
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(
+                f"⚠️ KAP Erişim Sorunu\n\n"
+                f"Ticker: {ticker}\n"
+                f"KAP {max_retries} denemede erisilemedi.\n"
+                f"Telegram metniyle AI analiz devam ediyor.\n"
+                f"Ham metin: {raw_text[:100]}..."
+            )
+        except Exception:
+            pass  # Admin bildirimi basarisiz olursa akis devam etsin
+
     # Adim 2: AI puanlama (KAP icerigi veya Telegram metni ile)
     try:
         result = await score_news(ticker, raw_text, kap_content, kap_url)
+
+        # AI puanlama basarisiz olursa da admin'e bildir
+        if result.get("score") is None:
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"⚠️ AI Puanlama Başarısız\n\n"
+                    f"Ticker: {ticker}\n"
+                    f"KAP icerik: {'Var' if kap_content else 'Yok'}\n"
+                    f"Skor uretilemedi — null kaydedilecek."
+                )
+            except Exception:
+                pass
+
         return result
     except Exception as e:
         logger.warning("AI puanlama hatasi (%s): %s", ticker, e)

@@ -1267,6 +1267,20 @@ async def admin_backfill_ai_scores(
     from app.models.telegram_news import TelegramNews
     from app.services.ai_news_scorer import analyze_news
 
+    # Debug: toplam kayit sayisini kontrol et
+    from sqlalchemy import func
+    total_count_q = await db.execute(
+        select(func.count()).select_from(TelegramNews)
+    )
+    total_in_db = total_count_q.scalar() or 0
+
+    type_count_q = await db.execute(
+        select(func.count()).select_from(TelegramNews).where(
+            TelegramNews.message_type.in_(["seans_ici_pozitif", "borsa_kapali"]),
+        )
+    )
+    type_count = type_count_q.scalar() or 0
+
     # Query: seans_ici/borsa_kapali + ticker var
     query = select(TelegramNews).where(
         TelegramNews.message_type.in_(["seans_ici_pozitif", "borsa_kapali"]),
@@ -1322,6 +1336,9 @@ async def admin_backfill_ai_scores(
         "total": len(records),
         "scored": scored,
         "failed": failed,
+        "force": force,
+        "debug_total_in_db": total_in_db,
+        "debug_type_match": type_count,
         "details": details,
     }
 
