@@ -46,6 +46,11 @@ _JITTER_MAX = 180  # 3 dakika
 # Begeni sikligi: her N reply'da 1 begeni
 _LIKE_EVERY_N = 5
 
+# Twitter API rate limit — Basic tier: 10 req / 15 dk (user tweets endpoint)
+# Her döngüde max bu kadar hedef kontrol edilir, geri kalanı sıradaki döngüye kalır
+_MAX_TARGETS_PER_CYCLE = 8  # 10 limitin altında kalıyoruz (güvenli)
+_twitter_rate_limited = False  # 429 alınca True olur, sonraki döngüde resetlenir
+
 
 # -------------------------------------------------------
 # Yardımcı: Credentials
@@ -294,6 +299,14 @@ GÖREV: Tweet'e 3 FARKLI reply önerisi üret. Her biri farklı ton ve uzunlukta
 - Her reply birbirinden FARKLI olmalı: biri onay, biri yorum, biri soru veya espri
 - Cümle kalıplarını TEKRARLAMA — "güzel tespit" veya "yakından takip" gibi ifadeleri aynı sette iki kez kullanma
 
+═══ NOKTALAMA VE RESMİYET ═══
+- ÇOK ÖNEMLİ: Aşırı noktalama KULLANMA — virgül, noktalı virgül, iki nokta fazla koymak resmi ve robot gibi görünür
+- Twitter'da insanlar çoğu zaman virgülsüz yazar, kısa cümleler kurar
+- "Bu gelişme, sektördeki genel trend doğrultusunda, olumlu bir sinyal veriyor." ← ÇOK RESMİ, YAPMA
+- "Bu gelişme olumlu sektör için iyi gidiyor" ← DOĞAL, BÖYLE YAZ
+- Akademik veya haber dili KULLANMA — sohbet dili kullan
+- Nokta kullanmak zorunlu değil, özellikle kısa reply'larda
+
 ═══ 3 REPLY FORMATI ═══
 1. UZUN YORUM (12-20 kelime): Kendi düşünceni, bakış açını ekle. Tweet'teki konuyu genişlet veya farklı bir açıdan değerlendir. Genel geçer değil, spesifik ol.
 2. KISA TEPKİ (3-8 kelime): Doğal insan tepkisi. "Valla haklısın", "Bunu bekliyordum", "Tam zamanında geldi bu haber"
@@ -326,24 +339,24 @@ YASAK — kesinlikle reply ATMA (is_safe: false):
 
 ═══ ÖRNEK İYİ REPLY'LAR ═══
 Tweet: "BIST güne alıcılı başladı"
-→ "Sabah seansı güzel açıldı, bakalım öğleden sonra devam edecek mi bu ivme"
-→ "Güzel başlangıç 📈"
-→ "Dış piyasalardan da destek var, umarım gün sonuna kadar tutunur"
+→ "sabah seansı güzel açıldı bakalım öğleden sonra da devam eder mi"
+→ "güzel başlangıç 📈"
+→ "dış piyasalardan da destek var umarım gün sonuna kadar tutunur"
 
 Tweet: "X şirketinin bilançosu beklentilerin üstünde geldi"
-→ "Bunu bekliyordum aslında, sektördeki genel trend de olumlu zaten"
-→ "Güçlü bilanço geldi valla"
-→ "Peki bir sonraki çeyrek için ne bekliyorsunuz hocam?"
+→ "bunu bekliyordum aslında sektördeki genel trend de olumlu zaten"
+→ "güçlü bilanço geldi valla"
+→ "peki bir sonraki çeyrek için ne bekliyorsunuz hocam"
 
 Tweet: "Yeni halka arz onaylandı: ABC Teknoloji"
-→ "Teknoloji sektöründen bir halka arz daha, sektöre ilgi artıyor belli ki"
-→ "Bir bakmak lazım buna 🤔"
-→ "Halka arz takvimi iyice yoğunlaştı bu aralar, güzel hareketlilik var piyasada"
+→ "teknoloji sektöründen bi halka arz daha sektöre ilgi artıyor belli ki"
+→ "bi bakmak lazım buna 🤔"
+→ "halka arz takvimi iyice yoğunlaştı bu aralar güzel hareketlilik var"
 
 Tweet: "Merkez Bankası faiz kararını açıkladı"
-→ "Piyasa bunu nasıl yorumlayacak merak ediyorum, ilk tepkiler karışık gibi"
-→ "Beklentiler dahilindeydi aslında"
-→ "Faiz tarafında sürpriz olmadı ama asıl mesele ileriye dönük sinyal bence"
+→ "piyasa bunu nasıl yorumlayacak merak ediyorum ilk tepkiler karışık gibi"
+→ "beklentiler dahilindeydi aslında"
+→ "faiz tarafında sürpriz olmadı ama asıl mesele ileriye dönük sinyal bence"
 
 ═══ KÖTÜ REPLY (YAPMA) ═══
 - "5000 seviyesi kritik" ← RAKAM, YASAK
@@ -352,6 +365,8 @@ Tweet: "Merkez Bankası faiz kararını açıkladı"
 - "Bu gelişme olumlu bir sinyal veriyor" ← KLİŞE, HER YERDE AYNI
 - "Güzel tespit, yakından takip etmek lazım" ← AYNI KALIBI HER SEFERINDE KULLANMA
 - 3 reply'ın hepsi aynı tonda ve uzunlukta ← ÇEŞİTLİLİK YOK
+- "Bu gelişme, sektördeki trend doğrultusunda, olumlu bir sinyal veriyor." ← ÇOK FAZLA VİRGÜL, RESMİ
+- "Kesinlikle katılıyorum; önemli bir adım." ← NOKTALAMA FAZLA, ROBOT GİBİ
 
 ═══ JSON ÇIKTI ═══
 {"is_safe": true, "reason": "", "replies": ["uzun yorum", "kısa tepki", "soru/katılım"]}
@@ -576,6 +591,10 @@ async def get_user_id_by_username(username: str) -> str | None:
             if user_id:
                 logger.info(f"Twitter user ID çözümlendi: @{username} → {user_id}")
                 return user_id
+        elif response.status_code == 429:
+            global _twitter_rate_limited
+            _twitter_rate_limited = True
+            logger.warning(f"Twitter API RATE LIMITED (429): user lookup @{username}")
         elif response.status_code == 404:
             logger.warning(f"Twitter kullanıcı bulunamadı: @{username}")
         else:
@@ -655,6 +674,17 @@ async def fetch_user_recent_tweets(
                 params=query_params,
                 headers={"Authorization": auth_header},
             )
+
+        if response.status_code == 429:
+            global _twitter_rate_limited
+            _twitter_rate_limited = True
+            reset_ts = response.headers.get("x-rate-limit-reset", "?")
+            logger.warning(
+                "Twitter API RATE LIMITED (429): user_id=%s, reset=%s — "
+                "bu döngüdeki kalan hedefler atlanacak",
+                user_id, reset_ts,
+            )
+            return []
 
         if response.status_code != 200:
             logger.error(f"User tweets hatası: {user_id} — HTTP {response.status_code}")
@@ -834,18 +864,29 @@ async def auto_reply_cycle():
     - İlk çalışmada: mevcut tweetlerin ID'sini kaydeder, reply ATMAZ
     - Her reply arasında 30sn-3dk rastgele jitter (doğal görünüm)
     - Her 5 reply'da 1 beğeni atar
-    - Günlük 20 reply limiti (gece 00:00'da sıfırlanır)
+    - Günlük reply limiti (DB'den, gece 00:00'da sıfırlanır)
     - Siyasi/borsa dışı tweetlere reply ATMAZ (AI filtresi)
+
+    Twitter API Rate Limit Yönetimi:
+    - Basic tier: 10 req / 15 dk (user tweets endpoint)
+    - Her döngüde max _MAX_TARGETS_PER_CYCLE hedef kontrol edilir
+    - last_reply_at ile sıralama yapılır (en uzun süredir kontrol edilmeyen önce)
+    - 429 alınca döngü hemen durur
     """
+    global _twitter_rate_limited
+
     if _AUTO_REPLY_LOCK.locked():
         logger.debug("Auto-reply zaten çalışıyor, atlıyorum")
         return
 
     async with _AUTO_REPLY_LOCK:
         try:
+            # Her döngü başında rate limit flag'ini resetle
+            _twitter_rate_limited = False
+
             # Toggle kontrolü
             if not await _is_auto_reply_enabled():
-                logger.debug("Auto-reply devre dışı (toggle kapalı)")
+                logger.info("Auto-reply devre dışı (toggle kapalı)")
                 return
 
             # Seed default targets (ilk çalışmada)
@@ -858,7 +899,11 @@ async def auto_reply_cycle():
             # Günlük limit (DB'den okunur — admin panelden ayarlanabilir)
             daily_limit = await _get_daily_limit()
             today_count = await _get_today_reply_count()
-            logger.info(f"Reply durum: bugün {today_count}/{daily_limit}, rate_limit=30dk")
+            logger.info(
+                "Auto-reply döngü başlıyor: bugün %d/%d, rate_limit=30dk/hesap, "
+                "max_hedef/döngü=%d",
+                today_count, daily_limit, _MAX_TARGETS_PER_CYCLE,
+            )
             if today_count >= daily_limit:
                 logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit} — durduruluyor")
                 return
@@ -873,21 +918,46 @@ async def auto_reply_cycle():
                 targets = list(result.scalars().all())
 
                 if not targets:
-                    logger.debug("Aktif reply hedefi yok")
+                    logger.info("Aktif reply hedefi yok — döngü bitti")
                     return
 
-                logger.info(
-                    f"Auto-reply tarama: {len(targets)} hedef, bugün {today_count} reply, kalan {remaining}"
+                # ─── AKILLI SIRALAMA ───
+                # En uzun süredir kontrol edilmeyen hedefler önce
+                # (last_reply_at None olanlar en başa, sonra eskiden yeniye)
+                targets.sort(
+                    key=lambda t: t.last_reply_at or datetime.min.replace(tzinfo=timezone.utc)
                 )
 
-                # Hedefleri karıştır — her seferinde farklı sıra
-                random.shuffle(targets)
+                logger.info(
+                    "Auto-reply: %d hedef toplam, kalan quota %d, "
+                    "bu döngü max %d hedef kontrol edilecek",
+                    len(targets), remaining, _MAX_TARGETS_PER_CYCLE,
+                )
 
                 replies_sent = 0
                 total_liked = 0
+                api_calls = 0  # Twitter API çağrı sayacı
+                skipped_rate_limit = 0
+                skipped_no_tweets = 0
+                skipped_init = 0
 
                 for target in targets:
                     if replies_sent >= remaining:
+                        logger.info("Günlük kota doldu, döngü duruyor")
+                        break
+
+                    # ─── TWITTER API RATE LIMIT KORUMASI ───
+                    if _twitter_rate_limited:
+                        logger.warning(
+                            "Twitter API rate limited — kalan hedefler sonraki döngüye bırakılıyor"
+                        )
+                        break
+
+                    if api_calls >= _MAX_TARGETS_PER_CYCLE:
+                        logger.info(
+                            "Döngü API limiti doldu (%d/%d) — kalan hedefler sonraki döngüye",
+                            api_calls, _MAX_TARGETS_PER_CYCLE,
+                        )
                         break
 
                     # ─── HESAP BAZLI RATE LIMIT (30 dk) ───
@@ -896,16 +966,16 @@ async def auto_reply_cycle():
                     if target.last_reply_at:
                         seconds_since = (now_utc - target.last_reply_at).total_seconds()
                         if seconds_since < 1800:  # 30 dakika = 1800 saniye
-                            logger.info(
-                                "Rate limit: @%s — son reply %d dk önce, atlanıyor",
-                                target.username, seconds_since // 60,
-                            )
-                            continue
+                            skipped_rate_limit += 1
+                            continue  # Sessiz — çok fazla log üretmesin
 
                     # User ID çözümle (cache'de yoksa API'den çek)
                     user_id = target.twitter_user_id
                     if not user_id:
                         user_id = await get_user_id_by_username(target.username)
+                        api_calls += 1
+                        if _twitter_rate_limited:
+                            break
                         if user_id:
                             target.twitter_user_id = user_id
                             await session.flush()
@@ -914,32 +984,39 @@ async def auto_reply_cycle():
                             continue
 
                     # ─── İLK ÇALIŞMA KONTROLÜ ───
-                    # last_seen_tweet_id yoksa: mevcut tweetlerin en yenisini kaydet, reply ATMA
                     if not target.last_seen_tweet_id:
                         init_tweets = await fetch_user_recent_tweets(user_id)
+                        api_calls += 1
+                        if _twitter_rate_limited:
+                            break
                         if init_tweets:
-                            # En yeni tweet ID'yi kaydet
                             newest_id = max(t["id"] for t in init_tweets)
                             target.last_seen_tweet_id = newest_id
                             await session.flush()
                             logger.info(
-                                f"İlk tarama @{target.username}: {len(init_tweets)} mevcut tweet atlandı, "
-                                f"since_id={newest_id} kaydedildi"
+                                "İlk tarama @%s: %d tweet atlandı, since_id=%s",
+                                target.username, len(init_tweets), newest_id,
                             )
                         else:
                             logger.info(f"İlk tarama @{target.username}: tweet bulunamadı")
-                        continue  # Bu hedef için bu döngüde reply ATMA
+                        skipped_init += 1
+                        continue
 
                     # ─── YENİ TWEETLERİ ÇEK (since_id ile) ───
                     tweets = await fetch_user_recent_tweets(
                         user_id,
                         since_id=target.last_seen_tweet_id,
                     )
+                    api_calls += 1
+
+                    if _twitter_rate_limited:
+                        break
 
                     if not tweets:
+                        skipped_no_tweets += 1
                         continue
 
-                    # En yeni tweet ID'yi güncelle (bir sonraki döngü için)
+                    # En yeni tweet ID'yi güncelle
                     newest_id = max(t["id"] for t in tweets)
                     target.last_seen_tweet_id = newest_id
                     await session.flush()
@@ -996,7 +1073,7 @@ async def auto_reply_cycle():
                             )
                             continue
 
-                        # Rastgele reply seç (her seferinde farklı ton)
+                        # Rastgele reply seç
                         reply_options = ai_result.get("replies", [])
                         if not reply_options:
                             continue
@@ -1023,12 +1100,12 @@ async def auto_reply_cycle():
                                 reply_tweet_id=send_result.get("reply_tweet_id"),
                                 status="replied",
                             ))
-                            # Hesap bazlı cooldown güncelle
                             target.last_reply_at = datetime.now(timezone.utc)
                             await session.flush()
                             replies_sent += 1
                             logger.info(
-                                f"Auto-reply #{replies_sent}: @{target.username} → \"{chosen_reply[:60]}\""
+                                f"Auto-reply #{today_count + replies_sent}: "
+                                f"@{target.username} → \"{chosen_reply[:60]}\""
                             )
 
                             # ─── BEĞENİ: Her 5 reply'da 1 beğeni ───
@@ -1054,7 +1131,10 @@ async def auto_reply_cycle():
                 await session.commit()
 
             logger.info(
-                f"Auto-reply döngü tamamlandı: {replies_sent} reply, {total_liked} beğeni"
+                "Auto-reply döngü bitti: %d reply, %d beğeni, %d API call, "
+                "atlandı: %d rate-limit, %d tweet-yok, %d ilk-tarama",
+                replies_sent, total_liked, api_calls,
+                skipped_rate_limit, skipped_no_tweets, skipped_init,
             )
 
         except Exception as e:
