@@ -678,8 +678,9 @@ async def create_stock_notification(
     db: AsyncSession = Depends(get_db),
 ):
     """Hisse bazli bildirim aboneligi satin al."""
+    # Row-level lock — ayni kullanicidan gelen esanli isteklerde race condition engellenir
     user_result = await db.execute(
-        select(User).where(User.device_id == device_id)
+        select(User).where(User.device_id == device_id).with_for_update()
     )
     user = user_result.scalar_one_or_none()
     if not user:
@@ -811,19 +812,22 @@ async def deactivate_all_stock_notifications(
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
+    # Sadece tekil abonelikleri iptal et — bundle (3 aylik/yillik) paketleri KORUYORUZ
+    # Bundle'lar ayri bir satin alma, deactivate-all sadece tekil hisse bazli abonelikleri etkiler
     result = await db.execute(
         update(StockNotificationSubscription)
         .where(
             and_(
                 StockNotificationSubscription.user_id == user.id,
                 StockNotificationSubscription.is_active == True,
+                StockNotificationSubscription.is_annual_bundle == False,
             )
         )
         .values(is_active=False)
     )
     count = result.rowcount
     await db.commit()
-    return {"message": f"{count} abonelik iptal edildi", "deactivated_count": count}
+    return {"message": f"{count} tekil abonelik iptal edildi (bundle paketler korundu)", "deactivated_count": count}
 
 
 @app.patch("/api/v1/users/{device_id}/stock-notifications/{sub_id}/mute")
@@ -3306,6 +3310,45 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
             }
             price = bundle_prices.get(product_id) or NOTIFICATION_TIER_PRICES.get(notif_type, {}).get("price_tl", 0)
 
+            # Bundle ise — mevcut aktif bundle var mi kontrol et (duplicate engelleme)
+            if is_bundle:
+                existing_bundle = await db.execute(
+                    select(StockNotificationSubscription).where(
+                        and_(
+                            StockNotificationSubscription.user_id == user.id,
+                            StockNotificationSubscription.is_annual_bundle == True,
+                            StockNotificationSubscription.is_active == True,
+                        )
+                    )
+                )
+                existing = existing_bundle.scalar_one_or_none()
+                if existing:
+                    # Mevcut bundle var — yenile (sure uzat, bilgileri guncelle)
+                    _now_rc = datetime.now(timezone.utc)
+                    expiration_ms = event.get("expiration_at_ms")
+                    if expiration_ms:
+                        existing.expires_at = datetime.fromtimestamp(expiration_ms / 1000, tz=timezone.utc)
+                    existing.revenue_cat_id = app_user_id
+                    existing.store = event.get("store", "")
+                    existing.product_id = product_id
+                    logger.info(
+                        "RC webhook: Mevcut bundle yenilendi user_id=%s, expires=%s",
+                        user.id, existing.expires_at,
+                    )
+                    await db.flush()
+                    return {"status": "ok"}
+
+            # expires_at hesapla — RC event'ten veya product_id'den
+            _now_rc = datetime.now(timezone.utc)
+            expiration_ms = event.get("expiration_at_ms")
+            if expiration_ms:
+                rc_expires_at = datetime.fromtimestamp(expiration_ms / 1000, tz=timezone.utc)
+            elif is_bundle:
+                bundle_days = 365 if "annual" in product_id else 90
+                rc_expires_at = _now_rc + timedelta(days=bundle_days)
+            else:
+                rc_expires_at = None  # Tekil abonelik — 25 gun trading day bazli
+
             sub = StockNotificationSubscription(
                 user_id=user.id,
                 ipo_id=int(ipo_id) if ipo_id else None,
@@ -3316,8 +3359,32 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
                 revenue_cat_id=app_user_id,
                 store=event.get("store", ""),
                 product_id=product_id,
+                purchased_at=_now_rc,
+                expires_at=rc_expires_at,
             )
             db.add(sub)
+
+        elif event_type in ["CANCELLATION", "EXPIRATION", "BILLING_ISSUE"]:
+            # Bildirim aboneliklerini iptal et
+            notif_subs_result = await db.execute(
+                select(StockNotificationSubscription).where(
+                    and_(
+                        StockNotificationSubscription.user_id == user.id,
+                        StockNotificationSubscription.product_id == product_id,
+                        StockNotificationSubscription.is_active == True,
+                    )
+                )
+            )
+            notif_subs = notif_subs_result.scalars().all()
+            cancelled_count = 0
+            for ns in notif_subs:
+                ns.is_active = False
+                cancelled_count += 1
+            if cancelled_count:
+                logger.info(
+                    "RC webhook: %s — %d bildirim aboneligi iptal edildi, user_id=%s, product=%s",
+                    event_type, cancelled_count, user.id, product_id,
+                )
 
     elif product_id in ceiling_package_map:
         if event_type in ["INITIAL_PURCHASE", "NON_RENEWING_PURCHASE"]:

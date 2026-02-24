@@ -335,3 +335,46 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v32 migration: FK ondelete CASCADE → SET NULL (IPO silinince abonelikler korunsun)
+        # stock_notification_subscriptions.ipo_id: CASCADE → SET NULL
+        # ceiling_track_subscriptions.ipo_id: CASCADE → SET NULL
+        try:
+            # stock_notification_subscriptions
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE table_name = 'stock_notification_subscriptions'
+                        AND constraint_type = 'FOREIGN KEY'
+                        AND constraint_name LIKE '%ipo_id%'
+                    ) THEN
+                        ALTER TABLE stock_notification_subscriptions
+                            DROP CONSTRAINT IF EXISTS stock_notification_subscriptions_ipo_id_fkey;
+                        ALTER TABLE stock_notification_subscriptions
+                            ADD CONSTRAINT stock_notification_subscriptions_ipo_id_fkey
+                            FOREIGN KEY (ipo_id) REFERENCES ipos(id) ON DELETE SET NULL;
+                    END IF;
+                END $$;
+            """))
+            # ceiling_track_subscriptions
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.table_constraints
+                        WHERE table_name = 'ceiling_track_subscriptions'
+                        AND constraint_type = 'FOREIGN KEY'
+                        AND constraint_name LIKE '%ipo_id%'
+                    ) THEN
+                        ALTER TABLE ceiling_track_subscriptions
+                            DROP CONSTRAINT IF EXISTS ceiling_track_subscriptions_ipo_id_fkey;
+                        ALTER TABLE ceiling_track_subscriptions
+                            ADD CONSTRAINT ceiling_track_subscriptions_ipo_id_fkey
+                            FOREIGN KEY (ipo_id) REFERENCES ipos(id) ON DELETE SET NULL;
+                    END IF;
+                END $$;
+            """))
+        except Exception:
+            pass

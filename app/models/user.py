@@ -197,7 +197,11 @@ class CeilingTrackSubscription(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    ipo_id: Mapped[int] = mapped_column(ForeignKey("ipos.id", ondelete="CASCADE"))
+    ipo_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ipos.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="IPO silinirse abonelik korunur"
+    )
 
     # Paket bilgisi
     tier: Mapped[str] = mapped_column(
@@ -249,9 +253,9 @@ class StockNotificationSubscription(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     ipo_id: Mapped[int | None] = mapped_column(
-        ForeignKey("ipos.id", ondelete="CASCADE"),
+        ForeignKey("ipos.id", ondelete="SET NULL"),
         nullable=True,
-        comment="NULL ise yillik paket (tum hisseler)"
+        comment="NULL ise yillik paket (tum hisseler). IPO silinirse abonelik korunur."
     )
 
     # Bildirim tipi
