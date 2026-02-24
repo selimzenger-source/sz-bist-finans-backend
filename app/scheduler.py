@@ -488,6 +488,28 @@ async def auto_update_ipo_statuses():
             pass
 
 
+async def cleanup_expired_coupons():
+    """Suresi gecmis kuponlari deaktive eder (her 2 saatte calisir)."""
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy import update
+        from app.models.user import Coupon
+
+        async with async_session() as db:
+            result = await db.execute(
+                update(Coupon).where(
+                    Coupon.expires_at < datetime.now(timezone.utc),
+                    Coupon.is_active == True,
+                ).values(is_active=False)
+            )
+            if result.rowcount > 0:
+                logger.info(f"Suresi gecmis {result.rowcount} kupon deaktive edildi.")
+            await db.commit()
+
+    except Exception as e:
+        logger.error(f"Kupon temizleme hatasi: {e}")
+
+
 async def tweet_distribution_morning_job():
     """Dagitim gunu sabahi 08:00 (TR) — tweet #2 tekrar at.
 
@@ -2710,6 +2732,15 @@ def _setup_scheduler_impl():
         CronTrigger(hour=21, minute=5),  # UTC 21:05 = TR 00:05
         id="ipo_status_midnight",
         name="IPO Durum Gece Yarisi (Dagitim Gecis)",
+        replace_existing=True,
+    )
+
+    # 7d. Suresi gecmis kuponlari temizle — her 2 saatte
+    scheduler.add_job(
+        cleanup_expired_coupons,
+        IntervalTrigger(hours=2),
+        id="coupon_cleanup",
+        name="Kupon SKT Temizleyici",
         replace_existing=True,
     )
 

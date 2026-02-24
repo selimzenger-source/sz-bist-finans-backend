@@ -335,7 +335,28 @@ class WalletTransaction(Base):
 
 
 # -------------------------------------------------------
-# Kupon Kodlari — sunucu tarafinda tanimli
+# Dinamik Kupon Modeli — admin panelden yonetilebilir
+# -------------------------------------------------------
+
+class Coupon(Base):
+    """Kampanya kupon kodlari — admin panelden olusturulur, DB'de saklanir."""
+
+    __tablename__ = "coupons"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False, comment="Puan miktari")
+    max_uses: Mapped[int] = mapped_column(Integer, default=1, comment="Maks kullanim sayisi")
+    uses_count: Mapped[int] = mapped_column(Integer, default=0, comment="Mevcut kullanim sayisi")
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="Son kullanma tarihi (None=sinirsiz)"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Aktif mi")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# -------------------------------------------------------
+# Eski Kupon Kodlari — geriye uyumluluk (fallback)
 # -------------------------------------------------------
 
 WALLET_COUPONS: dict[str, float] = {

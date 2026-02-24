@@ -388,6 +388,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # seans_disi_acilis sadece gap verisi — AI yoruma gerek yok
             ai_score = None
             ai_summary = None
+            ai_hashtags = []
             kap_url = None
             if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
@@ -397,6 +398,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     )
                     ai_score = ai_result.get("score")
                     ai_summary = ai_result.get("summary")
+                    ai_hashtags = ai_result.get("hashtags", [])
                     kap_url = ai_result.get("kap_url")
                     if ai_score:
                         logger.info(
@@ -494,6 +496,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             ai_score=ai_score,
                             ai_summary=ai_summary,
                             kap_url=kap_url,
+                            ai_hashtags=ai_hashtags,
                         )
                         logger.info(
                             "Twitter BIST50 tweet atildi: %s (basarili=%s, ai_score=%s)",

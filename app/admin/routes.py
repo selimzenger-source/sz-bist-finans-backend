@@ -1,9 +1,11 @@
-"""Admin panel route'lari — IPO CRUD + Dagitim Sonuclari + SPK Yonetimi."""
+"""Admin panel route'lari — IPO CRUD + Dagitim Sonuclari + SPK Yonetimi + Kupon."""
 
 import logging
 import os
 import re
-from datetime import date, datetime
+import secrets
+import string
+from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -17,6 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.ipo import IPO, IPOAllocation, IPOCeilingTrack
 from app.models.spk_application import SPKApplication
+from app.models.user import Coupon
 from app.admin.auth import (
     verify_password, create_session, destroy_session,
     get_current_admin, SESSION_COOKIE_NAME,
@@ -2047,3 +2050,226 @@ async def debug_test_push(
             "error": f"{type(e).__name__}: {str(e)[:200]}",
             "token_prefix": (fcm or expo)[:20],
         })
+
+
+# -------------------------------------------------------
+# KUPON YONETIMI
+# -------------------------------------------------------
+
+def _generate_coupon_code() -> str:
+    """SZ + 6 random alfanumerik (buyuk harf + rakam) = SZAB12XY."""
+    chars = string.ascii_uppercase + string.digits
+    return "SZ" + "".join(secrets.choice(chars) for _ in range(6))
+
+
+@router.get("/coupons", response_class=HTMLResponse)
+async def admin_coupons(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kupon yonetim sayfasi — listele + olustur formu."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    result = await db.execute(
+        select(Coupon).order_by(desc(Coupon.created_at))
+    )
+    coupons = result.scalars().all()
+
+    # Durum hesapla
+    now = datetime.now(timezone.utc)
+    coupon_list = []
+    for c in coupons:
+        if not c.is_active:
+            status = "deaktif"
+        elif c.expires_at and c.expires_at < now:
+            status = "suresi_dolmus"
+        elif c.uses_count >= c.max_uses:
+            status = "tukendi"
+        else:
+            status = "aktif"
+        coupon_list.append({"coupon": c, "status": status})
+
+    return templates.TemplateResponse("admin/coupons.html", {
+        "request": request,
+        "coupon_list": coupon_list,
+        "success": request.query_params.get("success"),
+        "error": request.query_params.get("error"),
+    })
+
+
+@router.post("/coupons/create")
+async def admin_create_coupon(
+    request: Request,
+    amount: float = Form(...),
+    max_uses: int = Form(1),
+    expires_at: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Yeni kupon olustur — SZ-prefix unique kod uret."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    if amount <= 0 or amount > 50000:
+        return RedirectResponse("/admin/coupons?error=Puan+miktari+0-50000+arasinda+olmali", status_code=302)
+    if max_uses < 1 or max_uses > 10000:
+        return RedirectResponse("/admin/coupons?error=Kullanim+limiti+1-10000+arasinda+olmali", status_code=302)
+
+    # SKT parse
+    expire_dt = None
+    if expires_at and expires_at.strip():
+        try:
+            expire_dt = datetime.strptime(expires_at.strip(), "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
+        except ValueError:
+            return RedirectResponse("/admin/coupons?error=Gecersiz+tarih+formati", status_code=302)
+
+    # Unique kod uret (collision check)
+    for _ in range(10):
+        code = _generate_coupon_code()
+        existing = await db.execute(
+            select(Coupon).where(Coupon.code == code)
+        )
+        if not existing.scalar_one_or_none():
+            break
+    else:
+        return RedirectResponse("/admin/coupons?error=Kod+uretilemedi+tekrar+deneyin", status_code=302)
+
+    coupon = Coupon(
+        code=code,
+        amount=amount,
+        max_uses=max_uses,
+        uses_count=0,
+        expires_at=expire_dt,
+        is_active=True,
+    )
+    db.add(coupon)
+    await db.flush()
+
+    return RedirectResponse(f"/admin/coupons?success=Kupon+olusturuldu:+{code}", status_code=302)
+
+
+@router.post("/coupons/{coupon_id}/delete")
+async def admin_delete_coupon(
+    request: Request,
+    coupon_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kuponu deaktive et (soft delete)."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    result = await db.execute(
+        select(Coupon).where(Coupon.id == coupon_id)
+    )
+    coupon = result.scalar_one_or_none()
+    if not coupon:
+        return RedirectResponse("/admin/coupons?error=Kupon+bulunamadi", status_code=302)
+
+    coupon.is_active = False
+    await db.flush()
+
+    return RedirectResponse(f"/admin/coupons?success=Kupon+{coupon.code}+deaktive+edildi", status_code=302)
+
+
+# -------------------------------------------------------
+# REPLY MODULE — AI destekli tweet reply
+# -------------------------------------------------------
+
+@router.get("/replies", response_class=HTMLResponse)
+async def admin_replies_page(request: Request):
+    """AI Reply modülü sayfası."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    return templates.TemplateResponse("admin/replies.html", {
+        "request": request,
+    })
+
+
+@router.post("/replies/generate")
+async def admin_replies_generate(request: Request):
+    """Tweet URL al → tweet çek + AI reply üret → JSON dön."""
+    from fastapi.responses import JSONResponse
+    from app.services.twitter_reply_service import (
+        fetch_tweet_by_url,
+        generate_reply_suggestions,
+    )
+
+    admin = get_current_admin(request)
+    if not admin:
+        return JSONResponse({"error": "Yetkisiz erişim"}, status_code=401)
+
+    form = await request.form()
+    tweet_url = form.get("tweet_url", "").strip()
+
+    if not tweet_url:
+        return JSONResponse({"error": "Tweet URL'si gerekli."}, status_code=400)
+
+    # 1. Tweet'i çek
+    tweet_result = await fetch_tweet_by_url(tweet_url)
+    if not tweet_result.get("success"):
+        return JSONResponse({
+            "error": tweet_result.get("error", "Tweet çekilemedi.")
+        }, status_code=400)
+
+    # 2. AI reply önerisi üret
+    ai_result = await generate_reply_suggestions(tweet_result["text"])
+    if not ai_result.get("success"):
+        return JSONResponse({
+            "error": ai_result.get("error", "AI reply üretilemedi.")
+        }, status_code=500)
+
+    return JSONResponse({
+        "tweet": {
+            "id": tweet_result["tweet_id"],
+            "text": tweet_result["text"],
+            "author_username": tweet_result["author_username"],
+            "author_name": tweet_result["author_name"],
+            "likes": tweet_result["likes"],
+            "retweets": tweet_result["retweets"],
+        },
+        "ai_result": {
+            "is_safe": ai_result["is_safe"],
+            "reason": ai_result.get("reason", ""),
+            "replies": ai_result.get("replies", []),
+        },
+    })
+
+
+@router.post("/replies/send")
+async def admin_replies_send(request: Request):
+    """Onaylanan reply'ı X'te yayınla."""
+    from fastapi.responses import JSONResponse
+    from app.services.twitter_reply_service import send_reply
+
+    admin = get_current_admin(request)
+    if not admin:
+        return JSONResponse({"error": "Yetkisiz erişim"}, status_code=401)
+
+    form = await request.form()
+    tweet_id = form.get("tweet_id", "").strip()
+    reply_text = form.get("reply_text", "").strip()
+
+    if not tweet_id or not reply_text:
+        return JSONResponse({
+            "error": "Tweet ID ve reply metni gerekli."
+        }, status_code=400)
+
+    result = await send_reply(tweet_id, reply_text)
+
+    if result.get("success"):
+        return JSONResponse({
+            "success": True,
+            "reply_tweet_id": result["reply_tweet_id"],
+        })
+    else:
+        return JSONResponse({
+            "success": False,
+            "error": result.get("error", "Reply gönderilemedi."),
+        }, status_code=500)

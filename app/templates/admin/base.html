@@ -16,16 +16,45 @@
         <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <a href="/admin/" class="flex items-center gap-2 text-xl font-bold tracking-tight">
                 <img src="/static/img/logo.jpg" alt="Logo" class="w-8 h-8 rounded-lg" />
-                SZ BIST Finans Admin
+                <span class="hidden sm:inline">SZ BIST Finans Admin</span>
+                <span class="sm:hidden">SZ Admin</span>
             </a>
-            <div class="flex items-center gap-4 text-sm">
+
+            <!-- Masaustu Menu -->
+            <div class="hidden md:flex items-center gap-4 text-sm">
                 <a href="/admin/" class="hover:text-indigo-400 transition">Dashboard</a>
-                <a href="/admin/spk" class="hover:text-indigo-400 transition">SPK Başvuruları</a>
-                <a href="/admin/tweets" class="hover:text-yellow-300 text-yellow-400 transition">🐦 Tweetler</a>
-                <a href="/admin/tweet-settings" class="hover:text-yellow-300 text-gray-400 transition">⚙️ Tweet Ayar</a>
-                <a href="/admin/broadcast" class="hover:text-purple-300 text-purple-400 transition">📢 Bildirim</a>
+                <a href="/admin/coupons" class="hover:text-emerald-300 text-emerald-400 transition">&#127915; Kuponlar</a>
+                <a href="/admin/spk" class="hover:text-indigo-400 transition">SPK</a>
+                <a href="/admin/tweets" class="hover:text-yellow-300 text-yellow-400 transition">&#128038; Tweetler</a>
+                <a href="/admin/tweet-settings" class="hover:text-yellow-300 text-gray-400 transition">&#9881;&#65039; Tweet Ayar</a>
+                <a href="/admin/broadcast" class="hover:text-purple-300 text-purple-400 transition">&#128226; Bildirim</a>
+                <a href="/admin/replies" class="hover:text-blue-300 text-blue-400 transition">&#128172; Reply</a>
                 <a href="/admin/ipo/new" class="hover:bg-indigo-600 bg-indigo-500 px-3 py-1 rounded transition">+ Yeni IPO</a>
-                <a href="/admin/logout" class="hover:text-red-300 text-red-400 transition">Çıkış</a>
+                <a href="/admin/logout" class="hover:text-red-300 text-red-400 transition">&#199;&#305;k&#305;&#351;</a>
+            </div>
+
+            <!-- Mobil Hamburger -->
+            <button id="menuToggle" class="md:hidden p-2 rounded-lg hover:bg-gray-700 transition"
+                    onclick="document.getElementById('mobileMenu').classList.toggle('hidden')">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </button>
+        </div>
+
+        <!-- Mobil Dropdown Menu -->
+        <div id="mobileMenu" class="hidden md:hidden border-t border-gray-700 bg-gray-800 px-4 py-3 space-y-2">
+            <a href="/admin/" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm">&#128202; Dashboard</a>
+            <a href="/admin/coupons" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-emerald-400">&#127915; Kuponlar</a>
+            <a href="/admin/spk" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm">&#128196; SPK Basvurulari</a>
+            <a href="/admin/tweets" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-yellow-400">&#128038; Tweetler</a>
+            <a href="/admin/tweet-settings" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-gray-400">&#9881;&#65039; Tweet Ayar</a>
+            <a href="/admin/broadcast" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-purple-400">&#128226; Bildirim</a>
+            <a href="/admin/replies" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-blue-400">&#128172; AI Reply</a>
+            <a href="/admin/ipo/new" class="block py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 transition text-sm text-center font-medium">+ Yeni IPO</a>
+            <div class="border-t border-gray-700 pt-2 mt-2">
+                <a href="/admin/logout" class="block py-2 px-3 rounded-lg hover:bg-gray-700 transition text-sm text-red-400">Cikis</a>
             </div>
         </div>
     </nav>
@@ -37,7 +66,7 @@
 
     <!-- Footer -->
     <footer class="text-center text-gray-600 text-xs py-4 mt-8">
-        SZ BIST Finans Admin Panel v2.0
+        SZ BIST Finans Admin Panel v2.1
     </footer>
 </body>
 </html>

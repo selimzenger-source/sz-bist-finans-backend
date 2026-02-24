@@ -165,6 +165,9 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
                     real_kap_url = kap_match.group(0)
 
             if real_kap_url:
+                # /en/ → /tr/ normalize (TradingView bazen Ingilizce KAP linki veriyor)
+                real_kap_url = real_kap_url.replace("/en/Bildirim/", "/tr/Bildirim/")
+                real_kap_url = real_kap_url.replace("/en/bildirim/", "/tr/Bildirim/")
                 logger.info(
                     "KAP bildirim linki bulundu: matriks:%s → %s",
                     matriks_id, real_kap_url,
@@ -212,7 +215,7 @@ async def score_news(
     api_key = _get_api_key()
     if not api_key:
         logger.debug("AI News Scorer: ABACUS_API_KEY bos, devre disi")
-        return {"score": None, "summary": None, "kap_url": kap_url}
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     # TradingView icerigi varsa birincil kaynak, yoksa Telegram metni
     has_tv = bool(tv_content and len(tv_content.strip()) > 50)
@@ -220,7 +223,7 @@ async def score_news(
     content = content[:4000] if content else ""  # gpt-4o uzun metin isleyebilir
 
     if not content.strip():
-        return {"score": None, "summary": None, "kap_url": kap_url}
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     # Kaynak bilgisini prompt'a ekle
     source_info = "KAP Bildirim Tam Metni (TradingView)" if has_tv else "Telegram Kanal Ozeti (detay erisilemedi)"
@@ -266,8 +269,15 @@ KRITIK KURALLAR:
 Haberi yatirimci bakis acisiyla Turkce en fazla 3 cumle ile ozetle.
 Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
 
+HASHTAG KURALLARI:
+- Haberin konusuyla ilgili 2-3 adet Twitter hashtag uret (# isareti OLMADAN)
+- Sirket ticker'i ({ticker}) zaten ekleniyor, onu TEKRAR verme
+- Sektor, konu ve iliskili kavramlardan sec: gayrimenkul, enerji, teknoloji, insaat, gida, saglik, otomotiv, ihracat, ithalat, temettü, bedelsiz, sermayeartirimi, karaciklama, ihale, sozlesme, ortaklik, satis, alim, uretim, yatirim vb.
+- Turkce ve kucuk harf yaz (ornek: gayrimenkul, temettü, ihale)
+- Sadece haberin icerigiyle GERCEKTEN ilgili hashtagler sec, genel/alakasiz olmasin
+
 SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
-{{"score": 7.3, "summary": "Uc cumleye kadar Turkce ozet."}}"""
+{{"score": 7.3, "summary": "Uc cumleye kadar Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
@@ -312,6 +322,7 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
         result = json.loads(text)
         score = result.get("score")
         summary = result.get("summary")
+        hashtags = result.get("hashtags", [])
 
         # Score validation: 1.0-10.0 arasinda olmali (ondalik)
         if isinstance(score, (int, float)) and 1.0 <= score <= 10.0:
@@ -324,18 +335,31 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
         if not isinstance(summary, str) or not summary.strip():
             summary = None
 
+        # Hashtags validation — max 3, her biri string, # isareti temizle
+        if isinstance(hashtags, list):
+            clean_tags = []
+            for tag in hashtags[:3]:
+                if isinstance(tag, str) and tag.strip():
+                    clean = tag.strip().lstrip("#").replace(" ", "")
+                    if clean and clean.upper() != ticker.upper():
+                        clean_tags.append(clean)
+            hashtags = clean_tags
+        else:
+            hashtags = []
+
         logger.info(
-            "AI News Scorer: %s — skor=%s, kaynak=%s, ozet=%s",
+            "AI News Scorer: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
             ticker, score,
             "TradingView" if has_tv else "Telegram",
+            hashtags,
             (summary[:60] + "...") if summary and len(summary) > 60 else summary,
         )
 
-        return {"score": score, "summary": summary, "kap_url": kap_url}
+        return {"score": score, "summary": summary, "kap_url": kap_url, "hashtags": hashtags}
 
     except Exception as e:
         logger.warning("AI News Scorer: Abacus hatasi (%s) — %s", ticker, e)
-        return {"score": None, "summary": None, "kap_url": kap_url}
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
 
 # -------------------------------------------------------
@@ -362,6 +386,7 @@ async def analyze_news(
             "score": float | None,
             "summary": str | None,
             "kap_url": str | None,
+            "hashtags": list[str],
         }
     """
     tv_content = None
@@ -401,4 +426,4 @@ async def analyze_news(
         return result
     except Exception as e:
         logger.warning("AI puanlama hatasi (%s): %s", ticker, e)
-        return {"score": None, "summary": None, "kap_url": kap_url}
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}

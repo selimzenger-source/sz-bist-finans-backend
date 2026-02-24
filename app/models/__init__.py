@@ -7,7 +7,7 @@ from app.models.user import (
     StockNotificationSubscription, NOTIFICATION_TIER_PRICES,
     NEWS_TIER_PRICES, COMBO_PRICE, QUARTERLY_PRICE,
     ANNUAL_BUNDLE_PRICE, COMBINED_ANNUAL_DISCOUNT_PCT,
-    WalletTransaction, WALLET_COUPONS,
+    WalletTransaction, Coupon, WALLET_COUPONS,
     WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
 )
 from app.models.dividend import Dividend, DividendHistory
@@ -25,7 +25,7 @@ __all__ = [
     "StockNotificationSubscription", "NOTIFICATION_TIER_PRICES",
     "NEWS_TIER_PRICES", "COMBO_PRICE", "QUARTERLY_PRICE",
     "ANNUAL_BUNDLE_PRICE", "COMBINED_ANNUAL_DISCOUNT_PCT",
-    "WalletTransaction", "WALLET_COUPONS",
+    "WalletTransaction", "Coupon", "WALLET_COUPONS",
     "WALLET_REWARD_AMOUNT", "WALLET_COOLDOWN_SECONDS", "WALLET_MAX_DAILY_ADS",
     "Dividend", "DividendHistory",
     "TelegramNews",

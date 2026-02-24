@@ -1,0 +1,229 @@
+{% extends "admin/base.html" %}
+{% block title %}Kupon Yonetimi{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto space-y-6">
+
+    <!-- Basari mesaji -->
+    {% if success %}
+    <div class="bg-green-900/50 border border-green-600 text-green-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">&#10004;</span>
+        <span>{{ success }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Hata mesaji -->
+    {% if error %}
+    <div class="bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">&#10060;</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Kupon Olustur Formu -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+        <h1 class="text-xl font-bold text-gray-100 mb-6 flex items-center gap-2">
+            &#127915; Yeni Kampanya Kuponu Olustur
+        </h1>
+
+        <form method="post" action="/admin/coupons/create">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <!-- Puan Miktari -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">
+                        Puan Miktari
+                    </label>
+                    <input type="number" name="amount" min="1" max="50000" step="1" required
+                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                                  text-gray-100 placeholder-gray-500
+                                  focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                           placeholder="500" />
+                </div>
+
+                <!-- Max Kullanim -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">
+                        Max Kullanim
+                    </label>
+                    <input type="number" name="max_uses" min="1" max="10000" value="1"
+                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                                  text-gray-100 placeholder-gray-500
+                                  focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                    <div class="text-xs text-gray-500 mt-1">Kac kisi kullanabilir</div>
+                </div>
+
+                <!-- Son Kullanma Tarihi -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">
+                        SKT <span class="text-gray-500">(opsiyonel)</span>
+                    </label>
+                    <input type="date" name="expires_at"
+                           class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                                  text-gray-100
+                                  focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                    <div class="text-xs text-gray-500 mt-1">Bos = suresiz</div>
+                </div>
+            </div>
+
+            <button type="submit"
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-6
+                           rounded-lg transition flex items-center gap-2">
+                <span>&#127915;</span>
+                <span>Kupon Olustur</span>
+            </button>
+        </form>
+    </div>
+
+    <!-- Kupon Listesi -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+        <h2 class="text-lg font-bold text-gray-100 mb-4 flex items-center gap-2">
+            &#128203; Kupon Listesi
+            <span class="text-sm font-normal text-gray-500">({{ coupon_list|length }} adet)</span>
+        </h2>
+
+        {% if coupon_list|length == 0 %}
+        <div class="text-center text-gray-500 py-8">
+            <p class="text-4xl mb-2">&#127915;</p>
+            <p>Henuz kupon olusturulmadi.</p>
+        </div>
+        {% else %}
+
+        <!-- Masaustu Tablo -->
+        <div class="hidden md:block overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="text-left py-2 px-2">Kod</th>
+                        <th class="text-right py-2 px-2">Puan</th>
+                        <th class="text-center py-2 px-2">Kullanim</th>
+                        <th class="text-center py-2 px-2">SKT</th>
+                        <th class="text-center py-2 px-2">Durum</th>
+                        <th class="text-center py-2 px-2">Olusturulma</th>
+                        <th class="text-center py-2 px-2">Islem</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in coupon_list %}
+                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+                        <td class="py-3 px-2">
+                            <span class="font-mono font-bold text-indigo-400 bg-indigo-900/30 px-2 py-1 rounded select-all">
+                                {{ item.coupon.code }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-2 text-right font-semibold text-emerald-400">
+                            {{ item.coupon.amount|int }}
+                        </td>
+                        <td class="py-3 px-2 text-center">
+                            <span class="{% if item.coupon.uses_count >= item.coupon.max_uses %}text-red-400{% else %}text-gray-300{% endif %}">
+                                {{ item.coupon.uses_count }}/{{ item.coupon.max_uses }}
+                            </span>
+                        </td>
+                        <td class="py-3 px-2 text-center text-gray-400 text-xs">
+                            {% if item.coupon.expires_at %}
+                                {{ item.coupon.expires_at.strftime('%d.%m.%Y') }}
+                            {% else %}
+                                <span class="text-gray-600">Suresiz</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-2 text-center">
+                            {% if item.status == 'aktif' %}
+                                <span class="bg-emerald-900/50 text-emerald-400 text-xs px-2 py-0.5 rounded-full">Aktif</span>
+                            {% elif item.status == 'suresi_dolmus' %}
+                                <span class="bg-yellow-900/50 text-yellow-400 text-xs px-2 py-0.5 rounded-full">SKT Dolmus</span>
+                            {% elif item.status == 'tukendi' %}
+                                <span class="bg-orange-900/50 text-orange-400 text-xs px-2 py-0.5 rounded-full">Tukendi</span>
+                            {% else %}
+                                <span class="bg-red-900/50 text-red-400 text-xs px-2 py-0.5 rounded-full">Deaktif</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3 px-2 text-center text-gray-500 text-xs">
+                            {{ item.coupon.created_at.strftime('%d.%m.%Y %H:%M') }}
+                        </td>
+                        <td class="py-3 px-2 text-center">
+                            {% if item.status == 'aktif' %}
+                            <form method="post" action="/admin/coupons/{{ item.coupon.id }}/delete"
+                                  onsubmit="return confirm('{{ item.coupon.code }} kuponunu deaktive etmek istediginize emin misiniz?')">
+                                <button type="submit"
+                                        class="text-red-400 hover:text-red-300 hover:bg-red-900/30 px-2 py-1 rounded transition text-xs">
+                                    Deaktif Et
+                                </button>
+                            </form>
+                            {% else %}
+                                <span class="text-gray-600 text-xs">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mobil Kart Gorunumu -->
+        <div class="md:hidden space-y-3">
+            {% for item in coupon_list %}
+            <div class="bg-gray-700/50 rounded-lg border border-gray-600 p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="font-mono font-bold text-indigo-400 bg-indigo-900/30 px-2 py-1 rounded text-sm select-all">
+                        {{ item.coupon.code }}
+                    </span>
+                    {% if item.status == 'aktif' %}
+                        <span class="bg-emerald-900/50 text-emerald-400 text-xs px-2 py-0.5 rounded-full">Aktif</span>
+                    {% elif item.status == 'suresi_dolmus' %}
+                        <span class="bg-yellow-900/50 text-yellow-400 text-xs px-2 py-0.5 rounded-full">SKT Dolmus</span>
+                    {% elif item.status == 'tukendi' %}
+                        <span class="bg-orange-900/50 text-orange-400 text-xs px-2 py-0.5 rounded-full">Tukendi</span>
+                    {% else %}
+                        <span class="bg-red-900/50 text-red-400 text-xs px-2 py-0.5 rounded-full">Deaktif</span>
+                    {% endif %}
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 text-sm mb-3">
+                    <div>
+                        <div class="text-gray-500 text-xs">Puan</div>
+                        <div class="font-semibold text-emerald-400">{{ item.coupon.amount|int }}</div>
+                    </div>
+                    <div>
+                        <div class="text-gray-500 text-xs">Kullanim</div>
+                        <div class="{% if item.coupon.uses_count >= item.coupon.max_uses %}text-red-400{% else %}text-gray-300{% endif %}">
+                            {{ item.coupon.uses_count }}/{{ item.coupon.max_uses }}
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-gray-500 text-xs">SKT</div>
+                        <div class="text-gray-400">
+                            {% if item.coupon.expires_at %}
+                                {{ item.coupon.expires_at.strftime('%d.%m.%Y') }}
+                            {% else %}
+                                Suresiz
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if item.status == 'aktif' %}
+                <form method="post" action="/admin/coupons/{{ item.coupon.id }}/delete"
+                      onsubmit="return confirm('{{ item.coupon.code }} kuponunu deaktive etmek istediginize emin misiniz?')">
+                    <button type="submit"
+                            class="w-full text-red-400 hover:text-red-300 border border-red-900/50 hover:bg-red-900/30
+                                   py-1.5 rounded-lg transition text-xs">
+                        Deaktif Et
+                    </button>
+                </form>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {% endif %}
+    </div>
+
+    <!-- Bilgi notu -->
+    <div class="bg-gray-800/50 rounded-lg border border-gray-700 p-4 text-sm text-gray-500">
+        <p class="flex items-start gap-1.5">
+            <span class="shrink-0">&#8505;&#65039;</span>
+            <span>Kupon kodlari SZ ile baslar ve benzersizdir. Her kullanici bir kuponu en fazla 1 kez kullanabilir.
+            SKT dolan kuponlar otomatik olarak deaktive edilir (2 saatte bir kontrol).</span>
+        </p>
+    </div>
+</div>
+{% endblock %}

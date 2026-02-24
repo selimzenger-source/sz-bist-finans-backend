@@ -38,7 +38,7 @@ from app.models import (
     NOTIFICATION_TIER_PRICES, NEWS_TIER_PRICES,
     COMBO_PRICE, QUARTERLY_PRICE,
     ANNUAL_BUNDLE_PRICE, COMBINED_ANNUAL_DISCOUNT_PCT,
-    WalletTransaction, WALLET_COUPONS,
+    WalletTransaction, Coupon, WALLET_COUPONS,
     WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
     Dividend, DividendHistory,
 )
@@ -1859,7 +1859,7 @@ async def wallet_redeem_coupon(
     data: WalletCouponRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Kupon kodu ile puan ekleme — sunucu tarafinda dogrulama."""
+    """Kupon kodu ile puan ekleme — once DB, sonra hardcoded fallback."""
     result = await db.execute(
         select(User).where(User.device_id == device_id).with_for_update()
     )
@@ -1869,11 +1869,35 @@ async def wallet_redeem_coupon(
 
     code = data.code.upper().strip()
 
-    # Kupon var mi?
-    if code not in WALLET_COUPONS:
+    # --- 1) Dinamik kupon: DB'den ara ---
+    now = datetime.now(timezone.utc)
+    db_coupon_result = await db.execute(
+        select(Coupon).where(
+            Coupon.code == code,
+            Coupon.is_active == True,
+        ).with_for_update()
+    )
+    db_coupon = db_coupon_result.scalar_one_or_none()
+
+    amount: float = 0.0
+    is_db_coupon = False
+
+    if db_coupon:
+        # SKT kontrolu
+        if db_coupon.expires_at and db_coupon.expires_at < now:
+            raise HTTPException(status_code=400, detail="Bu kuponun suresi dolmus.")
+        # Max kullanim kontrolu
+        if db_coupon.uses_count >= db_coupon.max_uses:
+            raise HTTPException(status_code=400, detail="Bu kupon kullanim limitine ulasmis.")
+        amount = db_coupon.amount
+        is_db_coupon = True
+    elif code in WALLET_COUPONS:
+        # --- 2) Hardcoded fallback ---
+        amount = WALLET_COUPONS[code]
+    else:
         raise HTTPException(status_code=400, detail="Gecersiz kupon kodu.")
 
-    # Daha once kullanildi mi?
+    # Daha once kullanildi mi? (per-user duplicate check)
     existing = await db.execute(
         select(WalletTransaction).where(
             and_(
@@ -1887,8 +1911,11 @@ async def wallet_redeem_coupon(
         raise HTTPException(status_code=400, detail="Bu kuponu daha once kullandiniz.")
 
     # Puan ekle
-    amount = WALLET_COUPONS[code]
     user.wallet_balance = (user.wallet_balance or 0.0) + amount
+
+    # DB kuponunda kullanim sayisini artir
+    if is_db_coupon and db_coupon:
+        db_coupon.uses_count += 1
 
     # Islem logu
     tx = WalletTransaction(
