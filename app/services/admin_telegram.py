@@ -6,9 +6,13 @@ Spam yapmaz — sadece onemli olaylar:
 - Scraper/bildirim hatalari
 - Ceiling update sonuclari
 - Firebase init basarisiz
+
+Anti-spam: Ayni hata mesaji icin max 3 bildirim gonderir (10 dk cooldown).
 """
 
 import logging
+import time
+from collections import defaultdict
 from typing import Optional
 
 import httpx
@@ -16,6 +20,47 @@ import httpx
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# ─── Anti-spam: Hata bildirim tekrar sınırlaması ───
+# Aynı hata mesajı (ilk 80 karakter) için max 3 bildirim, 10dk cooldown
+_ERROR_NOTIFY_MAX = 3        # Aynı hatadan max bu kadar mesaj
+_ERROR_COOLDOWN_SEC = 600    # 10 dakika cooldown
+_error_counts: dict[str, int] = defaultdict(int)       # hata_key → gönderim sayısı
+_error_first_seen: dict[str, float] = {}                # hata_key → ilk gönderim zamanı
+
+
+def _should_send_error(error_text: str) -> bool:
+    """Hata bildiriminin gönderilip gönderilmeyeceğini kontrol eder.
+
+    Aynı hata (ilk 80 karakter) 10 dakika içinde max 3 kez gönderilir.
+    10 dakika geçince sayaç sıfırlanır.
+    """
+    key = error_text[:80].strip().lower()
+    now = time.monotonic()
+
+    first_seen = _error_first_seen.get(key)
+
+    # Cooldown süresi dolmuşsa sıfırla
+    if first_seen and (now - first_seen) > _ERROR_COOLDOWN_SEC:
+        _error_counts[key] = 0
+        _error_first_seen[key] = now
+
+    count = _error_counts[key]
+
+    if count >= _ERROR_NOTIFY_MAX:
+        return False  # Limit dolmuş, spam yapma
+
+    # İlk kez görülüyorsa zaman kaydet
+    if key not in _error_first_seen:
+        _error_first_seen[key] = now
+
+    _error_counts[key] = count + 1
+
+    # Son mesajda uyarı ekle
+    if count + 1 == _ERROR_NOTIFY_MAX:
+        logger.info("Telegram anti-spam: '%s...' hatası %d. kez gönderildi — sonraki mesajlar susturulacak", key[:40], _ERROR_NOTIFY_MAX)
+
+    return True
 
 
 def _get_admin_config() -> tuple[str, str]:
@@ -107,7 +152,11 @@ async def notify_ipo_status_change(
 
 
 async def notify_scraper_error(scraper_name: str, error: str):
-    """Scraper hatasi bildirimi."""
+    """Scraper hatasi bildirimi (anti-spam: aynı hata max 3 mesaj / 10dk)."""
+    spam_key = f"{scraper_name}:{error}"
+    if not _should_send_error(spam_key):
+        return  # Aynı hatadan çok fazla mesaj gönderildi, sustur
+
     await send_admin_message(
         f"⚠️ <b>Scraper Hatasi</b>\n"
         f"Kaynak: {scraper_name}\n"
@@ -213,7 +262,11 @@ async def notify_push_error(
     error: str,
     user_id: int | None = None,
 ):
-    """Push bildirim hatasi — aninda uyari."""
+    """Push bildirim hatasi — aninda uyari (anti-spam: aynı hata max 3 mesaj / 10dk)."""
+    spam_key = f"push:{notification_type}:{error}"
+    if not _should_send_error(spam_key):
+        return  # Spam engeli
+
     text = f"❌ <b>Push Hata</b>\n" f"Tip: {notification_type}\n" f"Hata: {error[:300]}"
     if user_id:
         text += f"\nUser ID: {user_id}"

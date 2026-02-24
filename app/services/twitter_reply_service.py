@@ -46,9 +46,13 @@ _JITTER_MAX = 180  # 3 dakika
 # Begeni sikligi: her N reply'da 1 begeni
 _LIKE_EVERY_N = 5
 
-# Twitter API rate limit — Basic tier: 10 req / 15 dk (user tweets endpoint)
-# Her döngüde max bu kadar hedef kontrol edilir, geri kalanı sıradaki döngüye kalır
-_MAX_TARGETS_PER_CYCLE = 8  # 10 limitin altında kalıyoruz (güvenli)
+# Twitter API rate limit — Basic tier (user OAuth 1.0a):
+#   GET /2/users/:id/tweets = 900 req / 15 dk (çok cömert)
+#   POST /2/tweets = ~100 / 24 saat (reply dahil)
+#   POST /2/users/:id/likes = 50 / 15 dk, 1000 / 24 saat
+# Gerçek limit POST tweet'te — günlük 100 tweet'ten fazla atma
+# GET istekleri bolca yapılabilir, ama yine de zamana yaymak iyi
+_MAX_TARGETS_PER_CYCLE = 25  # GET limit 900, bolca kontrol edebiliriz
 _twitter_rate_limited = False  # 429 alınca True olur, sonraki döngüde resetlenir
 
 
@@ -715,86 +719,94 @@ async def fetch_user_recent_tweets(
 # 6. Otomatik Reply — Ana Döngü (Scheduler'dan çağrılır)
 # -------------------------------------------------------
 
-async def _seed_default_targets():
-    """Başlangıç reply hedeflerini DB'ye ekler (yoksa)."""
+async def _seed_default_targets(session):
+    """Başlangıç reply hedeflerini DB'ye ekler (yoksa).
+
+    Args:
+        session: Mevcut AsyncSession (dışarıdan verilir — bağımsız session AÇMAZ)
+    """
     try:
-        from app.database import async_session
         from app.models.user import ReplyTarget, DEFAULT_REPLY_TARGETS
         from sqlalchemy import select
 
-        async with async_session() as session:
-            for username in DEFAULT_REPLY_TARGETS:
-                existing = await session.execute(
-                    select(ReplyTarget).where(ReplyTarget.username == username)
-                )
-                if not existing.scalar_one_or_none():
-                    session.add(ReplyTarget(username=username, is_active=True))
-                    logger.info(f"Reply hedefi eklendi: @{username}")
-            await session.commit()
+        for username in DEFAULT_REPLY_TARGETS:
+            existing = await session.execute(
+                select(ReplyTarget).where(ReplyTarget.username == username)
+            )
+            if not existing.scalar_one_or_none():
+                session.add(ReplyTarget(username=username, is_active=True))
+                logger.info(f"Reply hedefi eklendi: @{username}")
+        await session.flush()
 
     except Exception as e:
         logger.error(f"Reply hedef seed hatası: {e}")
 
 
-async def _is_auto_reply_enabled() -> bool:
-    """Auto-reply toggle durumunu DB'den kontrol eder."""
+async def _is_auto_reply_enabled(session) -> bool:
+    """Auto-reply toggle durumunu DB'den kontrol eder.
+
+    Args:
+        session: Mevcut AsyncSession (dışarıdan verilir — bağımsız session AÇMAZ)
+    """
     try:
-        from app.database import async_session
         from app.models.app_setting import AppSetting
         from sqlalchemy import select
 
-        async with async_session() as session:
-            result = await session.execute(
-                select(AppSetting).where(AppSetting.key == "AUTO_REPLY_ENABLED")
-            )
-            setting = result.scalar_one_or_none()
-            if setting:
-                return setting.value.lower() in ("true", "1", "yes")
-            return True  # Default: açık
+        result = await session.execute(
+            select(AppSetting).where(AppSetting.key == "AUTO_REPLY_ENABLED")
+        )
+        setting = result.scalar_one_or_none()
+        if setting:
+            return setting.value.lower() in ("true", "1", "yes")
+        return True  # Default: açık
 
     except Exception:
         return True  # Hata durumunda açık varsay
 
 
-async def _get_daily_limit() -> int:
-    """Günlük reply limitini DB'den okur (admin panelden ayarlanır)."""
+async def _get_daily_limit(session) -> int:
+    """Günlük reply limitini DB'den okur (admin panelden ayarlanır).
+
+    Args:
+        session: Mevcut AsyncSession (dışarıdan verilir — bağımsız session AÇMAZ)
+    """
     try:
-        from app.database import async_session
         from app.models.app_setting import AppSetting
         from sqlalchemy import select
 
-        async with async_session() as session:
-            result = await session.execute(
-                select(AppSetting).where(AppSetting.key == "AUTO_REPLY_DAILY_LIMIT")
-            )
-            setting = result.scalar_one_or_none()
-            if setting:
-                limit_val = int(setting.value)
-                logger.info("Günlük reply limiti (DB): %d", limit_val)
-                return limit_val
+        result = await session.execute(
+            select(AppSetting).where(AppSetting.key == "AUTO_REPLY_DAILY_LIMIT")
+        )
+        setting = result.scalar_one_or_none()
+        if setting:
+            limit_val = int(setting.value)
+            logger.info("Günlük reply limiti (DB): %d", limit_val)
+            return limit_val
     except Exception as e:
         logger.warning("Günlük reply limiti okunamadı: %s", e)
     logger.info("Günlük reply limiti (varsayılan): %d", _AUTO_REPLY_DAILY_LIMIT_DEFAULT)
     return _AUTO_REPLY_DAILY_LIMIT_DEFAULT
 
 
-async def _get_today_reply_count() -> int:
-    """Bugün kaç reply atıldığını sayar."""
+async def _get_today_reply_count(session) -> int:
+    """Bugün kaç reply atıldığını sayar.
+
+    Args:
+        session: Mevcut AsyncSession (dışarıdan verilir — bağımsız session AÇMAZ)
+    """
     try:
-        from app.database import async_session
         from app.models.user import AutoReply
         from sqlalchemy import select, func
 
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        async with async_session() as session:
-            result = await session.execute(
-                select(func.count(AutoReply.id)).where(
-                    AutoReply.status == "replied",
-                    AutoReply.created_at >= today_start,
-                )
+        result = await session.execute(
+            select(func.count(AutoReply.id)).where(
+                AutoReply.status == "replied",
+                AutoReply.created_at >= today_start,
             )
-            return result.scalar() or 0
+        )
+        return result.scalar() or 0
 
     except Exception:
         return 0
@@ -867,8 +879,13 @@ async def auto_reply_cycle():
     - Günlük reply limiti (DB'den, gece 00:00'da sıfırlanır)
     - Siyasi/borsa dışı tweetlere reply ATMAZ (AI filtresi)
 
+    SESSION CONSOLIDATION:
+    - TEK bir async session açılır ve tüm helper fonksiyonlara iletilir
+    - Jitter bekleme sırasında session kapatılır, sonra yeniden açılır
+    - Bu sayede QueuePool overflow önlenir (eski: 5+ ayrı session)
+
     Twitter API Rate Limit Yönetimi:
-    - Basic tier: 10 req / 15 dk (user tweets endpoint)
+    - Basic tier user OAuth: GET tweets 900/15dk, POST tweets ~100/gün
     - Her döngüde max _MAX_TARGETS_PER_CYCLE hedef kontrol edilir
     - last_reply_at ile sıralama yapılır (en uzun süredir kontrol edilmeyen önce)
     - 429 alınca döngü hemen durur
@@ -884,33 +901,35 @@ async def auto_reply_cycle():
             # Her döngü başında rate limit flag'ini resetle
             _twitter_rate_limited = False
 
-            # Toggle kontrolü
-            if not await _is_auto_reply_enabled():
-                logger.info("Auto-reply devre dışı (toggle kapalı)")
-                return
-
-            # Seed default targets (ilk çalışmada)
-            await _seed_default_targets()
-
             from app.database import async_session
             from app.models.user import ReplyTarget, AutoReply
             from sqlalchemy import select
 
-            # Günlük limit (DB'den okunur — admin panelden ayarlanabilir)
-            daily_limit = await _get_daily_limit()
-            today_count = await _get_today_reply_count()
-            logger.info(
-                "Auto-reply döngü başlıyor: bugün %d/%d, rate_limit=30dk/hesap, "
-                "max_hedef/döngü=%d",
-                today_count, daily_limit, _MAX_TARGETS_PER_CYCLE,
-            )
-            if today_count >= daily_limit:
-                logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit} — durduruluyor")
-                return
-
-            remaining = daily_limit - today_count
-
+            # ─── TEK SESSION: Tüm DB işlemleri bu session üzerinden ───
             async with async_session() as session:
+
+                # Toggle kontrolü (aynı session ile)
+                if not await _is_auto_reply_enabled(session):
+                    logger.info("Auto-reply devre dışı (toggle kapalı)")
+                    return
+
+                # Seed default targets (aynı session ile)
+                await _seed_default_targets(session)
+
+                # Günlük limit (aynı session ile)
+                daily_limit = await _get_daily_limit(session)
+                today_count = await _get_today_reply_count(session)
+                logger.info(
+                    "Reply durum: bugün %d/%d, rate_limit=30dk/hesap, "
+                    "max_hedef/döngü=%d",
+                    today_count, daily_limit, _MAX_TARGETS_PER_CYCLE,
+                )
+                if today_count >= daily_limit:
+                    logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit} — durduruluyor")
+                    return
+
+                remaining = daily_limit - today_count
+
                 # Aktif hedefleri çek
                 result = await session.execute(
                     select(ReplyTarget).where(ReplyTarget.is_active == True)
@@ -923,7 +942,6 @@ async def auto_reply_cycle():
 
                 # ─── AKILLI SIRALAMA ───
                 # En uzun süredir kontrol edilmeyen hedefler önce
-                # (last_reply_at None olanlar en başa, sonra eskiden yeniye)
                 targets.sort(
                     key=lambda t: t.last_reply_at or datetime.min.replace(tzinfo=timezone.utc)
                 )
@@ -936,21 +954,23 @@ async def auto_reply_cycle():
 
                 replies_sent = 0
                 total_liked = 0
-                api_calls = 0  # Twitter API çağrı sayacı
+                api_calls = 0
                 skipped_rate_limit = 0
                 skipped_no_tweets = 0
                 skipped_init = 0
 
+                # ─── Reply bekleyen tweetleri topla (jitter öncesi) ───
+                # Önce TÜM hedefleri tara, reply atılacak tweetleri listeye al
+                # Sonra session'ı kapat, jitter bekle, yeni session ile reply at
+                pending_replies = []  # [(target_id, target_username, tweet_id, tweet_text, chosen_reply)]
+
                 for target in targets:
-                    if replies_sent >= remaining:
-                        logger.info("Günlük kota doldu, döngü duruyor")
+                    if len(pending_replies) + replies_sent >= remaining:
                         break
 
                     # ─── TWITTER API RATE LIMIT KORUMASI ───
                     if _twitter_rate_limited:
-                        logger.warning(
-                            "Twitter API rate limited — kalan hedefler sonraki döngüye bırakılıyor"
-                        )
+                        logger.warning("Twitter API rate limited — kalan hedefler sonraki döngüye")
                         break
 
                     if api_calls >= _MAX_TARGETS_PER_CYCLE:
@@ -961,15 +981,14 @@ async def auto_reply_cycle():
                         break
 
                     # ─── HESAP BAZLI RATE LIMIT (30 dk) ───
-                    # Aynı hesaba 30 dakikada max 1 reply
                     now_utc = datetime.now(timezone.utc)
                     if target.last_reply_at:
                         seconds_since = (now_utc - target.last_reply_at).total_seconds()
-                        if seconds_since < 1800:  # 30 dakika = 1800 saniye
+                        if seconds_since < 1800:
                             skipped_rate_limit += 1
-                            continue  # Sessiz — çok fazla log üretmesin
+                            continue
 
-                    # User ID çözümle (cache'de yoksa API'den çek)
+                    # User ID çözümle
                     user_id = target.twitter_user_id
                     if not user_id:
                         user_id = await get_user_id_by_username(target.username)
@@ -1002,7 +1021,7 @@ async def auto_reply_cycle():
                         skipped_init += 1
                         continue
 
-                    # ─── YENİ TWEETLERİ ÇEK (since_id ile) ───
+                    # ─── YENİ TWEETLERİ ÇEK ───
                     tweets = await fetch_user_recent_tweets(
                         user_id,
                         since_id=target.last_seen_tweet_id,
@@ -1021,12 +1040,10 @@ async def auto_reply_cycle():
                     target.last_seen_tweet_id = newest_id
                     await session.flush()
 
-                    logger.info(
-                        f"@{target.username}: {len(tweets)} yeni tweet bulundu"
-                    )
+                    logger.info(f"@{target.username}: {len(tweets)} yeni tweet bulundu")
 
                     for tweet in tweets:
-                        if replies_sent >= remaining:
+                        if len(pending_replies) + replies_sent >= remaining:
                             break
 
                         tweet_id = tweet["id"]
@@ -1079,62 +1096,82 @@ async def auto_reply_cycle():
                             continue
 
                         chosen_reply = random.choice(reply_options)
+                        pending_replies.append((
+                            target.id, target.username, tweet_id, tweet_text, chosen_reply
+                        ))
 
-                        # ─── JITTER: Doğal gecikme (30sn - 3dk) ───
-                        jitter = random.uniform(_JITTER_MIN, _JITTER_MAX)
-                        logger.info(
-                            f"Reply gönderilecek: @{target.username} tweet {tweet_id} "
-                            f"— {jitter:.0f}sn sonra → \"{chosen_reply[:50]}...\""
-                        )
-                        await asyncio.sleep(jitter)
-
-                        # Reply gönder
-                        send_result = await send_reply(tweet_id, chosen_reply)
-
-                        if send_result.get("success"):
-                            session.add(AutoReply(
-                                target_tweet_id=tweet_id,
-                                target_username=target.username,
-                                target_text=tweet_text[:1000],
-                                reply_text=chosen_reply,
-                                reply_tweet_id=send_result.get("reply_tweet_id"),
-                                status="replied",
-                            ))
-                            target.last_reply_at = datetime.now(timezone.utc)
-                            await session.flush()
-                            replies_sent += 1
-                            logger.info(
-                                f"Auto-reply #{today_count + replies_sent}: "
-                                f"@{target.username} → \"{chosen_reply[:60]}\""
-                            )
-
-                            # ─── BEĞENİ: Her 5 reply'da 1 beğeni ───
-                            if replies_sent % _LIKE_EVERY_N == 0:
-                                like_ok = await _like_tweet(tweet_id)
-                                if like_ok:
-                                    total_liked += 1
-                        else:
-                            session.add(AutoReply(
-                                target_tweet_id=tweet_id,
-                                target_username=target.username,
-                                target_text=tweet_text[:1000],
-                                reply_text=chosen_reply,
-                                status="failed",
-                                error_message=send_result.get("error", "Gönderim hatası"),
-                            ))
-                            logger.error(
-                                f"Auto-reply başarısız: @{target.username} — {send_result.get('error')}"
-                            )
-
-                        await session.flush()
-
+                # Tarama kısmını commit'le (last_seen_tweet_id güncellemeleri)
                 await session.commit()
+
+            # ─── SESSION KAPANDI — Artık jitter beklemesi pool'u TUTMAZ ───
+
+            # Bekleyen reply'ları gönder (her biri için kısa session aç-kapa)
+            for target_id, target_username, tweet_id, tweet_text, chosen_reply in pending_replies:
+                if replies_sent >= remaining:
+                    break
+
+                if _twitter_rate_limited:
+                    break
+
+                # ─── JITTER: Doğal gecikme (30sn - 3dk) ───
+                jitter = random.uniform(_JITTER_MIN, _JITTER_MAX)
+                logger.info(
+                    f"Reply gönderilecek: @{target_username} tweet {tweet_id} "
+                    f"— {jitter:.0f}sn sonra → \"{chosen_reply[:50]}...\""
+                )
+                await asyncio.sleep(jitter)
+
+                # Reply gönder (Twitter API — session gerektirmez)
+                send_result = await send_reply(tweet_id, chosen_reply)
+
+                # Sonucu DB'ye kaydet (KISA session — hemen kapanır)
+                async with async_session() as session:
+                    if send_result.get("success"):
+                        session.add(AutoReply(
+                            target_tweet_id=tweet_id,
+                            target_username=target_username,
+                            target_text=tweet_text[:1000],
+                            reply_text=chosen_reply,
+                            reply_tweet_id=send_result.get("reply_tweet_id"),
+                            status="replied",
+                        ))
+                        # Target'ın last_reply_at güncelle
+                        target_obj = await session.get(ReplyTarget, target_id)
+                        if target_obj:
+                            target_obj.last_reply_at = datetime.now(timezone.utc)
+                        await session.commit()
+                        replies_sent += 1
+                        logger.info(
+                            f"Auto-reply #{today_count + replies_sent}: "
+                            f"@{target_username} → \"{chosen_reply[:60]}\""
+                        )
+
+                        # ─── BEĞENİ: Her 5 reply'da 1 beğeni ───
+                        if replies_sent % _LIKE_EVERY_N == 0:
+                            like_ok = await _like_tweet(tweet_id)
+                            if like_ok:
+                                total_liked += 1
+                    else:
+                        session.add(AutoReply(
+                            target_tweet_id=tweet_id,
+                            target_username=target_username,
+                            target_text=tweet_text[:1000],
+                            reply_text=chosen_reply,
+                            status="failed",
+                            error_message=send_result.get("error", "Gönderim hatası"),
+                        ))
+                        await session.commit()
+                        logger.error(
+                            f"Auto-reply başarısız: @{target_username} — {send_result.get('error')}"
+                        )
 
             logger.info(
                 "Auto-reply döngü bitti: %d reply, %d beğeni, %d API call, "
-                "atlandı: %d rate-limit, %d tweet-yok, %d ilk-tarama",
+                "atlandı: %d rate-limit, %d tweet-yok, %d ilk-tarama, "
+                "bekleyen: %d",
                 replies_sent, total_liked, api_calls,
                 skipped_rate_limit, skipped_no_tweets, skipped_init,
+                len(pending_replies) - replies_sent,
             )
 
         except Exception as e:

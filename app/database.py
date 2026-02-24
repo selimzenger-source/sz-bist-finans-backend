@@ -21,10 +21,11 @@ engine_kwargs = {
 }
 
 if not is_sqlite:
-    engine_kwargs["pool_size"] = 5
-    engine_kwargs["max_overflow"] = 10
+    engine_kwargs["pool_size"] = 10
+    engine_kwargs["max_overflow"] = 20
     engine_kwargs["pool_pre_ping"] = True  # Baglanti kopmasini onle
     engine_kwargs["pool_recycle"] = 300    # 5 dk'da bir recycle
+    engine_kwargs["pool_timeout"] = 60     # Baglanti bekleme suresi (default 30 → 60)
 
 engine = create_async_engine(db_url, **engine_kwargs)
 
