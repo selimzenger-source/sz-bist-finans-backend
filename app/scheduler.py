@@ -2653,6 +2653,82 @@ async def update_bist50_index_job():
             pass
 
 
+async def expire_subscriptions():
+    """Suresi dolan abonelikleri otomatik deaktif eder.
+
+    Her saat calisir. Kontrol edilen tablolar:
+    1. UserSubscription (haber paketi) — wallet ile alinan 30 gunluk paketler
+    2. StockNotificationSubscription (bildirim paketi) — wallet/RevenueCat bundle'lar
+
+    Sadece expires_at < now VE is_active = True olanlari deaktif eder.
+    expires_at = NULL olanlar dokunulmaz (eski kayitlar, sinirsiz paketler).
+    """
+    _now = datetime.now(timezone.utc)
+    expired_news = 0
+    expired_notif = 0
+
+    try:
+        from app.models.user import UserSubscription, StockNotificationSubscription
+        from sqlalchemy import select, and_, update
+
+        async with async_session() as db:
+            # 1. Haber abonelikleri (UserSubscription)
+            result = await db.execute(
+                update(UserSubscription)
+                .where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.expires_at.isnot(None),
+                        UserSubscription.expires_at < _now,
+                    )
+                )
+                .values(is_active=False)
+            )
+            expired_news = result.rowcount
+
+            # 2. Bildirim abonelikleri (StockNotificationSubscription)
+            result2 = await db.execute(
+                update(StockNotificationSubscription)
+                .where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.expires_at.isnot(None),
+                        StockNotificationSubscription.expires_at < _now,
+                    )
+                )
+                .values(is_active=False)
+            )
+            expired_notif = result2.rowcount
+
+            await db.commit()
+
+        if expired_news > 0 or expired_notif > 0:
+            logger.warning(
+                "⏰ Abonelik expire: %d haber paketi, %d bildirim paketi deaktif edildi",
+                expired_news, expired_notif,
+            )
+            try:
+                from app.services.admin_telegram import send_admin_telegram
+                await send_admin_telegram(
+                    f"⏰ Abonelik Expire\n"
+                    f"Haber: {expired_news} paket\n"
+                    f"Bildirim: {expired_notif} paket\n"
+                    f"Zaman: {_now.strftime('%Y-%m-%d %H:%M UTC')}"
+                )
+            except Exception:
+                pass
+        else:
+            logger.debug("Abonelik expire kontrolu: suresi dolan abonelik yok")
+
+    except Exception as e:
+        logger.error("Abonelik expire hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("expire_subscriptions", str(e))
+        except Exception:
+            pass
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -2985,6 +3061,17 @@ def _setup_scheduler_impl():
         IntervalTrigger(minutes=5),
         id="auto_reply",
         name="X Otomatik Reply (5dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── Abonelik Expire Kontrolu — her saat ───
+    scheduler.add_job(
+        expire_subscriptions,
+        IntervalTrigger(hours=1),
+        id="expire_subscriptions",
+        name="Abonelik Suresi Dolma Kontrolu (her saat)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

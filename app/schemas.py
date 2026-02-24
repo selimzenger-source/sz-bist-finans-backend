@@ -465,8 +465,10 @@ class RealtimeNotifRequest(BaseModel):
 class StockNotificationCreate(BaseModel):
     """Hisse bazli bildirim aboneligi olusturma."""
     ipo_id: Optional[int] = None  # None ise yillik paket
-    notification_type: str  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde_dusus
+    notification_type: str = "all"  # tavan_bozulma, taban_acilma, gunluk_acilis_kapanis, yuzde_dusus
     is_annual_bundle: bool = False
+    store: Optional[str] = None  # play_store, app_store, wallet
+    product_id: Optional[str] = None  # Store product ID veya wallet_spend_ipo
 
 
 class StockNotificationOut(BaseModel):
@@ -531,8 +533,9 @@ class WalletEarnRequest(BaseModel):
 class WalletSpendRequest(BaseModel):
     """Puan harcama istegi."""
     amount: float
-    spend_type: str  # spend_news, spend_ipo, spend_notif
+    spend_type: str  # spend_news, spend_ipo, spend_notif, spend_notif_reward
     description: Optional[str] = None
+    ipo_id: Optional[int] = None  # spend_notif_reward icin — 4 bildirim atomik olusturulur
 
 
 class WalletCouponRequest(BaseModel):

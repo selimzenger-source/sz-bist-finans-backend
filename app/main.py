@@ -219,6 +219,19 @@ def _verify_admin_password(provided: str) -> bool:
 
 
 # -------------------------------------------------------
+# Admin Sifre Dogrulama Endpoint
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/verify")
+@limiter.limit("5/minute")
+async def verify_admin_password(request: Request, payload: dict = Body(...)):
+    """Admin sifresini dogrular — client-side hardcoded sifre yerine server-side kontrol."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=401, detail="Gecersiz admin sifresi")
+    return {"status": "ok", "message": "Admin dogrulandi"}
+
+
+# -------------------------------------------------------
 # Health Check
 # -------------------------------------------------------
 
@@ -686,6 +699,10 @@ async def create_stock_notification(
         if existing.scalar_one_or_none():
             raise HTTPException(status_code=400, detail="Zaten aktif yillik paketiniz bulunuyor")
 
+        _now = datetime.now(timezone.utc)
+        # Paket turu: quarterly (90 gun) veya annual (365 gun)
+        # Frontend product_id'den anliyoruz: "3aylik" → 90, "yillik" → 365
+        bundle_days = 365 if data.product_id and "yillik" in (data.product_id or "") else 90
         sub = StockNotificationSubscription(
             user_id=user.id,
             ipo_id=None,
@@ -693,9 +710,17 @@ async def create_stock_notification(
             is_annual_bundle=True,
             price_paid_tl=ANNUAL_BUNDLE_PRICE,
             is_active=True,
+            store=data.store or "play_store",
+            product_id=data.product_id,
+            purchased_at=_now,
+            expires_at=_now + timedelta(days=bundle_days),
         )
         db.add(sub)
         await db.flush()
+        logger.info(
+            "Bundle olusturuldu: user_id=%s, days=%d, expires=%s",
+            user.id, bundle_days, sub.expires_at.isoformat(),
+        )
         return sub
 
     # Tek hisse bildirim
@@ -1834,16 +1859,76 @@ async def wallet_spend(
                 is_annual_bundle=True,
                 price_paid_tl=0,  # Puan ile alindi
                 is_active=True,
+                store="wallet",
+                product_id="wallet_spend_ipo",
+                purchased_at=_now,
+                expires_at=_now + timedelta(days=90),  # 3 ay — artik suuresiz degil!
             )
             db.add(quarterly_sub)
             await db.flush()
-            logger.info("Puan ile 3 aylik halka arz paketi aktif edildi: user_id=%s", user.id)
+            logger.info(
+                "Puan ile 3 aylik halka arz paketi aktif edildi: user_id=%s, expires=%s",
+                user.id, quarterly_sub.expires_at.isoformat(),
+            )
         else:
             logger.info("Kullanicinin zaten aktif bundle'i var: user_id=%s", user.id)
 
-    # ---- Puan ile Bildirim Paketi alimi — log ----
-    if data.spend_type == "spend_notif":
-        logger.info("Puan ile bildirim paketi alindi: user_id=%s, amount=%s", user.id, data.amount)
+    # ---- Puan ile Bildirim Paketi (tek hisse, 4 tip birden) — ATOMIK server-side olustur ----
+    if data.spend_type in ("spend_notif", "spend_notif_reward"):
+        _now = datetime.now(timezone.utc)
+
+        # ipo_id varsa 4 bildirim tipini atomik olarak olustur
+        if data.ipo_id:
+            from app.models.ipo import IPO
+            ipo_result = await db.execute(select(IPO).where(IPO.id == data.ipo_id))
+            ipo_obj = ipo_result.scalar_one_or_none()
+
+            if ipo_obj:
+                notif_types = ["tavan_bozulma", "taban_acilma", "gunluk_acilis_kapanis", "yuzde_dusus"]
+                created_count = 0
+
+                for ntype in notif_types:
+                    # Duplicate kontrolu
+                    existing_check = await db.execute(
+                        select(StockNotificationSubscription).where(
+                            and_(
+                                StockNotificationSubscription.user_id == user.id,
+                                StockNotificationSubscription.ipo_id == data.ipo_id,
+                                StockNotificationSubscription.notification_type == ntype,
+                                StockNotificationSubscription.is_active == True,
+                            )
+                        )
+                    )
+                    if existing_check.scalar_one_or_none():
+                        continue  # Zaten aktif, atla
+
+                    new_notif = StockNotificationSubscription(
+                        user_id=user.id,
+                        ipo_id=data.ipo_id,
+                        notification_type=ntype,
+                        is_annual_bundle=False,
+                        price_paid_tl=0,  # Puan ile alindi
+                        is_active=True,
+                        store="wallet",
+                        product_id="wallet_spend_notif",
+                        purchased_at=_now,
+                    )
+                    db.add(new_notif)
+                    created_count += 1
+
+                await db.flush()
+                logger.info(
+                    "Puan ile 4 bildirim ATOMIK olusturuldu: user_id=%s, ipo_id=%s, created=%d",
+                    user.id, data.ipo_id, created_count,
+                )
+            else:
+                logger.warning("spend_notif_reward: IPO bulunamadi, ipo_id=%s", data.ipo_id)
+        else:
+            # ipo_id yoksa sadece log (eski frontend uyumu)
+            logger.info(
+                "Puan ile bildirim paketi alindi (ipo_id yok): user_id=%s, desc=%s",
+                user.id, data.description,
+            )
 
     _check_daily_reset(user)
     cooldown = _get_wallet_cooldown(user)
@@ -2186,7 +2271,14 @@ async def send_realtime_notification(
 
     import json as _json
 
+    _now_utc = datetime.now(timezone.utc)
+
     for sub in active_subs:
+        # Suresi dolmus mu? (scheduler saatte 1 temizliyor ama arada kacabilir)
+        if sub.expires_at and sub.expires_at < _now_utc:
+            sub.is_active = False
+            continue
+
         # Paket aboneleri icin: "all" tipinde kayitli, her bildirim tipini alir
         if sub.is_annual_bundle and sub.notification_type != "all":
             pass
