@@ -2990,6 +2990,31 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── AI Piyasa Raporu Tweetleri ───
+    from app.services.ai_market_report import send_morning_report_tweet, send_evening_report_tweet
+
+    # Sabah Acilis Raporu — 08:30 TR = 05:30 UTC (Pzt-Cum)
+    scheduler.add_job(
+        send_morning_report_tweet,
+        CronTrigger(hour=5, minute=30, day_of_week="mon-fri"),
+        id="morning_market_report",
+        name="Sabah Piyasa Raporu Tweet (08:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Aksam Kapanis Raporu — 20:00 TR = 17:00 UTC (Pzt-Cum)
+    scheduler.add_job(
+        send_evening_report_tweet,
+        CronTrigger(hour=17, minute=0, day_of_week="mon-fri"),
+        id="evening_market_report",
+        name="Aksam Kapanis Raporu Tweet (20:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
