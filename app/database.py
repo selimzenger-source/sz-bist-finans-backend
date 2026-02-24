@@ -326,6 +326,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v30 migration: reply_targets.last_reply_at (hesap bazli saatlik rate limit)
+        try:
+            await conn.execute(
+                text("ALTER TABLE reply_targets ADD COLUMN IF NOT EXISTS last_reply_at TIMESTAMPTZ")
+            )
+        except Exception:
+            pass
+
         # v29 migration: AI skoru < 6 olan haberleri telegram_news'den temizle
         # Chatbox'ta sadece AI >= 6 veya AI=NULL (basarisiz) haberler gorunecek
         try:

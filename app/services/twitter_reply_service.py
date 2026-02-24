@@ -854,6 +854,18 @@ async def auto_reply_cycle():
                     if replies_sent >= remaining:
                         break
 
+                    # ─── HESAP BAZLI SAATLIK RATE LIMIT ───
+                    # Aynı hesaba 1 saatte max 1 reply
+                    now_utc = datetime.now(timezone.utc)
+                    if target.last_reply_at:
+                        seconds_since = (now_utc - target.last_reply_at).total_seconds()
+                        if seconds_since < 3600:  # 1 saat = 3600 saniye
+                            logger.info(
+                                "Rate limit: @%s — son reply %d dk önce, atlanıyor",
+                                target.username, seconds_since // 60,
+                            )
+                            continue
+
                     # User ID çözümle (cache'de yoksa API'den çek)
                     user_id = target.twitter_user_id
                     if not user_id:
@@ -975,6 +987,9 @@ async def auto_reply_cycle():
                                 reply_tweet_id=send_result.get("reply_tweet_id"),
                                 status="replied",
                             ))
+                            # Hesap bazlı cooldown güncelle
+                            target.last_reply_at = datetime.now(timezone.utc)
+                            await session.flush()
                             replies_sent += 1
                             logger.info(
                                 f"Auto-reply #{replies_sent}: @{target.username} → \"{chosen_reply[:60]}\""

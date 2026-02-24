@@ -400,6 +400,10 @@ class ReplyTarget(Base):
         String(30), nullable=True,
         comment="Son gorulmus tweet ID — bundan onceki tweetlere reply atilmaz",
     )
+    last_reply_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+        comment="Son reply zamani — 1 saat cooldown icin",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
