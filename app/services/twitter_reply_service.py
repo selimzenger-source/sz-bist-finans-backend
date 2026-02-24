@@ -709,9 +709,12 @@ async def _get_daily_limit() -> int:
             )
             setting = result.scalar_one_or_none()
             if setting:
-                return int(setting.value)
-    except Exception:
-        pass
+                limit_val = int(setting.value)
+                logger.info("Günlük reply limiti (DB): %d", limit_val)
+                return limit_val
+    except Exception as e:
+        logger.warning("Günlük reply limiti okunamadı: %s", e)
+    logger.info("Günlük reply limiti (varsayılan): %d", _AUTO_REPLY_DAILY_LIMIT_DEFAULT)
     return _AUTO_REPLY_DAILY_LIMIT_DEFAULT
 
 
@@ -825,8 +828,9 @@ async def auto_reply_cycle():
             # Günlük limit (DB'den okunur — admin panelden ayarlanabilir)
             daily_limit = await _get_daily_limit()
             today_count = await _get_today_reply_count()
+            logger.info(f"Reply durum: bugün {today_count}/{daily_limit}, rate_limit=30dk")
             if today_count >= daily_limit:
-                logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit}")
+                logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit} — durduruluyor")
                 return
 
             remaining = daily_limit - today_count
@@ -856,12 +860,12 @@ async def auto_reply_cycle():
                     if replies_sent >= remaining:
                         break
 
-                    # ─── HESAP BAZLI SAATLIK RATE LIMIT ───
-                    # Aynı hesaba 1 saatte max 1 reply
+                    # ─── HESAP BAZLI RATE LIMIT (30 dk) ───
+                    # Aynı hesaba 30 dakikada max 1 reply
                     now_utc = datetime.now(timezone.utc)
                     if target.last_reply_at:
                         seconds_since = (now_utc - target.last_reply_at).total_seconds()
-                        if seconds_since < 3600:  # 1 saat = 3600 saniye
+                        if seconds_since < 1800:  # 30 dakika = 1800 saniye
                             logger.info(
                                 "Rate limit: @%s — son reply %d dk önce, atlanıyor",
                                 target.username, seconds_since // 60,
