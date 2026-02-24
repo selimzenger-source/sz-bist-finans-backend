@@ -1175,19 +1175,22 @@ async def trigger_opening_push_from_admin(
 
             ticker = ipo.ticker
             if hit_ceiling:
-                title = f"Seans Acilis: {ticker} Tavan Acti!"
-                body = f"{ticker} tavan fiyatindan acildi"
+                title = f"🚀 Seans Açılış: {ticker} Tavan Açtı!"
+                body = f"{ticker} tavan fiyatından açıldı 🎯"
             elif hit_floor:
-                title = f"Seans Acilis: {ticker} Taban Acti!"
-                body = f"{ticker} taban fiyatindan acildi"
+                title = f"📉 Seans Açılış: {ticker} Taban Açtı!"
+                body = f"{ticker} taban fiyatından açıldı ⚠️"
             else:
+                # %0.00 nötr — bildirim gönderme
+                if abs(pct_change) < 0.005:
+                    continue
                 gap_str = f"%+{abs(pct_change):.2f}" if pct_change >= 0 else f"%-{abs(pct_change):.2f}"
                 if pct_change >= 0:
-                    title = f"Seans Acilis: {ticker} Alicili Acti"
-                    body = f"Gap: {gap_str}"
+                    title = f"🟢 Seans Açılış: {ticker} Alıcılı Açtı"
+                    body = f"Açılış Gap: {gap_str}"
                 else:
-                    title = f"Seans Acilis: {ticker} Saticili Acti"
-                    body = f"Gap: {gap_str}"
+                    title = f"🔴 Seans Açılış: {ticker} Satıcılı Açtı"
+                    body = f"Açılış Gap: {gap_str}"
 
             # Bu IPO icin aktif aboneleri bul ve bildirim gonder
             from app.models.user import StockNotificationSubscription, User
@@ -1243,7 +1246,7 @@ async def trigger_opening_push_from_admin(
                     pass
 
         tickers_str = ", ".join(ipo.ticker for ipo in trading_ipos)
-        msg = quote(f"Acilis Push: {sent_total} bildirim gonderildi ({tickers_str})")
+        msg = quote(f"Açılış Push: {sent_total} bildirim gönderildi ({tickers_str})")
         logger.info("[ADMIN] Acilis push: %d bildirim — %s", sent_total, tickers_str)
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1", status_code=303)
 

@@ -1195,10 +1195,16 @@ def tweet_bist30_news(
                 f"#BIST50 #{ticker} #KAP #BorsaIstanbul"
             )
 
+        # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
+        # force_send=True ile TWITTER_AUTO_SEND'den bagimsiz direkt atar
+        logger.info(
+            "[KAP-TWEET] %s — text=%d char, img=%s, ai_score=%s",
+            ticker, len(text), bool(img_path), ai_score,
+        )
         if img_path:
-            return _safe_tweet_with_media(text, img_path)
+            return _safe_tweet_with_media(text, img_path, source="tweet_bist30_news", force_send=True)
         else:
-            return _safe_tweet(text)
+            return _safe_tweet(text, source="tweet_bist30_news", force_send=True)
     except Exception as e:
         logger.error(f"tweet_bist50_news hatasi: {e}")
         return False

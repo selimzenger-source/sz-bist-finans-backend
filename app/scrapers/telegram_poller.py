@@ -484,10 +484,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     from app.services.news_service import get_bist50_tickers_sync
                     from app.services.twitter_service import tweet_bist30_news
 
-                    if ticker and ticker.upper() in get_bist50_tickers_sync():
+                    bist50 = get_bist50_tickers_sync()
+                    if ticker and ticker.upper() in bist50:
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
+
+                        logger.info(
+                            "[TWEET-FLOW] KAP tweet baslatiliyor: %s | kw=%s | ai=%s | url=%s",
+                            ticker, tweet_kw, ai_score, kap_url,
+                        )
 
                         tw_success = tweet_bist30_news(
                             ticker,
@@ -499,7 +505,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             ai_hashtags=ai_hashtags,
                         )
                         logger.info(
-                            "Twitter BIST50 tweet atildi: %s (basarili=%s, ai_score=%s)",
+                            "[TWEET-FLOW] KAP tweet sonuc: %s (basarili=%s, ai_score=%s)",
                             ticker, tw_success, ai_score,
                         )
 
@@ -508,9 +514,14 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             "bist50_kap_haber", ticker, tw_success,
                             f"Anahtar: {tweet_kw} | AI: {ai_score}/10" if ai_score is None else f"Anahtar: {tweet_kw} | AI: {ai_score:.1f}/10",
                         )
+                    else:
+                        logger.info(
+                            "[TWEET-FLOW] BIST50 disinda, tweet atilmadi: %s (BIST50=%d hisse)",
+                            ticker, len(bist50),
+                        )
 
                 except Exception as tw_err:
-                    logger.error("Twitter tweet hatasi (poller devam eder): %s", tw_err)
+                    logger.error("[TWEET-FLOW] Twitter tweet hatasi (poller devam eder): %s", tw_err, exc_info=True)
 
         if new_count > 0:
             await session.commit()

@@ -622,8 +622,8 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="tavan_bozulma",
-                title=f"{ticker} Tavan Cozuldu!",
-                body=f"{ticker} tavan cozuldu!",
+                title=f"🔓 {ticker} Tavan Çözüldü!",
+                body=f"{ticker} tavan çözüldü!",
             )
             send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
             state.last_ceiling_notif_at = now
@@ -653,8 +653,8 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="tavan_bozulma",
-                title=f"{ticker} 5dk gecti, tavana kilitleyemedi!",
-                body=f"{ticker} tavan cozuldukten 5 dakika gecti, tavana kilitleyemedi!",
+                title=f"⏱️ {ticker} 5dk geçti, tavana kilitleyemedi!",
+                body=f"{ticker} tavan çözüldükten 5 dakika geçti, tavana kilitleyemedi!",
             )
             state.last_ceiling_notif_at = now
             state.ceiling_broke_at = None  # Yeni dongu icin sifirla
@@ -684,8 +684,8 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="taban_acilma",
-                title=f"{ticker} Taban Cozuldu!",
-                body=f"{ticker} taban cozuldu!",
+                title=f"🔓 {ticker} Taban Çözüldü!",
+                body=f"{ticker} taban çözüldü!",
             )
             send_ceiling_data_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
             state.last_floor_notif_at = now
@@ -715,8 +715,8 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="taban_acilma",
-                title=f"{ticker} 5dk gecti, tabana kilitleyemedi!",
-                body=f"{ticker} taban cozuldukten 5 dakika gecti, tabana kilitleyemedi!",
+                title=f"⏱️ {ticker} 5dk geçti, tabana kilitleyemedi!",
+                body=f"{ticker} taban çözüldükten 5 dakika geçti, tabana kilitleyemedi!",
             )
             state.last_floor_notif_at = now
             state.floor_broke_at = None  # Yeni dongu icin sifirla
