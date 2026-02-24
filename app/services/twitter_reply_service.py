@@ -46,6 +46,13 @@ _JITTER_MAX = 180  # 3 dakika
 # Begeni sikligi: her N reply'da 1 begeni
 _LIKE_EVERY_N = 5
 
+# Tweet yaş limiti — bu süreden eski tweetlere reply ATMA (dakika)
+# Deploy sonrası biriken eski tweetlere spam yapmayı önler
+_MAX_TWEET_AGE_MINUTES = 30  # Sadece son 30dk'daki tweetlere reply at
+
+# Min kelime sayısı — çok kısa tweetlere reply atma
+_MIN_TWEET_WORDS = 4  # En az 4 kelime olmalı
+
 # Twitter API rate limit — Basic tier (user OAuth 1.0a):
 #   GET /2/users/:id/tweets = 900 req / 15 dk (çok cömert)
 #   POST /2/tweets = ~100 / 24 saat (reply dahil)
@@ -1061,10 +1068,31 @@ async def auto_reply_cycle():
 
                         tweet_id = tweet["id"]
                         tweet_text = tweet["text"]
+                        tweet_created = tweet.get("created_at", "")
 
-                        # Çok kısa tweetleri atla
-                        if len(tweet_text.strip()) < 15:
+                        # ─── ESKİ TWEET KONTROLÜ ───
+                        # Sadece son _MAX_TWEET_AGE_MINUTES dk'daki tweetlere reply at
+                        # Deploy sonrası biriken eski tweetlere spam yapmayı önler
+                        if tweet_created:
+                            try:
+                                tweet_time = datetime.fromisoformat(
+                                    tweet_created.replace("Z", "+00:00")
+                                )
+                                age_minutes = (
+                                    datetime.now(timezone.utc) - tweet_time
+                                ).total_seconds() / 60
+                                if age_minutes > _MAX_TWEET_AGE_MINUTES:
+                                    continue  # Eski tweet, atla
+                            except (ValueError, TypeError):
+                                pass  # Parse edilemezse devam et
+
+                        # Çok kısa tweetleri atla (karakter + kelime kontrolü)
+                        clean_text = tweet_text.strip()
+                        if len(clean_text) < 15:
                             continue
+                        word_count = len(clean_text.split())
+                        if word_count < _MIN_TWEET_WORDS:
+                            continue  # Yeterli kelime yok, anlamlı reply üretilemez
 
                         # Zaten reply atılmış mı?
                         existing = await session.execute(
