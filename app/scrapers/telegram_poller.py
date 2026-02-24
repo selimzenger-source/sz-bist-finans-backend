@@ -412,21 +412,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
 
-            # DB'ye kaydet — fiyat yok
-            # seans_disi_acilis = acilis gap bilgisi, haber degil → DB'ye kaydetme
-            # (push bildirim yine gider ama "Son Haberler" listesinde gozukmez)
-            if message_type == "seans_disi_acilis":
+            # AI skoru kontrolu — 6 altindaki haberler DB'ye kaydedilmez,
+            # bildirim gitmez, tweet atilmaz. Chatbox'ta gorünmez.
+            # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
+            should_notify = (ai_score is None) or (ai_score >= 6)
+
+            if not should_notify:
+                logger.info(
+                    "AI skoru dusuk (%s < 6), DB+bildirim+tweet atlanıyor: %s — %s",
+                    ai_score, ticker, title,
+                )
+            elif message_type == "seans_disi_acilis":
+                # seans_disi_acilis = acilis gap bilgisi, haber degil → DB'ye kaydetme
                 logger.info(
                     "seans_disi_acilis DB'ye kaydedilmedi (haber degil): %s — %s",
                     ticker, title,
                 )
             else:
+                # AI skor >= 6 veya None → DB'ye kaydet
                 news = TelegramNews(
                     telegram_message_id=telegram_message_id,
                     chat_id=msg_chat_id,
                     message_type=message_type,
                     ticker=ticker,
-                    price_at_time=None,  # Fiyat kaydedilmez
+                    price_at_time=None,
                     raw_text=text,
                     parsed_title=title,
                     parsed_body=parsed_body,
@@ -434,8 +443,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     kap_notification_id=kap_id,
                     expected_trading_date=expected_date,
                     gap_pct=gap,
-                    prev_close_price=None,  # Fiyat kaydedilmez
-                    theoretical_open=None,  # Fiyat kaydedilmez
+                    prev_close_price=None,
+                    theoretical_open=None,
                     message_date=msg_date,
                     ai_score=ai_score,
                     ai_summary=ai_summary,
@@ -444,15 +453,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 session.add(news)
                 new_count += 1
 
-            # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
-            # AI skoru notr veya olumsuz ise bildirim gonderme (gereksiz bildirim engelle)
-            # ai_score None = AI basarisiz → guvenlisyeni gonder, ai_score >= 6 = pozitif
-            should_notify = (ai_score is None) or (ai_score >= 6)
+            # Push bildirim — sadece should_notify True ise
             if not should_notify:
-                logger.info(
-                    "AI skoru dusuk (%s < 6), bildirim atlanıyor: %s — %s",
-                    ai_score, ticker, title,
-                )
+                pass  # Yukarida loglandi
             else:
                 try:
                     from app.services.notification import NotificationService

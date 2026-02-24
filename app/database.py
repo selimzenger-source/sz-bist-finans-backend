@@ -325,3 +325,12 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v29 migration: AI skoru < 6 olan haberleri telegram_news'den temizle
+        # Chatbox'ta sadece AI >= 6 veya AI=NULL (basarisiz) haberler gorunecek
+        try:
+            await conn.execute(
+                text("DELETE FROM telegram_news WHERE ai_score IS NOT NULL AND ai_score < 6")
+            )
+        except Exception:
+            pass
