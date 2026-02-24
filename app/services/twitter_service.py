@@ -467,6 +467,7 @@ class _DynSetting:
 # f-string icinde {APP_LINK} yazildiginda otomatik DB'den okur
 APP_LINK = _DynSetting("APP_LINK")
 HALKAARZ_LINK = "https://szalgo.net.tr/halkaarz"
+KAP_HABER_LINK = "https://szalgo.net.tr/telegram-kap"
 SLOGAN = _DynSetting("SLOGAN")
 DISCLAIMER = _DynSetting("DISCLAIMER")
 DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")
@@ -1149,7 +1150,7 @@ def tweet_bist30_news(
             f"{ai_section}"
             f"{kap_section}\n"
             f"{_get_setting('T11_CTA')}\n"
-            f"📲 {HALKAARZ_LINK}\n"
+            f"📲 {KAP_HABER_LINK}\n"
             f"#BIST50 #{ticker} #KAP #Borsa"
         )
 
@@ -1166,7 +1167,7 @@ def tweet_bist30_news(
                 f"{ai_section_short}"
                 f"{kap_section}\n"
                 f"{_get_setting('T11_CTA')}\n"
-                f"📲 {HALKAARZ_LINK}\n"
+                f"📲 {KAP_HABER_LINK}\n"
                 f"#BIST50 #{ticker} #KAP #Borsa"
             )
 
@@ -1176,7 +1177,7 @@ def tweet_bist30_news(
                 f"{emoji} #{ticker} — Haber\n\n"
                 f"{now_str} | {clean_kw}\n"
                 f"{ai_section_short if ai_score else ''}"
-                f"\n📲 {HALKAARZ_LINK}\n"
+                f"\n📲 {KAP_HABER_LINK}\n"
                 f"#BIST50 #{ticker} #KAP"
             )
 
