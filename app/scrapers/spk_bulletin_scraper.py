@@ -114,6 +114,58 @@ def extract_tables_from_pdf(pdf_bytes: bytes) -> list[list[list[str]]]:
 
 
 # -------------------------------------------------------
+# Bulten Icerigini AI Analiz Formatina Cevirme
+# -------------------------------------------------------
+
+def format_tables_for_analysis(tables: list[list[list[str]]], full_text: str) -> str:
+    """PDF'den cikarilan tum tablolari + metni AI analizi icin yapisal formata cevirir.
+
+    Bu fonksiyon SPK bulten analiz tweeti icin kullanilir.
+    Tum tablo ve metin bilgilerini tek bir string olarak dondurur.
+
+    Returns:
+        Yapisal metin: Her tablo header + satirlari, ardindan full text
+    """
+    parts = []
+
+    # 1) Tablolari yapisal formata cevir
+    for idx, table in enumerate(tables, 1):
+        if not table or len(table) < 1:
+            continue
+
+        table_lines = []
+        for row_idx, row in enumerate(table):
+            if not row:
+                continue
+            # Hucreleri temizle
+            cells = [str(c or "").strip().replace("\n", " ") for c in row]
+            # Bos satirlari atla
+            if not any(cells):
+                continue
+            # Ilk satir genelde header
+            if row_idx == 0:
+                table_lines.append("BASLIK: " + " | ".join(cells))
+            else:
+                table_lines.append(" | ".join(cells))
+
+        if table_lines:
+            parts.append(f"--- TABLO {idx} ---")
+            parts.extend(table_lines)
+            parts.append("")
+
+    # 2) Full text'i ekle (tablo disindaki metin bilgileri)
+    if full_text:
+        parts.append("--- BULTEN METIN ICERIGI ---")
+        # Cok uzun metinleri kirp (AI token limiti)
+        trimmed = full_text[:8000] if len(full_text) > 8000 else full_text
+        parts.append(trimmed)
+
+    result = "\n".join(parts)
+    logger.info("format_tables_for_analysis: %d tablo, %d karakter cikti", len(tables), len(result))
+    return result
+
+
+# -------------------------------------------------------
 # Ilk Halka Arz Tablosu Parse
 # -------------------------------------------------------
 
@@ -436,15 +488,21 @@ class SPKBulletinScraper:
             logger.error("SPK PDF indirme hatasi: %s", e)
             return None
 
-    async def process_bulletin(self, pdf_url: str, bulletin_no: tuple[int, int]) -> list[dict]:
-        """Tek bir bulteni indir, parse et, halka arz bilgilerini cikar."""
+    async def process_bulletin(
+        self, pdf_url: str, bulletin_no: tuple[int, int],
+    ) -> tuple[list[dict], str]:
+        """Tek bir bulteni indir, parse et, halka arz bilgilerini cikar.
+
+        Returns:
+            (approvals, full_bulletin_text) — halka arz onaylari + AI analiz icin tam bulten metni
+        """
         bno_str = bulletin_no_str(*bulletin_no)
 
         # 1. PDF indir
         pdf_bytes = await self.download_pdf(pdf_url)
         if not pdf_bytes:
             logger.warning("SPK bulten %s: PDF indirilemedi", bno_str)
-            return []
+            return [], ""
 
         # 2. PDF'den text + tablo cikar
         full_text = extract_text_from_pdf(pdf_bytes)
@@ -457,9 +515,12 @@ class SPKBulletinScraper:
 
         if not full_text and not tables:
             logger.warning("SPK bulten %s: PDF bos veya okunamadi", bno_str)
-            return []
+            return [], ""
 
-        # 3. SADECE Ilk Halka Arzlar tablosu — sermaye artirimi tablolari atlanir
+        # 3. Tum bulten icerigini AI analiz formatina cevir
+        full_bulletin_text = format_tables_for_analysis(tables, full_text)
+
+        # 4. SADECE Ilk Halka Arzlar tablosu — sermaye artirimi tablolari atlanir
         ipo_approvals = find_ilk_halka_arz_table(tables, full_text)
 
         # NOT: find_halka_acik_pay_ihraclari() artik kullanilmiyor.
@@ -479,7 +540,7 @@ class SPKBulletinScraper:
             bno_str, len(all_approvals),
         )
 
-        return all_approvals
+        return all_approvals, full_bulletin_text
 
 
 # -------------------------------------------------------
@@ -624,7 +685,7 @@ async def _check_spk_bulletins_inner():
                 bno = bulletin["bulletin_no"]
                 bno_str_val = bulletin_no_str(*bno)
 
-                approvals = await scraper.process_bulletin(
+                approvals, full_bulletin_text = await scraper.process_bulletin(
                     bulletin["pdf_url"], bno,
                 )
 
@@ -706,6 +767,31 @@ async def _check_spk_bulletins_inner():
                         await activate_scraper_boost()
                     except Exception as _boost_err:
                         logger.warning("Scraper boost aktivasyon hatasi: %s", _boost_err)
+
+                # ────────────────────────────────────────────
+                # SPK Bulten Analiz Tweeti (bagimsiz, AI ile)
+                # Halka arz tweetinden 90sn sonra, veya direkt
+                # ────────────────────────────────────────────
+                if full_bulletin_text:
+                    try:
+                        if new_ipos_this_bulletin:
+                            # IPO tweeti atildiysa 90sn bekle
+                            logger.info("SPK bulten analiz: IPO tweeti atildi, 90sn bekleniyor...")
+                            await asyncio.sleep(90)
+
+                        from app.services.twitter_service import tweet_spk_bulletin_analysis
+                        from app.services.admin_telegram import notify_tweet_sent as _notify_tw
+                        _ba_ok = tweet_spk_bulletin_analysis(full_bulletin_text, bno_str_val)
+                        await _notify_tw(
+                            "spk_bulten_analiz", f"Bülten {bno_str_val}", _ba_ok,
+                            f"AI analiz tweeti ({'basarili' if _ba_ok else 'basarisiz'})",
+                        )
+                        logger.info(
+                            "SPK bulten analiz tweeti: bulten %s, sonuc=%s",
+                            bno_str_val, _ba_ok,
+                        )
+                    except Exception as _ba_err:
+                        logger.warning("SPK bulten analiz tweet hatasi: %s", _ba_err)
 
                 if highest_no is None or is_newer(bno, highest_no):
                     highest_no = bno

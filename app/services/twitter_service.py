@@ -1636,3 +1636,160 @@ def tweet_opening_summary(stocks: list) -> bool:
     except Exception as e:
         logger.error(f"tweet_opening_summary hatasi: {e}")
         return False
+
+
+# ================================================================
+# 17. SPK BULTEN ANALIZ TWEETI (AI ile kapsamli bulten analizi)
+# ================================================================
+
+BANNER_SPK_BULTEN_ANALIZ = os.path.join(_IMG_DIR, "spk_bulten_analiz.png")
+
+# Abacus AI sabitleri (ai_market_report.py ile ayni)
+_ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
+_BULLETIN_AI_MODEL = "gpt-4.1"
+
+_BULLETIN_ANALYSIS_SYSTEM_PROMPT = """Sen deneyimli bir SPK bulten analistisin. Verilen SPK bulteni icerigini analiz edip, yatirimcilari ilgilendiren onemli kararlari ozetleyeceksin.
+
+TWEET FORMATI:
+- Turkce, sade, bilgilendirici
+- Emoji kullan ama asiri degil
+- Max 3500 karakter
+- Her madde kisa ve net
+
+DAHIL ET (onem sirasina gore):
+1. Yeni halka arz onaylari — varsa sirket adi ve kisa bilgi, yoksa "Bu bultende yeni halka arz onayi bulunmuyor" yaz
+2. Bedelli sermaye artirimlari — sirket adi + arttirim miktari (varsa)
+3. Bedelsiz sermaye artirimlari — sirket adi + oran (varsa)
+4. Halka acik ortakliklarin pay ihraclari — sirket adi + detay
+5. Sirketlere verilen onemli idari para cezalari (IPC) — sirket adi + ceza tutari + neden (orn: ETYAT, HKTM gibi SIRKET bazli cezalar)
+
+KESINLIKLE HARIC TUT (bunlari YAZMA):
+- Eurobond ihraclari
+- Borsada islem yasagi / site yasaklari
+- Fon yoneticisi veya gercek kisi bazli cezalar (sadece SIRKET bazli cezalar dahil)
+- Borclama araclari
+- Gayrimenkul sertifikalari
+- Kira sertifikalari
+- Yatirim fonu kurulus/tadil islemleri
+- Portfoy yonetim sirketlerinin rutin islemleri
+
+FORMAT KURALLARI:
+- Borsada islemi olan sirketlerin ticker sembollerini biliyorsan #TICKER formatinda kullan
+- Bilmedigin ticker'i UYDURMA, sadece sirket adini yaz
+- Her bolumu emoji + baslik ile ayir (orn: 📊 Sermaye Artirimlari)
+- Bultende ilgili icerik YOKSA o bolumu hic yazma (bos bolum olmasin)
+- Sonuna #SPK #BultenAnaliz hashtag'leri ekle
+- Uydurmaya GEREK YOK — sadece bultendeki verileri kullan"""
+
+
+def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:
+    """Abacus AI ile bulten icerigini analiz eder, tweet metni uretir (senkron)."""
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        api_key = settings.ABACUS_API_KEY
+
+        if not api_key:
+            logger.error("SPK bulten analiz: Abacus API key yok")
+            return None
+
+        user_message = (
+            f"SPK Bulteni {bulletin_no} icerigini analiz et.\n"
+            f"SADECE bultendeki GERCEK verilere dayan, hicbir bilgiyi UYDURMA.\n\n"
+            f"--- BULTEN ICERIGI ---\n{bulletin_text}"
+        )
+
+        # Senkron httpx cagirisi (twitter_service sync context'te calisiyor)
+        resp = httpx.post(
+            _ABACUS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": _BULLETIN_AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": _BULLETIN_ANALYSIS_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1200,
+            },
+            timeout=60.0,
+        )
+
+        if resp.status_code != 200:
+            logger.error("SPK bulten AI hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            return None
+
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        if not content:
+            logger.error("SPK bulten AI bos rapor dondu")
+            return None
+
+        # Max 3500 karakter (link + hashtag icin bosluk birak)
+        if len(content) > 3500:
+            content = content[:3497] + "..."
+
+        logger.info("SPK bulten AI analiz uretildi: %d karakter", len(content))
+        return content.strip()
+
+    except Exception as e:
+        logger.error("SPK bulten AI analiz hatasi: %s", e)
+        return None
+
+
+def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
+    """SPK bulten analiz tweetini atar — AI analiz + gorsel + metin.
+
+    Mevcut halka arz tweetinden BAGIMSIZ calisir.
+    Bultenin tamami AI ile analiz edilip onemli kararlar ozetlenir.
+
+    Args:
+        bulletin_text: format_tables_for_analysis() ciktisi
+        bulletin_no: Bulten numarasi (orn: "2026/8")
+    """
+    try:
+        if not bulletin_text or len(bulletin_text) < 50:
+            logger.warning("SPK bulten analiz: Bulten icerigi cok kisa (%d char), tweet atilmadi",
+                           len(bulletin_text) if bulletin_text else 0)
+            return False
+
+        # 1. AI analiz uret
+        ai_text = _generate_bulletin_analysis_sync(bulletin_text, bulletin_no)
+        if not ai_text:
+            logger.warning("SPK bulten analiz: AI metin uretilemedi, tweet atilmadi")
+            return False
+
+        # 2. Tweet metnini olustur
+        text = (
+            f"📋 SPK Bülteni {bulletin_no} — Analiz\n\n"
+            f"{ai_text}\n\n"
+            f"📲 {APP_LINK}\n"
+            f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
+        )
+
+        # 4000 karakter Twitter limiti
+        if len(text) > 3950:
+            # AI metnini kirp
+            max_ai = 3950 - len(text) + len(ai_text) - 10
+            ai_text = ai_text[:max_ai] + "..."
+            text = (
+                f"📋 SPK Bülteni {bulletin_no} — Analiz\n\n"
+                f"{ai_text}\n\n"
+                f"📲 {APP_LINK}\n"
+                f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
+            )
+
+        # 3. Gorselli tweet at
+        if os.path.exists(BANNER_SPK_BULTEN_ANALIZ):
+            return _safe_tweet_with_media(text, BANNER_SPK_BULTEN_ANALIZ, source="tweet_spk_bulletin_analysis")
+        else:
+            logger.warning("SPK bulten analiz: Gorsel bulunamadi (%s), sadece metin", BANNER_SPK_BULTEN_ANALIZ)
+            return _safe_tweet(text, source="tweet_spk_bulletin_analysis")
+
+    except Exception as e:
+        logger.error("tweet_spk_bulletin_analysis hatasi: %s", e)
+        return False
