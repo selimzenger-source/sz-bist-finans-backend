@@ -413,28 +413,36 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
 
             # DB'ye kaydet — fiyat yok
-            news = TelegramNews(
-                telegram_message_id=telegram_message_id,
-                chat_id=msg_chat_id,
-                message_type=message_type,
-                ticker=ticker,
-                price_at_time=None,  # Fiyat kaydedilmez
-                raw_text=text,
-                parsed_title=title,
-                parsed_body=parsed_body,
-                sentiment=sentiment,
-                kap_notification_id=kap_id,
-                expected_trading_date=expected_date,
-                gap_pct=gap,
-                prev_close_price=None,  # Fiyat kaydedilmez
-                theoretical_open=None,  # Fiyat kaydedilmez
-                message_date=msg_date,
-                ai_score=ai_score,
-                ai_summary=ai_summary,
-                kap_url=kap_url,
-            )
-            session.add(news)
-            new_count += 1
+            # seans_disi_acilis = acilis gap bilgisi, haber degil → DB'ye kaydetme
+            # (push bildirim yine gider ama "Son Haberler" listesinde gozukmez)
+            if message_type == "seans_disi_acilis":
+                logger.info(
+                    "seans_disi_acilis DB'ye kaydedilmedi (haber degil): %s — %s",
+                    ticker, title,
+                )
+            else:
+                news = TelegramNews(
+                    telegram_message_id=telegram_message_id,
+                    chat_id=msg_chat_id,
+                    message_type=message_type,
+                    ticker=ticker,
+                    price_at_time=None,  # Fiyat kaydedilmez
+                    raw_text=text,
+                    parsed_title=title,
+                    parsed_body=parsed_body,
+                    sentiment=sentiment,
+                    kap_notification_id=kap_id,
+                    expected_trading_date=expected_date,
+                    gap_pct=gap,
+                    prev_close_price=None,  # Fiyat kaydedilmez
+                    theoretical_open=None,  # Fiyat kaydedilmez
+                    message_date=msg_date,
+                    ai_score=ai_score,
+                    ai_summary=ai_summary,
+                    kap_url=kap_url,
+                )
+                session.add(news)
+                new_count += 1
 
             # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
             # AI skoru notr veya olumsuz ise bildirim gonderme (gereksiz bildirim engelle)

@@ -493,9 +493,13 @@ async def list_telegram_news(
 
     if has_paid_sub:
         # Ucretli abone (ana_yildiz): tum hisselerin haberleri (max 50, sayfa basi 30)
+        # seans_disi_acilis = acilis gap bilgisi, haber degil — listede gosterme
         query = (
             select(TelegramNews)
-            .where(TelegramNews.created_at >= since)
+            .where(
+                TelegramNews.created_at >= since,
+                TelegramNews.message_type != "seans_disi_acilis",
+            )
             .order_by(desc(TelegramNews.created_at))
         )
 
@@ -509,12 +513,14 @@ async def list_telegram_news(
         query = query.limit(min(limit, 50)).offset(offset)
     else:
         # Ucretsiz: BIST 50 hisselerinin son 20 haberi
+        # seans_disi_acilis = acilis gap bilgisi, haber degil — listede gosterme
         query = (
             select(TelegramNews)
             .where(
                 and_(
                     TelegramNews.created_at >= since,
                     TelegramNews.ticker.in_(BIST50_TICKERS),
+                    TelegramNews.message_type != "seans_disi_acilis",
                 )
             )
             .order_by(desc(TelegramNews.created_at))

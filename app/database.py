@@ -316,3 +316,12 @@ async def init_db():
             await conn.execute(text("UPDATE reply_targets SET last_seen_tweet_id = NULL"))
         except Exception:
             pass
+
+        # v28 migration: seans_disi_acilis kayitlarini telegram_news'den temizle
+        # Acilis gap bilgisi haber degil — "Son Haberler" listesinde gozukmemeli
+        try:
+            await conn.execute(
+                text("DELETE FROM telegram_news WHERE message_type = 'seans_disi_acilis'")
+            )
+        except Exception:
+            pass
