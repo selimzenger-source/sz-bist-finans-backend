@@ -4057,3 +4057,74 @@ async def submit_feedback(body: FeedbackRequest):
     ok = await send_admin_message(text, parse_mode="HTML", silent=False)
 
     return {"success": ok, "message": "Mesajınız iletildi." if ok else "Bir hata oluştu, lütfen tekrar deneyin."}
+
+
+# ---------- ERROR REPORT — uygulama crash hata bildirimi ----------
+
+class ErrorReportRequest(BaseModel):
+    device_id: str = "unknown"
+    user_note: str = ""
+    error_message: str = ""
+    error_stack: str = ""
+    component_stack: str = ""
+    app_version: str = ""
+    platform: str = ""
+    timestamp: str = ""
+
+
+@app.post("/api/v1/error-report")
+@limiter.limit("5/minute")
+async def submit_error_report(
+    request: Request,
+    body: ErrorReportRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Uygulama crash hata raporu — Telegram'a bildirim + 10 puan ödül."""
+    from app.services.admin_telegram import send_admin_message
+
+    # Telegram mesajı oluştur
+    lines = [
+        "<b>🐛 Uygulama Hata Raporu</b>",
+        "",
+        f"<b>Platform:</b> {body.platform}",
+        f"<b>Versiyon:</b> {body.app_version}",
+        f"<b>Cihaz:</b> <code>{body.device_id[:16]}</code>",
+        f"<b>Zaman:</b> {body.timestamp[:19]}",
+    ]
+    if body.user_note:
+        lines.append(f"\n<b>Kullanıcı Notu:</b>\n{body.user_note[:500]}")
+    lines.append(f"\n<b>Hata:</b>\n<code>{body.error_message[:500]}</code>")
+    if body.error_stack:
+        lines.append(f"\n<b>Stack:</b>\n<code>{body.error_stack[:800]}</code>")
+
+    text = "\n".join(lines)
+    ok = await send_admin_message(text, parse_mode="HTML", silent=False)
+
+    # Kullanıcıya 10 puan ödül ver
+    reward_given = False
+    if body.device_id and body.device_id != "unknown":
+        try:
+            result = await db.execute(
+                select(User).where(User.device_id == body.device_id).with_for_update()
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                user.wallet_balance = (user.wallet_balance or 0.0) + 10.0
+                tx = WalletTransaction(
+                    user_id=user.id,
+                    amount=10.0,
+                    tx_type="error_report",
+                    description="Hata raporu teşekkür puanı",
+                    balance_after=user.wallet_balance,
+                )
+                db.add(tx)
+                await db.flush()
+                reward_given = True
+        except Exception:
+            pass  # Puan veremesek de rapor iletilsin
+
+    return {
+        "success": ok,
+        "reward_given": reward_given,
+        "message": "Hata raporunuz iletildi, teşekkürler!",
+    }
