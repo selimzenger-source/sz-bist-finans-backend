@@ -145,24 +145,54 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
             # 5000 karakterle sinirla
             full_text = full_text[:5000]
 
-            # --- Gercek KAP bildirim linkini cikart ---
-            # TradingView sayfasinda "Orjinal Link" bolumunde kap.org.tr linki bulunur
+            # --- Gercek KAP bildirim linkini cikart (cok katmanli arama) ---
             import re as _re
             real_kap_url = None
-            # Tum kap.org.tr linklerini tara
+
+            # Katman 1: <a> tag'lerinde kap.org.tr linki ara
             for a_tag in soup.find_all("a", href=True):
                 href = a_tag["href"]
                 if "kap.org.tr" in href and "/Bildirim/" in href:
                     real_kap_url = href
                     break
-            # Fallback: icerik metninden regex ile kap linkini bul
+
+            # Katman 2: Icerik metninden regex ile kap linkini bul
+            # /tr/ ve /en/ opsiyonel — bazen kap.org.tr/Bildirim/123 formati olabilir
+            _KAP_REGEX = r'https?://(?:www\.)?kap\.org\.tr/(?:(?:tr|en)/)?Bildirim/(\d+)'
+            if not real_kap_url:
+                kap_match = _re.search(_KAP_REGEX, resp.text)
+                if kap_match:
+                    # Normalize: her zaman /tr/ ile dondur
+                    real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_match.group(1)}"
+
+            # Katman 3: JSON-LD / <script> tag'lerinde kap.org.tr linkini ara
+            if not real_kap_url:
+                for script_tag in soup.find_all("script"):
+                    script_text = script_tag.string or ""
+                    if "kap.org.tr" in script_text:
+                        kap_match = _re.search(_KAP_REGEX, script_text)
+                        if kap_match:
+                            real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_match.group(1)}"
+                            break
+
+            # Katman 4: Meta tag'lerden KAP linki ara (og:url, canonical, og:see_also)
+            if not real_kap_url:
+                for meta_tag in soup.find_all("meta"):
+                    content = meta_tag.get("content", "")
+                    if "kap.org.tr" in content and "Bildirim" in content:
+                        kap_match = _re.search(_KAP_REGEX, content)
+                        if kap_match:
+                            real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_match.group(1)}"
+                            break
+
+            # Katman 5: Tam HTML'de genis regex (encoded URL'ler, parcali URL'ler dahil)
             if not real_kap_url:
                 kap_match = _re.search(
-                    r'https?://(?:www\.)?kap\.org\.tr/(?:tr/)?Bildirim/(\d+)',
+                    r'kap\.org\.tr[^"\'<>\s]*?Bildirim/(\d+)',
                     resp.text,
                 )
                 if kap_match:
-                    real_kap_url = kap_match.group(0)
+                    real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_match.group(1)}"
 
             if real_kap_url:
                 # /en/ → /tr/ normalize (TradingView bazen Ingilizce KAP linki veriyor)
@@ -171,6 +201,11 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
                 logger.info(
                     "KAP bildirim linki bulundu: matriks:%s → %s",
                     matriks_id, real_kap_url,
+                )
+            else:
+                logger.warning(
+                    "KAP bildirim linki bulunamadi: matriks:%s — TradingView fallback kullanilacak",
+                    matriks_id,
                 )
 
             logger.info(
@@ -214,7 +249,7 @@ async def score_news(
     """
     api_key = _get_api_key()
     if not api_key:
-        logger.debug("AI News Scorer: ABACUS_API_KEY bos, devre disi")
+        logger.error("AI News Scorer: ABACUS_API_KEY bos — AI puanlama devre disi! (%s)", ticker)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     # TradingView icerigi varsa birincil kaynak, yoksa Telegram metni
@@ -307,7 +342,12 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
                     "max_tokens": 500,
                 },
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                logger.error(
+                    "AI News Scorer: Abacus API HTTP %s (%s) — %s",
+                    resp.status_code, ticker, resp.text[:200],
+                )
+                return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
             data = resp.json()
 
         # OpenAI format: choices[0].message.content
@@ -357,8 +397,14 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
 
         return {"score": score, "summary": summary, "kap_url": kap_url, "hashtags": hashtags}
 
+    except httpx.TimeoutException:
+        logger.error("AI News Scorer: Abacus API zaman asimi (%s) — %s sn", ticker, _AI_TIMEOUT)
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+    except json.JSONDecodeError as e:
+        logger.error("AI News Scorer: JSON parse hatasi (%s) — %s", ticker, e)
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
     except Exception as e:
-        logger.warning("AI News Scorer: Abacus hatasi (%s) — %s", ticker, e)
+        logger.error("AI News Scorer: Beklenmeyen hata (%s) — %s", ticker, e)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
 

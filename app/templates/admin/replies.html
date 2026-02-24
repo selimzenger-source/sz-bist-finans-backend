@@ -2,23 +2,92 @@
 {% block title %}AI Reply{% endblock %}
 
 {% block content %}
-<div class="max-w-3xl mx-auto space-y-6">
+<div class="max-w-4xl mx-auto space-y-6">
 
-    <!-- Sayfa Başlığı -->
+    <!-- Flash Mesajlar -->
+    {% if success %}
+    <div class="bg-emerald-900/50 border border-emerald-600 text-emerald-300 px-4 py-3 rounded-lg text-sm">
+        &#10004; {{ success }}
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg text-sm">
+        &#10060; {{ error }}
+    </div>
+    {% endif %}
+
+    <!-- ============================================ -->
+    <!-- BOLUM 1: Otomatik Reply Ayarlari -->
+    <!-- ============================================ -->
     <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
-        <h1 class="text-xl font-bold text-gray-100 mb-1 flex items-center gap-2">
-            &#128172; AI Reply Modülü
-        </h1>
-        <p class="text-gray-500 text-sm">
-            Popüler borsa tweetlerine AI destekli reply atın. URL yapıştırın, 3 öneri alın, düzenleyip yayınlayın.
-        </p>
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold text-gray-100 flex items-center gap-2">
+                &#129302; Otomatik Reply
+            </h2>
+            <div class="flex items-center gap-3">
+                <span class="text-xs text-gray-400">
+                    Bug&#252;n: <strong class="text-gray-200">{{ today_count }}/{{ daily_limit }}</strong> reply
+                </span>
+                <form method="post" action="/admin/replies/toggle-auto" class="inline">
+                    <button type="submit"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium transition
+                                   {% if auto_reply_on %}
+                                   bg-emerald-600 hover:bg-emerald-500 text-white
+                                   {% else %}
+                                   bg-gray-600 hover:bg-gray-500 text-gray-300
+                                   {% endif %}">
+                        {% if auto_reply_on %}&#9989; A&#231;&#305;k{% else %}&#9940; Kapal&#305;{% endif %}
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Takip Edilen Hesaplar -->
+        <div class="mb-4">
+            <h3 class="text-sm font-medium text-gray-400 mb-2">Takip Edilen Hesaplar ({{ targets|length }})</h3>
+
+            {% if targets %}
+            <div class="flex flex-wrap gap-2 mb-3">
+                {% for target in targets %}
+                <div class="flex items-center gap-1 bg-gray-700 rounded-lg px-3 py-1.5 text-sm
+                            {% if target.is_active %}text-blue-300{% else %}text-gray-500{% endif %}">
+                    <span>@{{ target.username }}</span>
+                    <form method="post" action="/admin/replies/targets/{{ target.id }}/delete" class="inline">
+                        <button type="submit" class="text-red-500 hover:text-red-400 ml-1 text-xs"
+                                title="Sil">&#10005;</button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-sm mb-3">Hen&#252;z takip edilen hesap yok.</p>
+            {% endif %}
+
+            <!-- Yeni Hesap Ekle -->
+            <form method="post" action="/admin/replies/targets/add" class="flex gap-2">
+                <input type="text" name="username" required
+                       class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                              text-gray-100 placeholder-gray-500 text-sm
+                              focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                       placeholder="@kullaniciadi" />
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-500 text-white font-medium py-2 px-4
+                               rounded-lg transition text-sm shrink-0">
+                    + Ekle
+                </button>
+            </form>
+        </div>
     </div>
 
-    <!-- Tweet URL Girişi -->
+    <!-- ============================================ -->
+    <!-- BOLUM 2: Manuel Reply -->
+    <!-- ============================================ -->
     <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
-        <label class="block text-sm font-medium text-gray-300 mb-2">
-            Tweet URL'si
-        </label>
+        <h2 class="text-lg font-bold text-gray-100 mb-1 flex items-center gap-2">
+            &#128172; Manuel Reply
+        </h2>
+        <p class="text-gray-500 text-xs mb-4">Tweet URL yap&#305;&#351;t&#305;r&#305;n, AI 3 &#246;neri &#252;retsin, se&#231;ip g&#246;nderin.</p>
+
         <div class="flex gap-3">
             <input type="text" id="tweetUrlInput"
                    class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2.5
@@ -32,28 +101,24 @@
                 <span id="analyzeBtnText">Analiz Et</span>
             </button>
         </div>
-        <p class="text-xs text-gray-500 mt-2">
-            x.com veya twitter.com tweet linklerini destekler
-        </p>
     </div>
 
-    <!-- Hata Mesajı -->
+    <!-- Hata Mesaji -->
     <div id="errorBox" class="hidden bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg flex items-center gap-2">
         <span class="text-lg shrink-0">&#10060;</span>
         <span id="errorText"></span>
     </div>
 
-    <!-- Güvenlik Uyarısı (is_safe=false) -->
+    <!-- Guvenlik Uyarisi -->
     <div id="unsafeBox" class="hidden bg-red-900/50 border border-red-600 text-red-300 px-5 py-4 rounded-xl">
         <div class="flex items-center gap-2 mb-2">
             <span class="text-2xl">&#9940;</span>
             <span class="font-bold text-lg">Reddedildi</span>
         </div>
         <p id="unsafeReason" class="text-red-400"></p>
-        <p class="text-red-500 text-xs mt-2">Bu tweet'e reply önerilmez. Farklı bir tweet deneyin.</p>
     </div>
 
-    <!-- Orijinal Tweet Kartı -->
+    <!-- Orijinal Tweet Karti -->
     <div id="tweetCard" class="hidden bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-5">
         <div class="flex items-start gap-3 mb-3">
             <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-700 rounded-full
@@ -69,43 +134,33 @@
             </div>
         </div>
         <div class="flex items-center gap-4 text-xs text-gray-500 border-t border-gray-700 pt-3">
-            <span class="flex items-center gap-1">
-                &#10084;&#65039; <span id="tweetLikes">0</span>
-            </span>
-            <span class="flex items-center gap-1">
-                &#128260; <span id="tweetRetweets">0</span>
-            </span>
+            <span>&#10084;&#65039; <span id="tweetLikes">0</span></span>
+            <span>&#128260; <span id="tweetRetweets">0</span></span>
         </div>
     </div>
 
-    <!-- AI Reply Önerileri -->
+    <!-- AI Reply Onerileri -->
     <div id="replySuggestions" class="hidden space-y-3">
         <h2 class="text-lg font-bold text-gray-100 flex items-center gap-2">
-            &#129302; AI Reply Önerileri
-            <span class="text-sm font-normal text-gray-500">— birini seçin veya düzenleyin</span>
+            &#129302; AI Reply &#214;nerileri
         </h2>
-
         <div id="replyCards" class="space-y-2"></div>
     </div>
 
-    <!-- Düzenleme + Gönderim -->
+    <!-- Duzenleme + Gonderim -->
     <div id="editSection" class="hidden bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
-        <h3 class="text-sm font-medium text-gray-300 mb-2">
-            &#9999;&#65039; Reply Düzenle
-        </h3>
+        <h3 class="text-sm font-medium text-gray-300 mb-2">&#9999;&#65039; Reply D&#252;zenle</h3>
         <textarea id="replyTextarea" rows="3"
                   class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2.5
                          text-gray-100 placeholder-gray-500
                          focus:ring-2 focus:ring-indigo-500 focus:border-transparent
                          resize-none text-sm"
-                  placeholder="Yukarıdan bir reply seçin veya kendi yazınızı girin..."
+                  placeholder="Yukar&#305;dan bir reply se&#231;in veya kendi yaz&#305;n&#305;z&#305; girin..."
                   oninput="updateCharCount()"></textarea>
         <div class="flex items-center justify-between mt-2">
             <div class="text-xs">
                 <span id="charCount" class="text-gray-400">0</span>
-                <span class="text-gray-600">/</span>
-                <span class="text-gray-600">280</span>
-                <span id="charWarning" class="hidden text-yellow-400 ml-2">&#9888; 120 karakter hedefi aşıldı</span>
+                <span class="text-gray-600">/ 280</span>
             </div>
             <button type="button" id="sendBtn" onclick="sendReply()"
                     class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-5
@@ -113,287 +168,226 @@
                            disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled>
                 <span id="sendBtnIcon">&#10004;</span>
-                <span id="sendBtnText">Onayla ve X'te Yayınla</span>
+                <span id="sendBtnText">Onayla ve Yay&#305;nla</span>
             </button>
         </div>
     </div>
 
-    <!-- Başarı Mesajı -->
+    <!-- Basari Mesaji -->
     <div id="successBox" class="hidden bg-emerald-900/50 border border-emerald-600 text-emerald-300 px-5 py-4 rounded-xl">
         <div class="flex items-center gap-2 mb-2">
             <span class="text-2xl">&#10004;</span>
-            <span class="font-bold text-lg">Reply Yayınlandı!</span>
+            <span class="font-bold text-lg">Reply Yay&#305;nland&#305;!</span>
         </div>
         <p class="text-emerald-400 text-sm">
-            Reply başarıyla X'te yayınlandı.
             <a id="replyLink" href="#" target="_blank" class="underline hover:text-emerald-300 font-medium">
-                Reply'ı görüntüle &#8599;
+                Reply'&#305; g&#246;r&#252;nt&#252;le &#8599;
             </a>
         </p>
     </div>
 
-    <!-- Bilgi Notu -->
-    <div class="bg-gray-800/50 rounded-lg border border-gray-700 p-4 text-sm text-gray-500">
-        <p class="flex items-start gap-1.5">
-            <span class="shrink-0">&#8505;&#65039;</span>
-            <span>AI, borsa/finans dışı tweetleri otomatik reddeder. Her reply admin onayı gerektirir.
-            Karakter hedefi 120, X limiti 280'dir. Yatırım tavsiyesi niteliğinde reply atmayın.</span>
-        </p>
+    <!-- ============================================ -->
+    <!-- BOLUM 3: Otomatik Reply Logu -->
+    <!-- ============================================ -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+        <h2 class="text-lg font-bold text-gray-100 mb-4 flex items-center gap-2">
+            &#128203; Otomatik Reply Logu
+            <span class="text-sm font-normal text-gray-500">(Son 50)</span>
+        </h2>
+
+        {% if reply_log %}
+        <!-- Masaustu Tablo -->
+        <div class="hidden md:block overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="py-2 text-left">Hedef</th>
+                        <th class="py-2 text-left">Tweet</th>
+                        <th class="py-2 text-left">Reply</th>
+                        <th class="py-2 text-center">Durum</th>
+                        <th class="py-2 text-right">Tarih</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in reply_log %}
+                    <tr class="border-b border-gray-700/50 hover:bg-gray-700/30">
+                        <td class="py-2 text-blue-300">@{{ entry.target_username }}</td>
+                        <td class="py-2 text-gray-300 max-w-[200px] truncate">{{ entry.target_text[:80] }}</td>
+                        <td class="py-2 text-gray-300 max-w-[200px] truncate">
+                            {% if entry.reply_text %}{{ entry.reply_text[:60] }}{% else %}-{% endif %}
+                        </td>
+                        <td class="py-2 text-center">
+                            {% if entry.status == 'replied' %}
+                            <span class="bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded text-xs">&#10004;</span>
+                            {% elif entry.status == 'unsafe' %}
+                            <span class="bg-yellow-900/50 text-yellow-400 px-2 py-0.5 rounded text-xs">&#9940;</span>
+                            {% elif entry.status == 'failed' %}
+                            <span class="bg-red-900/50 text-red-400 px-2 py-0.5 rounded text-xs">&#10060;</span>
+                            {% else %}
+                            <span class="bg-gray-700 text-gray-400 px-2 py-0.5 rounded text-xs">{{ entry.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2 text-right text-gray-500 text-xs">
+                            {{ entry.created_at.strftime('%d.%m %H:%M') if entry.created_at else '-' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Mobil Kartlar -->
+        <div class="md:hidden space-y-3">
+            {% for entry in reply_log[:20] %}
+            <div class="bg-gray-700/40 rounded-lg p-3 text-sm">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-blue-300 font-medium">@{{ entry.target_username }}</span>
+                    {% if entry.status == 'replied' %}
+                    <span class="bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded text-xs">&#10004;</span>
+                    {% elif entry.status == 'unsafe' %}
+                    <span class="bg-yellow-900/50 text-yellow-400 px-2 py-0.5 rounded text-xs">&#9940;</span>
+                    {% elif entry.status == 'failed' %}
+                    <span class="bg-red-900/50 text-red-400 px-2 py-0.5 rounded text-xs">&#10060;</span>
+                    {% endif %}
+                </div>
+                <p class="text-gray-400 text-xs mb-1">{{ entry.target_text[:100] }}</p>
+                {% if entry.reply_text %}
+                <p class="text-gray-200 text-xs">&#8627; {{ entry.reply_text[:100] }}</p>
+                {% endif %}
+                {% if entry.error_message %}
+                <p class="text-red-400 text-xs mt-1">{{ entry.error_message[:80] }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-gray-500 text-sm">Hen&#252;z otomatik reply at&#305;lmad&#305;. Sistem 5 dakikada bir tarama yapar.</p>
+        {% endif %}
     </div>
+
 </div>
 
 <script>
-// State
 let currentTweetId = null;
 
-// Hata göster
 function showError(msg) {
     document.getElementById('errorBox').classList.remove('hidden');
     document.getElementById('errorText').textContent = msg;
 }
+function hideError() { document.getElementById('errorBox').classList.add('hidden'); }
 
-// Hata gizle
-function hideError() {
-    document.getElementById('errorBox').classList.add('hidden');
-}
-
-// Tüm sonuçları sıfırla
 function resetResults() {
     hideError();
-    document.getElementById('unsafeBox').classList.add('hidden');
-    document.getElementById('tweetCard').classList.add('hidden');
-    document.getElementById('replySuggestions').classList.add('hidden');
-    document.getElementById('editSection').classList.add('hidden');
-    document.getElementById('successBox').classList.add('hidden');
+    ['unsafeBox','tweetCard','replySuggestions','editSection','successBox'].forEach(
+        id => document.getElementById(id).classList.add('hidden')
+    );
     document.getElementById('replyTextarea').value = '';
     document.getElementById('sendBtn').disabled = true;
     currentTweetId = null;
     updateCharCount();
 }
 
-// Buton loading state
-function setAnalyzeLoading(loading) {
+function setAnalyzeLoading(on) {
     const btn = document.getElementById('analyzeBtn');
-    const icon = document.getElementById('analyzeBtnIcon');
-    const text = document.getElementById('analyzeBtnText');
-    if (loading) {
-        btn.disabled = true;
-        btn.classList.add('opacity-60', 'cursor-not-allowed');
-        icon.innerHTML = '&#8987;';
-        text.textContent = 'Analiz ediliyor...';
-    } else {
-        btn.disabled = false;
-        btn.classList.remove('opacity-60', 'cursor-not-allowed');
-        icon.innerHTML = '&#128270;';
-        text.textContent = 'Analiz Et';
-    }
+    btn.disabled = on;
+    btn.classList.toggle('opacity-60', on);
+    document.getElementById('analyzeBtnIcon').innerHTML = on ? '&#8987;' : '&#128270;';
+    document.getElementById('analyzeBtnText').textContent = on ? 'Analiz...' : 'Analiz Et';
 }
-
-function setSendLoading(loading) {
+function setSendLoading(on) {
     const btn = document.getElementById('sendBtn');
-    const icon = document.getElementById('sendBtnIcon');
-    const text = document.getElementById('sendBtnText');
-    if (loading) {
-        btn.disabled = true;
-        btn.classList.add('opacity-60');
-        icon.innerHTML = '&#8987;';
-        text.textContent = 'Gönderiliyor...';
-    } else {
-        btn.disabled = false;
-        btn.classList.remove('opacity-60');
-        icon.innerHTML = '&#10004;';
-        text.textContent = 'Onayla ve X\'te Yayınla';
-    }
+    btn.disabled = on;
+    btn.classList.toggle('opacity-60', on);
+    document.getElementById('sendBtnIcon').innerHTML = on ? '&#8987;' : '&#10004;';
+    document.getElementById('sendBtnText').textContent = on ? 'G\u00f6nderiliyor...' : 'Onayla ve Yay\u0131nla';
 }
 
-// Karakter sayacı
 function updateCharCount() {
-    const textarea = document.getElementById('replyTextarea');
-    const count = textarea.value.length;
-    const countEl = document.getElementById('charCount');
-    const warningEl = document.getElementById('charWarning');
-    const sendBtn = document.getElementById('sendBtn');
-
-    countEl.textContent = count;
-
-    // Renk kodlaması
-    if (count > 280) {
-        countEl.classList.remove('text-gray-400', 'text-yellow-400');
-        countEl.classList.add('text-red-400');
-        sendBtn.disabled = true;
-    } else if (count > 120) {
-        countEl.classList.remove('text-gray-400', 'text-red-400');
-        countEl.classList.add('text-yellow-400');
-        warningEl.classList.remove('hidden');
-        sendBtn.disabled = count === 0;
-    } else {
-        countEl.classList.remove('text-yellow-400', 'text-red-400');
-        countEl.classList.add('text-gray-400');
-        warningEl.classList.add('hidden');
-        sendBtn.disabled = count === 0;
-    }
+    const len = document.getElementById('replyTextarea').value.length;
+    const el = document.getElementById('charCount');
+    el.textContent = len;
+    el.className = len > 280 ? 'text-red-400' : len > 120 ? 'text-yellow-400' : 'text-gray-400';
+    document.getElementById('sendBtn').disabled = len === 0 || len > 280;
 }
 
-// Reply kartına tıklanınca textarea'ya aktar
 function selectReply(text) {
-    const textarea = document.getElementById('replyTextarea');
-    textarea.value = text;
+    document.getElementById('replyTextarea').value = text;
     updateCharCount();
-
-    // Seçili kartı vurgula
-    document.querySelectorAll('.reply-card').forEach(card => {
-        card.classList.remove('border-emerald-500', 'bg-emerald-900/20');
-        card.classList.add('border-gray-600');
+    document.querySelectorAll('.reply-card').forEach(c => {
+        c.classList.remove('border-emerald-500','bg-emerald-900/20');
+        c.classList.add('border-gray-600');
     });
     event.currentTarget.classList.remove('border-gray-600');
-    event.currentTarget.classList.add('border-emerald-500', 'bg-emerald-900/20');
-
-    // Scroll to edit section
-    document.getElementById('editSection').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    event.currentTarget.classList.add('border-emerald-500','bg-emerald-900/20');
+    document.getElementById('editSection').scrollIntoView({behavior:'smooth',block:'center'});
 }
 
-// Ana fonksiyon: Tweet analiz et
+function escapeHtml(t) { const d=document.createElement('div'); d.appendChild(document.createTextNode(t)); return d.innerHTML; }
+
 async function analyzeTweet() {
     const url = document.getElementById('tweetUrlInput').value.trim();
-    if (!url) {
-        showError('Lütfen bir tweet URL\'si girin.');
-        return;
-    }
-
+    if (!url) { showError('Tweet URL girin.'); return; }
     resetResults();
     setAnalyzeLoading(true);
-
     try {
-        const formData = new FormData();
-        formData.append('tweet_url', url);
+        const fd = new FormData(); fd.append('tweet_url', url);
+        const r = await fetch('/admin/replies/generate', {method:'POST', body:fd});
+        const d = await r.json();
+        if (!r.ok) { showError(d.error||'Hata.'); return; }
 
-        const resp = await fetch('/admin/replies/generate', {
-            method: 'POST',
-            body: formData,
-        });
-
-        const data = await resp.json();
-
-        if (!resp.ok) {
-            showError(data.error || 'Bir hata oluştu.');
-            return;
-        }
-
-        // Tweet kartını göster
-        const tweet = data.tweet;
-        currentTweetId = tweet.id;
-
-        document.getElementById('tweetAuthorInitial').textContent = (tweet.author_name || '?')[0].toUpperCase();
-        document.getElementById('tweetAuthorName').textContent = tweet.author_name;
-        document.getElementById('tweetAuthorHandle').textContent = '@' + tweet.author_username;
-        document.getElementById('tweetText').textContent = tweet.text;
-        document.getElementById('tweetLikes').textContent = tweet.likes.toLocaleString('tr-TR');
-        document.getElementById('tweetRetweets').textContent = tweet.retweets.toLocaleString('tr-TR');
+        const tw = d.tweet;
+        currentTweetId = tw.id;
+        document.getElementById('tweetAuthorInitial').textContent = (tw.author_name||'?')[0].toUpperCase();
+        document.getElementById('tweetAuthorName').textContent = tw.author_name;
+        document.getElementById('tweetAuthorHandle').textContent = '@'+tw.author_username;
+        document.getElementById('tweetText').textContent = tw.text;
+        document.getElementById('tweetLikes').textContent = tw.likes.toLocaleString('tr-TR');
+        document.getElementById('tweetRetweets').textContent = tw.retweets.toLocaleString('tr-TR');
         document.getElementById('tweetCard').classList.remove('hidden');
 
-        // AI sonucu
-        const ai = data.ai_result;
-
+        const ai = d.ai_result;
         if (!ai.is_safe) {
-            // Güvenli değil — kırmızı uyarı
             document.getElementById('unsafeReason').textContent = ai.reason;
             document.getElementById('unsafeBox').classList.remove('hidden');
             return;
         }
 
-        // Reply kartlarını oluştur
-        const cardsContainer = document.getElementById('replyCards');
-        cardsContainer.innerHTML = '';
-
-        const tones = ['&#128218; Bilgilendirici', '&#128172; Tartışmacı', '&#9889; Vurucu'];
-
-        ai.replies.forEach((reply, idx) => {
+        const cc = document.getElementById('replyCards'); cc.innerHTML = '';
+        const tones = ['&#128218; Bilgilendirici','&#128172; Tart\u0131\u015fmac\u0131','&#9889; Vurucu'];
+        ai.replies.forEach((rp,i) => {
             const card = document.createElement('div');
-            card.className = 'reply-card bg-gray-700/50 rounded-lg border border-gray-600 p-4 cursor-pointer ' +
-                             'hover:border-emerald-500 hover:bg-emerald-900/10 transition';
-            card.onclick = function() { selectReply(reply); };
-
-            card.innerHTML =
-                '<div class="flex items-center justify-between mb-2">' +
-                    '<span class="text-xs text-gray-400">' + (tones[idx] || ('Öneri ' + (idx + 1))) + '</span>' +
-                    '<span class="text-xs text-gray-600">' + reply.length + ' karakter</span>' +
-                '</div>' +
-                '<p class="text-gray-200 text-sm">' + escapeHtml(reply) + '</p>';
-
-            cardsContainer.appendChild(card);
+            card.className = 'reply-card bg-gray-700/50 rounded-lg border border-gray-600 p-4 cursor-pointer hover:border-emerald-500 hover:bg-emerald-900/10 transition';
+            card.onclick = function(){ selectReply(rp); };
+            card.innerHTML = '<div class="flex justify-between mb-2"><span class="text-xs text-gray-400">'+(tones[i]||'')+'</span><span class="text-xs text-gray-600">'+rp.length+' chr</span></div><p class="text-gray-200 text-sm">'+escapeHtml(rp)+'</p>';
+            cc.appendChild(card);
         });
 
         document.getElementById('replySuggestions').classList.remove('hidden');
         document.getElementById('editSection').classList.remove('hidden');
-
-    } catch (err) {
-        showError('Ağ hatası: ' + err.message);
-    } finally {
-        setAnalyzeLoading(false);
-    }
+    } catch(e) { showError('A\u011f hatas\u0131: '+e.message); }
+    finally { setAnalyzeLoading(false); }
 }
 
-// Reply gönder
 async function sendReply() {
-    const replyText = document.getElementById('replyTextarea').value.trim();
-    if (!replyText || !currentTweetId) return;
-
-    if (!confirm('Bu reply X\'te yayınlanacak. Emin misiniz?\n\n"' + replyText + '"')) {
-        return;
-    }
-
-    setSendLoading(true);
-    hideError();
-
+    const rt = document.getElementById('replyTextarea').value.trim();
+    if (!rt || !currentTweetId) return;
+    if (!confirm('Reply yay\u0131nlanacak:\n\n"'+rt+'"')) return;
+    setSendLoading(true); hideError();
     try {
-        const formData = new FormData();
-        formData.append('tweet_id', currentTweetId);
-        formData.append('reply_text', replyText);
-
-        const resp = await fetch('/admin/replies/send', {
-            method: 'POST',
-            body: formData,
-        });
-
-        const data = await resp.json();
-
-        if (data.success) {
-            // Başarılı
-            const replyId = data.reply_tweet_id;
-            const replyUrl = 'https://x.com/SZAlgoFinans/status/' + replyId;
-            document.getElementById('replyLink').href = replyUrl;
+        const fd = new FormData(); fd.append('tweet_id', currentTweetId); fd.append('reply_text', rt);
+        const r = await fetch('/admin/replies/send', {method:'POST', body:fd});
+        const d = await r.json();
+        if (d.success) {
+            document.getElementById('replyLink').href = 'https://x.com/SZAlgoFinans/status/'+d.reply_tweet_id;
             document.getElementById('successBox').classList.remove('hidden');
-
-            // Gönderim alanını devre dışı bırak
             document.getElementById('sendBtn').disabled = true;
             document.getElementById('replyTextarea').disabled = true;
-
-            // Başarı mesajına scroll
-            document.getElementById('successBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-            showError(data.error || 'Reply gönderilemedi.');
-        }
-
-    } catch (err) {
-        showError('Ağ hatası: ' + err.message);
-    } finally {
-        setSendLoading(false);
-    }
+            document.getElementById('successBox').scrollIntoView({behavior:'smooth',block:'center'});
+        } else { showError(d.error||'G\u00f6nderilemedi.'); }
+    } catch(e) { showError('A\u011f hatas\u0131: '+e.message); }
+    finally { setSendLoading(false); }
 }
 
-// HTML escape
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.appendChild(document.createTextNode(text));
-    return div.innerHTML;
-}
-
-// Enter ile analiz
-document.getElementById('tweetUrlInput').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') {
-        e.preventDefault();
-        analyzeTweet();
-    }
-});
+document.getElementById('tweetUrlInput').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();analyzeTweet();} });
 </script>
 {% endblock %}

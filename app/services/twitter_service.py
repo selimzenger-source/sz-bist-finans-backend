@@ -1143,7 +1143,10 @@ def tweet_bist30_news(
         # KAP link bolumu (varsa)
         kap_section = ""
         if kap_url:
-            kap_section = f"\n📎 KAP: {kap_url}\n"
+            if "kap.org.tr" in kap_url:
+                kap_section = f"\n📎 KAP: {kap_url}\n"
+            else:
+                kap_section = f"\n📎 Kaynak: {kap_url}\n"
 
         # AI tarafindan uretilen icerik hashtag'leri (sektor, konu vb.)
         extra_hashtags = ""

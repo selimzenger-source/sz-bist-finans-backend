@@ -2963,6 +2963,18 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
+    # 25. X Otomatik Reply — her 5 dakika
+    from app.services.twitter_reply_service import auto_reply_cycle
+    scheduler.add_job(
+        auto_reply_cycle,
+        IntervalTrigger(minutes=5),
+        id="auto_reply",
+        name="X Otomatik Reply (5dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",

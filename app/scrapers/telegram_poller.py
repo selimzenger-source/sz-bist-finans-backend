@@ -479,7 +479,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # TWITTER ENTEGRASYONU (Sadece BIST 50)
             # AI skoru dusukse tweet de atilmaz (notr/olumsuz haber)
             # ----------------------------------------------------------------
-            if should_notify:  # AI skor filtresi: ai_score >= 6 veya None
+            if should_notify and message_type != "seans_disi_acilis":  # seans_disi_acilis = sadece acilis gap, tweet atilmaz
                 try:
                     from app.services.news_service import get_bist50_tickers_sync
                     from app.services.twitter_service import tweet_bist30_news

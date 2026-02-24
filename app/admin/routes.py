@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.ipo import IPO, IPOAllocation, IPOCeilingTrack
 from app.models.spk_application import SPKApplication
-from app.models.user import Coupon
+from app.models.user import Coupon, ReplyTarget, AutoReply
 from app.admin.auth import (
     verify_password, create_session, destroy_session,
     get_current_admin, SESSION_COOKIE_NAME,
@@ -2181,14 +2181,57 @@ async def admin_delete_coupon(
 # -------------------------------------------------------
 
 @router.get("/replies", response_class=HTMLResponse)
-async def admin_replies_page(request: Request):
-    """AI Reply modülü sayfası."""
+async def admin_replies_page(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """AI Reply modülü sayfası — manuel + otomatik + hedefler."""
     admin = get_current_admin(request)
     if not admin:
         return RedirectResponse("/admin/login", status_code=302)
 
+    # Takip edilen hesaplar
+    targets_result = await db.execute(
+        select(ReplyTarget).order_by(desc(ReplyTarget.created_at))
+    )
+    targets = targets_result.scalars().all()
+
+    # Son 50 otomatik reply logu
+    log_result = await db.execute(
+        select(AutoReply).order_by(desc(AutoReply.created_at)).limit(50)
+    )
+    reply_log = log_result.scalars().all()
+
+    # Auto-reply toggle durumu
+    from app.models.app_setting import AppSetting
+    toggle_result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "AUTO_REPLY_ENABLED")
+    )
+    toggle_setting = toggle_result.scalar_one_or_none()
+    auto_reply_on = True  # Default: açık
+    if toggle_setting:
+        auto_reply_on = toggle_setting.value.lower() in ("true", "1", "yes")
+
+    # Bugün kaç reply atıldı
+    from sqlalchemy import func as sa_func_inner
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    count_result = await db.execute(
+        select(sa_func.count(AutoReply.id)).where(
+            AutoReply.status == "replied",
+            AutoReply.created_at >= today_start,
+        )
+    )
+    today_count = count_result.scalar() or 0
+
     return templates.TemplateResponse("admin/replies.html", {
         "request": request,
+        "targets": targets,
+        "reply_log": reply_log,
+        "auto_reply_on": auto_reply_on,
+        "today_count": today_count,
+        "daily_limit": 20,
+        "success": request.query_params.get("success"),
+        "error": request.query_params.get("error"),
     })
 
 
@@ -2273,3 +2316,101 @@ async def admin_replies_send(request: Request):
             "success": False,
             "error": result.get("error", "Reply gönderilemedi."),
         }, status_code=500)
+
+
+# -------------------------------------------------------
+# REPLY TARGETS — Hesap Ekleme/Silme + Toggle
+# -------------------------------------------------------
+
+@router.post("/replies/targets/add")
+async def admin_reply_target_add(
+    request: Request,
+    username: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Yeni reply hedefi ekle."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    # @ işaretini temizle
+    clean_username = username.strip().lstrip("@")
+    if not clean_username:
+        return RedirectResponse("/admin/replies?error=Kullanici+adi+bos", status_code=302)
+
+    # Zaten var mı?
+    existing = await db.execute(
+        select(ReplyTarget).where(ReplyTarget.username == clean_username)
+    )
+    if existing.scalar_one_or_none():
+        return RedirectResponse(
+            f"/admin/replies?error=@{clean_username}+zaten+mevcut", status_code=302
+        )
+
+    db.add(ReplyTarget(username=clean_username, is_active=True))
+    await db.flush()
+
+    return RedirectResponse(
+        f"/admin/replies?success=@{clean_username}+eklendi", status_code=302
+    )
+
+
+@router.post("/replies/targets/{target_id}/delete")
+async def admin_reply_target_delete(
+    request: Request,
+    target_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Reply hedefi sil (DB'den kaldir)."""
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    result = await db.execute(
+        select(ReplyTarget).where(ReplyTarget.id == target_id)
+    )
+    target = result.scalar_one_or_none()
+    if not target:
+        return RedirectResponse("/admin/replies?error=Hedef+bulunamadi", status_code=302)
+
+    username = target.username
+    await db.delete(target)
+    await db.flush()
+
+    return RedirectResponse(
+        f"/admin/replies?success=@{username}+silindi", status_code=302
+    )
+
+
+@router.post("/replies/toggle-auto")
+async def admin_reply_toggle_auto(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Otomatik reply toggle (açık/kapalı)."""
+    from app.models.app_setting import AppSetting
+
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    # Mevcut durumu kontrol et
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "AUTO_REPLY_ENABLED")
+    )
+    setting = result.scalar_one_or_none()
+
+    if setting:
+        current = setting.value.lower() in ("true", "1", "yes")
+        setting.value = "false" if current else "true"
+        new_state = "kapalı" if current else "açık"
+    else:
+        # İlk kez — default açık, toggle kapalıya çevir
+        db.add(AppSetting(key="AUTO_REPLY_ENABLED", value="false"))
+        new_state = "kapalı"
+
+    await db.flush()
+
+    return RedirectResponse(
+        f"/admin/replies?success=Otomatik+reply+{new_state}", status_code=302
+    )

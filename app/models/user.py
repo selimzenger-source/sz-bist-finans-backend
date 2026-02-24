@@ -375,3 +375,57 @@ WALLET_COUPONS: dict[str, float] = {
 WALLET_REWARD_AMOUNT = 2.0    # Reklam basina kazanilan puan
 WALLET_COOLDOWN_SECONDS = 180  # 3 dakika bekleme
 WALLET_MAX_DAILY_ADS = 30     # Gunluk max reklam
+
+
+# -------------------------------------------------------
+# X (Twitter) Otomatik Reply Sistemi
+# -------------------------------------------------------
+
+class ReplyTarget(Base):
+    """Takip edilen X (Twitter) hesabi — otomatik reply icin."""
+
+    __tablename__ = "reply_targets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True,
+        comment="X kullanici adi (@ olmadan)",
+    )
+    twitter_user_id: Mapped[str | None] = mapped_column(
+        String(30), nullable=True,
+        comment="Twitter API user ID (cache)",
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Aktif mi")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AutoReply(Base):
+    """Otomatik atilan reply logu."""
+
+    __tablename__ = "auto_replies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_tweet_id: Mapped[str] = mapped_column(
+        String(30), unique=True, nullable=False, index=True,
+        comment="Yanit verilen tweet ID",
+    )
+    target_username: Mapped[str] = mapped_column(String(50), nullable=False, comment="Tweet sahibi")
+    target_text: Mapped[str] = mapped_column(Text, nullable=False, comment="Orijinal tweet metni")
+    reply_text: Mapped[str] = mapped_column(Text, nullable=False, comment="Gonderilen reply")
+    reply_tweet_id: Mapped[str | None] = mapped_column(
+        String(30), nullable=True, comment="X'teki reply tweet ID",
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="replied",
+        comment="replied / failed / skipped / unsafe",
+    )
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# Baslangic reply hedefleri (DB seed — sistem ilk acilista ekler)
+DEFAULT_REPLY_TARGETS = [
+    "mehmetmesci", "arifcoskun05", "taaardu", "BORSAIZINDE",
+    "PiyasaTurkiye", "suatyildiz", "MertBasaran_inv", "BoraOzkent",
+    "mervedemirel___", "TanerGenek", "ademayan66", "borsaninizinden", "kursadbucak",
+]
