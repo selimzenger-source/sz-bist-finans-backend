@@ -72,7 +72,7 @@ async def validate_ipo_dates(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-5",
+                    "model": "gpt-4o-mini",
                     "messages": [
                         {"role": "system", "content": "Sen bir veri dogrulama asistanisin. Sadece JSON formatinda yanit ver."},
                         {"role": "user", "content": prompt},
