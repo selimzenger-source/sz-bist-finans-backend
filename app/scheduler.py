@@ -1896,11 +1896,11 @@ async def _opening_summary_attempt(retry_num: int = 0):
     """
     from datetime import date as date_type
     from sqlalchemy import select, and_
-    from app.database import AsyncSessionLocal
+    from app.database import async_session
     from app.models.ipo import IPO, IPOCeilingTrack
 
-    async with AsyncSessionLocal() as db:
-        today = date_type.today()
+    async with async_session() as db:
+        today = _today_tr()
 
         result = await db.execute(
             select(IPO).where(
@@ -2420,12 +2420,12 @@ async def tweet_opening_price_job():
     """Ilk islem gunu acilis fiyati tweeti — 09:56 (UTC 06:56).
 
     Sadece bugun trading_start olan IPO'lar icin calisir.
-    Yahoo Finance'den acilis fiyatini cekip tweet atar.
+    IPOCeilingTrack tablosundan (excel_sync) acilis fiyatini okur.
+    Yahoo Finance'a bagli degildir — local DB verisi kullanir.
     """
     try:
         from sqlalchemy import select, and_
-        from app.models.ipo import IPO
-        from app.scrapers.yahoo_finance_scraper import YahooFinanceScraper
+        from app.models.ipo import IPO, IPOCeilingTrack
 
         async with async_session() as db:
             today = _today_tr()
@@ -2440,39 +2440,54 @@ async def tweet_opening_price_job():
             todays_ipos = list(result.scalars().all())
 
             if not todays_ipos:
+                logger.info("T7 Acilis tweet: bugun trading_start olan IPO yok")
                 return
 
-            scraper = YahooFinanceScraper()
-            try:
-                _tweet_idx = 0
-                for ipo in todays_ipos:
-                    try:
-                        days_data = await scraper.fetch_ohlc_since_trading_start(
-                            ticker=ipo.ticker,
-                            trading_start=ipo.trading_start,
-                            max_days=1,
-                        )
-                        if days_data and days_data[0].get("open"):
-                            open_price = float(days_data[0]["open"])
-                            ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
-                            pct_change = (
-                                ((open_price - ipo_price) / ipo_price) * 100
-                                if ipo_price > 0 else 0
+            _tweet_idx = 0
+            for ipo in todays_ipos:
+                try:
+                    # IPOCeilingTrack'ten bugunku veriyi al (excel_sync tarafindan doldurulur)
+                    track_result = await db.execute(
+                        select(IPOCeilingTrack).where(
+                            and_(
+                                IPOCeilingTrack.ipo_id == ipo.id,
+                                IPOCeilingTrack.trade_date == today,
                             )
-                            # Jitter — ilk tweet haric 50-55 sn bekle
-                            if _tweet_idx > 0:
-                                jitter = random.uniform(50, 55)
-                                logger.info("Acilis tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
-                                await asyncio.sleep(jitter)
-                            from app.services.twitter_service import tweet_opening_price
-                            from app.services.admin_telegram import notify_tweet_sent
-                            tw_ok = tweet_opening_price(ipo, open_price, pct_change)
-                            _tweet_idx += 1
-                            await notify_tweet_sent("acilis_fiyati", ipo.ticker or ipo.company_name, tw_ok, f"Açılış: {open_price}₺ ({pct_change:+.1f}%)")
-                    except Exception as e:
-                        logger.error("Acilis fiyati tweet hatasi %s: %s", ipo.ticker, e)
-            finally:
-                await scraper.close()
+                        )
+                    )
+                    today_track = track_result.scalar_one_or_none()
+
+                    if not today_track:
+                        logger.warning("T7 Acilis tweet: %s icin bugunku track verisi yok (excel_sync henuz calismadi?)", ipo.ticker)
+                        continue
+
+                    # Acilis fiyati: open_price varsa onu, yoksa close_price (anlik fiyat)
+                    raw_open = today_track.open_price or today_track.close_price
+                    if not raw_open:
+                        logger.warning("T7 Acilis tweet: %s icin open_price ve close_price bos", ipo.ticker)
+                        continue
+
+                    open_price = float(raw_open)
+                    ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
+                    pct_change = (
+                        ((open_price - ipo_price) / ipo_price) * 100
+                        if ipo_price > 0 else 0
+                    )
+
+                    # Jitter — ilk tweet haric 50-55 sn bekle
+                    if _tweet_idx > 0:
+                        jitter = random.uniform(50, 55)
+                        logger.info("Acilis tweet jitter: %.1f sn bekleniyor (%s)", jitter, ipo.ticker)
+                        await asyncio.sleep(jitter)
+
+                    from app.services.twitter_service import tweet_opening_price
+                    from app.services.admin_telegram import notify_tweet_sent
+                    tw_ok = tweet_opening_price(ipo, open_price, pct_change)
+                    _tweet_idx += 1
+                    await notify_tweet_sent("acilis_fiyati", ipo.ticker or ipo.company_name, tw_ok, f"Açılış: {open_price}₺ ({pct_change:+.1f}%)")
+
+                except Exception as e:
+                    logger.error("Acilis fiyati tweet hatasi %s: %s", ipo.ticker, e)
 
     except Exception as e:
         logger.error("Acilis fiyati tweet job hatasi: %s", e)
