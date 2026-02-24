@@ -746,6 +746,16 @@ class IPOService:
             except Exception:
                 pass
 
+            # AI Halka Arz Degerlendirme Raporu — background task
+            if not ipo.ai_report:
+                try:
+                    import asyncio
+                    from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+                    asyncio.create_task(generate_and_save_ipo_report(ipo.id))
+                    logger.info(f"AI IPO rapor task baslatildi: {ipo.ticker or ipo.company_name}")
+                except Exception as e:
+                    logger.warning(f"AI IPO rapor task hatasi: {e}")
+
         # ==========================================
         # 2. in_distribution → awaiting_trading
         #    Kosul: subscription_end gectiyse

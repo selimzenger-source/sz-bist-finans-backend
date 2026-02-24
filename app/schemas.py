@@ -174,6 +174,10 @@ class IPODetailOut(BaseModel):
     trading_day_count: int = 0
     high_from_start: Optional[Decimal] = None
 
+    # AI Rapor
+    ai_report: Optional[str] = None
+    ai_report_generated_at: Optional[datetime] = None
+
     # Zaman
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

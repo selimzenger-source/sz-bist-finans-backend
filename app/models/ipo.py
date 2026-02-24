@@ -131,6 +131,14 @@ class IPO(Base):
         Numeric(12, 2), comment="Islem basindan bu yana en yuksek fiyat (%4 dusus hesabi icin)"
     )
 
+    # --- AI Rapor ---
+    ai_report: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="AI halka arz degerlendirme raporu (JSON)"
+    )
+    ai_report_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="AI rapor uretim zamani"
+    )
+
     # --- Tweet Tracking ---
     intro_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="Sirket tanitim tweeti atildi mi"

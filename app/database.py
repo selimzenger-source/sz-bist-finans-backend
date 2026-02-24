@@ -324,3 +324,14 @@ async def init_db():
 
         # v29 migration: KALDIRILDI — her deploy'da ai_score < 6 siliyordu.
         # Poller zaten bu kayitlari kaydetmiyor, migration gereksiz.
+
+        # v31 migration: IPO AI rapor alanlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ai_report TEXT")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ai_report_generated_at TIMESTAMPTZ")
+            )
+        except Exception:
+            pass
