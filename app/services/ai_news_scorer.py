@@ -145,6 +145,31 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
             # 5000 karakterle sinirla
             full_text = full_text[:5000]
 
+            # --- Gercek KAP bildirim linkini cikart ---
+            # TradingView sayfasinda "Orjinal Link" bolumunde kap.org.tr linki bulunur
+            import re as _re
+            real_kap_url = None
+            # Tum kap.org.tr linklerini tara
+            for a_tag in soup.find_all("a", href=True):
+                href = a_tag["href"]
+                if "kap.org.tr" in href and "/Bildirim/" in href:
+                    real_kap_url = href
+                    break
+            # Fallback: icerik metninden regex ile kap linkini bul
+            if not real_kap_url:
+                kap_match = _re.search(
+                    r'https?://(?:www\.)?kap\.org\.tr/(?:tr/)?Bildirim/(\d+)',
+                    resp.text,
+                )
+                if kap_match:
+                    real_kap_url = kap_match.group(0)
+
+            if real_kap_url:
+                logger.info(
+                    "KAP bildirim linki bulundu: matriks:%s → %s",
+                    matriks_id, real_kap_url,
+                )
+
             logger.info(
                 "TradingView icerik basarili: matriks:%s (%d karakter)",
                 matriks_id, len(full_text),
@@ -154,6 +179,7 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
                 "full_text": full_text,
                 "tv_url": tv_url,
                 "title": title,
+                "real_kap_url": real_kap_url,
             }
 
     except Exception as e:
@@ -343,12 +369,20 @@ async def analyze_news(
 
     # Adim 1: TradingView'dan icerik cek (Matriks ID varsa)
     if matriks_id:
-        kap_url = f"https://www.kap.org.tr/tr/Bildirim/{matriks_id}"
+        # Fallback olarak TradingView linki (gercek KAP linki bulunursa degisir)
+        kap_url = f"https://tr.tradingview.com/news/matriks:{matriks_id}:0/"
 
         try:
             tv_result = await fetch_tradingview_content(matriks_id)
             if tv_result and tv_result.get("full_text"):
                 tv_content = tv_result["full_text"]
+                # Gercek KAP bildirim linkini kullan (TradingView'dan cikarildi)
+                if tv_result.get("real_kap_url"):
+                    kap_url = tv_result["real_kap_url"]
+                    logger.info(
+                        "Gercek KAP linki kullaniliyor: %s → %s",
+                        ticker, kap_url,
+                    )
                 logger.info(
                     "TradingView eslestirme basarili: %s → matriks:%s (%d karakter)",
                     ticker, matriks_id, len(tv_content),
