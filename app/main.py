@@ -16,7 +16,7 @@ from typing import Optional
 
 import hmac
 
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
