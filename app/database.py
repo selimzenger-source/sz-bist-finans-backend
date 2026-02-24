@@ -311,14 +311,8 @@ async def init_db():
         # v27 migration: KALDIRILDI — her deploy'da auto_replies silip last_seen_tweet_id
         # sıfırlıyordu, sistem sürekli resetleniyordu. Artık çalışmaz.
 
-        # v28 migration: seans_disi_acilis kayitlarini telegram_news'den temizle
-        # Acilis gap bilgisi haber degil — "Son Haberler" listesinde gozukmemeli
-        try:
-            await conn.execute(
-                text("DELETE FROM telegram_news WHERE message_type = 'seans_disi_acilis'")
-            )
-        except Exception:
-            pass
+        # v28 migration: KALDIRILDI — her deploy'da seans_disi_acilis siliyordu.
+        # Poller zaten bu kayitlari kaydetmiyor, migration gereksiz.
 
         # v30 migration: reply_targets.last_reply_at (hesap bazli saatlik rate limit)
         try:
@@ -328,11 +322,5 @@ async def init_db():
         except Exception:
             pass
 
-        # v29 migration: AI skoru < 6 olan haberleri telegram_news'den temizle
-        # Chatbox'ta sadece AI >= 6 veya AI=NULL (basarisiz) haberler gorunecek
-        try:
-            await conn.execute(
-                text("DELETE FROM telegram_news WHERE ai_score IS NOT NULL AND ai_score < 6")
-            )
-        except Exception:
-            pass
+        # v29 migration: KALDIRILDI — her deploy'da ai_score < 6 siliyordu.
+        # Poller zaten bu kayitlari kaydetmiyor, migration gereksiz.

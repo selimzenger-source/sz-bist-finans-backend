@@ -451,7 +451,7 @@ async def list_telegram_news(
     ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
     message_type: Optional[str] = Query(None, description="seans_ici_pozitif, borsa_kapali, seans_disi_acilis"),
     sentiment: Optional[str] = Query(None, description="positive, negative, neutral"),
-    days: int = Query(7, ge=1, le=30, description="Son kac gun"),
+    days: int = Query(30, ge=1, le=90, description="Son kac gun"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     device_id: Optional[str] = Query(None, description="Abonelik kontrolu icin device_id"),
