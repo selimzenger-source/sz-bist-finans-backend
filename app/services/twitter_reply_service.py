@@ -53,6 +53,8 @@ _LIKE_EVERY_N = 5
 # Gerçek limit POST tweet'te — günlük 100 tweet'ten fazla atma
 # GET istekleri bolca yapılabilir, ama yine de zamana yaymak iyi
 _MAX_TARGETS_PER_CYCLE = 25  # GET limit 900, bolca kontrol edebiliriz
+_MAX_REPLIES_PER_CYCLE = 2   # Döngü başına max 2 reply — zamana yayar, spam önler
+                              # 5dk interval × 2 reply = saatte max 24 reply (doğal görünüm)
 _twitter_rate_limited = False  # 429 alınca True olur, sonraki döngüde resetlenir
 
 
@@ -921,8 +923,9 @@ async def auto_reply_cycle():
                 today_count = await _get_today_reply_count(session)
                 logger.info(
                     "Reply durum: bugün %d/%d, rate_limit=30dk/hesap, "
-                    "max_hedef/döngü=%d",
+                    "max_hedef/döngü=%d, max_reply/döngü=%d",
                     today_count, daily_limit, _MAX_TARGETS_PER_CYCLE,
+                    _MAX_REPLIES_PER_CYCLE,
                 )
                 if today_count >= daily_limit:
                     logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit} — durduruluyor")
@@ -965,6 +968,8 @@ async def auto_reply_cycle():
                 pending_replies = []  # [(target_id, target_username, tweet_id, tweet_text, chosen_reply)]
 
                 for target in targets:
+                    if len(pending_replies) >= _MAX_REPLIES_PER_CYCLE:
+                        break  # Bu döngüde yeterli reply toplandı, geri kalanı sonraki döngüye
                     if len(pending_replies) + replies_sent >= remaining:
                         break
 
@@ -1043,6 +1048,8 @@ async def auto_reply_cycle():
                     logger.info(f"@{target.username}: {len(tweets)} yeni tweet bulundu")
 
                     for tweet in tweets:
+                        if len(pending_replies) >= _MAX_REPLIES_PER_CYCLE:
+                            break
                         if len(pending_replies) + replies_sent >= remaining:
                             break
 
