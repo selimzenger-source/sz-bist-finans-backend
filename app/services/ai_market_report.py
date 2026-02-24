@@ -4,6 +4,7 @@ Sabah 08:15 TR: Onceki gun verileri + bugunun beklentileri
 Aksam 20:45 TR: Gunun kapanis verileri + degerlendirme
 Her ikisi de X (Twitter) uzerinden gorsel + metin tweet olarak paylasilir.
 
+v5: BigPara RSS eklendi + hashtag kurali guncellendi (dogal, seyrek kullanim)
 v4: Ekonomik takvim (doviz.com) + yaklasan IPO etkinlikleri + resmi kaynak referanslari
     + Gercek haber kaynaklari (DB + dis kaynak RSS) + ceiling_tracks + halusinasyon korumasi
 """
@@ -57,6 +58,11 @@ _RSS_SOURCES = [
         "name": "Dunya Gazetesi",
         "url": "https://www.dunya.com/rss",
         "max_items": 5,
+    },
+    {
+        "name": "BigPara",
+        "url": "https://bigpara.hurriyet.com.tr/rss/",
+        "max_items": 6,
     },
 ]
 
@@ -640,6 +646,7 @@ Halka Arz Kaynaklari:
 Piyasa Haberleri:
 - Bloomberg HT: Piyasa haberleri, ekonomi gelismeleri
 - Dunya Gazetesi: Ekonomi haberleri
+- BigPara (Hurriyet): Ekonomi, borsa, KAP haberleri
 """
 
 _MORNING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU rapor yaziyorsun.
@@ -654,8 +661,15 @@ KURAL:
 7. Tweet formati: max 3800 karakter (gorsel ile 4000 limiti var)
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
-10. Sonda mutlaka szalgo.net.tr linki ve hashtag'ler olmali
+10. Sonda mutlaka szalgo.net.tr linki olmali
 11. Haber kaynaklarini referans goster (Bloomberg HT, KAP vs.)
+
+HASHTAG KURALI (COK ONEMLI):
+- Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
+- Her paragrafta EN FAZLA 1 hashtag olabilir — #BIST100, #HalkaArz gibi kritik kaliplar
+- Halka arz hisselerini bahsettiginde cumle icinde dogal yaz: orn "BESTE 7. gunde tavan kırıldı" — #BESTE seklinde DEGIL
+- Sondaki link satirinda max 2-3 genel hashtag olabilir: #borsa #HalkaArz
+- ASLA hashtag yigini yapma — rapor profesyonel analist uslubunda olmali, spam gibi degil
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
 📊 AÇILIŞ RAPORU — [gun_adi], [tarih]
@@ -678,7 +692,7 @@ FORMAT:
 
 🏦 Halka Arz Takibi
 [islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
-[Her hisse kodunu #TICKER formatiyla yaz, orn: #BESTE, #AKHAN]
+[Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL]
 [Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
 [Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
 
@@ -689,7 +703,7 @@ FORMAT:
 
 📲 szalgo.net.tr
 
-#BIST100 #borsa #bist #xauusd #altin #HalkaArz [+ konuya gore 2-3 ek: #SP500 #dolar #nasdaq #enflasyon — tekrar etme]"""
+#borsa #HalkaArz"""
 
 _EVENING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra gun sonu degerlendirme raporu yaziyorsun.
 
@@ -703,8 +717,15 @@ KURAL:
 7. Tweet formati: max 3800 karakter (gorsel ile 4000 limiti var)
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
-10. Sonda mutlaka szalgo.net.tr linki ve hashtag'ler olmali
+10. Sonda mutlaka szalgo.net.tr linki olmali
 11. Haber kaynaklarini referans goster (Bloomberg HT, KAP vs.)
+
+HASHTAG KURALI (COK ONEMLI):
+- Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
+- Her paragrafta EN FAZLA 1 hashtag olabilir — #BIST100, #HalkaArz gibi kritik kaliplar
+- Halka arz hisselerini bahsettiginde cumle icinde dogal yaz: orn "BESTE 7. gunde tavan kırıldı" — #BESTE seklinde DEGIL
+- Sondaki link satirinda max 2-3 genel hashtag olabilir: #borsa #HalkaArz
+- ASLA hashtag yigini yapma — rapor profesyonel analist uslubunda olmali, spam gibi degil
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
 📊 KAPANIŞ RAPORU — [gun_adi], [tarih]
@@ -727,7 +748,7 @@ FORMAT:
 
 🏦 Halka Arz Takibi
 [islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
-[Her hisse kodunu #TICKER formatiyla yaz, orn: #BESTE, #AKHAN]
+[Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL]
 [Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
 [Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
 
@@ -738,7 +759,7 @@ FORMAT:
 
 📲 szalgo.net.tr
 
-#BIST100 #borsa #bist #xauusd #altin #HalkaArz [+ konuya gore 2-3 ek: #SP500 #dolar #nasdaq #enflasyon — tekrar etme]"""
+#borsa #HalkaArz"""
 
 
 def _format_full_context(
@@ -1015,7 +1036,7 @@ async def _generate_report(
 # ────────────────────────────────────────────
 
 async def _collect_all_data() -> tuple:
-    """Tum 7 veri kaynagini paralel toplar."""
+    """Tum 8 veri kaynagini paralel toplar (BigPara RSS dahil)."""
     import asyncio
 
     # 7 kaynak paralel calissin
