@@ -447,10 +447,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Hemen push bildirim gonder (matched_kw yukarida parse edildi)
             # AI skoru notr veya olumsuz ise bildirim gonderme (gereksiz bildirim engelle)
             # ai_score None = AI basarisiz → guvenlisyeni gonder, ai_score >= 6 = pozitif
-            should_notify = (ai_score is None) or (ai_score >= 5)
+            should_notify = (ai_score is None) or (ai_score >= 6)
             if not should_notify:
                 logger.info(
-                    "AI skoru dusuk (%s < 5), bildirim atlanıyor: %s — %s",
+                    "AI skoru dusuk (%s < 6), bildirim atlanıyor: %s — %s",
                     ai_score, ticker, title,
                 )
             else:
