@@ -494,7 +494,7 @@ def tweet_new_ipo(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI, source="tweet_new_ipo", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
     except Exception as e:
         logger.error(f"tweet_new_ipo hatasi: {e}")
         return False
@@ -533,7 +533,7 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI, source="tweet_new_ipos_batch", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
     except Exception as e:
         logger.error(f"tweet_new_ipos_batch hatasi: {e}")
         return False
@@ -593,7 +593,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR, source="tweet_distribution_start", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR)
     except Exception as e:
         logger.error(f"tweet_distribution_start hatası: {e}")
         return False
@@ -683,7 +683,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
 
-        return _safe_tweet_with_media(text, BANNER_DAGITIM_SONUCLARI, source="tweet_allocation_results", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_DAGITIM_SONUCLARI)
     except Exception as e:
         logger.error(f"tweet_allocation_results hatası: {e}")
         return False
@@ -720,7 +720,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SON_4_SAAT, source="tweet_last_4_hours", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_SON_4_SAAT)
     except Exception as e:
         logger.error(f"tweet_last_4_hours hatasi: {e}")
         return False
@@ -756,7 +756,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA, source="tweet_last_30_min", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA)
     except Exception as e:
         logger.error(f"tweet_last_30_min hatasi: {e}")
         return False
@@ -783,7 +783,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
-        return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR, source="tweet_first_trading_day", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR)
     except Exception as e:
         logger.error(f"tweet_first_trading_day hatasi: {e}")
         return False
@@ -825,7 +825,7 @@ def tweet_trading_date_detected(ipo) -> bool:
         if ipo.ticker:
             text += f" #{ipo.ticker}"
 
-        return _safe_tweet_with_media(text, BANNER_TRADING_DATE_TESPIT, source="tweet_trading_date_detected", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_TRADING_DATE_TESPIT)
     except Exception as e:
         logger.error(f"tweet_trading_date_detected hatasi: {e}")
         return False
@@ -859,7 +859,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
-        return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI, source="tweet_opening_price", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI)
     except Exception as e:
         logger.error(f"tweet_opening_price hatasi: {e}")
         return False
@@ -949,10 +949,13 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
             )
             banner = BANNER_GUNLUK_TAKIP
 
-        result = _safe_tweet_with_media(text, banner, source="tweet_daily_tracking", force_send=True)
+        # Kuyruk modunda temp dosyayi silme
+        auto_send = is_auto_send()
 
-        # Temp dosya temizligi
-        if image_path:
+        result = _safe_tweet_with_media(text, banner)
+
+        # Temp dosya temizligi — sadece auto_send modunda
+        if image_path and auto_send:
             try:
                 os.remove(image_path)
             except OSError:
@@ -1020,10 +1023,13 @@ def tweet_25_day_performance(
         # Dinamik gorsel varsa onu kullan, yoksa statik banner
         banner = image_path if image_path else BANNER_25_GUN_PERFORMANS
 
-        result = _safe_tweet_with_media(text, banner, source="tweet_25_day_performance", force_send=True)
+        # Kuyruk modunda temp dosyayi silme — admin onayindan sonra lazim
+        auto_send = is_auto_send()
 
-        # Temp dosya temizligi
-        if image_path:
+        result = _safe_tweet_with_media(text, banner)
+
+        # Temp dosyayi temizle — sadece auto_send modunda (kuyrukta dosya lazim)
+        if image_path and auto_send:
             try:
                 os.remove(image_path)
             except OSError:
@@ -1072,7 +1078,7 @@ def tweet_yearly_summary(
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR, source="tweet_yearly_summary", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR)
     except Exception as e:
         logger.error(f"tweet_yearly_summary hatasi: {e}")
         return False
@@ -1236,7 +1242,7 @@ def tweet_last_day_morning(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU, source="tweet_last_day_morning", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU)
     except Exception as e:
         logger.error(f"tweet_last_day_morning hatasi: {e}")
         return False
@@ -1320,7 +1326,7 @@ def tweet_company_intro(ipo) -> bool:
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
 
-        return _safe_tweet_with_media(text, BANNER_HALKA_ARZ_HAKKINDA, source="tweet_company_intro", force_send=True)
+        return _safe_tweet_with_media(text, BANNER_HALKA_ARZ_HAKKINDA)
     except Exception as e:
         logger.error(f"tweet_company_intro hatasi: {e}")
         return False
@@ -1345,8 +1351,8 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         )
 
         if image_path:
-            return _safe_tweet_with_media(text, image_path, source="tweet_spk_pending", force_send=True)
-        return _safe_tweet(text, source="tweet_spk_pending", force_send=True)
+            return _safe_tweet_with_media(text, image_path)
+        return _safe_tweet(text)
     except Exception as e:
         logger.error(f"tweet_spk_pending_with_image hatasi: {e}")
         return False
@@ -1389,7 +1395,7 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
 
         if not os.path.exists(image_path):
             logger.warning(f"Gorsel bulunamadi: {image_path}, sadece metin atiliyor")
-            return _safe_tweet(text, source=source, force_send=force_send)
+            return _safe_tweet(text)
 
         # 1. Media Upload (v1.1 — multipart/form-data)
         upload_url = "https://upload.twitter.com/1.1/media/upload.json"
@@ -1425,12 +1431,12 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
 
         if upload_resp.status_code not in (200, 201):
             logger.error(f"Media upload hatasi ({upload_resp.status_code}): {upload_resp.text[:200]}")
-            return _safe_tweet(text, source=source, force_send=force_send)  # Gorsel basarisiz → sadece metin at
+            return _safe_tweet(text)  # Gorsel basarisiz → sadece metin at
 
         media_id = upload_resp.json().get("media_id_string")
         if not media_id:
             logger.error("Media upload: media_id alinamadi")
-            return _safe_tweet(text, source=source, force_send=force_send)
+            return _safe_tweet(text)
 
         logger.info(f"Media upload basarili: media_id={media_id}")
 
@@ -1537,13 +1543,17 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
             f"#HalkaArz #BIST100 #borsa #hisse"
         )
 
-        result = _safe_tweet_with_media(text, image_path, source="tweet_market_snapshot", force_send=True)
+        # Kuyruk modunda temp dosyayi silme
+        auto_send = is_auto_send()
 
-        # Temp dosya temizligi
-        try:
-            os.remove(image_path)
-        except OSError:
-            pass
+        result = _safe_tweet_with_media(text, image_path)
+
+        # Temp dosya temizligi — sadece auto_send modunda
+        if auto_send:
+            try:
+                os.remove(image_path)
+            except OSError:
+                pass
 
         return result
     except Exception as e:
@@ -1610,10 +1620,13 @@ def tweet_opening_summary(stocks: list) -> bool:
             f"#HalkaArz #BIST100 #borsa #hisse"
         )
 
-        result = _safe_tweet_with_media(text, image_path, source="tweet_opening_summary", force_send=True) if image_path else _safe_tweet(text, source="tweet_opening_summary", force_send=True)
+        # Kuyruk modunda temp dosyayi silme
+        auto_send = is_auto_send()
+
+        result = _safe_tweet_with_media(text, image_path) if image_path else _safe_tweet(text)
 
         # Temp dosya temizligi
-        if image_path:
+        if auto_send and image_path:
             try:
                 os.remove(image_path)
             except OSError:
