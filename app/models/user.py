@@ -396,6 +396,10 @@ class ReplyTarget(Base):
         comment="Twitter API user ID (cache)",
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="Aktif mi")
+    last_seen_tweet_id: Mapped[str | None] = mapped_column(
+        String(30), nullable=True,
+        comment="Son gorulmus tweet ID — bundan onceki tweetlere reply atilmaz",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     X_API_SECRET: str = ""
     X_ACCESS_TOKEN: str = ""
     X_ACCESS_TOKEN_SECRET: str = ""
+    X_USER_ID: str = ""  # Kendi hesap user ID (begeni icin — bossa /users/me'den cekilir)
 
     # Tweet onay modu — False iken tweetler kuyruğa girer, admin onaylar
     # True yapilinca otomatik atilir (sistem oturunca)

@@ -9,6 +9,7 @@ Mevcut 14 tweet tipinin otomatik/onay modundan TAMAMEN BAĞIMSIZ.
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 import hashlib
@@ -32,10 +33,18 @@ _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
 _TWITTER_TWEET_LOOKUP_URL = "https://api.twitter.com/2/tweets/{tweet_id}"
 _TWITTER_USER_LOOKUP_URL = "https://api.twitter.com/2/users/by/username/{username}"
 _TWITTER_USER_TWEETS_URL = "https://api.twitter.com/2/users/{user_id}/tweets"
+_TWITTER_LIKE_URL = "https://api.twitter.com/2/users/{user_id}/likes"
 
 # Otomatik reply ayarlari
 _AUTO_REPLY_DAILY_LIMIT = 20
 _AUTO_REPLY_LOCK = asyncio.Lock()
+
+# Jitter araliklari (saniye) — dogal gorunum icin dagitilmis
+_JITTER_MIN = 30
+_JITTER_MAX = 180  # 3 dakika
+
+# Begeni sikligi: her N reply'da 1 begeni
+_LIKE_EVERY_N = 5
 
 
 # -------------------------------------------------------
@@ -268,49 +277,41 @@ async def fetch_tweet_by_url(tweet_url: str) -> dict:
 # 2. AI Reply Önerisi Üretme (Abacus AI)
 # -------------------------------------------------------
 
-_SYSTEM_PROMPT = """Sen @SZAlgoFinans hesabının kıdemli reply yazarısın.
-10 yıllık BİST deneyimine sahip, piyasa jargonunu iyi bilen bir analistsin.
+_SYSTEM_PROMPT = """Sen borsa takipçisi bir Twitter kullanıcısısın.
 
-GÖREV:
-Verilen tweet'e 3 farklı reply önerisi üret. Her biri farklı ton/yaklaşımda olmalı.
+GÖREV: Tweet'e KISA ve DOĞAL bir reply yaz. 3 farklı öneri üret.
 
-KURALLAR:
-1. Her reply en fazla 120 karakter olmalı (tweet reply'ları kısa ve etkili olmalı)
-2. Türkçe yaz, borsa/finans jargonu kullan (destek, direnç, momentum, hacim, boğa, ayı, vb.)
-3. Robotik/yapay zekâ gibi yazma — doğal, samimi, profesyonel ol
-4. İlgili hisse senedi ticker'ları veya sektör bilgisi varsa kullan
-5. Yatırım tavsiyesi verme, sadece analitik yorum yap
-6. Emoji kullanabilirsin ama abartma (max 1-2 emoji per reply)
-7. "⚠️YT değildir" uyarısını EKLEME — bu sadece ana tweetler için
+KESİN KURALLAR:
+1. Her reply 7-12 kelime olmalı — ASLA daha uzun yazma
+2. HİÇBİR RAKAM veya FİYAT YAZMA — ne seviye, ne yüzde, ne hedef fiyat
+3. Genel borsa/hisse/şirket haberi/halka arz yorumu yap
+4. Samimi, doğal, insansı yaz — robot gibi yazma
+5. Kısa cümle, sohbet havası — "Aynen", "Güzel tespit", "Katılıyorum" tarzı
+6. Max 1 emoji, abartma
+7. YT değildir YAZMA
 
-GÜVENLİK FİLTRESİ:
-Eğer tweet borsa/finans/ekonomi ile ALAKASIZ ise (siyaset, spor, magazin, kişisel, vs.):
-- is_safe: false yap
-- reason: "Bu tweet borsa/finans konusu dışında, reply uygun değil" yaz
-- replies boş array dön
+YASAK KONULAR (is_safe: false yap):
+- Siyaset, politika, seçim, parti, siyasi kişiler
+- Spor, magazin, kişisel konular
+- Hakaret, nefret söylemi
+- Borsa/finans/ekonomi DIŞI her şey
 
-Eğer tweet hakaret, nefret söylemi veya uygunsuz içerik içeriyorsa:
-- is_safe: false yap
-- reason: Sebebi kısaca yaz
-- replies boş array dön
+ÖRNEK İYİ REPLY'LAR:
+- "Hacim artışı devam ederse momentum güçlenir 📈"
+- "Güzel tespit, sektörde hareketlilik var"
+- "Bu haberi yakından takip etmek lazım"
+- "Katılıyorum, bilanço dönemi belirleyici olacak"
+- "Piyasa bunu fiyatlamaya başlamış gibi"
 
-ÇIKIŞ FORMATI (JSON):
-{
-  "is_safe": true,
-  "reason": "",
-  "replies": [
-    "Reply 1 — bilgilendirici ton",
-    "Reply 2 — soru soran/tartışma açan ton",
-    "Reply 3 — kısa ve vurucu ton"
-  ]
-}
+KÖTÜ REPLY (YAPMA):
+- "5000 üstü tutunma kritik" ← RAKAM VAR, YASAK
+- "Hedef 47.50 TL görünüyor" ← FİYAT VAR, YASAK
+- "%3.5 üstü kapanış önemli" ← YÜZDE VAR, YASAK
 
-Eğer güvenli değilse:
-{
-  "is_safe": false,
-  "reason": "Reddedilme sebebi",
-  "replies": []
-}"""
+JSON ÇIKTI:
+{"is_safe": true, "reason": "", "replies": ["reply1", "reply2", "reply3"]}
+veya
+{"is_safe": false, "reason": "Borsa dışı konu", "replies": []}"""
 
 
 async def generate_reply_suggestions(tweet_text: str) -> dict:
@@ -702,16 +703,72 @@ async def _get_today_reply_count() -> int:
         return 0
 
 
+async def _like_tweet(tweet_id: str) -> bool:
+    """Tweet'i beğenir (Twitter API v2 — POST /2/users/:id/likes).
+
+    Returns True if successful.
+    """
+    creds = _load_credentials()
+    if not creds:
+        return False
+
+    # Kendi user ID'mizi almamız lazım — oauth token sahibi
+    # Twitter API v2: POST /2/users/{authenticated_user_id}/likes
+    # Authenticated user ID'yi token'dan çıkarmak yerine, ayarlardan alalım
+    try:
+        from app.config import get_settings
+        my_user_id = getattr(get_settings(), "X_USER_ID", None)
+        if not my_user_id:
+            # User ID yoksa /2/users/me endpoint'inden çek
+            me_url = "https://api.twitter.com/2/users/me"
+            auth_header = _build_oauth_header(creds, method="GET", url=me_url)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(me_url, headers={"Authorization": auth_header})
+            if resp.status_code == 200:
+                my_user_id = resp.json().get("data", {}).get("id")
+            if not my_user_id:
+                logger.error("Kendi user ID alınamadı — beğeni atılamıyor")
+                return False
+    except Exception as e:
+        logger.error(f"User ID alma hatası: {e}")
+        return False
+
+    like_url = _TWITTER_LIKE_URL.format(user_id=my_user_id)
+    auth_header = _build_oauth_header(creds, method="POST", url=like_url)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                like_url,
+                json={"tweet_id": tweet_id},
+                headers={
+                    "Authorization": auth_header,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if resp.status_code in (200, 201):
+            logger.info(f"Tweet beğenildi: {tweet_id}")
+            return True
+        else:
+            logger.warning(f"Beğeni hatası: HTTP {resp.status_code} — {resp.text[:200]}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Beğeni hatası: {e}")
+        return False
+
+
 async def auto_reply_cycle():
     """Otomatik reply ana döngüsü — scheduler'dan 5dk'da bir çağrılır.
 
-    1. Auto-reply toggle kontrolü
-    2. DB'den aktif ReplyTarget'ları çek
-    3. Her hedef için son tweetleri çek
-    4. Zaten reply atılmış mı kontrol et
-    5. Günlük limit kontrolü
-    6. AI reply üret → is_safe kontrol → gönder
-    7. Sonucu AutoReply tablosuna kaydet
+    KRİTİK KURALLAR:
+    - Sadece YENİ tweetlere reply atar (last_seen_tweet_id'den sonrakiler)
+    - İlk çalışmada: mevcut tweetlerin ID'sini kaydeder, reply ATMAZ
+    - Her reply arasında 30sn-3dk rastgele jitter (doğal görünüm)
+    - Her 5 reply'da 1 beğeni atar
+    - Günlük 20 reply limiti (gece 00:00'da sıfırlanır)
+    - Siyasi/borsa dışı tweetlere reply ATMAZ (AI filtresi)
     """
     if _AUTO_REPLY_LOCK.locked():
         logger.debug("Auto-reply zaten çalışıyor, atlıyorum")
@@ -744,7 +801,7 @@ async def auto_reply_cycle():
                 result = await session.execute(
                     select(ReplyTarget).where(ReplyTarget.is_active == True)
                 )
-                targets = result.scalars().all()
+                targets = list(result.scalars().all())
 
                 if not targets:
                     logger.debug("Aktif reply hedefi yok")
@@ -754,7 +811,11 @@ async def auto_reply_cycle():
                     f"Auto-reply tarama: {len(targets)} hedef, bugün {today_count} reply, kalan {remaining}"
                 )
 
+                # Hedefleri karıştır — her seferinde farklı sıra
+                random.shuffle(targets)
+
                 replies_sent = 0
+                total_liked = 0
 
                 for target in targets:
                     if replies_sent >= remaining:
@@ -771,11 +832,40 @@ async def auto_reply_cycle():
                             logger.warning(f"User ID çözümlenemedi: @{target.username}")
                             continue
 
-                    # Son tweetleri çek
-                    tweets = await fetch_user_recent_tweets(user_id)
+                    # ─── İLK ÇALIŞMA KONTROLÜ ───
+                    # last_seen_tweet_id yoksa: mevcut tweetlerin en yenisini kaydet, reply ATMA
+                    if not target.last_seen_tweet_id:
+                        init_tweets = await fetch_user_recent_tweets(user_id)
+                        if init_tweets:
+                            # En yeni tweet ID'yi kaydet
+                            newest_id = max(t["id"] for t in init_tweets)
+                            target.last_seen_tweet_id = newest_id
+                            await session.flush()
+                            logger.info(
+                                f"İlk tarama @{target.username}: {len(init_tweets)} mevcut tweet atlandı, "
+                                f"since_id={newest_id} kaydedildi"
+                            )
+                        else:
+                            logger.info(f"İlk tarama @{target.username}: tweet bulunamadı")
+                        continue  # Bu hedef için bu döngüde reply ATMA
+
+                    # ─── YENİ TWEETLERİ ÇEK (since_id ile) ───
+                    tweets = await fetch_user_recent_tweets(
+                        user_id,
+                        since_id=target.last_seen_tweet_id,
+                    )
 
                     if not tweets:
                         continue
+
+                    # En yeni tweet ID'yi güncelle (bir sonraki döngü için)
+                    newest_id = max(t["id"] for t in tweets)
+                    target.last_seen_tweet_id = newest_id
+                    await session.flush()
+
+                    logger.info(
+                        f"@{target.username}: {len(tweets)} yeni tweet bulundu"
+                    )
 
                     for tweet in tweets:
                         if replies_sent >= remaining:
@@ -799,7 +889,6 @@ async def auto_reply_cycle():
                         ai_result = await generate_reply_suggestions(tweet_text)
 
                         if not ai_result.get("success"):
-                            # AI hatası — log ve atla
                             session.add(AutoReply(
                                 target_tweet_id=tweet_id,
                                 target_username=target.username,
@@ -812,7 +901,6 @@ async def auto_reply_cycle():
                             continue
 
                         if not ai_result.get("is_safe"):
-                            # Güvenli değil — log ve atla
                             session.add(AutoReply(
                                 target_tweet_id=tweet_id,
                                 target_username=target.username,
@@ -822,14 +910,25 @@ async def auto_reply_cycle():
                                 error_message=ai_result.get("reason", "Güvenli değil"),
                             ))
                             await session.flush()
+                            logger.info(
+                                f"Unsafe tweet atlandı: @{target.username} — {ai_result.get('reason')}"
+                            )
                             continue
 
-                        # İlk reply'ı seç (bilgilendirici ton)
+                        # Rastgele reply seç (her seferinde farklı ton)
                         reply_options = ai_result.get("replies", [])
                         if not reply_options:
                             continue
 
-                        chosen_reply = reply_options[0]
+                        chosen_reply = random.choice(reply_options)
+
+                        # ─── JITTER: Doğal gecikme (30sn - 3dk) ───
+                        jitter = random.uniform(_JITTER_MIN, _JITTER_MAX)
+                        logger.info(
+                            f"Reply gönderilecek: @{target.username} tweet {tweet_id} "
+                            f"— {jitter:.0f}sn sonra → \"{chosen_reply[:50]}...\""
+                        )
+                        await asyncio.sleep(jitter)
 
                         # Reply gönder
                         send_result = await send_reply(tweet_id, chosen_reply)
@@ -845,8 +944,14 @@ async def auto_reply_cycle():
                             ))
                             replies_sent += 1
                             logger.info(
-                                f"Auto-reply başarılı: @{target.username} tweet {tweet_id} → \"{chosen_reply[:60]}...\""
+                                f"Auto-reply #{replies_sent}: @{target.username} → \"{chosen_reply[:60]}\""
                             )
+
+                            # ─── BEĞENİ: Her 5 reply'da 1 beğeni ───
+                            if replies_sent % _LIKE_EVERY_N == 0:
+                                like_ok = await _like_tweet(tweet_id)
+                                if like_ok:
+                                    total_liked += 1
                         else:
                             session.add(AutoReply(
                                 target_tweet_id=tweet_id,
@@ -857,17 +962,16 @@ async def auto_reply_cycle():
                                 error_message=send_result.get("error", "Gönderim hatası"),
                             ))
                             logger.error(
-                                f"Auto-reply başarısız: @{target.username} tweet {tweet_id} — {send_result.get('error')}"
+                                f"Auto-reply başarısız: @{target.username} — {send_result.get('error')}"
                             )
 
                         await session.flush()
 
-                        # Rate limit koruması — tweetler arası 3 sn bekleme
-                        await asyncio.sleep(3)
-
                 await session.commit()
 
-            logger.info(f"Auto-reply döngü tamamlandı: {replies_sent} reply atıldı")
+            logger.info(
+                f"Auto-reply döngü tamamlandı: {replies_sent} reply, {total_liked} beğeni"
+            )
 
         except Exception as e:
-            logger.error(f"Auto-reply döngü hatası: {e}")
+            logger.error(f"Auto-reply döngü hatası: {e}", exc_info=True)

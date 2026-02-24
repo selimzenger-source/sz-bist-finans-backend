@@ -299,3 +299,11 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v26 migration: reply_targets.last_seen_tweet_id (eski tweetlere reply engeli)
+        try:
+            await conn.execute(
+                text("ALTER TABLE reply_targets ADD COLUMN IF NOT EXISTS last_seen_tweet_id VARCHAR(30)")
+            )
+        except Exception:
+            pass
