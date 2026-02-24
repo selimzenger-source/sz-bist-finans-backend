@@ -2226,13 +2226,20 @@ async def admin_replies_page(
     )
     today_count = count_result.scalar() or 0
 
+    # Günlük limit (DB'den okur, default 20)
+    limit_result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "AUTO_REPLY_DAILY_LIMIT")
+    )
+    limit_setting = limit_result.scalar_one_or_none()
+    daily_limit = int(limit_setting.value) if limit_setting else 20
+
     return templates.TemplateResponse("admin/replies.html", {
         "request": request,
         "targets": targets,
         "reply_log": reply_log,
         "auto_reply_on": auto_reply_on,
         "today_count": today_count,
-        "daily_limit": 20,
+        "daily_limit": daily_limit,
         "success": request.query_params.get("success"),
         "error": request.query_params.get("error"),
     })
@@ -2416,4 +2423,40 @@ async def admin_reply_toggle_auto(
 
     return RedirectResponse(
         f"/admin/replies?success=Otomatik+reply+{new_state}", status_code=302
+    )
+
+
+@router.post("/replies/set-limit")
+async def admin_reply_set_limit(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Günlük reply limitini ayarla (admin panelden)."""
+    from app.models.app_setting import AppSetting
+
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    form = await request.form()
+    new_limit = form.get("daily_limit", "20")
+    try:
+        limit_val = max(1, min(100, int(new_limit)))  # 1-100 arası
+    except (ValueError, TypeError):
+        limit_val = 20
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "AUTO_REPLY_DAILY_LIMIT")
+    )
+    setting = result.scalar_one_or_none()
+
+    if setting:
+        setting.value = str(limit_val)
+    else:
+        db.add(AppSetting(key="AUTO_REPLY_DAILY_LIMIT", value=str(limit_val)))
+
+    await db.flush()
+
+    return RedirectResponse(
+        f"/admin/replies?success=Günlük+limit+{limit_val}+yapıldı", status_code=302
     )

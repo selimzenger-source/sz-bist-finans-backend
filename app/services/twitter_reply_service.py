@@ -36,7 +36,7 @@ _TWITTER_USER_TWEETS_URL = "https://api.twitter.com/2/users/{user_id}/tweets"
 _TWITTER_LIKE_URL = "https://api.twitter.com/2/users/{user_id}/likes"
 
 # Otomatik reply ayarlari
-_AUTO_REPLY_DAILY_LIMIT = 20
+_AUTO_REPLY_DAILY_LIMIT_DEFAULT = 20  # DB'de yoksa bu kullanilir
 _AUTO_REPLY_LOCK = asyncio.Lock()
 
 # Jitter araliklari (saniye) — dogal gorunum icin dagitilmis
@@ -681,6 +681,25 @@ async def _is_auto_reply_enabled() -> bool:
         return True  # Hata durumunda açık varsay
 
 
+async def _get_daily_limit() -> int:
+    """Günlük reply limitini DB'den okur (admin panelden ayarlanır)."""
+    try:
+        from app.database import async_session
+        from app.models.app_setting import AppSetting
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(AppSetting).where(AppSetting.key == "AUTO_REPLY_DAILY_LIMIT")
+            )
+            setting = result.scalar_one_or_none()
+            if setting:
+                return int(setting.value)
+    except Exception:
+        pass
+    return _AUTO_REPLY_DAILY_LIMIT_DEFAULT
+
+
 async def _get_today_reply_count() -> int:
     """Bugün kaç reply atıldığını sayar."""
     try:
@@ -788,13 +807,14 @@ async def auto_reply_cycle():
             from app.models.user import ReplyTarget, AutoReply
             from sqlalchemy import select
 
-            # Günlük limit
+            # Günlük limit (DB'den okunur — admin panelden ayarlanabilir)
+            daily_limit = await _get_daily_limit()
             today_count = await _get_today_reply_count()
-            if today_count >= _AUTO_REPLY_DAILY_LIMIT:
-                logger.info(f"Günlük reply limiti doldu: {today_count}/{_AUTO_REPLY_DAILY_LIMIT}")
+            if today_count >= daily_limit:
+                logger.info(f"Günlük reply limiti doldu: {today_count}/{daily_limit}")
                 return
 
-            remaining = _AUTO_REPLY_DAILY_LIMIT - today_count
+            remaining = daily_limit - today_count
 
             async with async_session() as session:
                 # Aktif hedefleri çek

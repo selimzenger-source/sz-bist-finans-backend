@@ -307,3 +307,12 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v27 migration: Eski buggy auto-reply spamini temizle + fresh start
+        # Bir kerelik: tum eski auto_replies silinir, last_seen_tweet_id sifirlanir
+        # Boylece sistem ilk dongude mevcut tweetleri kaydeder, reply ATMAZ
+        try:
+            await conn.execute(text("DELETE FROM auto_replies"))
+            await conn.execute(text("UPDATE reply_targets SET last_seen_tweet_id = NULL"))
+        except Exception:
+            pass
