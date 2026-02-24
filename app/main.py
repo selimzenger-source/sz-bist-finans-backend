@@ -4079,7 +4079,7 @@ async def submit_error_report(
     body: ErrorReportRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Uygulama crash hata raporu — Telegram'a bildirim + 10 puan ödül."""
+    """Uygulama crash hata raporu — Telegram'a bildirim + 50 puan ödül (48 saat cooldown)."""
     from app.services.admin_telegram import send_admin_message
 
     # Telegram mesajı oluştur
@@ -4100,8 +4100,9 @@ async def submit_error_report(
     text = "\n".join(lines)
     ok = await send_admin_message(text, parse_mode="HTML", silent=False)
 
-    # Kullanıcıya 50 puan ödül ver
-    reward_given = False
+    # Kullanıcıya 50 puan ödül ver — 48 saat cooldown (suistimal önleme)
+    points_awarded = False
+    cooldown_active = False
     if body.device_id and body.device_id != "unknown":
         try:
             result = await db.execute(
@@ -4109,22 +4110,37 @@ async def submit_error_report(
             )
             user = result.scalar_one_or_none()
             if user:
-                user.wallet_balance = (user.wallet_balance or 0.0) + 50.0
-                tx = WalletTransaction(
-                    user_id=user.id,
-                    amount=50.0,
-                    tx_type="error_report",
-                    description="Hata raporu teşekkür puanı (50 puan)",
-                    balance_after=user.wallet_balance,
+                # Son 48 saatte zaten puan verildi mi kontrol et
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+                recent_tx = await db.execute(
+                    select(WalletTransaction).where(
+                        WalletTransaction.user_id == user.id,
+                        WalletTransaction.tx_type == "error_report",
+                        WalletTransaction.created_at >= cutoff,
+                    ).limit(1)
                 )
-                db.add(tx)
-                await db.flush()
-                reward_given = True
+                already_rewarded = recent_tx.scalar_one_or_none()
+
+                if already_rewarded:
+                    cooldown_active = True
+                else:
+                    user.wallet_balance = (user.wallet_balance or 0.0) + 50.0
+                    tx = WalletTransaction(
+                        user_id=user.id,
+                        amount=50.0,
+                        tx_type="error_report",
+                        description="Hata raporu teşekkür puanı (50 puan)",
+                        balance_after=user.wallet_balance,
+                    )
+                    db.add(tx)
+                    await db.flush()
+                    points_awarded = True
         except Exception:
             pass  # Puan veremesek de rapor iletilsin
 
     return {
         "success": ok,
-        "reward_given": reward_given,
+        "points_awarded": points_awarded,
+        "cooldown_active": cooldown_active,
         "message": "Hata raporunuz iletildi, teşekkürler!",
     }
