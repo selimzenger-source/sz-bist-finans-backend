@@ -34,8 +34,8 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 # Versiyon — deploy dogrulama icin
 _SCORER_VERSION = "v4-decimal"
 
-# AI model — gpt-4o guclu analiz icin
-_AI_MODEL = "gpt-4o"
+# AI model — claude-sonnet-4-5 (Abacus RouteLLM uzerinden)
+_AI_MODEL = "claude-sonnet-4-5"
 
 # Timeouts
 _TV_TIMEOUT = 15   # TradingView icin

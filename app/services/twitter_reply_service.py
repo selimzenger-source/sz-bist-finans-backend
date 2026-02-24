@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Abacus AI RouteLLM endpoint (OpenAI compat)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL = "gpt-4o"
+_AI_MODEL = "claude-sonnet-4-5"
 _AI_TIMEOUT = 25
 
 # Twitter API v2
