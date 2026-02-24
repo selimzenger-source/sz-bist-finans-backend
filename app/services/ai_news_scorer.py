@@ -301,8 +301,9 @@ KRITIK KURALLAR:
 - Sadece "pozitif" etiketi tasimasi YETMEZ — gercek etkiyi ol
 - Kaynak "Telegram Ozeti" ise ve detay yoksa: 5.0-5.5 arasi ver (belirsiz)
 
-Haberi yatirimci bakis acisiyla Turkce en fazla 3 cumle ile ozetle.
+Haberi yatirimci bakis acisiyla Turkce EN AZ 3, EN FAZLA 5 cumle ile ozetle.
 Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
+Haberin ne oldugunu, sirket icin ne anlama geldigini ve yatirimci icin neden onemli oldugunu acikla.
 
 HASHTAG KURALLARI:
 - Haberin konusuyla ilgili 2-3 adet Twitter hashtag uret (# isareti OLMADAN)
@@ -312,7 +313,7 @@ HASHTAG KURALLARI:
 - Sadece haberin icerigiyle GERCEKTEN ilgili hashtagler sec, genel/alakasiz olmasin
 
 SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
-{{"score": 7.3, "summary": "Uc cumleye kadar Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
+{{"score": 7.3, "summary": "3-5 cumle detayli Turkce ozet. Haberin icerigini acikla. Sirket icin etkisini belirt. Yatirimci icin onemini vurgula.", "hashtags": ["sektor", "konu"]}}"""
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
