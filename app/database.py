@@ -378,3 +378,23 @@ async def init_db():
             """))
         except Exception:
             pass
+
+        # v33 migration: users.persistent_id (kalici cihaz ID — hesap kurtarma)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS persistent_id VARCHAR(255)")
+            )
+            # Unique constraint (aynı cihazdan birden fazla hesap olmasın)
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_indexes
+                        WHERE tablename = 'users' AND indexname = 'idx_users_persistent_id'
+                    ) THEN
+                        CREATE UNIQUE INDEX idx_users_persistent_id ON users(persistent_id) WHERE persistent_id IS NOT NULL;
+                    END IF;
+                END $$;
+            """))
+        except Exception:
+            pass

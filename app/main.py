@@ -906,12 +906,20 @@ async def toggle_mute_stock_notification(
 @app.post("/api/v1/users/register", response_model=UserOut)
 @limiter.limit("10/minute")
 async def register_device(request: Request, data: UserRegister, db: AsyncSession = Depends(get_db)):
-    """Cihaz kayit — ilk acilista cagrilir."""
+    """Cihaz kayit — ilk acilista cagrilir.
+
+    Hesap kurtarma: Eger device_id bulunamazsa ama persistent_id eslesen bir
+    kullanici varsa, eski hesabi geri yukler (device_id gunceller).
+    Bu sayede uygulama silinip tekrar yuklendiginde cuzdan bakiyesi,
+    abonelikler ve tum veriler korunur.
+    """
     # Bos string token'lari None'a cevir (AuthContext bos token ile register yapar)
     clean_fcm = data.fcm_token.strip() if data.fcm_token else None
     clean_fcm = clean_fcm or None  # "" -> None
     clean_expo = data.expo_push_token.strip() if data.expo_push_token else None
     clean_expo = clean_expo or None
+    clean_persistent = data.persistent_id.strip() if data.persistent_id else None
+    clean_persistent = clean_persistent or None
 
     result = await db.execute(
         select(User).where(User.device_id == data.device_id)
@@ -919,14 +927,62 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
     user = result.scalar_one_or_none()
 
     if user:
-        # Sadece gecerli token varsa guncelle (bos string ile ezme)
+        # Mevcut kullanici — token ve persistent_id guncelle
         if clean_fcm:
             user.fcm_token = clean_fcm
         if clean_expo:
             user.expo_push_token = clean_expo
+        if clean_persistent and not user.persistent_id:
+            user.persistent_id = clean_persistent
         user.platform = data.platform
         user.app_version = data.app_version
+    elif clean_persistent:
+        # device_id bulunamadi — persistent_id ile hesap kurtarma dene
+        recovery_result = await db.execute(
+            select(User).where(
+                and_(
+                    User.persistent_id == clean_persistent,
+                    User.deleted == False,
+                )
+            )
+        )
+        recovered_user = recovery_result.scalar_one_or_none()
+
+        if recovered_user:
+            # Eski hesap bulundu — device_id'yi guncelle (hesap kurtarma)
+            recovered_user.device_id = data.device_id
+            if clean_fcm:
+                recovered_user.fcm_token = clean_fcm
+            if clean_expo:
+                recovered_user.expo_push_token = clean_expo
+            recovered_user.platform = data.platform
+            recovered_user.app_version = data.app_version
+            user = recovered_user
+            logger.info(
+                "Hesap kurtarma basarili: persistent_id=%s, eski_device=%s → yeni_device=%s, user_id=%d",
+                clean_persistent, "?", data.device_id, user.id,
+            )
+        else:
+            # persistent_id ile de bulunamadi — yeni kullanici olustur
+            user = User(
+                device_id=data.device_id,
+                persistent_id=clean_persistent,
+                fcm_token=clean_fcm,
+                expo_push_token=clean_expo,
+                platform=data.platform,
+                app_version=data.app_version,
+            )
+            db.add(user)
+
+            await db.flush()
+            subscription = UserSubscription(
+                user_id=user.id,
+                package="free",
+                is_active=True,
+            )
+            db.add(subscription)
     else:
+        # persistent_id yok, device_id bulunamadi — yeni kullanici
         user = User(
             device_id=data.device_id,
             fcm_token=clean_fcm,
@@ -936,13 +992,12 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
         )
         db.add(user)
 
+        await db.flush()
         subscription = UserSubscription(
-            user_id=user.id if user.id else 0,
+            user_id=user.id,
             package="free",
             is_active=True,
         )
-        await db.flush()
-        subscription.user_id = user.id
         db.add(subscription)
 
     await db.flush()

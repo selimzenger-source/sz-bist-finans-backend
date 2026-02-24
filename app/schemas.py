@@ -296,6 +296,7 @@ class IPOSectionsOut(BaseModel):
 class UserRegister(BaseModel):
     """Cihaz kayit istegi."""
     device_id: str
+    persistent_id: Optional[str] = None  # Android ID veya iOS Keychain ID — hesap kurtarma icin
     fcm_token: str
     expo_push_token: Optional[str] = None
     platform: str  # ios, android
