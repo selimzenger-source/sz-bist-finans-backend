@@ -627,12 +627,19 @@ _HALLUCINATION_GUARD = """
 - Ekonomik takvimden bugun/yarin onemli etkinlikler varsa bahset.
 - IPO etkinlikleri (son gun, ilk islem) varsa MUTLAKA vurgula — yatirimci icin kritik.
 
-REFERANS KAYNAKLARI (raporda bahsedebilirsin):
-- KAP (kap.org.tr): Resmi bildirimler
-- Borsa Istanbul (borsaistanbul.com): Kapanis verileri
-- SPK (spk.gov.tr): Halka arz onaylari
-- halkarz.com: Halka arz verileri
-- Bloomberg HT: Piyasa haberleri
+REFERANS KAYNAKLARI (raporda uygun olanlara atifta bulun):
+Resmi Kaynaklar:
+- KAP (kap.org.tr): Resmi sirket bildirimleri, halka arz sonuclari, VBTS tedbir kararlari
+- Borsa Istanbul (borsaistanbul.com): Gun sonu kapanis fiyatlari, hacim, tavan/taban verileri
+- SPK (spk.gov.tr): Halka arz onaylari, SPK bultenleri, tahsisat oranlari
+Halka Arz Kaynaklari:
+- halkarz.com: Tavan serileri, islem goerme tarihleri, araci kurum dagilimlari
+- halkaarztakvimi.com.tr: Yaklasan halka arzlar, talep toplama tarihleri
+- Fintables (fintables.com): Temel analiz, bilancolar, carpanlar (F/K, PD/DD)
+- Midas (getmidas.com): Sirket tanitimlari, halka arz gelir kullanimi
+Piyasa Haberleri:
+- Bloomberg HT: Piyasa haberleri, ekonomi gelismeleri
+- Dunya Gazetesi: Ekonomi haberleri
 """
 
 _MORNING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU rapor yaziyorsun.
