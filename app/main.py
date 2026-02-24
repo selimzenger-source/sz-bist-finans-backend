@@ -4100,7 +4100,7 @@ async def submit_error_report(
     text = "\n".join(lines)
     ok = await send_admin_message(text, parse_mode="HTML", silent=False)
 
-    # Kullanıcıya 10 puan ödül ver
+    # Kullanıcıya 50 puan ödül ver
     reward_given = False
     if body.device_id and body.device_id != "unknown":
         try:
@@ -4109,12 +4109,12 @@ async def submit_error_report(
             )
             user = result.scalar_one_or_none()
             if user:
-                user.wallet_balance = (user.wallet_balance or 0.0) + 10.0
+                user.wallet_balance = (user.wallet_balance or 0.0) + 50.0
                 tx = WalletTransaction(
                     user_id=user.id,
-                    amount=10.0,
+                    amount=50.0,
                     tx_type="error_report",
-                    description="Hata raporu teşekkür puanı",
+                    description="Hata raporu teşekkür puanı (50 puan)",
                     balance_after=user.wallet_balance,
                 )
                 db.add(tx)
