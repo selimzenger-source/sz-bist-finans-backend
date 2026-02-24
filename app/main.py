@@ -4144,3 +4144,65 @@ async def submit_error_report(
         "cooldown_active": cooldown_active,
         "message": "Hata raporunuz iletildi, teşekkürler!",
     }
+
+
+# ---------- REVIEW REWARD — mağaza yorum ödülü (1 kerelik 100 puan) ----------
+
+class ReviewRewardRequest(BaseModel):
+    device_id: str
+    platform: str = ""  # "android" veya "ios"
+
+
+@app.post("/api/v1/review-reward")
+@limiter.limit("3/minute")
+async def claim_review_reward(
+    request: Request,
+    body: ReviewRewardRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mağaza yorumu ödülü — cihaz başına 1 kerelik 100 puan."""
+    if not body.device_id:
+        raise HTTPException(status_code=400, detail="device_id gerekli")
+
+    result = await db.execute(
+        select(User).where(User.device_id == body.device_id).with_for_update()
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+
+    # Daha önce review ödülü alınmış mı kontrol et
+    existing_tx = await db.execute(
+        select(WalletTransaction).where(
+            WalletTransaction.user_id == user.id,
+            WalletTransaction.tx_type == "review_reward",
+        ).limit(1)
+    )
+    already_claimed = existing_tx.scalar_one_or_none()
+
+    if already_claimed:
+        return {
+            "success": False,
+            "points_awarded": False,
+            "already_claimed": True,
+            "message": "Bu ödülü daha önce aldınız.",
+        }
+
+    # 100 puan ver
+    user.wallet_balance = (user.wallet_balance or 0.0) + 100.0
+    tx = WalletTransaction(
+        user_id=user.id,
+        amount=100.0,
+        tx_type="review_reward",
+        description=f"Mağaza yorumu ödülü ({body.platform}) — 100 puan",
+        balance_after=user.wallet_balance,
+    )
+    db.add(tx)
+    await db.flush()
+
+    return {
+        "success": True,
+        "points_awarded": True,
+        "already_claimed": False,
+        "message": "100 puan cüzdanınıza eklendi!",
+    }
