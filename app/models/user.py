@@ -348,7 +348,6 @@ WALLET_COUPONS: dict[str, float] = {
     "SZ1750L": 1750.0,
     "SZ2000Y": 2000.0,
     "SZ2500Z": 2500.0,
-    "SZ_ALGO_DENEM01": 10000.0,  # Sinirsiz test kuponu
 }
 
 # Reklam ayarlari

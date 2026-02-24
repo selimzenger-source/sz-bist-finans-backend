@@ -1592,7 +1592,8 @@ def _check_daily_reset(user: User):
 
 
 @app.get("/api/v1/users/{device_id}/wallet", response_model=WalletBalanceOut)
-async def get_wallet(device_id: str, db: AsyncSession = Depends(get_db)):
+@limiter.limit("30/minute")
+async def get_wallet(request: Request, device_id: str, db: AsyncSession = Depends(get_db)):
     """Kullanicinin cuzdan bakiyesini ve reklam durumunu getirir."""
     result = await db.execute(select(User).where(User.device_id == device_id))
     user = result.scalar_one_or_none()
@@ -1733,7 +1734,22 @@ async def wallet_spend(
     data: WalletSpendRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Puan harcama — paket satin alma oncesi bakiye kontrolu."""
+    """Puan harcama — paket satin alma oncesi bakiye kontrolu + sunucu tarafindan fiyat dogrulama."""
+    # Sunucu tarafinda fiyat tablosu — client manipulasyonuna karsi koruma
+    SPEND_PRICES: dict[str, float] = {
+        "spend_news": 650.0,
+        "spend_ipo": 950.0,
+        "spend_notif_reward": 150.0,
+        "spend_notif": 150.0,
+    }
+
+    # spend_type dogrulama
+    if data.spend_type not in SPEND_PRICES:
+        raise HTTPException(status_code=400, detail=f"Gecersiz harcama tipi: {data.spend_type}")
+
+    # Sunucu tarafindan belirlenen fiyati kullan — client amount'u yoksay
+    server_amount = SPEND_PRICES[data.spend_type]
+
     result = await db.execute(
         select(User).where(User.device_id == device_id).with_for_update()
     )
@@ -1741,23 +1757,20 @@ async def wallet_spend(
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
-    if data.amount <= 0:
-        raise HTTPException(status_code=400, detail="Miktar 0'dan buyuk olmali")
-
     current_balance = user.wallet_balance or 0.0
-    if current_balance < data.amount:
+    if current_balance < server_amount:
         raise HTTPException(
             status_code=400,
-            detail=f"Yetersiz bakiye. Mevcut: {current_balance:.0f}, Gerekli: {data.amount:.0f}"
+            detail=f"Yetersiz bakiye. Mevcut: {current_balance:.0f}, Gerekli: {server_amount:.0f}"
         )
 
-    # Bakiye dus
-    user.wallet_balance = current_balance - data.amount
+    # Bakiye dus — sunucu fiyati ile
+    user.wallet_balance = current_balance - server_amount
 
-    # Islem logu
+    # Islem logu — sunucu tarafindan dogrulanan fiyat
     tx = WalletTransaction(
         user_id=user.id,
-        amount=-data.amount,
+        amount=-server_amount,
         tx_type=data.spend_type,
         description=data.description or f"Harcama: {data.spend_type}",
         balance_after=user.wallet_balance,
@@ -1839,7 +1852,7 @@ async def wallet_spend(
 
 
 @app.post("/api/v1/users/{device_id}/wallet/redeem-coupon", response_model=WalletBalanceOut)
-@limiter.limit("10/minute")
+@limiter.limit("3/minute")
 async def wallet_redeem_coupon(
     request: Request,
     device_id: str,
@@ -1860,19 +1873,18 @@ async def wallet_redeem_coupon(
     if code not in WALLET_COUPONS:
         raise HTTPException(status_code=400, detail="Gecersiz kupon kodu.")
 
-    # Daha once kullanildi mi? (SZ_ALGO_DENEM01 haric — sinirsiz test kuponu)
-    if code != "SZ_ALGO_DENEM01":
-        existing = await db.execute(
-            select(WalletTransaction).where(
-                and_(
-                    WalletTransaction.user_id == user.id,
-                    WalletTransaction.tx_type == "coupon",
-                    WalletTransaction.description == f"Kupon: {code}",
-                )
+    # Daha once kullanildi mi?
+    existing = await db.execute(
+        select(WalletTransaction).where(
+            and_(
+                WalletTransaction.user_id == user.id,
+                WalletTransaction.tx_type == "coupon",
+                WalletTransaction.description == f"Kupon: {code}",
             )
         )
-        if existing.scalar_one_or_none():
-            raise HTTPException(status_code=400, detail="Bu kuponu daha once kullandiniz.")
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Bu kuponu daha once kullandiniz.")
 
     # Puan ekle
     amount = WALLET_COUPONS[code]
@@ -4117,7 +4129,7 @@ async def submit_error_report(
                         WalletTransaction.user_id == user.id,
                         WalletTransaction.tx_type == "error_report",
                         WalletTransaction.created_at >= cutoff,
-                    ).limit(1)
+                    ).with_for_update().limit(1)
                 )
                 already_rewarded = recent_tx.scalar_one_or_none()
 
@@ -4171,12 +4183,12 @@ async def claim_review_reward(
     if not user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
 
-    # Daha önce review ödülü alınmış mı kontrol et
+    # Daha önce review ödülü alınmış mı kontrol et — race condition koruması
     existing_tx = await db.execute(
         select(WalletTransaction).where(
             WalletTransaction.user_id == user.id,
             WalletTransaction.tx_type == "review_reward",
-        ).limit(1)
+        ).with_for_update().limit(1)
     )
     already_claimed = existing_tx.scalar_one_or_none()
 
