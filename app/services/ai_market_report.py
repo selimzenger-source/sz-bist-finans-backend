@@ -4,7 +4,8 @@ Sabah 08:15 TR: Onceki gun verileri + bugunun beklentileri
 Aksam 20:45 TR: Gunun kapanis verileri + degerlendirme
 Her ikisi de X (Twitter) uzerinden gorsel + metin tweet olarak paylasilir.
 
-v3: Gercek haber kaynaklari (DB + dis kaynak RSS) + ceiling_tracks + halusinasyon korumasi
+v4: Ekonomik takvim (doviz.com) + yaklasan IPO etkinlikleri + resmi kaynak referanslari
+    + Gercek haber kaynaklari (DB + dis kaynak RSS) + ceiling_tracks + halusinasyon korumasi
 """
 
 import logging
@@ -14,6 +15,7 @@ from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 
 import httpx
+from bs4 import BeautifulSoup
 
 from app.config import get_settings
 
@@ -398,7 +400,215 @@ async def fetch_rss_headlines() -> list[dict]:
 
 
 # ────────────────────────────────────────────
-# 5) AI Rapor Uretme
+# 5) Ekonomik Takvim (doviz.com)
+# ────────────────────────────────────────────
+
+async def fetch_economic_calendar() -> dict:
+    """doviz.com'dan bugun ve yarinin ekonomik etkinliklerini ceker.
+
+    Returns:
+        {
+            "today": [{"time": "10:00", "event": "TUIK Enflasyon", "importance": "Yuksek", ...}],
+            "tomorrow": [...],
+        }
+    """
+    result = {"today": [], "tomorrow": []}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.post(
+                "https://www.doviz.com/calendar/getCalendarEvents",
+                data={"country": ""},  # Tum ulkeler — TR + global
+                headers={
+                    "User-Agent": _YAHOO_HEADERS["User-Agent"],
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": "https://www.doviz.com/ekonomik-takvim",
+                },
+            )
+
+            if resp.status_code != 200:
+                logger.warning("doviz.com takvim: HTTP %d", resp.status_code)
+                return result
+
+            data = resp.json()
+            calendar_html = data.get("calendarHTML", "")
+            if not calendar_html:
+                logger.warning("doviz.com takvim: bos HTML")
+                return result
+
+            soup = BeautifulSoup(calendar_html, "lxml")
+
+            # calendar-content-0 = Bugun, calendar-content-1 = Yarin
+            for section_id, key in [("calendar-content-0", "today"), ("calendar-content-1", "tomorrow")]:
+                section = soup.find(id=section_id)
+                if not section:
+                    continue
+
+                # Tarih basligi
+                date_header = section.find(class_="text-bold")
+                date_str = date_header.text.strip() if date_header else ""
+
+                rows = section.select("tr")
+                for row in rows:
+                    cells = row.find_all("td")
+                    if len(cells) < 7:
+                        continue
+
+                    time_str = cells[0].text.strip()
+                    country = cells[1].text.strip()
+                    importance_span = cells[2].find("span", class_="importance")
+                    importance = importance_span.get("title", "") if importance_span else ""
+                    event_name = cells[3].text.strip()
+                    actual = cells[4].text.strip()
+                    forecast = cells[5].text.strip()
+                    previous = cells[6].text.strip()
+
+                    if not event_name:
+                        continue
+
+                    # Sadece onemli olanlari al (Yuksek ve Orta)
+                    # Ama TR etkinliklerini her zaman al
+                    is_turkey = "türkiye" in country.lower() or "turkey" in country.lower()
+                    is_important = importance in ("Yüksek", "Orta", "High", "Medium")
+
+                    if is_turkey or is_important:
+                        result[key].append({
+                            "time": time_str,
+                            "country": country,
+                            "event": event_name,
+                            "importance": importance,
+                            "actual": actual if actual and actual != "-" else None,
+                            "forecast": forecast if forecast and forecast != "-" else None,
+                            "previous": previous if previous and previous != "-" else None,
+                        })
+
+                logger.info("doviz.com %s: %d etkinlik", key, len(result[key]))
+
+    except Exception as e:
+        logger.error("Ekonomik takvim hatasi: %s", e)
+
+    return result
+
+
+# ────────────────────────────────────────────
+# 6) Yaklasan IPO Etkinlikleri (DB)
+# ────────────────────────────────────────────
+
+async def get_upcoming_ipo_events() -> list[dict]:
+    """Bugun ve yarinki onemli IPO etkinliklerini getirir:
+    - Basvuru son gunu (subscription_end)
+    - Ilk islem gunu (trading_start)
+    - Dagitim baslayanlar (in_distribution)
+    - Sonuc aciklananlar (awaiting_trading)
+    """
+    try:
+        from app.database import async_session
+        from app.models.ipo import IPO
+        from sqlalchemy import select, or_, and_
+
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+
+        async with async_session() as session:
+            # Dagitim surecinde olanlar
+            result_dist = await session.execute(
+                select(IPO).where(IPO.status == "in_distribution")
+            )
+            in_dist = list(result_dist.scalars().all())
+
+            # Islem gunu beklenenler
+            result_await = await session.execute(
+                select(IPO).where(IPO.status == "awaiting_trading")
+            )
+            awaiting = list(result_await.scalars().all())
+
+            # Yeni onaylananlar
+            result_new = await session.execute(
+                select(IPO).where(IPO.status == "newly_approved")
+            )
+            newly_approved = list(result_new.scalars().all())
+
+            events = []
+
+            for ipo in in_dist:
+                # Basvuru son gunu bugün veya yarın mı?
+                if ipo.subscription_end:
+                    sub_end = ipo.subscription_end if isinstance(ipo.subscription_end, date) else None
+                    if sub_end == today:
+                        events.append({
+                            "type": "SON_GUN",
+                            "ticker": ipo.ticker or ipo.company_name,
+                            "company": ipo.company_name,
+                            "detail": f"Basvuru SON GUN! Saat {ipo.subscription_hours or '17:00'}'e kadar",
+                            "date": today.isoformat(),
+                        })
+                    elif sub_end == tomorrow:
+                        events.append({
+                            "type": "SON_GUN_YARIN",
+                            "ticker": ipo.ticker or ipo.company_name,
+                            "company": ipo.company_name,
+                            "detail": f"YARIN son gun — basvuruyu kacirmayin",
+                            "date": tomorrow.isoformat(),
+                        })
+
+                # Dagitimda olanlar genel bilgi
+                events.append({
+                    "type": "DAGITIMDA",
+                    "ticker": ipo.ticker or ipo.company_name,
+                    "company": ipo.company_name,
+                    "detail": f"Talep toplama devam ediyor — Fiyat: {ipo.ipo_price} TL"
+                              + (f", Son gun: {ipo.subscription_end}" if ipo.subscription_end else ""),
+                    "date": today.isoformat(),
+                })
+
+            for ipo in awaiting:
+                # Islem gunu ilani beklenen
+                if ipo.expected_trading_date:
+                    exp_date = ipo.expected_trading_date if isinstance(ipo.expected_trading_date, date) else None
+                    if exp_date == today:
+                        events.append({
+                            "type": "ILK_ISLEM",
+                            "ticker": ipo.ticker or ipo.company_name,
+                            "company": ipo.company_name,
+                            "detail": f"BUGUN borsada ilk islem gunu! Halka arz fiyati: {ipo.ipo_price} TL",
+                            "date": today.isoformat(),
+                        })
+                    elif exp_date == tomorrow:
+                        events.append({
+                            "type": "ILK_ISLEM_YARIN",
+                            "ticker": ipo.ticker or ipo.company_name,
+                            "company": ipo.company_name,
+                            "detail": f"YARIN borsada ilk islem gunu",
+                            "date": tomorrow.isoformat(),
+                        })
+
+                events.append({
+                    "type": "ISLEM_BEKLENIYOR",
+                    "ticker": ipo.ticker or ipo.company_name,
+                    "company": ipo.company_name,
+                    "detail": f"Islem gunu ilani bekleniyor"
+                              + (f" — Beklenen: {ipo.expected_trading_date}" if ipo.expected_trading_date else ""),
+                    "date": today.isoformat(),
+                })
+
+            for ipo in newly_approved:
+                events.append({
+                    "type": "YENI_ONAY",
+                    "ticker": ipo.ticker or ipo.company_name,
+                    "company": ipo.company_name,
+                    "detail": f"SPK onayi aldi, dagitim sureci bekleniyor",
+                    "date": today.isoformat(),
+                })
+
+            return events
+
+    except Exception as e:
+        logger.error("IPO etkinlik hatasi: %s", e)
+        return []
+
+
+# ────────────────────────────────────────────
+# 7) AI Rapor Uretme
 # ────────────────────────────────────────────
 
 _HALLUCINATION_GUARD = """
@@ -406,7 +616,7 @@ _HALLUCINATION_GUARD = """
 - SADECE asagida verilen verileri kullan. Hicbir bilgiyi UYDURMA.
 - Bir veri yoksa o konuyu atla veya "veri bulunamadi" yaz.
 - Halka arz tavan/taban verisi ceiling_tracks olarak gun gun verilmistir.
-  Eger bir hisse icin ceiling_tracks verisi yoksa, tavan serisi yorumu YAPMA.
+  Eger bir hisse icin ceiling_tracks verisi yoksa, tavan serisi/bozulma yorumu YAPMA.
 - Tavan serisi suresini SADECE "tavan_seri_gun" ve "daily_tracks" verilerinden oku.
   Islem gunu sayisi (trading_day_count) tavan serisi demek DEGILDIR!
 - Haftanin hangi gunu oldugu TARIH satirinda yazilidir, buna uy.
@@ -414,6 +624,15 @@ _HALLUCINATION_GUARD = """
 - Haber kaynaklarini belirt (orn: "Bloomberg HT'ye gore...", "KAP bildirimlerine gore...").
 - Rakamlari yuvarlarken virgulden sonra max 2 basamak kullan.
 - Halka arz verilerinde SADECE verilen bilgileri kullan. Kendi bilgini ekleme.
+- Ekonomik takvimden bugun/yarin onemli etkinlikler varsa bahset.
+- IPO etkinlikleri (son gun, ilk islem) varsa MUTLAKA vurgula — yatirimci icin kritik.
+
+REFERANS KAYNAKLARI (raporda bahsedebilirsin):
+- KAP (kap.org.tr): Resmi bildirimler
+- Borsa Istanbul (borsaistanbul.com): Kapanis verileri
+- SPK (spk.gov.tr): Halka arz onaylari
+- halkarz.com: Halka arz verileri
+- Bloomberg HT: Piyasa haberleri
 """
 
 _MORNING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU rapor yaziyorsun.
@@ -446,10 +665,15 @@ FORMAT:
 📰 Gunun Onemli Gelismeleri
 [RSS ve KAP haberlerinden en onemli 2-3 gelisme]
 
+📅 Ekonomik Takvim
+[Bugun ve yarin onemli ekonomik veri aciklamalari varsa yaz — TCMB, TUIK, Fed vs.]
+[Etkinlik yoksa bu bolumu atla]
+
 🏦 Halka Arz Takibi
 [islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
 [Her hisse kodunu #TICKER formatiyla yaz, orn: #BESTE, #AKHAN]
 [Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
+[Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
 
 📌 Gunun Beklentileri
 [kisa ozet, dikkat edilecekler]
@@ -490,13 +714,18 @@ FORMAT:
 📰 Gunun Onemli Gelismeleri
 [RSS ve KAP haberlerinden en onemli 2-3 gelisme]
 
+📅 Ekonomik Takvim
+[Bugun aciklanan veriler ve yarin beklenen onemli veriler varsa yaz]
+[Etkinlik yoksa bu bolumu atla]
+
 🏦 Halka Arz Takibi
 [islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
 [Her hisse kodunu #TICKER formatiyla yaz, orn: #BESTE, #AKHAN]
 [Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
+[Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
 
 📌 Genel Degerlendirme
-[gunun ozeti, onemli gelismeler]
+[gunun ozeti, onemli gelismeler, yarin beklentileri]
 
 ⚠️ Yatirim tavsiyesi degildir.
 
@@ -511,9 +740,11 @@ def _format_full_context(
     kap_news: list[dict],
     telegram_news: list[dict],
     rss_headlines: list[dict],
+    econ_calendar: dict,
+    ipo_events: list[dict],
     report_type: str,
 ) -> str:
-    """AI'a gonderilecek zengin veri kontekstini formatlar."""
+    """AI'a gonderilecek zengin veri kontekstini formatlar — 8 kaynak."""
     today = date.today()
     day_name = _TR_DAY_NAMES.get(today.weekday(), "Bilinmiyor")
 
@@ -524,7 +755,7 @@ def _format_full_context(
 
     # ── Piyasa Verileri ──
     lines.append("=" * 50)
-    lines.append("PIYASA VERILERI (Yahoo Finance)")
+    lines.append("PIYASA VERILERI (Kaynak: Yahoo Finance)")
     lines.append("=" * 50)
     for name, label in [
         ("XU100", "BIST 100"),
@@ -633,6 +864,63 @@ def _format_full_context(
     else:
         lines.append("Su an 25 gun altinda islem goren halka arz yok.")
 
+    # ── Yaklasan IPO Etkinlikleri (DB) ──
+    lines.append("")
+    lines.append("=" * 50)
+    lines.append("YAKLASAN HALKA ARZ ETKINLIKLERI")
+    lines.append("=" * 50)
+    if ipo_events:
+        for ev in ipo_events:
+            type_icon = {
+                "SON_GUN": "🔴 SON GUN",
+                "SON_GUN_YARIN": "🟡 YARIN SON GUN",
+                "ILK_ISLEM": "🟢 ILK ISLEM GUNU",
+                "ILK_ISLEM_YARIN": "🟢 YARIN ILK ISLEM",
+                "DAGITIMDA": "📋 DAGITIMDA",
+                "ISLEM_BEKLENIYOR": "⏳ ISLEM BEKLENIYOR",
+                "YENI_ONAY": "✅ YENI SPK ONAYI",
+            }.get(ev["type"], ev["type"])
+            lines.append(f"  {type_icon} — {ev['ticker']} ({ev['company']})")
+            lines.append(f"    {ev['detail']}")
+    else:
+        lines.append("  Yaklasan onemli IPO etkinligi yok.")
+
+    # ── Ekonomik Takvim (doviz.com) ──
+    lines.append("")
+    lines.append("=" * 50)
+    lines.append("EKONOMIK TAKVIM (Kaynak: doviz.com)")
+    lines.append("=" * 50)
+
+    today_events = econ_calendar.get("today", [])
+    tomorrow_events = econ_calendar.get("tomorrow", [])
+
+    if today_events:
+        lines.append("BUGUN:")
+        for ev in today_events[:12]:  # Max 12 etkinlik
+            importance_tag = f"[{ev['importance']}]" if ev.get("importance") else ""
+            actual = f" Gerceklesen: {ev['actual']}" if ev.get("actual") else ""
+            forecast = f" Beklenti: {ev['forecast']}" if ev.get("forecast") else ""
+            previous = f" Onceki: {ev['previous']}" if ev.get("previous") else ""
+            lines.append(
+                f"  {ev['time']} {ev['country']} {importance_tag} {ev['event']}"
+                f"{actual}{forecast}{previous}"
+            )
+    else:
+        lines.append("BUGUN: Onemli ekonomik veri aciklamasi yok.")
+
+    if tomorrow_events:
+        lines.append("YARIN:")
+        for ev in tomorrow_events[:8]:
+            importance_tag = f"[{ev['importance']}]" if ev.get("importance") else ""
+            forecast = f" Beklenti: {ev['forecast']}" if ev.get("forecast") else ""
+            previous = f" Onceki: {ev['previous']}" if ev.get("previous") else ""
+            lines.append(
+                f"  {ev['time']} {ev['country']} {importance_tag} {ev['event']}"
+                f"{forecast}{previous}"
+            )
+    elif not today_events:
+        lines.append("YARIN: Ekonomik takvim verisi alinamadi.")
+
     return "\n".join(lines)
 
 
@@ -642,16 +930,21 @@ async def _generate_report(
     kap_news: list[dict],
     telegram_news: list[dict],
     rss_headlines: list[dict],
+    econ_calendar: dict,
+    ipo_events: list[dict],
     report_type: str,
 ) -> str | None:
-    """AI ile piyasa raporu uretir — zengin veri konteksti ile."""
+    """AI ile piyasa raporu uretir — 8 kaynak zengin veri konteksti ile."""
     api_key = get_settings().ABACUS_API_KEY
     if not api_key:
         logger.error("Abacus API key yok — rapor uretilemedi")
         return None
 
     system_prompt = _MORNING_SYSTEM_PROMPT if report_type == "morning" else _EVENING_SYSTEM_PROMPT
-    context = _format_full_context(market_data, ipos, kap_news, telegram_news, rss_headlines, report_type)
+    context = _format_full_context(
+        market_data, ipos, kap_news, telegram_news, rss_headlines,
+        econ_calendar, ipo_events, report_type,
+    )
 
     user_message = (
         "Asagidaki GERCEK verileri kullanarak rapor yaz.\n"
@@ -661,8 +954,12 @@ async def _generate_report(
         f"{context}"
     )
 
-    logger.info("AI %s raporu icin kontekst: %d karakter, %d IPO, %d KAP, %d Telegram, %d RSS",
-                report_type, len(context), len(ipos), len(kap_news), len(telegram_news), len(rss_headlines))
+    logger.info(
+        "AI %s raporu kontekst: %d kar, %d IPO, %d KAP, %d Telegram, %d RSS, %d+%d takvim, %d IPO-event",
+        report_type, len(context), len(ipos), len(kap_news), len(telegram_news),
+        len(rss_headlines), len(econ_calendar.get("today", [])),
+        len(econ_calendar.get("tomorrow", [])), len(ipo_events),
+    )
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
@@ -711,33 +1008,39 @@ async def _generate_report(
 # ────────────────────────────────────────────
 
 async def _collect_all_data() -> tuple:
-    """Tum veri kaynaklarini paralel toplar."""
+    """Tum 7 veri kaynagini paralel toplar."""
     import asyncio
 
-    # Paralel calistiralim
+    # 7 kaynak paralel calissin
     market_task = asyncio.create_task(fetch_market_snapshot())
     ipos_task = asyncio.create_task(get_active_ipos_performance())
     kap_task = asyncio.create_task(get_recent_kap_news(hours=24, limit=10))
     telegram_task = asyncio.create_task(get_recent_telegram_news(hours=24, limit=10))
     rss_task = asyncio.create_task(fetch_rss_headlines())
+    calendar_task = asyncio.create_task(fetch_economic_calendar())
+    ipo_events_task = asyncio.create_task(get_upcoming_ipo_events())
 
     market_data = await market_task
     ipos = await ipos_task
     kap_news = await kap_task
     telegram_news = await telegram_task
     rss_headlines = await rss_task
+    econ_calendar = await calendar_task
+    ipo_events = await ipo_events_task
 
-    return market_data, ipos, kap_news, telegram_news, rss_headlines
+    return market_data, ipos, kap_news, telegram_news, rss_headlines, econ_calendar, ipo_events
 
 
 async def send_morning_report_tweet():
     """Sabah acilis raporu tweeti gonderir (08:15 TR)."""
-    logger.info("Sabah acilis raporu hazirlaniyor — tum kaynaklar toplanıyor...")
+    logger.info("Sabah acilis raporu hazirlaniyor — 7 kaynak toplanıyor...")
 
-    market_data, ipos, kap_news, telegram_news, rss_headlines = await _collect_all_data()
+    (market_data, ipos, kap_news, telegram_news,
+     rss_headlines, econ_calendar, ipo_events) = await _collect_all_data()
 
     report_text = await _generate_report(
-        market_data, ipos, kap_news, telegram_news, rss_headlines, "morning"
+        market_data, ipos, kap_news, telegram_news, rss_headlines,
+        econ_calendar, ipo_events, "morning",
     )
     if not report_text:
         logger.error("Sabah raporu uretilemedi — tweet atilmadi")
@@ -759,12 +1062,14 @@ async def send_morning_report_tweet():
 
 async def send_evening_report_tweet():
     """Aksam kapanis raporu tweeti gonderir (20:45 TR)."""
-    logger.info("Aksam kapanis raporu hazirlaniyor — tum kaynaklar toplanıyor...")
+    logger.info("Aksam kapanis raporu hazirlaniyor — 7 kaynak toplanıyor...")
 
-    market_data, ipos, kap_news, telegram_news, rss_headlines = await _collect_all_data()
+    (market_data, ipos, kap_news, telegram_news,
+     rss_headlines, econ_calendar, ipo_events) = await _collect_all_data()
 
     report_text = await _generate_report(
-        market_data, ipos, kap_news, telegram_news, rss_headlines, "evening"
+        market_data, ipos, kap_news, telegram_news, rss_headlines,
+        econ_calendar, ipo_events, "evening",
     )
     if not report_text:
         logger.error("Aksam raporu uretilemedi — tweet atilmadi")
