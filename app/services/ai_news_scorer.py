@@ -3,7 +3,7 @@
 Akis:
 1. Telegram'dan Matriks HaberId (kap_notification_id) gelir
 2. TradingView'dan haber icerigini cek (matriks:{id}:0/ URL)
-3. Abacus AI (gpt-4o) ile 1.0-10.0 ondalik puan + 2 cumle Turkce ozet uret
+3. Abacus AI (gpt-4o) ile 1.0-10.0 ondalik puan + 3 cumle Turkce ozet uret
 4. Sonuc: {"score": float, "summary": str, "kap_url": str|None}
 
 V4 Degisiklikler:
@@ -237,11 +237,11 @@ KRITIK KURALLAR:
 - Sadece "pozitif" etiketi tasimasi YETMEZ — gercek etkiyi ol
 - Kaynak "Telegram Ozeti" ise ve detay yoksa: 5.0-5.5 arasi ver (belirsiz)
 
-Haberi yatirimci bakis acisiyla Turkce 2 cumle ile ozetle.
+Haberi yatirimci bakis acisiyla Turkce en fazla 3 cumle ile ozetle.
 Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
 
 SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
-{{"score": 7.3, "summary": "Iki cumlelik Turkce ozet."}}"""
+{{"score": 7.3, "summary": "Uc cumleye kadar Turkce ozet."}}"""
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
@@ -343,7 +343,7 @@ async def analyze_news(
 
     # Adim 1: TradingView'dan icerik cek (Matriks ID varsa)
     if matriks_id:
-        kap_url = f"{TV_NEWS_BASE}/matriks:{matriks_id}:0/"
+        kap_url = f"https://www.kap.org.tr/tr/Bildirim/{matriks_id}"
 
         try:
             tv_result = await fetch_tradingview_content(matriks_id)
