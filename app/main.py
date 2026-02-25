@@ -2700,7 +2700,7 @@ async def trigger_opening_tweet(
     payload: dict,
     db: AsyncSession = Depends(get_db),
 ):
-    """Excel sync sonrasi cagirilir — ilk 5 gun icindeki hisselerin
+    """Excel sync sonrasi cagirilir — ilk 10 gun icindeki hisselerin
     acilis bilgilerini tweet + gorsel olarak atar.
 
     Body: {"admin_password": "..."}
@@ -2713,7 +2713,7 @@ async def trigger_opening_tweet(
 
     today = date_type.today()
 
-    # trading_day <= 5 olan aktif hisseleri bul
+    # trading_day <= 10 olan aktif hisseleri bul
     result = await db.execute(
         select(IPO).where(
             and_(
@@ -2743,8 +2743,8 @@ async def trigger_opening_tweet(
         latest = tracks[-1]
         current_day = latest.trading_day
 
-        # Sadece ilk 5 gun icindekiler
-        if current_day > 5:
+        # Sadece ilk 10 gun icindekiler
+        if current_day > 10:
             continue
 
         # Bugünün verisini bul (open_price olan)
@@ -2817,7 +2817,7 @@ async def trigger_opening_tweet(
         })
 
     if not stocks:
-        return {"status": "ok", "message": "Ilk 5 gun icinde hisse yok, tweet atilmadi.", "stocks": []}
+        return {"status": "ok", "message": "Ilk 10 gun icinde hisse yok, tweet atilmadi.", "stocks": []}
 
     # Tweet at
     from app.services.twitter_service import tweet_opening_summary

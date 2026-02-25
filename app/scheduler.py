@@ -1933,7 +1933,7 @@ async def market_snapshot_tweet():
 
 # ═══════════════════════════════════════════════════════════════
 # T16 — ACILIS BILGILERI (09:57 TR / 06:57 UTC)
-# Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini tweet atar
+# Ilk 10 islem gunu icindeki hisselerin acilis fiyatlarini tweet atar
 # ═══════════════════════════════════════════════════════════════
 
 async def _opening_summary_attempt(retry_num: int = 0):
@@ -1978,7 +1978,7 @@ async def _opening_summary_attempt(retry_num: int = 0):
 
             latest = tracks[-1]
             current_day = latest.trading_day
-            if current_day > 5:
+            if current_day > 10:
                 continue
 
             # Bugunku track'i bul
@@ -2056,8 +2056,8 @@ async def _opening_summary_attempt(retry_num: int = 0):
             return {"retry": f"Acilis fiyati olan hisse yok ({no_open_count} hisse veri bekliyor)"}
 
         if not stocks:
-            logger.info("T16: Ilk 5 gun icinde hisse yok, tweet atilmadi.")
-            return {"message": "Ilk 5 gun icinde hisse yok, tweet atilmadi."}
+            logger.info("T16: Ilk 10 gun icinde hisse yok, tweet atilmadi.")
+            return {"message": "Ilk 10 gun icinde hisse yok, tweet atilmadi."}
 
         tickers_str = ", ".join(s["ticker"] for s in stocks)
 
@@ -2078,7 +2078,7 @@ async def _opening_summary_attempt(retry_num: int = 0):
 async def opening_summary_tweet():
     """Acilis bilgileri tweet — 09:58 TR (UTC 06:58).
 
-    Ilk 5 islem gunu icindeki hisselerin acilis fiyatlarini
+    Ilk 10 islem gunu icindeki hisselerin acilis fiyatlarini
     grid layout gorsel ile tweet atar.
 
     Borsa 09:55'te acilir, excel_sync ~1 dk icinde acilis verisini yazar.

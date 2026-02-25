@@ -835,7 +835,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
 
 
 # ══════════════════════════════════════════════════════════════
-# T16 — Yeni Halka Arzlar Ilk 5 Gun Acilis Bilgileri (09:57)
+# T16 — Yeni Halka Arzlar Ilk 10 Gun Acilis Bilgileri (09:57)
 # Grid layout: 1-3 = 1 satir, 4-6 = 2 satir (3'lu), banner bg
 # ══════════════════════════════════════════════════════════════
 
@@ -874,7 +874,7 @@ def _draw_rounded_rect(draw, xy, radius, fill, outline=None):
 
 
 def generate_opening_summary_image(stocks: list) -> Optional[str]:
-    """Ilk 5 gun icindeki hisselerin acilis bilgilerini GRID layout ile olusturur.
+    """Ilk 10 gun icindeki hisselerin acilis bilgilerini GRID layout ile olusturur.
 
     Layout:
         1-3 hisse = 1 satir (yan yana)
@@ -994,7 +994,7 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         draw.text((padding, hdr_y + 10), title_text, fill=GOLD, font=font_header)
 
         date_text = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
-        info_text = f"{date_text}  |  {num_stocks} Hisse  |  İlk 5 İşlem Günü"
+        info_text = f"{date_text}  |  {num_stocks} Hisse  |  İlk 10 İşlem Günü"
         draw.text((padding, hdr_y + 44), info_text, fill=GRAY, font=font_header_sm)
 
         # ── Grid Kartlari ─────────────────────────
