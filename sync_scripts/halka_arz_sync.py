@@ -103,6 +103,10 @@ SYNC_INTERVAL = 15
 # Tavan/taban bozulma sonrasi bekleme suresi (saniye) — 5 dakika
 RELOCK_WAIT_SECONDS = 300
 
+# Ardisik "cozuldu" bildirimleri arasi minimum bekleme (saniye) — 10 dakika
+# Hisse hizli salinim yaptiginda (tavan→cozul→tavan→cozul) spam onler
+CEILING_BREAK_COOLDOWN = 600
+
 # Piyasa calisma saatleri
 MARKET_OPEN_HOUR = 9
 MARKET_OPEN_MIN = 56   # Acilis bildirimi saati
@@ -618,16 +622,25 @@ def process_stock(stock: StockState, now: dt.datetime):
     # Daha once tavana kilitliydi, simdi cozuldu
     # Bildirim HEMEN gider, sonra 5dk bekleme baslar
     if state.was_ceiling_locked and not stock.is_ceiling_locked:
-        if not state.ceiling_broke_at:  # Ilk cozulme
-            send_notification_to_backend(
-                ticker=ticker,
-                notif_type="tavan_bozulma",
-                title=f"🔓 {ticker} Tavan Çözüldü!",
-                body=f"{ticker} tavan çözüldü!",
+        if not state.ceiling_broke_at:  # Ilk cozulme (veya 5dk sonrasi reset)
+            # COOLDOWN: Son bildirimden 10dk gecmeden yeni "cozuldu" bildirimi GONDERME
+            cooldown_ok = (
+                not state.last_ceiling_notif_at
+                or (now - state.last_ceiling_notif_at).total_seconds() >= CEILING_BREAK_COOLDOWN
             )
-            send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
-            state.last_ceiling_notif_at = now
-            log(f"  >>> {ticker} TAVAN COZULDU!")
+            if cooldown_ok:
+                send_notification_to_backend(
+                    ticker=ticker,
+                    notif_type="tavan_bozulma",
+                    title=f"🔓 {ticker} Tavan Çözüldü!",
+                    body=f"{ticker} tavan çözüldü!",
+                )
+                send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=stock.is_floor_locked, state=state)
+                state.last_ceiling_notif_at = now
+                log(f"  >>> {ticker} TAVAN COZULDU!")
+            else:
+                remaining = CEILING_BREAK_COOLDOWN - (now - state.last_ceiling_notif_at).total_seconds()
+                log(f"  {ticker} tavan cozuldu ama cooldown aktif ({remaining:.0f}sn kaldi)")
         state.ceiling_broke_at = now
         state.ceiling_5min_checked = False
 
@@ -647,6 +660,7 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_ceiling_data_to_backend(stock, hit_ceiling=True, hit_floor=False, state=state)
             state.last_ceiling_notif_at = now
             state.ceiling_broke_at = None  # Yeni dongu icin sifirla
+            state.notified_ceiling_first_lock = False  # Yeni kilitlenme bildirimi gidebilsin
             log(f"  >>> {ticker} TAVANA KİTLEDİ! (5dk kontrol)")
         else:
             # 5dk gecti hala kilitleyemedi
@@ -658,6 +672,7 @@ def process_stock(stock: StockState, now: dt.datetime):
             )
             state.last_ceiling_notif_at = now
             state.ceiling_broke_at = None  # Yeni dongu icin sifirla
+            state.notified_ceiling_first_lock = False  # Yeni kilitlenme bildirimi gidebilsin
             log(f"  >>> {ticker} 5DK GECTI, TAVANA KILITLEYEMEDI!")
 
     # =====================
@@ -680,16 +695,25 @@ def process_stock(stock: StockState, now: dt.datetime):
     # Daha once tabana kilitliydi, simdi cozuldu
     # Bildirim HEMEN gider, sonra 5dk bekleme baslar
     if state.was_floor_locked and not stock.is_floor_locked:
-        if not state.floor_broke_at:  # Ilk cozulme
-            send_notification_to_backend(
-                ticker=ticker,
-                notif_type="taban_acilma",
-                title=f"🔓 {ticker} Taban Çözüldü!",
-                body=f"{ticker} taban çözüldü!",
+        if not state.floor_broke_at:  # Ilk cozulme (veya 5dk sonrasi reset)
+            # COOLDOWN: Son bildirimden 10dk gecmeden yeni "cozuldu" bildirimi GONDERME
+            cooldown_ok = (
+                not state.last_floor_notif_at
+                or (now - state.last_floor_notif_at).total_seconds() >= CEILING_BREAK_COOLDOWN
             )
-            send_ceiling_data_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
-            state.last_floor_notif_at = now
-            log(f"  >>> {ticker} TABAN COZULDU!")
+            if cooldown_ok:
+                send_notification_to_backend(
+                    ticker=ticker,
+                    notif_type="taban_acilma",
+                    title=f"🔓 {ticker} Taban Çözüldü!",
+                    body=f"{ticker} taban çözüldü!",
+                )
+                send_ceiling_data_to_backend(stock, hit_ceiling=stock.is_ceiling_locked, hit_floor=False, state=state)
+                state.last_floor_notif_at = now
+                log(f"  >>> {ticker} TABAN COZULDU!")
+            else:
+                remaining = CEILING_BREAK_COOLDOWN - (now - state.last_floor_notif_at).total_seconds()
+                log(f"  {ticker} taban cozuldu ama cooldown aktif ({remaining:.0f}sn kaldi)")
         state.floor_broke_at = now
         state.floor_5min_checked = False
 
@@ -709,6 +733,7 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_ceiling_data_to_backend(stock, hit_ceiling=False, hit_floor=True, state=state)
             state.last_floor_notif_at = now
             state.floor_broke_at = None  # Yeni dongu icin sifirla
+            state.notified_floor_first_lock = False  # Yeni kilitlenme bildirimi gidebilsin
             log(f"  >>> {ticker} TABANA KİTLENDİ! (5dk kontrol)")
         else:
             # 5dk gecti hala kilitleyemedi
@@ -720,6 +745,7 @@ def process_stock(stock: StockState, now: dt.datetime):
             )
             state.last_floor_notif_at = now
             state.floor_broke_at = None  # Yeni dongu icin sifirla
+            state.notified_floor_first_lock = False  # Yeni kilitlenme bildirimi gidebilsin
             log(f"  >>> {ticker} 5DK GECTI, TABANA KILITLEYEMEDI!")
 
     # Mevcut durumu kaydet (bir sonraki tick icin)
