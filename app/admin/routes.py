@@ -1397,70 +1397,87 @@ async def trigger_spk_analysis_from_admin(
     from fastapi.responses import JSONResponse
     from urllib.parse import quote
     try:
-        from app.scrapers.spk_bulletin_scraper import (
-            SPKBulletinScraper, format_tables_for_analysis,
-        )
+        import httpx as _hx
+        import pdfplumber
+        import io
+        from app.scrapers.spk_bulletin_scraper import format_tables_for_analysis
         from app.services.twitter_service import tweet_spk_bulletin_analysis
 
-        # Scraper ile bülten listesinden doğru PDF URL'yi bul
-        scraper = SPKBulletinScraper()
+        # Body'den veya query'den URL/bulletin_no alabilir
+        body = {}
         try:
-            bulletins = await scraper.fetch_bulletin_list(year=2026)
-            target = None
-            for b in reversed(bulletins):  # Sondan başla (en güncel)
-                if b["bulletin_no"] == (2026, 10):
-                    target = b
-                    break
-            if not target:
-                # En son bülteni al
+            body = await request.json()
+        except Exception:
+            pass
+        pdf_url = body.get("pdf_url") or request.query_params.get("pdf_url")
+        bulletin_no = body.get("bulletin_no") or request.query_params.get("bulletin_no", "2026/10")
+
+        if not pdf_url:
+            # Scraper ile bul
+            from app.scrapers.spk_bulletin_scraper import SPKBulletinScraper, bulletin_no_str
+            scraper = SPKBulletinScraper()
+            try:
+                bulletins = await scraper.fetch_bulletin_list(year=2026)
                 target = bulletins[-1] if bulletins else None
+                for b in reversed(bulletins):
+                    yr, no = bulletin_no.split("/") if "/" in bulletin_no else (2026, 10)
+                    if b["bulletin_no"] == (int(yr), int(no)):
+                        target = b
+                        break
+                if target:
+                    pdf_url = target["pdf_url"]
+                    bulletin_no = bulletin_no_str(*target["bulletin_no"])
+            finally:
+                await scraper.close()
 
-            if not target:
-                err = "SPK bülten listesinde bülten bulunamadı"
-                if is_api:
-                    return JSONResponse({"ok": False, "error": err})
-                return RedirectResponse(url=f"/admin/tweets?trigger_msg={quote(err)}&trigger_ok=0", status_code=303)
-
-            bno = target["bulletin_no"]
-            from app.scrapers.spk_bulletin_scraper import bulletin_no_str
-            bulletin_no = bulletin_no_str(*bno)
-            pdf_url = target["pdf_url"]
-
-            # PDF'yi indir ve parse et
-            approvals, full_text = await scraper.process_bulletin(pdf_url, bno)
-
-            if len(full_text) < 50:
-                err = f"SPK bülten {bulletin_no} içeriği çok kısa ({len(full_text)} kar)"
-                if is_api:
-                    return JSONResponse({"ok": False, "error": err})
-                return RedirectResponse(url=f"/admin/tweets?trigger_msg={quote(err)}&trigger_ok=0", status_code=303)
-
-            # format_tables_for_analysis yerine full_text kullan (process_bulletin zaten parse ediyor)
-            import pdfplumber, io
-            pdf_bytes = await scraper.download_pdf(pdf_url)
-            if pdf_bytes:
-                pdf = pdfplumber.open(io.BytesIO(pdf_bytes))
-                tables = []
-                for page in pdf.pages:
-                    for t in (page.extract_tables() or []):
-                        tables.append(t)
-                analysis_text = format_tables_for_analysis(tables, full_text)
-            else:
-                analysis_text = full_text
-
-            result = tweet_spk_bulletin_analysis(analysis_text, bulletin_no)
+        if not pdf_url:
+            err = "PDF URL bulunamadı — pdf_url parametresi verin"
             if is_api:
-                return JSONResponse({"ok": bool(result), "bulletin": bulletin_no, "pdf_url": pdf_url})
-            msg = quote(f"SPK Bülten {bulletin_no} analizi: {'Başarılı' if result else 'Başarısız'}")
-            return RedirectResponse(
-                url=f"/admin/tweets?trigger_msg={msg}&trigger_ok={'1' if result else '0'}",
-                status_code=303,
-            )
-        finally:
-            await scraper.close()
+                return JSONResponse({"ok": False, "error": err})
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={quote(err)}&trigger_ok=0", status_code=303)
 
+        # PDF indir (sync httpx — verify=False)
+        logger.info("[ADMIN] SPK PDF indiriliyor: %s", pdf_url)
+        async with _hx.AsyncClient(timeout=30, verify=False, follow_redirects=True) as client:
+            r = await client.get(pdf_url)
+        if r.status_code != 200:
+            err = f"SPK PDF HTTP {r.status_code}"
+            if is_api:
+                return JSONResponse({"ok": False, "error": err})
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={quote(err)}&trigger_ok=0", status_code=303)
+
+        logger.info("[ADMIN] SPK PDF indirildi: %d bytes", len(r.content))
+
+        # Parse PDF
+        pdf = pdfplumber.open(io.BytesIO(r.content))
+        full_text = ""
+        tables = []
+        for page in pdf.pages:
+            full_text += (page.extract_text() or "") + "\n"
+            for t in (page.extract_tables() or []):
+                tables.append(t)
+
+        analysis_text = format_tables_for_analysis(tables, full_text)
+        if len(analysis_text) < 50:
+            analysis_text = full_text  # Fallback: tüm text
+
+        if len(analysis_text) < 50:
+            err = f"SPK bülten içeriği çok kısa ({len(analysis_text)} kar)"
+            if is_api:
+                return JSONResponse({"ok": False, "error": err})
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={quote(err)}&trigger_ok=0", status_code=303)
+
+        logger.info("[ADMIN] SPK analiz text: %d kar, tweet atılıyor...", len(analysis_text))
+        result = tweet_spk_bulletin_analysis(analysis_text, bulletin_no)
+        if is_api:
+            return JSONResponse({"ok": bool(result), "bulletin": bulletin_no, "text_len": len(analysis_text)})
+        msg = quote(f"SPK Bülten {bulletin_no}: {'Başarılı' if result else 'Başarısız'}")
+        return RedirectResponse(
+            url=f"/admin/tweets?trigger_msg={msg}&trigger_ok={'1' if result else '0'}",
+            status_code=303,
+        )
     except Exception as e:
-        logger.error("[ADMIN] SPK bülten analiz retry hatası: %s", e)
+        logger.error("[ADMIN] SPK bülten analiz retry hatası: %s", e, exc_info=True)
         if is_api:
             return JSONResponse({"ok": False, "error": str(e)[:200]})
         msg = quote(f"SPK Hata: {str(e)[:150]}")
