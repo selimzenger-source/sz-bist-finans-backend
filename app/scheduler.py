@@ -2022,13 +2022,15 @@ async def _opening_summary_attempt(retry_num: int = 0):
             alis_lot = today_track.alis_lot or 0
             satis_lot = today_track.satis_lot or 0
 
-            if pct_change >= 9.5:
+            # Durum: günlük değişime göre (dünkü kapanışa kıyasla)
+            # Tavan/Taban günlük limit → daily_pct kullanılmalı (pct_change HA fiyatına göre, YANLIŞ)
+            if daily_pct >= 9.5:
                 durum = "tavan"
-            elif pct_change <= -9.5:
+            elif daily_pct <= -9.5:
                 durum = "taban"
-            elif pct_change > 0:
+            elif daily_pct > 0:
                 durum = "alici_kapatti"
-            elif pct_change < 0:
+            elif daily_pct < 0:
                 durum = "satici_kapatti"
             else:
                 durum = "not_kapatti"

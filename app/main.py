@@ -2785,14 +2785,16 @@ async def trigger_opening_tweet(
         alis_lot = today_track.alis_lot or 0
         satis_lot = today_track.satis_lot or 0
 
-        # Durum (bugünün açılışına göre basit eşik)
-        if pct_change >= 9.5:
+        # Durum (günlük değişime göre — dünkü kapanışa kıyasla)
+        # NOT: pct_change (HA fiyatına göre) DEĞİL, daily_pct (dünkü kapanışa göre)
+        # Tavan/Taban günlük limit olduğu için daily_pct kullanılmalı
+        if daily_pct >= 9.5:
             durum = "tavan"
-        elif pct_change <= -9.5:
+        elif daily_pct <= -9.5:
             durum = "taban"
-        elif pct_change > 0:
+        elif daily_pct > 0:
             durum = "alici_kapatti"
-        elif pct_change < 0:
+        elif daily_pct < 0:
             durum = "satici_kapatti"
         else:
             durum = "not_kapatti"
