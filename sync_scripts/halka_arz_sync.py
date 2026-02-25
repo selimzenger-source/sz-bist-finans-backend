@@ -580,7 +580,7 @@ def process_stock(stock: StockState, now: dt.datetime):
                 ticker=ticker,
                 notif_type="yuzde_dusus",
                 title=f"{ticker} Günün En Yükseğinden %{drop_pct:.1f} Düştü!",
-                body=f"{ticker} gün içi en yükseğinden %{drop_pct:.1f} düştü. (En Yüksek: {gun_high:.2f}₺ → Son: {stock.son_fiyat:.2f}₺)",
+                body=f"{ticker} günün en yükseğinden %{drop_pct:.1f} düştü.",
                 sub_event="pct4",
             )
             state.notified_drop_4pct = True
@@ -592,7 +592,7 @@ def process_stock(stock: StockState, now: dt.datetime):
                 ticker=ticker,
                 notif_type="yuzde_dusus",
                 title=f"{ticker} Günün En Yükseğinden %{drop_pct:.1f} Düştü!",
-                body=f"{ticker} gün içi en yükseğinden %{drop_pct:.1f} düştü. (En Yüksek: {gun_high:.2f}₺ → Son: {stock.son_fiyat:.2f}₺)",
+                body=f"{ticker} günün en yükseğinden %{drop_pct:.1f} düştü.",
                 sub_event="pct7",
             )
             state.notified_drop_7pct = True
