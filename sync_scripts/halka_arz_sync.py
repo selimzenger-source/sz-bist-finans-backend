@@ -579,24 +579,24 @@ def process_stock(stock: StockState, now: dt.datetime):
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="yuzde_dusus",
-                title=f"{ticker} En Yukseginden %4 Dustu!",
-                body=f"{ticker} gun ici en yukseginden %4 dustu!",
+                title=f"{ticker} Günün En Yükseğinden %{drop_pct:.1f} Düştü!",
+                body=f"{ticker} gün içi en yükseğinden %{drop_pct:.1f} düştü. (En Yüksek: {gun_high:.2f}₺ → Son: {stock.son_fiyat:.2f}₺)",
                 sub_event="pct4",
             )
             state.notified_drop_4pct = True
-            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct4)")
+            log(f"  >>> {ticker} GUNUN EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct4)")
 
         # %7 dusus → yuzde_dusus servisine gonder (sub_event: pct7)
         if drop_pct >= 7.0 and not state.notified_drop_7pct:
             send_notification_to_backend(
                 ticker=ticker,
                 notif_type="yuzde_dusus",
-                title=f"{ticker} En Yukseginden %7 Dustu!",
-                body=f"{ticker} gun ici en yukseginden %7 dustu!",
+                title=f"{ticker} Günün En Yükseğinden %{drop_pct:.1f} Düştü!",
+                body=f"{ticker} gün içi en yükseğinden %{drop_pct:.1f} düştü. (En Yüksek: {gun_high:.2f}₺ → Son: {stock.son_fiyat:.2f}₺)",
                 sub_event="pct7",
             )
             state.notified_drop_7pct = True
-            log(f"  >>> {ticker} EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct7)")
+            log(f"  >>> {ticker} GUNUN EN YUKSEGINDEN %{drop_pct:.1f} DUSTU! (yuzde_dusus/pct7)")
 
     # =====================
     # TAVAN TAKIBI

@@ -2864,6 +2864,8 @@ def _setup_scheduler_impl():
         id="ipo_status_updater",
         name="IPO Durum Guncelleyici",
         replace_existing=True,
+        max_instances=1,      # Spam koruma: çift çalışmayı önle
+        coalesce=True,        # Biriken çağrıları birleştir
     )
 
     # 7b. IPO Durum Guncelleme — gece yarisi 00:05 (subscription_start gunu aninda gecis)
@@ -2873,6 +2875,8 @@ def _setup_scheduler_impl():
         id="ipo_status_midnight",
         name="IPO Durum Gece Yarisi (Dagitim Gecis)",
         replace_existing=True,
+        max_instances=1,      # Spam koruma: çift çalışmayı önle
+        coalesce=True,
     )
 
     # 7d. Suresi gecmis kuponlari temizle — her 2 saatte
@@ -2967,6 +2971,8 @@ def _setup_scheduler_impl():
         id="daily_ceiling_update",
         name="Tavan Takip Gun Sonu (18:07 TR)",
         replace_existing=True,
+        max_instances=1,      # Spam koruma: restart'ta çift çalışmayı önle
+        coalesce=True,
     )
 
     # 13b. Tavan Takip Retry — basarisiz olursa saatte bir tekrar dene
