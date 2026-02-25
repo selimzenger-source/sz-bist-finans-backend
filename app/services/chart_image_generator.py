@@ -1054,7 +1054,8 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             y += badge_h_px + 14
 
             # ─ Acilis Fiyati (buyuk) ─
-            price_color = GREEN if pct >= 0 else RED
+            # Renk: günlük değişime göre (daily_pct), HA fiyatına göre (pct) DEĞİL
+            price_color = GREEN if daily_pct >= 0 else RED
             _draw_centered(draw, mid_x, y, "Açılış Fiyatı", font_label, GRAY)
             y += 18
             _draw_centered(draw, mid_x, y, f"{open_price:.2f} TL",
