@@ -580,7 +580,14 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
             }
         else:
             error_text = response.text[:300]
-            logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
+            # 403 "not been mentioned" = tweet yazarı reply kısıtlamış (beklenen durum) → INFO
+            if response.status_code == 403 and "not been mentioned" in error_text:
+                logger.info(
+                    "Tweet reply kısıtlanmış (403 not-been-mentioned) → tweet %s atlanacak",
+                    tweet_id,
+                )
+            else:
+                logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
             return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text}"}
 
     except httpx.TimeoutException:
