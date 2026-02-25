@@ -514,17 +514,19 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
 # 3. Reply Gönderme (Twitter API v2)
 # -------------------------------------------------------
 
-async def send_reply(tweet_id: str, reply_text: str) -> dict:
-    """Tweet'e reply atar.
+async def send_reply(tweet_id: str, reply_text: str, *, allow_quote_fallback: bool = True) -> dict:
+    """Tweet'e reply atar. 403 alınırsa otomatik quote tweet'e düşer.
 
     Args:
         tweet_id: Yanıtlanacak tweet'in ID'si
         reply_text: Reply metni
+        allow_quote_fallback: 403'te quote tweet denesin mi (default True)
 
     Returns:
         {
             "success": True,
             "reply_tweet_id": str,
+            "method": "reply" | "quote_tweet",
         }
         veya hata durumunda:
         {"success": False, "error": str}
@@ -534,7 +536,6 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
 
     reply_text = reply_text.strip()
 
-    # 280 karakter limiti (reply'lar Blue Tick'ten bağımsız olarak 280'e kısıtlı olmayabilir ama güvenli sınır)
     if len(reply_text) > 4000:
         reply_text = reply_text[:3997] + "..."
 
@@ -577,18 +578,24 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
             return {
                 "success": True,
                 "reply_tweet_id": reply_id,
+                "method": "reply",
             }
-        else:
-            error_text = response.text[:300]
-            # 403 "not been mentioned" = tweet yazarı reply kısıtlamış (beklenen durum) → INFO
-            if response.status_code == 403 and "not been mentioned" in error_text:
-                logger.info(
-                    "Tweet reply kısıtlanmış (403 not-been-mentioned) → tweet %s atlanacak",
-                    tweet_id,
-                )
-            else:
-                logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
-            return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text}"}
+
+        error_text = response.text[:300]
+
+        # ── 403 FALLBACK: Quote tweet dene ──
+        # Twitter API 403 "not been mentioned" hatası — reply yerine quote tweet at
+        # Quote tweet, reply kısıtlamalarından ETKİLENMEZ
+        if response.status_code == 403 and allow_quote_fallback:
+            logger.warning(
+                "Reply 403 → quote tweet fallback deneniyor: tweet %s — %s",
+                tweet_id, error_text[:100],
+            )
+            return await _send_quote_tweet(tweet_id, reply_text, creds)
+
+        # Diğer hatalar
+        logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
+        return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text}"}
 
     except httpx.TimeoutException:
         logger.error("Reply gönderme zaman aşımı")
@@ -596,6 +603,58 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
     except Exception as e:
         logger.error(f"Reply gönderme hatası: {e}")
         return {"success": False, "error": f"Beklenmeyen hata: {str(e)[:200]}"}
+
+
+async def _send_quote_tweet(tweet_id: str, text: str, creds: dict) -> dict:
+    """Reply yerine quote tweet gönderir (403 fallback).
+
+    Quote tweet, tweet URL'sini text sonuna ekleyerek veya
+    quote_tweet_id parametresi ile yapılır.
+    """
+    from app.services.twitter_service import _record_tweet_sent
+
+    auth_header = _build_oauth_header(creds, method="POST", url=_TWITTER_TWEET_URL)
+
+    payload = {
+        "text": text,
+        "quote_tweet_id": tweet_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                _TWITTER_TWEET_URL,
+                json=payload,
+                headers={
+                    "Authorization": auth_header,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if response.status_code in (200, 201):
+            data = response.json()
+            qt_id = data.get("data", {}).get("id", "?")
+            logger.info(f"Quote tweet başarılı (id={qt_id}) → tweet {tweet_id}")
+            _record_tweet_sent()
+            return {
+                "success": True,
+                "reply_tweet_id": qt_id,
+                "method": "quote_tweet",
+            }
+        else:
+            error_text = response.text[:300]
+            logger.error(f"Quote tweet hatası: HTTP {response.status_code} — {error_text}")
+            return {
+                "success": False,
+                "error": f"Quote tweet hatası (HTTP {response.status_code}): {error_text}",
+            }
+
+    except httpx.TimeoutException:
+        logger.error("Quote tweet zaman aşımı")
+        return {"success": False, "error": "Quote tweet zaman aşımı"}
+    except Exception as e:
+        logger.error(f"Quote tweet hatası: {e}")
+        return {"success": False, "error": f"Quote tweet hatası: {str(e)[:200]}"}
 
 
 # -------------------------------------------------------
@@ -682,7 +741,7 @@ async def fetch_user_recent_tweets(
     # Query parametreleri
     query_params = {
         "max_results": "10",
-        "tweet.fields": "text,created_at",
+        "tweet.fields": "text,created_at,reply_settings",
         "exclude": "retweets,replies",  # Sadece orijinal tweetler
     }
     if since_id:
@@ -768,6 +827,7 @@ async def fetch_user_recent_tweets(
                 "id": tweet.get("id", ""),
                 "text": tweet.get("text", ""),
                 "created_at": tweet.get("created_at", ""),
+                "reply_settings": tweet.get("reply_settings", "everyone"),
             })
 
         return result
@@ -1233,11 +1293,12 @@ async def auto_reply_cycle():
                         await err_session.commit()
                     break  # Kalan pending_replies'ı atla — kredi yok
 
-                # 403 "not been mentioned" = tweet reply kısıtlanmış → sadece BU tweet'i atla
-                if "HTTP 403" in error_msg and "not been mentioned" in error_msg:
+                # 403 → reply + quote tweet ikisi de başarısız → bu tweeti atla, devam et
+                # (send_reply zaten quote tweet fallback denedi — ikisi de 403 ise tweet-level sorun)
+                if "HTTP 403" in error_msg or "Quote tweet hatası" in error_msg:
                     logger.info(
-                        "Tweet reply kısıtlanmış (403): @%s tweet %s — atlanıyor",
-                        target_username, tweet_id,
+                        "Reply+QuoteTweet başarısız (403): @%s tweet %s — atlanıyor: %s",
+                        target_username, tweet_id, error_msg[:100],
                     )
                     async with async_session() as err_session:
                         err_session.add(AutoReply(
@@ -1246,28 +1307,10 @@ async def auto_reply_cycle():
                             target_text=tweet_text[:1000],
                             reply_text=chosen_reply,
                             status="skipped",
-                            error_message="Tweet reply kısıtlanmış (yazar mention etmemiş)",
+                            error_message=f"Reply+QT 403: {error_msg[:400]}",
                         ))
                         await err_session.commit()
-                    continue  # Bu tweet'i atla, sonraki reply'a devam et
-
-                # 403 diğer (hesap seviye yetki) → TÜM döngüyü durdur
-                if "HTTP 403" in error_msg:
-                    logger.warning(
-                        "Twitter API yetki hatası (403) — kalan reply'lar iptal: %s",
-                        error_msg[:100],
-                    )
-                    async with async_session() as err_session:
-                        err_session.add(AutoReply(
-                            target_tweet_id=tweet_id,
-                            target_username=target_username,
-                            target_text=tweet_text[:1000],
-                            reply_text=chosen_reply,
-                            status="failed",
-                            error_message=error_msg[:500],
-                        ))
-                        await err_session.commit()
-                    break  # Hesap seviye sorun — dur
+                    continue  # Bu tweeti atla, sonraki reply'a devam et
 
                 # Sonucu DB'ye kaydet (KISA session — hemen kapanır)
                 async with async_session() as session:
@@ -1286,8 +1329,9 @@ async def auto_reply_cycle():
                             target_obj.last_reply_at = datetime.now(timezone.utc)
                         await session.commit()
                         replies_sent += 1
+                        method = send_result.get("method", "reply")
                         logger.info(
-                            f"Auto-reply #{today_count + replies_sent}: "
+                            f"Auto-reply #{today_count + replies_sent} ({method}): "
                             f"@{target_username} → \"{chosen_reply[:60]}\""
                         )
 
