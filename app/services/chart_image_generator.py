@@ -1223,16 +1223,24 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         y = top_stripe_h
         draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG_C)
 
-        # Logo
-        logo_path = os.path.join(_img_dir, "logo.jpg")
+        # Logo — spk_halka_arz_icon.png (candlestick megaphone), fallback logo.jpg
+        logo_path = os.path.join(_img_dir, "spk_halka_arz_icon.png")
+        if not os.path.exists(logo_path):
+            logo_path = os.path.join(_img_dir, "logo.jpg")
         logo_x = padding
-        logo_y = y + (header_h - 60) // 2
+        logo_size_h = 80  # Header'da büyük logo
+        logo_y = y + (header_h - logo_size_h) // 2
         try:
             if os.path.exists(logo_path):
                 logo_raw = Image.open(logo_path).convert("RGBA")
-                logo_r = logo_raw.resize((60, 60), Image.LANCZOS)
-                img.paste(logo_r.convert("RGB"), (logo_x, logo_y))
-                logo_x += 68
+                logo_r = logo_raw.resize((logo_size_h, logo_size_h), Image.LANCZOS)
+                # RGBA destekli yapıştırma (transparan arka plan için)
+                tmp = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                tmp.paste(logo_r, (logo_x, logo_y))
+                img_rgba = img.convert("RGBA")
+                img_rgba = Image.alpha_composite(img_rgba, tmp)
+                img.paste(img_rgba.convert("RGB"))
+                logo_x += logo_size_h + 14
         except Exception:
             pass
 
@@ -1355,13 +1363,17 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         draw.rectangle([(0, footer_y), (width, total_h)], fill=HEADER_BG_C)
         draw.line([(0, footer_y), (width, footer_y)], fill=TOP_STRIPE, width=2)
 
-        # Logo
+        # Footer logo (küçük — transparan paste)
         logo_xx = padding
         try:
             if os.path.exists(logo_path):
-                logo_r2 = Image.open(logo_path).convert("RGB").resize((30, 30), Image.LANCZOS)
-                img.paste(logo_r2, (logo_xx, footer_y + 24))
-                logo_xx += 38
+                logo_r2 = Image.open(logo_path).convert("RGBA").resize((32, 32), Image.LANCZOS)
+                tmp2 = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                tmp2.paste(logo_r2, (logo_xx, footer_y + 22))
+                img_rgba2 = img.convert("RGBA")
+                img_rgba2 = Image.alpha_composite(img_rgba2, tmp2)
+                img.paste(img_rgba2.convert("RGB"))
+                logo_xx += 40
         except Exception:
             pass
         draw.text((logo_xx, footer_y + 24), "szalgo.net.tr",

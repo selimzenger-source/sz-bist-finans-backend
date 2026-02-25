@@ -583,17 +583,45 @@ async def send_reply(tweet_id: str, reply_text: str, *, allow_quote_fallback: bo
 
         error_text = response.text[:300]
 
-        # ── 403 FALLBACK: Quote tweet dene ──
-        # Twitter API 403 "not been mentioned" hatası — reply yerine quote tweet at
-        # Quote tweet, reply kısıtlamalarından ETKİLENMEZ
+        # ── 403 FALLBACK ZİNCİRİ ──────────────────────────────────────────────
+        # Twitter API Basic tier kısıtlaması:
+        # "Reply/quote not allowed — you have not been mentioned or engaged"
+        # Çözüm: reply → quote tweet → mention tweet (3 aşamalı fallback)
         if response.status_code == 403 and allow_quote_fallback:
+            reply_403_detail = error_text[:150]
             logger.warning(
-                "Reply 403 → quote tweet fallback deneniyor: tweet %s — %s",
-                tweet_id, error_text[:100],
+                "Reply 403 (tweet %s): %s → Fallback 1: quote tweet deneniyor...",
+                tweet_id, reply_403_detail,
             )
-            return await _send_quote_tweet(tweet_id, reply_text, creds)
 
-        # Diğer hatalar
+            # Fallback 1: Quote tweet
+            qt_result = await _send_quote_tweet(tweet_id, reply_text, creds)
+            if qt_result.get("success"):
+                return qt_result
+
+            # Fallback 1 de başarısız → Fallback 2: Mention tweet
+            logger.warning(
+                "Quote tweet de 403 (tweet %s) → Fallback 2: @mention tweet deneniyor...",
+                tweet_id,
+            )
+            mention_result = await _send_mention_fallback(tweet_id, reply_text, creds)
+            if mention_result.get("success"):
+                return mention_result
+
+            # Her şey başarısız
+            logger.error(
+                "Tüm fallback'lar başarısız (tweet %s): reply=403, qt=%s, mention=%s",
+                tweet_id, qt_result.get("error", "?")[:80], mention_result.get("error", "?")[:80],
+            )
+            return {
+                "success": False,
+                "error": (
+                    f"Reply 403: {reply_403_detail[:100]} | "
+                    f"Mention: {mention_result.get('error', '?')[:100]}"
+                ),
+            }
+
+        # Diğer hatalar (non-403)
         logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
         return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text}"}
 
@@ -606,29 +634,18 @@ async def send_reply(tweet_id: str, reply_text: str, *, allow_quote_fallback: bo
 
 
 async def _send_quote_tweet(tweet_id: str, text: str, creds: dict) -> dict:
-    """Reply yerine quote tweet gönderir (403 fallback).
-
-    Quote tweet, tweet URL'sini text sonuna ekleyerek veya
-    quote_tweet_id parametresi ile yapılır.
-    """
+    """Reply yerine quote tweet gönderir (fallback 1)."""
     from app.services.twitter_service import _record_tweet_sent
 
     auth_header = _build_oauth_header(creds, method="POST", url=_TWITTER_TWEET_URL)
-
-    payload = {
-        "text": text,
-        "quote_tweet_id": tweet_id,
-    }
+    payload = {"text": text, "quote_tweet_id": tweet_id}
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 _TWITTER_TWEET_URL,
                 json=payload,
-                headers={
-                    "Authorization": auth_header,
-                    "Content-Type": "application/json",
-                },
+                headers={"Authorization": auth_header, "Content-Type": "application/json"},
             )
 
         if response.status_code in (200, 201):
@@ -636,25 +653,91 @@ async def _send_quote_tweet(tweet_id: str, text: str, creds: dict) -> dict:
             qt_id = data.get("data", {}).get("id", "?")
             logger.info(f"Quote tweet başarılı (id={qt_id}) → tweet {tweet_id}")
             _record_tweet_sent()
-            return {
-                "success": True,
-                "reply_tweet_id": qt_id,
-                "method": "quote_tweet",
-            }
-        else:
-            error_text = response.text[:300]
-            logger.error(f"Quote tweet hatası: HTTP {response.status_code} — {error_text}")
-            return {
-                "success": False,
-                "error": f"Quote tweet hatası (HTTP {response.status_code}): {error_text}",
-            }
+            return {"success": True, "reply_tweet_id": qt_id, "method": "quote_tweet"}
 
-    except httpx.TimeoutException:
-        logger.error("Quote tweet zaman aşımı")
-        return {"success": False, "error": "Quote tweet zaman aşımı"}
+        error_text = response.text[:300]
+        logger.warning(f"Quote tweet 403/hata: HTTP {response.status_code}")
+        return {"success": False, "error": f"qt_403:{response.status_code}:{error_text}"}
+
     except Exception as e:
-        logger.error(f"Quote tweet hatası: {e}")
-        return {"success": False, "error": f"Quote tweet hatası: {str(e)[:200]}"}
+        return {"success": False, "error": f"qt_err:{str(e)[:200]}"}
+
+
+async def _get_tweet_author_username(tweet_id: str, creds: dict) -> str | None:
+    """Tweet yazarının @username'ini Twitter API v2'den çeker."""
+    try:
+        lookup_url = f"https://api.twitter.com/2/tweets/{tweet_id}"
+        auth_header = _build_oauth_header(creds, method="GET", url=lookup_url)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                lookup_url,
+                params={"expansions": "author_id", "user.fields": "username"},
+                headers={"Authorization": auth_header},
+            )
+        if r.status_code == 200:
+            data = r.json()
+            users = data.get("includes", {}).get("users", [])
+            if users:
+                return users[0].get("username")
+    except Exception as e:
+        logger.warning("Tweet yazar username alınamadı: %s", e)
+    return None
+
+
+async def _send_mention_fallback(tweet_id: str, text: str, creds: dict) -> dict:
+    """Reply & quote tweet 403 sonrası son fallback: @mention regular tweet.
+
+    Twitter API Basic tier'da reply/quote kısıtlaması var (mention edilmeden reply yasak).
+    Çözüm: @username text tweet_url formatında regular tweet gönder.
+    Bu kullanıcıya bildirim gider + tweet bağlamı görünür.
+    """
+    from app.services.twitter_service import _record_tweet_sent
+
+    # Tweet yazarının username'ini çek
+    username = await _get_tweet_author_username(tweet_id, creds)
+    tweet_url = f"https://x.com/i/status/{tweet_id}"
+
+    # Mention tweet metni oluştur
+    if username:
+        prefix = f"@{username} "
+        suffix = f"\n↩️ {tweet_url}"
+        max_body = 280 - len(prefix) - len(suffix) - 3
+        body = text[:max_body] + "..." if len(text) > max_body else text
+        mention_text = f"{prefix}{body}{suffix}"
+    else:
+        suffix = f"\n↩️ {tweet_url}"
+        max_body = 280 - len(suffix) - 3
+        body = text[:max_body] + "..." if len(text) > max_body else text
+        mention_text = f"{body}{suffix}"
+
+    auth_header = _build_oauth_header(creds, method="POST", url=_TWITTER_TWEET_URL)
+    payload = {"text": mention_text}
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                _TWITTER_TWEET_URL,
+                json=payload,
+                headers={"Authorization": auth_header, "Content-Type": "application/json"},
+            )
+
+        if response.status_code in (200, 201):
+            data = response.json()
+            new_id = data.get("data", {}).get("id", "?")
+            logger.info(
+                "Mention fallback başarılı (id=%s) → @%s tweet %s",
+                new_id, username or "?", tweet_id,
+            )
+            _record_tweet_sent()
+            return {"success": True, "reply_tweet_id": new_id, "method": "mention_tweet"}
+
+        error_text = response.text[:300]
+        logger.error("Mention fallback hatası: HTTP %s — %s", response.status_code, error_text)
+        return {"success": False, "error": f"Mention tweet hatası (HTTP {response.status_code}): {error_text}"}
+
+    except Exception as e:
+        logger.error("Mention fallback exception: %s", e)
+        return {"success": False, "error": f"Mention tweet exception: {str(e)[:200]}"}
 
 
 # -------------------------------------------------------
