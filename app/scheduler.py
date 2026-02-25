@@ -488,6 +488,55 @@ async def auto_update_ipo_statuses():
             pass
 
 
+async def generate_missing_ipo_reports():
+    """Eksik AI raporlarini uretir — in_distribution veya sonraki asamadaki IPO'lar icin.
+
+    Bu fonksiyon catch-up gorevi olarak calisir: deployment sonrasi
+    veya status gecisi sirasinda rapor uretilememis IPO'lar icin
+    otomatik olarak AI degerlendirme raporu uretir.
+    """
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+        from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+
+        # in_distribution, awaiting_trading veya trading — raporu olmayan
+        target_statuses = ["in_distribution", "awaiting_trading", "trading"]
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(IPO).where(
+                    and_(
+                        IPO.status.in_(target_statuses),
+                        IPO.archived == False,
+                        IPO.ai_report.is_(None),
+                    )
+                )
+            )
+            ipos = result.scalars().all()
+
+            if not ipos:
+                return
+
+            logger.info(f"AI rapor catch-up: {len(ipos)} IPO rapor bekliyor")
+
+            for ipo in ipos:
+                try:
+                    success = await generate_and_save_ipo_report(ipo.id)
+                    if success:
+                        logger.info(f"AI rapor uretildi (catch-up): {ipo.ticker or ipo.company_name}")
+                    else:
+                        logger.warning(f"AI rapor uretilemedi: {ipo.ticker or ipo.company_name}")
+                except Exception as e:
+                    logger.error(f"AI rapor catch-up hatasi ({ipo.ticker}): {e}")
+
+                # Rate limit — ardisik istekler arasi 5 sn bekle
+                await asyncio.sleep(5)
+
+    except Exception as e:
+        logger.error(f"AI rapor catch-up genel hata: {e}")
+
+
 async def cleanup_expired_coupons():
     """Suresi gecmis kuponlari deaktive eder (her 2 saatte calisir)."""
     try:
@@ -3102,6 +3151,17 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # AI IPO Rapor Catch-up — gunluk 10:00 TR (UTC 07:00)
+    scheduler.add_job(
+        generate_missing_ipo_reports,
+        CronTrigger(hour=7, minute=0),
+        id="ai_ipo_report_catchup",
+        name="AI IPO Rapor Catch-up (10:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
@@ -3111,6 +3171,13 @@ def _setup_scheduler_impl():
     # Startup: Onceki boost suresi hala aktif mi kontrol et
     import asyncio
     asyncio.get_event_loop().create_task(_restore_boost_on_startup())
+
+    # Startup: Eksik AI raporlarini hemen uret (60 sn sonra — DB hazir olsun)
+    async def _delayed_ai_catchup():
+        await asyncio.sleep(60)
+        await generate_missing_ipo_reports()
+
+    asyncio.get_event_loop().create_task(_delayed_ai_catchup())
 
 
 def shutdown_scheduler():
