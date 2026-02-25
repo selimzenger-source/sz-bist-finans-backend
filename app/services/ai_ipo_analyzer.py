@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "claude-sonnet-4-5"
-_AI_TIMEOUT = 60  # Detayli analiz uzun surebilir
+_AI_TIMEOUT = 120  # 4000 token response icin 120 sn gerekebilir
 
 _SYSTEM_PROMPT = """Sen Turkiye'nin en deneyimli halka arz analistlerinden birisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun.
 
@@ -274,8 +274,11 @@ async def generate_ipo_report(ipo) -> dict | None:
     except json.JSONDecodeError as e:
         logger.error("AI IPO raporu JSON parse hatasi: %s — content: %s", e, content[:200])
         return None
+    except httpx.TimeoutException as e:
+        logger.error("AI IPO rapor TIMEOUT hatasi (%d sn): %s — %s", _AI_TIMEOUT, ipo.ticker or ipo.company_name, type(e).__name__)
+        return None
     except Exception as e:
-        logger.error("AI IPO rapor uretme hatasi: %s", e)
+        logger.error("AI IPO rapor uretme hatasi: %s — type=%s — ipo=%s", e, type(e).__name__, ipo.ticker or ipo.company_name)
         return None
 
 
