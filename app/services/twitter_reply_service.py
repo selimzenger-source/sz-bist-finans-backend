@@ -537,6 +537,13 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
     if not creds:
         return {"success": False, "error": "Twitter API anahtarları yapılandırılmamış."}
 
+    # ── Global rate limit: dakikada max 3 tweet (reply dahil) ──
+    from app.services.twitter_service import _wait_for_tweet_rate_limit, _record_tweet_sent
+    wait = _wait_for_tweet_rate_limit()
+    if wait > 0:
+        import asyncio
+        await asyncio.sleep(wait)
+
     auth_header = _build_oauth_header(creds, method="POST", url=_TWITTER_TWEET_URL)
 
     payload = {
@@ -561,6 +568,7 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
             data = response.json()
             reply_id = data.get("data", {}).get("id", "?")
             logger.info(f"Reply başarılı (id={reply_id}) → tweet {tweet_id}")
+            _record_tweet_sent()
             return {
                 "success": True,
                 "reply_tweet_id": reply_id,

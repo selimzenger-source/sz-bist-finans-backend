@@ -45,6 +45,44 @@ logger = logging.getLogger(__name__)
 # Twitter API v2 endpoint
 _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
 
+# ── Global Tweet Rate Limiter ──
+# Dakikada max 3 tweet — ban riskini önler (reply + normal tweet dahil)
+import threading
+
+_TWEET_RATE_MAX = 3        # dakikada max tweet
+_TWEET_RATE_WINDOW = 60    # saniye
+_tweet_timestamps: list[float] = []
+_tweet_rate_lock = threading.Lock()
+
+
+def _check_tweet_rate_limit() -> bool:
+    """Dakikada max 3 tweet kontrolü. True = gönderilebilir, False = beklemeli."""
+    now = time.time()
+    with _tweet_rate_lock:
+        # Eski timestamp'leri temizle
+        _tweet_timestamps[:] = [t for t in _tweet_timestamps if now - t < _TWEET_RATE_WINDOW]
+        return len(_tweet_timestamps) < _TWEET_RATE_MAX
+
+
+def _wait_for_tweet_rate_limit():
+    """Rate limit doluysa en eski tweet'in süresinin dolmasını bekler."""
+    now = time.time()
+    with _tweet_rate_lock:
+        _tweet_timestamps[:] = [t for t in _tweet_timestamps if now - t < _TWEET_RATE_WINDOW]
+        if len(_tweet_timestamps) >= _TWEET_RATE_MAX:
+            oldest = min(_tweet_timestamps)
+            wait_secs = _TWEET_RATE_WINDOW - (now - oldest) + 1
+            if wait_secs > 0:
+                logger.info(f"Tweet rate limit: {wait_secs:.0f}sn bekleniyor (dakikada max {_TWEET_RATE_MAX})")
+                return wait_secs
+    return 0
+
+
+def _record_tweet_sent():
+    """Başarılı tweet gönderimini kaydet."""
+    with _tweet_rate_lock:
+        _tweet_timestamps.append(time.time())
+
 
 def _queue_tweet(text: str, image_path: str | None = None, source: str = "unknown") -> bool:
     """Tweet'i kuyruğa ekler (DB'ye PendingTweet kaydeder).
@@ -324,6 +362,11 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
             logger.info(f"[TWITTER-DRY-RUN] {text[:80]}...")
             return False
 
+        # ── Rate limit: dakikada max 3 tweet ──
+        wait = _wait_for_tweet_rate_limit()
+        if wait > 0:
+            time.sleep(wait)
+
         # Twitter karakter limiti: 4000 (Blue Tick)
         if len(text) > 4000:
             text = text[:3997] + "..."
@@ -344,6 +387,7 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
             tweet_id = response.json().get("data", {}).get("id", "?")
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
             _mark_tweet_sent(text)
+            _record_tweet_sent()
             return True
         else:
             error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
@@ -1397,6 +1441,11 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             logger.warning(f"Gorsel bulunamadi: {image_path}, sadece metin atiliyor")
             return _safe_tweet(text)
 
+        # ── Rate limit: dakikada max 3 tweet ──
+        wait = _wait_for_tweet_rate_limit()
+        if wait > 0:
+            time.sleep(wait)
+
         # 1. Media Upload (v1.1 — multipart/form-data)
         upload_url = "https://upload.twitter.com/1.1/media/upload.json"
 
@@ -1462,6 +1511,7 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
             logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
             _mark_tweet_sent(text)
+            _record_tweet_sent()
             return True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
