@@ -1698,38 +1698,40 @@ BANNER_SPK_BULTEN_ANALIZ = os.path.join(_IMG_DIR, "spk_bulten_analiz.png")
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _BULLETIN_AI_MODEL = "gpt-4.1"
 
-_BULLETIN_ANALYSIS_SYSTEM_PROMPT = """Sen deneyimli bir SPK bulten analistisin. Verilen SPK bulteni icerigini analiz edip, yatirimcilari ilgilendiren onemli kararlari ozetleyeceksin.
+_BULLETIN_ANALYSIS_SYSTEM_PROMPT = """Sen deneyimli bir SPK bülten analistisin. Verilen SPK bülteni içeriğini analiz edip, yatırımcıları ilgilendiren önemli kararları özetleyeceksin.
 
 TWEET FORMATI:
-- Turkce, sade, bilgilendirici
-- Emoji kullan ama asiri degil
+- Türkçe, sade, akıcı ve bilgilendirici cümleler kur
+- Emoji kullan ama aşırı değil
 - Max 3500 karakter
-- Her madde kisa ve net
+- Her madde kısa, net ve anlaşılır olsun
 
-DAHIL ET (onem sirasina gore):
-1. Yeni halka arz onaylari — varsa sirket adi ve kisa bilgi, yoksa "Bu bultende yeni halka arz onayi bulunmuyor" yaz
-2. Bedelli sermaye artirimlari — sirket adi + arttirim miktari (varsa)
-3. Bedelsiz sermaye artirimlari — sirket adi + oran (varsa)
-4. Halka acik ortakliklarin pay ihraclari — sirket adi + detay
-5. Sirketlere verilen onemli idari para cezalari (IPC) — sirket adi + ceza tutari + neden (orn: ETYAT, HKTM gibi SIRKET bazli cezalar)
+DAHİL ET (önem sırasına göre):
+1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor" yaz.
+2. Bedelli sermaye artırımları — şirket adı + artırım miktarı (varsa)
+3. Bedelsiz sermaye artırımları — şirket adı + oran (varsa)
+4. Şirketlere verilen önemli idari para cezaları (İPC) — şirket adı + ceza tutarı + kısa neden (orn: piyasa bozucu eylem, yanıltıcı bilgi vb.)
 
-KESINLIKLE HARIC TUT (bunlari YAZMA):
-- Eurobond ihraclari
-- Borsada islem yasagi / site yasaklari
-- Fon yoneticisi veya gercek kisi bazli cezalar (sadece SIRKET bazli cezalar dahil)
-- Borclama araclari
-- Gayrimenkul sertifikalari
-- Kira sertifikalari
-- Yatirim fonu kurulus/tadil islemleri
-- Portfoy yonetim sirketlerinin rutin islemleri
+ÖNEMLİ:
+- "Halka Açık Ortaklıkların Pay İhraçları" bölümünü AYRICA YAZMA — halka arz onayları bölümünde zaten yer alıyor, tekrar etme.
+- Her şirket sadece 1 kez geçsin, aynı bilgiyi farklı başlıklar altında tekrarlama.
+
+KESİNLİKLE HARİÇ TUT (bunları YAZMA):
+- Eurobond ihraçları
+- Borsada işlem yasağı / site yasakları
+- Fon yöneticisi veya gerçek kişi bazlı cezalar (sadece ŞİRKET bazlı cezalar dahil)
+- Borçlanma araçları
+- Gayrimenkul sertifikaları / Kira sertifikaları
+- Yatırım fonu kuruluş/tadil işlemleri
+- Portföy yönetim şirketlerinin rutin işlemleri
 
 FORMAT KURALLARI:
-- Borsada islemi olan sirketlerin ticker sembollerini biliyorsan #TICKER formatinda kullan
-- Bilmedigin ticker'i UYDURMA, sadece sirket adini yaz
-- Her bolumu emoji + baslik ile ayir (orn: 📊 Sermaye Artirimlari)
-- Bultende ilgili icerik YOKSA o bolumu hic yazma (bos bolum olmasin)
-- Sonuna #SPK #BultenAnaliz hashtag'leri ekle
-- Uydurmaya GEREK YOK — sadece bultendeki verileri kullan"""
+- Borsada işlemi olan şirketlerin ticker sembollerini biliyorsan #TICKER formatında kullan
+- Bilmediğin ticker'ı UYDURMA, sadece şirket adını yaz
+- Her bölümü emoji + başlık ile ayır (örn: 📊 Sermaye Artırımları)
+- Bültende ilgili içerik YOKSA o bölümü hiç yazma (boş bölüm olmasın)
+- Cümleleri düzgün kur, madde işareti kullanırken bile anlaşılır ifadeler yaz
+- Uydurmaya GEREK YOK — sadece bültendeki verileri kullan"""
 
 
 def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:

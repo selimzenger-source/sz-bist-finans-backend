@@ -1378,6 +1378,57 @@ async def reject_tweet(
     return RedirectResponse(url="/admin/tweets", status_code=303)
 
 
+@router.post("/tweets/trigger-spk-analysis")
+async def trigger_spk_analysis_from_admin(
+    request: Request,
+):
+    """Admin panelden SPK bülten analizini tekrar tetikler (son bülten)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from urllib.parse import quote
+    try:
+        import httpx as _hx
+        import pdfplumber
+        import io
+        from app.scrapers.spk_bulletin_scraper import format_tables_for_analysis
+        from app.services.twitter_service import tweet_spk_bulletin_analysis
+
+        # Son bülten numarasını dene (2026/10)
+        bulletin_no = "2026/10"
+        year, no = 2026, 10
+        url = f"https://spk.gov.tr/data/61d94765b7d3e21590edc567/{year}/{no}-{year}.pdf"
+
+        r = _hx.get(url, timeout=30, verify=False)
+        if r.status_code != 200:
+            msg = quote(f"SPK PDF indirilemedi: HTTP {r.status_code}")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        pdf = pdfplumber.open(io.BytesIO(r.content))
+        full_text = ""
+        tables = []
+        for page in pdf.pages:
+            full_text += (page.extract_text() or "")
+            for t in (page.extract_tables() or []):
+                tables.append(t)
+
+        analysis_text = format_tables_for_analysis(tables, full_text)
+        if len(analysis_text) < 50:
+            msg = quote("SPK bülten içeriği çok kısa")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        result = tweet_spk_bulletin_analysis(analysis_text, bulletin_no)
+        msg = quote(f"SPK Bülten {bulletin_no} analizi: {'Başarılı' if result else 'Başarısız'}")
+        return RedirectResponse(
+            url=f"/admin/tweets?trigger_msg={msg}&trigger_ok={'1' if result else '0'}",
+            status_code=303,
+        )
+    except Exception as e:
+        logger.error("[ADMIN] SPK bülten analiz retry hatası: %s", e)
+        msg = quote(f"SPK Hata: {str(e)[:150]}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
 @router.post("/tweets/toggle-auto-send")
 async def toggle_auto_send(
     request: Request,

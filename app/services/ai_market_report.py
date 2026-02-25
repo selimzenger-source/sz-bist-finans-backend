@@ -627,26 +627,17 @@ _HALLUCINATION_GUARD = """
   Islem gunu sayisi (trading_day_count) tavan serisi demek DEGILDIR!
 - Haftanin hangi gunu oldugu TARIH satirinda yazilidir, buna uy.
 - KAP/Telegram haberlerini ve RSS haberlerini referans alarak piyasa yorumu yap.
-- Haber kaynaklarini belirt (orn: "Bloomberg HT'ye gore...", "KAP bildirimlerine gore...").
+- Haber kaynaklarini belirtirken DIS SITE ADI YAZMA. "Piyasa verilerine gore..." gibi genel ifade kullan.
 - Rakamlari yuvarlarken virgulden sonra max 2 basamak kullan.
 - Halka arz verilerinde SADECE verilen bilgileri kullan. Kendi bilgini ekleme.
 - Ekonomik takvimden bugun/yarin onemli etkinlikler varsa bahset.
 - IPO etkinlikleri (son gun, ilk islem) varsa MUTLAKA vurgula — yatirimci icin kritik.
 
-REFERANS KAYNAKLARI (raporda uygun olanlara atifta bulun):
-Resmi Kaynaklar:
-- KAP (kap.org.tr): Resmi sirket bildirimleri, halka arz sonuclari, VBTS tedbir kararlari
-- Borsa Istanbul (borsaistanbul.com): Gun sonu kapanis fiyatlari, hacim, tavan/taban verileri
-- SPK (spk.gov.tr): Halka arz onaylari, SPK bultenleri, tahsisat oranlari
-Halka Arz Kaynaklari:
-- halkarz.com: Tavan serileri, islem goerme tarihleri, araci kurum dagilimlari
-- halkaarztakvimi.com.tr: Yaklasan halka arzlar, talep toplama tarihleri
-- Fintables (fintables.com): Temel analiz, bilancolar, carpanlar (F/K, PD/DD)
-- Midas (getmidas.com): Sirket tanitimlari, halka arz gelir kullanimi
-Piyasa Haberleri:
-- Bloomberg HT: Piyasa haberleri, ekonomi gelismeleri
-- Dunya Gazetesi: Ekonomi haberleri
-- BigPara (Hurriyet): Ekonomi, borsa, KAP haberleri
+KAYNAK ATFI KURALI (COK ONEMLI):
+- Raporda DIS SITE ADI, URL veya kaynak adi YAZMA. (orn: Bloomberg HT, KAP, halkarz.com, doviz.com vs. YAZMA)
+- Sadece "szalgo.net.tr" linki kullanilabilir (zaten sonda var).
+- "Kaynak: ..." veya "(Kaynak: ...)" gibi ifadeler KULLANMA.
+- Haberleri/verileri genel ifadelerle sun: "Piyasa verilerine gore...", "Aciklanan verilere gore..." gibi.
 """
 
 _MORNING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU rapor yaziyorsun.
@@ -662,7 +653,7 @@ KURAL:
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
 10. Sonda mutlaka szalgo.net.tr linki olmali
-11. Haber kaynaklarini referans goster (Bloomberg HT, KAP vs.)
+11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
 
 HASHTAG KURALI (COK ONEMLI):
 - Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
@@ -718,7 +709,7 @@ KURAL:
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
 10. Sonda mutlaka szalgo.net.tr linki olmali
-11. Haber kaynaklarini referans goster (Bloomberg HT, KAP vs.)
+11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
 
 HASHTAG KURALI (COK ONEMLI):
 - Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
@@ -783,7 +774,7 @@ def _format_full_context(
 
     # ── Piyasa Verileri ──
     lines.append("=" * 50)
-    lines.append("PIYASA VERILERI (Kaynak: Yahoo Finance)")
+    lines.append("PIYASA VERILERI")
     lines.append("=" * 50)
     for name, label in [
         ("XU100", "BIST 100"),
@@ -803,16 +794,16 @@ def _format_full_context(
         else:
             lines.append(f"{label}: Veri alinamadi")
 
-    # ── RSS Haberleri (Dis Kaynak) ──
+    # ── RSS Haberleri ──
     lines.append("")
     lines.append("=" * 50)
-    lines.append("DIS KAYNAK HABERLER (RSS)")
+    lines.append("HABERLER (RSS)")
     lines.append("=" * 50)
     if rss_headlines:
         for h in rss_headlines:
             lines.append(f"  [{h['source']}] {h['title']}")
     else:
-        lines.append("  Dis kaynak haber alinamadi.")
+        lines.append("  Haber alinamadi.")
 
     # ── KAP Haberleri (DB) ──
     lines.append("")
@@ -916,7 +907,7 @@ def _format_full_context(
     # ── Ekonomik Takvim (doviz.com) ──
     lines.append("")
     lines.append("=" * 50)
-    lines.append("EKONOMIK TAKVIM (Kaynak: doviz.com)")
+    lines.append("EKONOMIK TAKVIM")
     lines.append("=" * 50)
 
     today_events = econ_calendar.get("today", [])
@@ -978,7 +969,7 @@ async def _generate_report(
         "Asagidaki GERCEK verileri kullanarak rapor yaz.\n"
         "SADECE verilen verilere dayan — hicbir bilgiyi UYDURMA.\n"
         "Halka arz tavan serisi bilgisini SADECE daily_tracks verilerinden oku.\n"
-        "Haber kaynaklarini referans goster.\n\n"
+        "Dis site adi veya URL kullanma, sadece szalgo.net.tr.\n\n"
         f"{context}"
     )
 
