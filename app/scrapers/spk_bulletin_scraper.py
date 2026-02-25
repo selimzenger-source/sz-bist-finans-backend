@@ -775,9 +775,9 @@ async def _check_spk_bulletins_inner():
                 if full_bulletin_text:
                     try:
                         if new_ipos_this_bulletin:
-                            # IPO tweeti atildiysa 90sn bekle
-                            logger.info("SPK bulten analiz: IPO tweeti atildi, 90sn bekleniyor...")
-                            await asyncio.sleep(90)
+                            # IPO tweeti atildiysa 3dk bekle
+                            logger.info("SPK bulten analiz: IPO tweeti atildi, 180sn (3dk) bekleniyor...")
+                            await asyncio.sleep(180)
 
                         from app.services.twitter_service import tweet_spk_bulletin_analysis
                         from app.services.admin_telegram import notify_tweet_sent as _notify_tw

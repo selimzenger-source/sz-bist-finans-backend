@@ -520,11 +520,37 @@ DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")
 # ================================================================
 # 1. YENI HALKA ARZ (SPK Onayi)
 # ================================================================
+def _build_ipo_approval_image(ipos: list, bulletin_no: str) -> Optional[str]:
+    """Halka arz onayları için özel görsel oluşturur.
+
+    IPO objelerini approvals dict formatına çevirir ve generate_spk_onay_image çağırır.
+    Başarısızlık durumunda None döner (fallback: BANNER_SPK_ONAYI kullanılır).
+    """
+    try:
+        from app.services.chart_image_generator import generate_spk_onay_image
+        approvals = []
+        for ipo in ipos:
+            approvals.append({
+                "company_name": ipo.company_name or "Bilinmiyor",
+                "existing_capital": getattr(ipo, "existing_capital", None),
+                "new_capital": getattr(ipo, "new_capital", None),
+                "sale_price": getattr(ipo, "ipo_price", None),
+            })
+        return generate_spk_onay_image(approvals, bulletin_no)
+    except Exception as e:
+        logger.warning("IPO approval image olusturulamadi: %s", e)
+        return None
+
+
 def tweet_new_ipo(ipo) -> bool:
     """SPK'dan yeni halka arz onayi geldiginde tweet atar."""
     try:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "Yeni Halka Arz"):
             return False
+
+        # Bülten numarasını bul (varsa)
+        bulletin_no = getattr(ipo, "spk_bulletin_no", None) or "SPK"
+
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         price_text = ""
         if ipo.ipo_price:
@@ -538,7 +564,11 @@ def tweet_new_ipo(ipo) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
+        # Özel görsel oluştur
+        img_path = _build_ipo_approval_image([ipo], bulletin_no)
+        if img_path:
+            return _safe_tweet_with_media(text, img_path, source="tweet_new_ipo")
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI, source="tweet_new_ipo")
     except Exception as e:
         logger.error(f"tweet_new_ipo hatasi: {e}")
         return False
@@ -548,11 +578,11 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
     """Ayni bultendeki halka arz onaylarini tek tweet'te atar.
 
     1 adet ise: eski format (tweet_new_ipo)
-    2+ adet ise: birlesik format (liste halinde)
+    2+ adet ise: birlesik format (liste halinde) + özel görsel
 
     Args:
         ipos: Yeni olusturulan IPO objeleri listesi
-        bulletin_no: Bulten numarasi (orn: "2/2026")
+        bulletin_no: Bulten numarasi (orn: "2026/10")
     """
     try:
         if not ipos:
@@ -577,7 +607,11 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI)
+        # Özel görsel oluştur
+        img_path = _build_ipo_approval_image(ipos, bulletin_no)
+        if img_path:
+            return _safe_tweet_with_media(text, img_path, source="tweet_new_ipos_batch")
+        return _safe_tweet_with_media(text, BANNER_SPK_ONAYI, source="tweet_new_ipos_batch")
     except Exception as e:
         logger.error(f"tweet_new_ipos_batch hatasi: {e}")
         return False

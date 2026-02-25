@@ -1140,3 +1140,251 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
     except Exception as e:
         logger.error("Opening summary gorsel hatasi: %s", e, exc_info=True)
         return None
+
+
+# ================================================================
+# SPK YENİ HALKA ARZ ONAYI GÖRSELİ
+# ================================================================
+
+def _fmt_capital(val) -> str:
+    """Sermaye sayısını okunabilir formata çevirir: 141000000 → 141 mn TL"""
+    try:
+        n = float(val)
+        if n >= 1_000_000_000:
+            return f"{n / 1_000_000_000:.2f} mr TL"
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f} mn TL"
+        return f"{n:,.0f} TL"
+    except Exception:
+        return str(val)
+
+
+def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
+    """SPK halka arz onayları için özel görsel oluşturur.
+
+    Args:
+        approvals: [{"company_name": str, "existing_capital": Decimal,
+                     "new_capital": Decimal, "sale_price": Decimal|None}, ...]
+        bulletin_no: "2026/10" gibi bülten numarası
+
+    Returns:
+        Oluşturulan PNG dosyasının yolu veya None
+    """
+    try:
+        if not approvals:
+            return None
+
+        _img_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        width = 1200
+        padding = 48
+        count = len(approvals)
+
+        # ── Renkler ─────────────────────────────────────
+        BG          = (14, 14, 26)        # #0e0e1a çok koyu
+        CARD_BG     = (22, 22, 42)        # #16162a kart arkaplanı
+        CARD_BG2    = (28, 28, 52)        # #1c1c34 alternatif satır
+        HEADER_BG_C = (20, 20, 40)        # üst bar
+        TOP_STRIPE  = (34, 197, 94)       # #22c55e yeşil üst şerit
+        ACCENT_GRN  = (34, 197, 94)
+        GOLD_C      = (250, 204, 21)
+        ORANGE_C    = (251, 146, 60)
+        WHITE_C     = (255, 255, 255)
+        GRAY_C      = (156, 163, 175)
+        DIVIDER_C   = (50, 50, 80)
+        BLUE_ACC    = (99, 102, 241)      # #6366f1 indigo — vurgu
+
+        # ── Fontlar ─────────────────────────────────────
+        f_title      = _load_font(46, bold=True)
+        f_subtitle   = _load_font(28, bold=False)
+        f_company    = _load_font(34, bold=True)
+        f_detail     = _load_font(26, bold=False)
+        f_detail_b   = _load_font(26, bold=True)
+        f_footer     = _load_font(28, bold=True)
+        f_footer_sm  = _load_font(22, bold=False)
+        f_badge      = _load_font(22, bold=True)
+
+        # ── Boyut hesapla ────────────────────────────────
+        top_stripe_h = 8      # üst yeşil çizgi
+        header_h     = 160    # SZ Algo branding
+        title_h      = 120    # başlık bölümü
+        card_h       = 175    # her IPO kartı
+        gap          = 16     # kartlar arası boşluk
+        footer_h     = 80
+        cards_total  = count * card_h + (count - 1) * gap + padding
+        total_h      = top_stripe_h + header_h + title_h + cards_total + footer_h
+
+        img  = Image.new("RGB", (width, total_h), BG)
+        draw = ImageDraw.Draw(img)
+
+        # ── Üst yeşil şerit ─────────────────────────────
+        draw.rectangle([(0, 0), (width, top_stripe_h)], fill=TOP_STRIPE)
+
+        # ── Header bölümü (Logo + SZ Algo Finans) ───────
+        y = top_stripe_h
+        draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG_C)
+
+        # Logo
+        logo_path = os.path.join(_img_dir, "logo.jpg")
+        logo_x = padding
+        logo_y = y + (header_h - 60) // 2
+        try:
+            if os.path.exists(logo_path):
+                logo_raw = Image.open(logo_path).convert("RGBA")
+                logo_r = logo_raw.resize((60, 60), Image.LANCZOS)
+                img.paste(logo_r.convert("RGB"), (logo_x, logo_y))
+                logo_x += 68
+        except Exception:
+            pass
+
+        # "SZ Algo Finans" + "Halka Arz İzleme"
+        draw.text((logo_x, y + 28), "SZ Algo Finans",
+                  fill=WHITE_C, font=_load_font(36, bold=True))
+        draw.text((logo_x, y + 76), "Halka Arz Takip & Bildirim",
+                  fill=GRAY_C, font=f_subtitle)
+
+        # Sağ taraf — bülten numarası badge
+        badge_text = f"SPK Bülteni {bulletin_no}"
+        bb = f_badge.getbbox(badge_text)
+        bw = bb[2] - bb[0] + 28
+        bh = 38
+        bx = width - padding - bw
+        by = y + (header_h - bh) // 2
+        draw.rounded_rectangle([(bx, by), (bx + bw, by + bh)],
+                                radius=8, fill=BLUE_ACC)
+        draw.text((bx + 14, by + 8), badge_text, fill=WHITE_C, font=f_badge)
+
+        # Alt divider
+        draw.line([(0, y + header_h - 1), (width, y + header_h - 1)],
+                  fill=DIVIDER_C, width=1)
+
+        # ── Başlık bölümü ────────────────────────────────
+        y += header_h
+        draw.rectangle([(0, y), (width, y + title_h)], fill=BG)
+
+        # Yeşil tik + büyük başlık
+        title_icon = "✅"
+        title_num  = f" {count} Yeni" if count > 1 else " Yeni"
+        title_rest = " Halka Arz Onayı"
+        draw.text((padding, y + 22), title_icon + title_num,
+                  fill=ACCENT_GRN, font=f_title)
+        # "Halka Arz Onayı" kısmını beyaz yaz
+        icon_bb = f_title.getbbox(title_icon + title_num)
+        icon_w  = icon_bb[2] - icon_bb[0]
+        draw.text((padding + icon_w, y + 22), title_rest,
+                  fill=WHITE_C, font=f_title)
+
+        # Alt satır: "SPK tarafından onaylandı"
+        sub_text = f"SPK tarafından onaylandı — {bulletin_no} Bülteni"
+        draw.text((padding, y + 78), sub_text, fill=GRAY_C, font=f_subtitle)
+
+        # Divider
+        draw.line([(padding, y + title_h - 4), (width - padding, y + title_h - 4)],
+                  fill=DIVIDER_C, width=1)
+
+        # ── IPO Kartları ─────────────────────────────────
+        y += title_h + gap // 2
+        for i, appr in enumerate(approvals):
+            card_y = y + i * (card_h + gap)
+            card_bg = CARD_BG if i % 2 == 0 else CARD_BG2
+
+            # Kart arkaplanı (yuvarlak köşe)
+            draw.rounded_rectangle(
+                [(padding, card_y), (width - padding, card_y + card_h)],
+                radius=12, fill=card_bg,
+            )
+
+            # Sol yeşil aksan çizgisi
+            draw.rounded_rectangle(
+                [(padding, card_y), (padding + 6, card_y + card_h)],
+                radius=4, fill=ACCENT_GRN,
+            )
+
+            # Numara badge (sağ üst)
+            num_text = f"#{i + 1}"
+            nb = f_badge.getbbox(num_text)
+            nw = nb[2] - nb[0] + 20
+            nx = width - padding - nw - 10
+            ny = card_y + 12
+            draw.rounded_rectangle([(nx, ny), (nx + nw, ny + 28)],
+                                    radius=6, fill=(40, 40, 70))
+            draw.text((nx + 10, ny + 4), num_text, fill=GRAY_C, font=f_badge)
+
+            cx = padding + 24   # sol iç padding
+            cy = card_y + 18
+
+            # Şirket adı
+            company_name = appr.get("company_name", "Bilinmiyor")
+            # Çok uzunsa kes
+            if len(company_name) > 52:
+                company_name = company_name[:50] + "…"
+            draw.text((cx, cy), company_name, fill=WHITE_C, font=f_company)
+            cy += 44
+
+            # Sermaye bilgisi: Mevcut → Yeni
+            exist_cap = appr.get("existing_capital")
+            new_cap   = appr.get("new_capital")
+            if exist_cap and new_cap:
+                cap_text = f"🏦  {_fmt_capital(exist_cap)}  →  {_fmt_capital(new_cap)}"
+                draw.text((cx, cy), cap_text, fill=GRAY_C, font=f_detail)
+                cy += 36
+            elif new_cap:
+                cap_text = f"🏦  Yeni Sermaye: {_fmt_capital(new_cap)}"
+                draw.text((cx, cy), cap_text, fill=GRAY_C, font=f_detail)
+                cy += 36
+
+            # Halka arz fiyatı
+            price = appr.get("sale_price")
+            if price:
+                try:
+                    price_f = float(price)
+                    price_str = f"{price_f:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    draw.text((cx, cy), f"💰  Halka Arz Fiyatı: ",
+                              fill=GRAY_C, font=f_detail)
+                    px_bb = f_detail.getbbox("💰  Halka Arz Fiyatı: ")
+                    px_w  = px_bb[2] - px_bb[0]
+                    draw.text((cx + px_w, cy), f"{price_str} TL",
+                              fill=GOLD_C, font=f_detail_b)
+                except Exception:
+                    pass
+            else:
+                draw.text((cx, cy), "💰  Halka Arz Fiyatı: Belirlenmedi",
+                          fill=GRAY_C, font=f_detail)
+
+        # ── Footer ───────────────────────────────────────
+        footer_y = total_h - footer_h
+        draw.rectangle([(0, footer_y), (width, total_h)], fill=HEADER_BG_C)
+        draw.line([(0, footer_y), (width, footer_y)], fill=TOP_STRIPE, width=2)
+
+        # Logo
+        logo_xx = padding
+        try:
+            if os.path.exists(logo_path):
+                logo_r2 = Image.open(logo_path).convert("RGB").resize((30, 30), Image.LANCZOS)
+                img.paste(logo_r2, (logo_xx, footer_y + 24))
+                logo_xx += 38
+        except Exception:
+            pass
+        draw.text((logo_xx, footer_y + 24), "szalgo.net.tr",
+                  fill=ORANGE_C, font=f_footer)
+
+        # Sağ: disclaimer
+        disc = "Yatırım tavsiyesi değildir"
+        db   = f_footer_sm.getbbox(disc)
+        dw   = db[2] - db[0]
+        draw.text((width - padding - dw, footer_y + 28),
+                  disc, fill=GRAY_C, font=f_footer_sm)
+
+        # Watermark
+        _draw_bg_watermark(img, width, total_h)
+
+        # ── Kaydet ───────────────────────────────────────
+        ts = datetime.now(_TR_TZ).strftime("%Y%m%d_%H%M%S")
+        filename  = f"spk_onay_{ts}.png"
+        filepath  = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        logger.info("SPK onay gorseli olusturuldu: %s (%d onay)", filepath, count)
+        return filepath
+
+    except Exception as e:
+        logger.error("generate_spk_onay_image hatasi: %s", e, exc_info=True)
+        return None
