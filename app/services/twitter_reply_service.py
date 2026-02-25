@@ -623,14 +623,17 @@ async def get_user_id_by_username(username: str) -> str | None:
             if user_id:
                 logger.info(f"Twitter user ID çözümlendi: @{username} → {user_id}")
                 return user_id
-        elif response.status_code in (402, 403):
+        elif response.status_code == 402:
             global _twitter_rate_limited
             _twitter_rate_limited = True
             logger.warning(
-                "Twitter API ödeme/yetki hatası (user lookup): @%s, HTTP %d — "
+                "Twitter API ödeme hatası (user lookup): @%s, HTTP 402 — "
                 "bu döngüdeki kalan hedefler atlanacak",
-                username, response.status_code,
+                username,
             )
+        elif response.status_code == 403:
+            # 403 = korumalı/askıya alınmış hesap → sadece atla (döngüyü durdurma)
+            logger.info("Twitter user lookup 403 (korumalı?): @%s — atlanıyor", username)
         elif response.status_code == 429:
             _twitter_rate_limited = True
             logger.warning(f"Twitter API RATE LIMITED (429): user lookup @{username}")
@@ -714,13 +717,21 @@ async def fetch_user_recent_tweets(
                 headers={"Authorization": auth_header},
             )
 
-        if response.status_code in (402, 403):
+        if response.status_code == 402:
             global _twitter_rate_limited
             _twitter_rate_limited = True
             logger.warning(
-                "Twitter API ödeme/yetki hatası (GET tweets): user_id=%s, HTTP %d — "
+                "Twitter API ödeme hatası (GET tweets): user_id=%s, HTTP 402 — "
                 "bu döngüdeki kalan hedefler atlanacak",
-                user_id, response.status_code,
+                user_id,
+            )
+            return []
+
+        if response.status_code == 403:
+            # 403 = korumalı hesap veya erişim yok → sadece bu hesabı atla
+            logger.info(
+                "Twitter GET tweets 403 (korumalı hesap?): user_id=%s — atlanıyor",
+                user_id,
             )
             return []
 
@@ -1194,11 +1205,13 @@ async def auto_reply_cycle():
                 # Reply gönder (Twitter API — session gerektirmez)
                 send_result = await send_reply(tweet_id, chosen_reply)
 
-                # ── CIRCUIT BREAKER: Ödeme/yetki hatası → döngüyü durdur ──
+                # ── CIRCUIT BREAKER: Ödeme/yetki hatası yönetimi ──
                 error_msg = send_result.get("error", "")
-                if "HTTP 402" in error_msg or "HTTP 403" in error_msg:
+
+                # 402 = ödeme sorunu → TÜM döngüyü durdur (hesap seviye)
+                if "HTTP 402" in error_msg:
                     logger.warning(
-                        "Twitter API ödeme/yetki hatası — kalan reply'lar iptal: %s",
+                        "Twitter API ödeme hatası (402) — kalan reply'lar iptal: %s",
                         error_msg[:100],
                     )
                     async with async_session() as err_session:
@@ -1212,6 +1225,42 @@ async def auto_reply_cycle():
                         ))
                         await err_session.commit()
                     break  # Kalan pending_replies'ı atla — kredi yok
+
+                # 403 "not been mentioned" = tweet reply kısıtlanmış → sadece BU tweet'i atla
+                if "HTTP 403" in error_msg and "not been mentioned" in error_msg:
+                    logger.info(
+                        "Tweet reply kısıtlanmış (403): @%s tweet %s — atlanıyor",
+                        target_username, tweet_id,
+                    )
+                    async with async_session() as err_session:
+                        err_session.add(AutoReply(
+                            target_tweet_id=tweet_id,
+                            target_username=target_username,
+                            target_text=tweet_text[:1000],
+                            reply_text=chosen_reply,
+                            status="skipped",
+                            error_message="Tweet reply kısıtlanmış (yazar mention etmemiş)",
+                        ))
+                        await err_session.commit()
+                    continue  # Bu tweet'i atla, sonraki reply'a devam et
+
+                # 403 diğer (hesap seviye yetki) → TÜM döngüyü durdur
+                if "HTTP 403" in error_msg:
+                    logger.warning(
+                        "Twitter API yetki hatası (403) — kalan reply'lar iptal: %s",
+                        error_msg[:100],
+                    )
+                    async with async_session() as err_session:
+                        err_session.add(AutoReply(
+                            target_tweet_id=tweet_id,
+                            target_username=target_username,
+                            target_text=tweet_text[:1000],
+                            reply_text=chosen_reply,
+                            status="failed",
+                            error_message=error_msg[:500],
+                        ))
+                        await err_session.commit()
+                    break  # Hesap seviye sorun — dur
 
                 # Sonucu DB'ye kaydet (KISA session — hemen kapanır)
                 async with async_session() as session:
