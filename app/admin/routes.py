@@ -1382,10 +1382,19 @@ async def reject_tweet(
 async def trigger_spk_analysis_from_admin(
     request: Request,
 ):
-    """Admin panelden SPK bülten analizini tekrar tetikler (son bülten)."""
-    if not get_current_admin(request):
+    """Admin panelden veya API key ile SPK bülten analizini tetikler."""
+    # Session auth VEYA API key
+    api_key = request.headers.get("X-Admin-Key", "")
+    is_api = api_key == os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    is_session = bool(get_current_admin(request))
+
+    if not is_api and not is_session:
+        from fastapi.responses import JSONResponse as _JR
+        if "application/json" in request.headers.get("accept", ""):
+            return _JR({"error": "Unauthorized"}, status_code=401)
         return RedirectResponse(url="/admin/login", status_code=303)
 
+    from fastapi.responses import JSONResponse
     from urllib.parse import quote
     try:
         import httpx as _hx
@@ -1401,7 +1410,10 @@ async def trigger_spk_analysis_from_admin(
 
         r = _hx.get(url, timeout=30, verify=False)
         if r.status_code != 200:
-            msg = quote(f"SPK PDF indirilemedi: HTTP {r.status_code}")
+            err = f"SPK PDF indirilemedi: HTTP {r.status_code}"
+            if is_api:
+                return JSONResponse({"ok": False, "error": err})
+            msg = quote(err)
             return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
         pdf = pdfplumber.open(io.BytesIO(r.content))
@@ -1414,10 +1426,15 @@ async def trigger_spk_analysis_from_admin(
 
         analysis_text = format_tables_for_analysis(tables, full_text)
         if len(analysis_text) < 50:
-            msg = quote("SPK bülten içeriği çok kısa")
+            err = "SPK bülten içeriği çok kısa"
+            if is_api:
+                return JSONResponse({"ok": False, "error": err})
+            msg = quote(err)
             return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
         result = tweet_spk_bulletin_analysis(analysis_text, bulletin_no)
+        if is_api:
+            return JSONResponse({"ok": bool(result), "bulletin": bulletin_no})
         msg = quote(f"SPK Bülten {bulletin_no} analizi: {'Başarılı' if result else 'Başarısız'}")
         return RedirectResponse(
             url=f"/admin/tweets?trigger_msg={msg}&trigger_ok={'1' if result else '0'}",
@@ -1425,6 +1442,8 @@ async def trigger_spk_analysis_from_admin(
         )
     except Exception as e:
         logger.error("[ADMIN] SPK bülten analiz retry hatası: %s", e)
+        if is_api:
+            return JSONResponse({"ok": False, "error": str(e)[:200]})
         msg = quote(f"SPK Hata: {str(e)[:150]}")
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
 
