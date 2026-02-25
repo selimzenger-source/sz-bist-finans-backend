@@ -2329,6 +2329,39 @@ async def admin_replies_send(request: Request):
 
 
 # -------------------------------------------------------
+# REPLY DEBUG — Son hata mesajlarini goster
+# -------------------------------------------------------
+
+@router.get("/replies/debug")
+async def admin_replies_debug(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Son 20 reply kaydinin TAM hata mesajlarini dondurur (JSON)."""
+    from fastapi.responses import JSONResponse
+    from app.models.auto_reply import AutoReply
+
+    result = await db.execute(
+        select(AutoReply).order_by(desc(AutoReply.created_at)).limit(20)
+    )
+    entries = result.scalars().all()
+
+    data = []
+    for e in entries:
+        data.append({
+            "id": e.id,
+            "target_username": e.target_username,
+            "status": e.status,
+            "error_message": e.error_message,
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+            "target_tweet_id": e.target_tweet_id,
+            "reply_text": (e.reply_text or "")[:60],
+        })
+
+    return JSONResponse(data)
+
+
+# -------------------------------------------------------
 # REPLY TARGETS — Hesap Ekleme/Silme + Toggle
 # -------------------------------------------------------
 
