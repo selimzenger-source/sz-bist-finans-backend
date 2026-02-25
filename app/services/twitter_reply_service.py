@@ -36,7 +36,7 @@ _TWITTER_USER_TWEETS_URL = "https://api.twitter.com/2/users/{user_id}/tweets"
 _TWITTER_LIKE_URL = "https://api.twitter.com/2/users/{user_id}/likes"
 
 # Otomatik reply ayarlari
-_AUTO_REPLY_DAILY_LIMIT_DEFAULT = 20  # DB'de yoksa bu kullanilir
+_AUTO_REPLY_DAILY_LIMIT_DEFAULT = 24  # DB'de yoksa bu kullanilir
 _AUTO_REPLY_LOCK = asyncio.Lock()
 
 # Jitter araliklari (saniye) — dogal gorunum icin dagitilmis
@@ -54,14 +54,15 @@ _MAX_TWEET_AGE_MINUTES = 30  # Sadece son 30dk'daki tweetlere reply at
 _MIN_TWEET_WORDS = 6  # En az 6 kelime olmalı — kısa tweetlere anlamlı reply üretilemez
 
 # Twitter API rate limit — Basic tier (user OAuth 1.0a):
-#   GET /2/users/:id/tweets = 900 req / 15 dk (çok cömert)
+#   GET /2/users/:id/tweets = 900 req / 15 dk
 #   POST /2/tweets = ~100 / 24 saat (reply dahil)
 #   POST /2/users/:id/likes = 50 / 15 dk, 1000 / 24 saat
-# Gerçek limit POST tweet'te — günlük 100 tweet'ten fazla atma
-# GET istekleri bolca yapılabilir, ama yine de zamana yaymak iyi
-_MAX_TARGETS_PER_CYCLE = 25  # GET limit 900, bolca kontrol edebiliriz
+# KRİTİK: GET istekleri de ÜCRETL — Read kredit tüketir!
+# 30dk × 8 hedef = max 384 GET/gün (~$0.10-0.25 maliyet)
+# Limit dolunca (24 reply) GET yapmaz → 0 ek maliyet
+_MAX_TARGETS_PER_CYCLE = 8   # API kredi tasarrufu — 8 hedef/döngü yeterli (akıllı sıralama ile)
 _MAX_REPLIES_PER_CYCLE = 2   # Döngü başına max 2 reply — zamana yayar, spam önler
-                              # 5dk interval × 2 reply = saatte max 24 reply (doğal görünüm)
+                              # 30dk interval × 2 reply = saatte max 4 reply (doğal görünüm)
 _twitter_rate_limited = False  # 429 alınca True olur, sonraki döngüde resetlenir
 
 
@@ -622,8 +623,15 @@ async def get_user_id_by_username(username: str) -> str | None:
             if user_id:
                 logger.info(f"Twitter user ID çözümlendi: @{username} → {user_id}")
                 return user_id
-        elif response.status_code == 429:
+        elif response.status_code in (402, 403):
             global _twitter_rate_limited
+            _twitter_rate_limited = True
+            logger.warning(
+                "Twitter API ödeme/yetki hatası (user lookup): @%s, HTTP %d — "
+                "bu döngüdeki kalan hedefler atlanacak",
+                username, response.status_code,
+            )
+        elif response.status_code == 429:
             _twitter_rate_limited = True
             logger.warning(f"Twitter API RATE LIMITED (429): user lookup @{username}")
         elif response.status_code == 404:
@@ -706,8 +714,17 @@ async def fetch_user_recent_tweets(
                 headers={"Authorization": auth_header},
             )
 
-        if response.status_code == 429:
+        if response.status_code in (402, 403):
             global _twitter_rate_limited
+            _twitter_rate_limited = True
+            logger.warning(
+                "Twitter API ödeme/yetki hatası (GET tweets): user_id=%s, HTTP %d — "
+                "bu döngüdeki kalan hedefler atlanacak",
+                user_id, response.status_code,
+            )
+            return []
+
+        if response.status_code == 429:
             _twitter_rate_limited = True
             reset_ts = response.headers.get("x-rate-limit-reset", "?")
             logger.warning(
@@ -896,7 +913,7 @@ async def _like_tweet(tweet_id: str) -> bool:
 
 
 async def auto_reply_cycle():
-    """Otomatik reply ana döngüsü — scheduler'dan 5dk'da bir çağrılır.
+    """Otomatik reply ana döngüsü — scheduler'dan 30dk'da bir çağrılır.
 
     KRİTİK KURALLAR:
     - Sadece YENİ tweetlere reply atar (last_seen_tweet_id'den sonrakiler)
@@ -911,11 +928,11 @@ async def auto_reply_cycle():
     - Jitter bekleme sırasında session kapatılır, sonra yeniden açılır
     - Bu sayede QueuePool overflow önlenir (eski: 5+ ayrı session)
 
-    Twitter API Rate Limit Yönetimi:
-    - Basic tier user OAuth: GET tweets 900/15dk, POST tweets ~100/gün
-    - Her döngüde max _MAX_TARGETS_PER_CYCLE hedef kontrol edilir
-    - last_reply_at ile sıralama yapılır (en uzun süredir kontrol edilmeyen önce)
-    - 429 alınca döngü hemen durur
+    Twitter API Kredi Tasarrufu:
+    - 30dk interval × 8 hedef/döngü = max 384 GET/gün (~150-250 gerçek)
+    - 24 reply limiti dolunca GET yapmaz → 0 maliyet
+    - 402/403 alınca döngü hemen durur (circuit breaker)
+    - 429 alınca döngü hemen durur (rate limit)
     """
     global _twitter_rate_limited
 
@@ -1176,6 +1193,25 @@ async def auto_reply_cycle():
 
                 # Reply gönder (Twitter API — session gerektirmez)
                 send_result = await send_reply(tweet_id, chosen_reply)
+
+                # ── CIRCUIT BREAKER: Ödeme/yetki hatası → döngüyü durdur ──
+                error_msg = send_result.get("error", "")
+                if "HTTP 402" in error_msg or "HTTP 403" in error_msg:
+                    logger.warning(
+                        "Twitter API ödeme/yetki hatası — kalan reply'lar iptal: %s",
+                        error_msg[:100],
+                    )
+                    async with async_session() as err_session:
+                        err_session.add(AutoReply(
+                            target_tweet_id=tweet_id,
+                            target_username=target_username,
+                            target_text=tweet_text[:1000],
+                            reply_text=chosen_reply,
+                            status="failed",
+                            error_message=error_msg[:500],
+                        ))
+                        await err_session.commit()
+                    break  # Kalan pending_replies'ı atla — kredi yok
 
                 # Sonucu DB'ye kaydet (KISA session — hemen kapanır)
                 async with async_session() as session:

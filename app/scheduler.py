@@ -3103,13 +3103,13 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 25. X Otomatik Reply — her 5 dakika
+    # 25. X Otomatik Reply — her 30 dakika (API kredi tasarrufu: 48 döngü/gün × 8 hedef = max 384 GET)
     from app.services.twitter_reply_service import auto_reply_cycle
     scheduler.add_job(
         auto_reply_cycle,
-        IntervalTrigger(minutes=5),
+        IntervalTrigger(minutes=30),
         id="auto_reply",
-        name="X Otomatik Reply (5dk)",
+        name="X Otomatik Reply (30dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
