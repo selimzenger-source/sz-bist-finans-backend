@@ -212,7 +212,7 @@ async def generate_ipo_report(ipo) -> dict | None:
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.2,
-                    "max_tokens": 2500,
+                    "max_tokens": 4000,
                 },
             )
 
