@@ -1370,6 +1370,30 @@ def tweet_company_intro(ipo) -> bool:
             if ipo.spk_bulletin_no:
                 spk_text += f" (Bülten {ipo.spk_bulletin_no})"
 
+        # Fon kullanim yerleri — varsa tweette ONCE goster (sirket tanitiminin onunde)
+        fund_usage_text = ""
+        raw_fund = getattr(ipo, "fund_usage", None)
+        if raw_fund:
+            try:
+                import json as _json
+                fu = _json.loads(raw_fund) if isinstance(raw_fund, str) else raw_fund
+                if isinstance(fu, list) and fu:
+                    lines = []
+                    for item in fu[:5]:  # max 5 madde
+                        if isinstance(item, dict):
+                            oran = item.get("oran") or item.get("rate") or item.get("percentage") or ""
+                            hedef = item.get("hedef") or item.get("target") or item.get("description") or ""
+                            if hedef:
+                                lines.append(f"• %{oran} {hedef}" if oran else f"• {hedef}")
+                        elif isinstance(item, str) and item.strip():
+                            lines.append(f"• {item.strip()}")
+                    if lines:
+                        fund_usage_text = "\n\n💼 Fon Kullanım Yerleri:\n" + "\n".join(lines)
+                elif isinstance(fu, str) and fu.strip():
+                    fund_usage_text = f"\n\n💼 Fon Kullanım Yerleri:\n{fu.strip()}"
+            except Exception:
+                pass  # JSON parse hatasi — sessizce atla
+
         # Sirket aciklamasi — paragraf gecisleri korunarak ilk 1-2 paragraf
         desc_text = ""
         if ipo.company_description:
@@ -1384,8 +1408,8 @@ def tweet_company_intro(ipo) -> bool:
             selected = raw_paragraphs[:2]
             tweet_desc = "\n\n".join(selected)
 
-            # Max 1200 karakter (tweet icinde gorsel + diger bilgilerle birlikte)
-            max_desc_len = 1200
+            # Max 900 karakter — fund_usage eklenince toplam uzunluk asmasın
+            max_desc_len = 900
             if len(tweet_desc) > max_desc_len:
                 tweet_desc = tweet_desc[:max_desc_len - 3] + "..."
 
@@ -1399,6 +1423,7 @@ def tweet_company_intro(ipo) -> bool:
             f"{_get_setting('T13_BASLIK')}\n\n"
             f"{clean_name}{ticker_text}"
             f"{spk_text}{sector_text}{price_text}"
+            f"{fund_usage_text}"
             f"{desc_text}\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
