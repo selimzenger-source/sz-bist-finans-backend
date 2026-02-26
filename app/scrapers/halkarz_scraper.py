@@ -486,31 +486,30 @@ class HalkArzDetailParser:
     # ============================================================
 
     def _parse_date_range(self, text: str) -> dict:
-        """'19-20 Şubat 2026' veya '5-6 Şubat 2026' formatini parse eder.
+        """'19-20 Şubat 2026', '26 Şubat - 2 Mart 2026' formatini parse eder.
 
-        Guclendirilmis v2: Saat kaliplari (09:00, 17:00), yil (2026) ve
-        sira numarasi gibi tarih-disi sayilar artik gun olarak alinmiyor.
-        Sadece ay adinin hemen oncesindeki ardisik sayi grubu gun olarak kabul edilir.
+        Guclendirilmis v3: Ay siniri gecen tarih araliklarini destekler.
+        Ornek: "26 Şubat - 2 Mart 2026" → start=26 Feb, end=2 Mar
         """
         result = {}
 
-        # Ay ve yil bul
-        month = None
+        # Yil bul
         year = None
-        month_pos = -1
-        for month_name, month_num in TR_MONTHS.items():
-            pos = text.lower().find(month_name)
-            if pos != -1:
-                month = month_num
-                month_pos = pos
-                break
-
         year_match = re.search(r"(20\d{2})", text)
         if year_match:
             year = int(year_match.group(1))
 
-        if not month or not year:
-            # Fallback: DD/MM/YYYY formati
+        # TUM ay adlarini konumlariyla bul (birden fazla ay olabilir)
+        text_lower = text.lower()
+        found_months = []  # [(position, month_num, month_name), ...]
+        for month_name, month_num in TR_MONTHS.items():
+            pos = text_lower.find(month_name)
+            if pos != -1:
+                found_months.append((pos, month_num, month_name))
+        found_months.sort(key=lambda x: x[0])  # Konuma gore sirala
+
+        if not found_months or not year:
+            # Fallback: DD/MM/YYYY veya DD.MM.YYYY formati
             dates = re.findall(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", text)
             if dates:
                 try:
@@ -524,34 +523,69 @@ class HalkArzDetailParser:
                         pass
             return result
 
-        # Ay adinin hemen oncesindeki metni al — gun sayilari burada
-        before_month = text[:month_pos].strip()
+        def _extract_day_before(txt_segment: str) -> int | None:
+            """Metin parcasindan son gun sayisini cikar."""
+            segment = re.sub(r"\d{1,2}:\d{2}", "", txt_segment)  # Saat cikar
+            if year:
+                segment = segment.replace(str(year), "")
+            segment = segment.strip()
+            day_match = re.search(r"(\d{1,2})\s*$", segment)
+            if day_match:
+                d = int(day_match.group(1))
+                if 1 <= d <= 31:
+                    return d
+            return None
 
-        # Saat kaliplarini cikar (09:00, 17:00 gibi — gun olarak alinmasin)
-        before_month = re.sub(r"\d{1,2}:\d{2}", "", before_month)
-        # Yil'i da cikar (2026 gibi 4 haneli sayinin parcalari alinmasin)
-        before_month = before_month.replace(str(year), "")
-        before_month = before_month.strip()
+        if len(found_months) >= 2:
+            # --- IKI FARKLI AY: "26 Şubat - 2 Mart 2026" ---
+            m1_pos, m1_num, m1_name = found_months[0]
+            m2_pos, m2_num, m2_name = found_months[1]
 
-        # Ay adinin hemen oncesindeki ardisik gun grubunu bul (sondan esle)
-        # "26-27" → [26, 27],  "5,6,7" → [5, 6, 7],  "26" → [26]
-        # Onemli: $ ile sondan eslesir — basta baska sayi varsa (sira no vs) almaz
-        day_range_match = re.search(
-            r"(\d{1,2}(?:\s*[-\u2013,/]\s*\d{1,2})*)\s*$",
-            before_month,
-        )
-        if day_range_match:
-            matched = day_range_match.group(1)
-            days = [int(d) for d in re.findall(r"\d{1,2}", matched) if 1 <= int(d) <= 31]
+            # Ilk ayin oncesindeki gun
+            before_m1 = text[:m1_pos]
+            day1 = _extract_day_before(before_m1)
+
+            # Ikinci ayin oncesindeki gun (ilk ay adinin sonundan itibaren)
+            between = text[m1_pos + len(m1_name):m2_pos]
+            day2 = _extract_day_before(between)
+
+            if day1:
+                try:
+                    result["start"] = date(year, m1_num, day1)
+                except ValueError:
+                    pass
+            if day2:
+                try:
+                    # Ikinci ay icin yil kontrolu (aralik → ocak gecisi)
+                    end_year = year if m2_num >= m1_num else year + 1
+                    result["end"] = date(end_year, m2_num, day2)
+                except ValueError:
+                    pass
         else:
-            days = []
+            # --- TEK AY: "26-27 Şubat 2026" ---
+            month_pos = found_months[0][0]
+            month = found_months[0][1]
 
-        if days:
-            try:
-                result["start"] = date(year, month, min(days))
-                result["end"] = date(year, month, max(days))
-            except ValueError:
-                pass
+            before_month = text[:month_pos].strip()
+            before_month = re.sub(r"\d{1,2}:\d{2}", "", before_month)
+            before_month = before_month.replace(str(year), "").strip()
+
+            day_range_match = re.search(
+                r"(\d{1,2}(?:\s*[-\u2013,/]\s*\d{1,2})*)\s*$",
+                before_month,
+            )
+            if day_range_match:
+                matched = day_range_match.group(1)
+                days = [int(d) for d in re.findall(r"\d{1,2}", matched) if 1 <= int(d) <= 31]
+            else:
+                days = []
+
+            if days:
+                try:
+                    result["start"] = date(year, month, min(days))
+                    result["end"] = date(year, month, max(days))
+                except ValueError:
+                    pass
 
         return result
 

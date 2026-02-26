@@ -376,11 +376,11 @@ class GedikScraper:
             return None
 
     def _parse_date_range(self, raw: str) -> tuple[Optional[date], Optional[date]]:
-        """Tarih araligi parse.
+        """Tarih araligi parse — ay siniri gecen araliklari destekler.
 
         Ornekler:
             '11-12-13 Şubat 2026' → (2026-02-11, 2026-02-13)
-            '28-29-30 Ocak 2026' → (2026-01-28, 2026-01-30)
+            '26 Şubat - 2 Mart 2026' → (2026-02-26, 2026-03-02)
             '7-8-9 Ocak 2026' → (2026-01-07, 2026-01-09)
         """
         if not raw or raw.strip() in ("-", ""):
@@ -396,32 +396,54 @@ class GedikScraper:
 
             raw_lower = raw.lower().strip()
 
-            # Yili bul
             year_match = re.search(r"(\d{4})", raw)
             if not year_match:
                 return None, None
             year = int(year_match.group(1))
 
-            # Ay bul
-            month = None
+            # TUM ay adlarini konumlariyla bul
+            found_months = []
             for ay_name, ay_num in months.items():
-                if ay_name in raw_lower:
-                    month = ay_num
-                    break
+                pos = raw_lower.find(ay_name)
+                if pos != -1:
+                    found_months.append((pos, ay_num, ay_name))
+            found_months.sort(key=lambda x: x[0])
 
-            if not month:
+            if not found_months:
                 return None, None
 
-            # Gun numaralarini bul
-            days = re.findall(r"\b(\d{1,2})\b", raw)
-            days = [int(d) for d in days if int(d) <= 31]
+            def _day_before(segment: str) -> int | None:
+                seg = re.sub(r"\d{1,2}:\d{2}", "", segment)
+                seg = seg.replace(str(year), "").strip()
+                m = re.search(r"(\d{1,2})\s*$", seg)
+                if m:
+                    d = int(m.group(1))
+                    return d if 1 <= d <= 31 else None
+                return None
 
-            if not days:
-                return None, None
+            if len(found_months) >= 2:
+                # IKI FARKLI AY: "26 Şubat - 2 Mart 2026"
+                m1_pos, m1_num, m1_name = found_months[0]
+                m2_pos, m2_num, m2_name = found_months[1]
 
-            start = date(year, month, days[0])
-            end = date(year, month, days[-1]) if len(days) > 1 else start
-            return start, end
+                day1 = _day_before(raw[:m1_pos])
+                between = raw[m1_pos + len(m1_name):m2_pos]
+                day2 = _day_before(between)
+
+                start_d = date(year, m1_num, day1) if day1 else None
+                end_year = year if m2_num >= m1_num else year + 1
+                end_d = date(end_year, m2_num, day2) if day2 else None
+                return start_d, end_d
+            else:
+                # TEK AY: "5-6 Şubat 2026"
+                month = found_months[0][1]
+                days = re.findall(r"\b(\d{1,2})\b", raw)
+                days = [int(d) for d in days if 1 <= int(d) <= 31]
+                if not days:
+                    return None, None
+                start = date(year, month, days[0])
+                end = date(year, month, days[-1]) if len(days) > 1 else start
+                return start, end
 
         except Exception:
             return None, None
