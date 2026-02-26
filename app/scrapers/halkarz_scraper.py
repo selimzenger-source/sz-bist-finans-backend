@@ -720,9 +720,13 @@ class HalkArzScraper:
         # Normalize
         def normalize(s):
             s = s.lower().strip()
+            # Bastaki parantez icindeki takma adlari sil — "(MetropolCard) Metropal..." → "Metropal..."
+            s = re.sub(r"^\([^)]*\)\s*", "", s)
             # A.Ş., A.S., San., Tic. gibi kisaltmalari sil
             s = re.sub(r"\b(a\.ş\.|a\.s\.|san\.|tic\.|ve |ltd\.|şti\.|dış |iç )", "", s)
             s = re.sub(r"[^\w\s]", "", s)
+            # Yalniz kalan "aş" veya "as" kisaltmasini sil (Anonim Şirket / Şirketi — noktasiz)
+            s = re.sub(r"\s+aş\b|\s+as\b", "", s)
             s = re.sub(r"\s+", " ", s).strip()
             return s
 
