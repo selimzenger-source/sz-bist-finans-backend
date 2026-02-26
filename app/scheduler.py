@@ -626,7 +626,7 @@ async def tweet_distribution_morning_job():
 async def archive_old_ipos():
     """25 is gunu gecen halka arzlari arsivler + 25/25 performans tweeti atar.
 
-    Her gun 12:00 TR (UTC 09:00) calisir.
+    Her gun 18:30 TR (UTC 15:30) calisir — borsa kapanisi sonrasi aksam saati.
     Iki kosuldan biri yeterlii:
       1) trading_start tarihi ~37 takvim gunu oncesinde olan
       2) trading_day_count >= 25 olan (DB'de ceiling track verisi ile doldurulur)
@@ -2916,12 +2916,14 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 8. 25 Is Gunu Arsiv + 25/25 Tweet — her gun 12:00 TR (UTC 09:00)
+    # 8. 25 Is Gunu Arsiv + 25/25 Tweet — her gun 18:30 TR (UTC 15:30)
+    # Not: Eskiden 12:00 TR idi, ama 25/25 performans tweeti aksam atilmali
+    # (borsa kapanisi 18:00, kapanis verisi 18:07'de islenir, sonra 25/25 tweet 18:30'da)
     scheduler.add_job(
         archive_old_ipos,
-        CronTrigger(hour=9, minute=0),
+        CronTrigger(hour=15, minute=30),
         id="ipo_archiver",
-        name="IPO Arsivleyici + 25 Gun Tweet (12:00 TR)",
+        name="IPO Arsivleyici + 25 Gun Tweet (18:30 TR)",
         replace_existing=True,
     )
 

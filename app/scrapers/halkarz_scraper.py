@@ -1166,15 +1166,32 @@ async def scrape_halkarz():
                             logger.warning("HalkArz: %s — tweet hatasi: %s", ipo.ticker or ipo.company_name, tweet_err)
 
                         # Bildirim: Dagitim sonucu bildirimi (notify_ipo_result = True olanlara)
-                        try:
-                            from app.services.notification import NotificationService
-                            notif_service = NotificationService(db)
-                            sent_count = await notif_service.notify_allocation_result(
-                                ipo, total_applicants=safe_data.get("total_applicants", 0)
+                        # NOT: Eger IPO zaten "trading" durumundaysa ve bugun gong gunuyse
+                        # bildirim ATMA — sonuclar daha once aciklanmis olmali, scraper gec
+                        # yakalamis demektir. Kullanicilar gong gununde "dagitim sonucu"
+                        # bildirimi almamali.
+                        from datetime import date as _date_type
+                        _today = _date_type.today()
+                        _is_gong_day = (
+                            ipo.status == "trading"
+                            and ipo.trading_start is not None
+                            and ipo.trading_start == _today
+                        )
+                        if _is_gong_day:
+                            logger.info(
+                                "HalkArz: %s — gong gunu, dagitim bildirimi atlanıyor (tweet atildi ama push yok)",
+                                ipo.ticker or ipo.company_name,
                             )
-                            logger.info("HalkArz: %s — dagitim bildirimi %d kullaniciya gonderildi", ipo.ticker or ipo.company_name, sent_count)
-                        except Exception as notif_err:
-                            logger.warning("HalkArz: %s — bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
+                        else:
+                            try:
+                                from app.services.notification import NotificationService
+                                notif_service = NotificationService(db)
+                                sent_count = await notif_service.notify_allocation_result(
+                                    ipo, total_applicants=safe_data.get("total_applicants", 0)
+                                )
+                                logger.info("HalkArz: %s — dagitim bildirimi %d kullaniciya gonderildi", ipo.ticker or ipo.company_name, sent_count)
+                            except Exception as notif_err:
+                                logger.warning("HalkArz: %s — bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
 
             await db.commit()
             logger.info("HalkArz: %d IPO guncellendi", updated_count)
