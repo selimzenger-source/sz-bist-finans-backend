@@ -2134,9 +2134,7 @@ async def daily_ceiling_update():
     global _ceiling_retry_pending
     try:
         from sqlalchemy import select, and_
-        from decimal import Decimal
         from app.models.ipo import IPO, IPOCeilingTrack
-        from app.scrapers.yahoo_finance_scraper import detect_ceiling_floor
 
         async with async_session() as db:
             # Isleme baslayan ve henuz arsivlenmemis IPO'lari bul
@@ -2239,23 +2237,19 @@ async def daily_ceiling_update():
                             current_day = len(days_data)
                             last_close = float(last_day["close"])
 
-                            # Gunluk % degisim hesapla (Decimal tipinde — detect_ceiling_floor Decimal bekler)
+                            # Gunluk % degisim hesapla
                             if len(days_data) > 1:
-                                prev_c = Decimal(str(days_data[-2]["close"]))
+                                prev_c_f = float(days_data[-2]["close"])
                             else:
-                                prev_c = Decimal(str(ipo.ipo_price)) if ipo.ipo_price else Decimal("0")
-                            prev_c_f = float(prev_c)
+                                prev_c_f = float(ipo.ipo_price) if ipo.ipo_price else 0
                             daily_pct = (
                                 ((last_close - prev_c_f) / prev_c_f) * 100
                                 if prev_c_f > 0 else 0
                             )
 
-                            last_det = detect_ceiling_floor(
-                                close_price=Decimal(str(last_day["close"])),
-                                prev_close=prev_c,
-                                high_price=Decimal(str(last_day["high"])) if last_day.get("high") is not None else None,
-                                low_price=Decimal(str(last_day["low"])) if last_day.get("low") is not None else None,
-                            )
+                            # Durum: Excel sync track'ten al (Yahoo yerine)
+                            last_track = tracks[-1]
+                            last_durum = last_track.durum or "not_kapatti"
 
                             # Jitter — ilk IPO haric tweetler arasi 100-120 sn (2 dk) bekle
                             if success_count > 1:
@@ -2273,7 +2267,7 @@ async def daily_ceiling_update():
 
                                 tweet_ok = tweet_daily_tracking(
                                     ipo, current_day, last_close,
-                                    daily_pct, last_det["durum"],
+                                    daily_pct, last_durum,
                                     days_data=days_data,
                                     ceiling_days=ceiling_d,
                                     floor_days=floor_d,
@@ -2285,7 +2279,7 @@ async def daily_ceiling_update():
                                         "gunluk_takip",
                                         ipo.ticker,
                                         tweet_ok,
-                                        f"Gun: {current_day}/25 | %{daily_pct:+.2f} | {last_det['durum']}",
+                                        f"Gun: {current_day}/25 | %{daily_pct:+.2f} | {last_durum}",
                                     )
                                 except Exception:
                                     pass

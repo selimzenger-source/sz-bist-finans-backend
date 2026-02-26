@@ -450,6 +450,7 @@ def live_sync(filepath, interval=15):
     prev_prices = {}       # {ticker: Decimal(son_fiyat)}
     prev_hit_ceiling = {}  # {ticker: bool}
     prev_hit_floor = {}    # {ticker: bool}
+    prev_lots = {}         # {ticker: (alis_lot, satis_lot)} — lot degisimi takibi
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
     opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
@@ -496,6 +497,7 @@ def live_sync(filepath, interval=15):
                 prev_prices.clear()
                 prev_hit_ceiling.clear()
                 prev_hit_floor.clear()
+                prev_lots.clear()
                 pct_alerts_sent.clear()
                 opening_notif_sent = False
                 closing_notif_sent = False
@@ -534,12 +536,19 @@ def live_sync(filepath, interval=15):
                 if son is None or son == 0:
                     continue
 
-                # Fiyat degisti mi?
-                if ticker in prev_prices and prev_prices[ticker] == son:
-                    continue  # Ayni fiyat, atla
+                # Fiyat veya lot degisti mi?
+                alis_lot_raw = row.get("alis_lot")
+                satis_lot_raw = row.get("satis_lot")
+                lot_key = (alis_lot_raw, satis_lot_raw)
+                price_same = ticker in prev_prices and prev_prices[ticker] == son
+                lot_same = prev_lots.get(ticker) == lot_key
+
+                if price_same and lot_same:
+                    continue  # Fiyat ve lot ayni, atla
 
                 # Degismis — track hazirla
                 prev_prices[ticker] = son
+                prev_lots[ticker] = lot_key
 
                 tavan_limit = row.get("tavan_limit")
                 taban_limit = row.get("taban_limit")
@@ -583,13 +592,11 @@ def live_sync(filepath, interval=15):
                 if daily_pct is not None:
                     track["pct_change"] = str(daily_pct)
 
-                # Alis/satis lot (K ve L sutunlari)
-                alis_lot = row.get("alis_lot")
-                satis_lot = row.get("satis_lot")
-                if alis_lot:
-                    track["alis_lot"] = alis_lot
-                if satis_lot:
-                    track["satis_lot"] = satis_lot
+                # Alis/satis lot (K ve L sutunlari — yukarida alis_lot_raw/satis_lot_raw okundu)
+                if alis_lot_raw:
+                    track["alis_lot"] = alis_lot_raw
+                if satis_lot_raw:
+                    track["satis_lot"] = satis_lot_raw
 
                 status = "TAVAN" if hit_ceiling else ("TABAN" if hit_floor else "NORMAL")
                 changed_tracks.append(track)
