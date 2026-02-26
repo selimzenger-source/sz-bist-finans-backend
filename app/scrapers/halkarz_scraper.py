@@ -759,15 +759,36 @@ class HalkArzScraper:
             logger.error("HalkArz detay hatasi (%s): %s", url, e)
             return None
 
-    def match_post_to_ipo(self, post_title: str, ipo_name: str) -> bool:
-        """Fuzzy matching: DB'deki IPO ismi ile site post basligi eslesir mi?"""
+    def match_post_to_ipo(self, post_title: str, ipo_name: str, ipo_ticker: str = None) -> bool:
+        """Fuzzy matching: DB'deki IPO ismi ile site post basligi eslesir mi?
+
+        Oncelik sirasi:
+        0. Ticker eslesmesi (en guvenilir — detay sayfasindaki BIST koduna bakar)
+        1. Normalize edilmis tam eslesme
+        2. Biri digerini icerir
+        3. Ilk kelime eslesmesi (min 4 karakter)
+        4. Ilk 2 kelime eslesmesi
+        """
+        # 0. Ticker-bazli eslesme — en guvenilir yontem
+        if ipo_ticker:
+            # Post basliginda ticker geciyorsa direkt esles
+            ticker_upper = ipo_ticker.upper()
+            title_upper = post_title.upper()
+            if ticker_upper in title_upper:
+                return True
+            # Slug'da ticker geciyorsa (gentas → GENKM icin slug'da olmaz ama bazi durumlarda ise yarar)
+
         # Normalize
         def normalize(s):
             s = s.lower().strip()
+            # Unicode normalizasyonu — NFC (composed form) ile tutarlilik sagla
+            s = unicodedata.normalize("NFC", s)
             # Bastaki parantez icindeki takma adlari sil — "(MetropolCard) Metropal..." → "Metropal..."
             s = re.sub(r"^\([^)]*\)\s*", "", s)
             # A.Ş., A.S., San., Tic. gibi kisaltmalari sil
             s = re.sub(r"\b(a\.ş\.|a\.s\.|san\.|tic\.|ve |ltd\.|şti\.|dış |iç )", "", s)
+            # Tam Turkce ticari kelimeleri de sil (kisaltma vs tam yazi farki icin)
+            s = re.sub(r"\b(sanayi|ticaret|pazarlama|holding|enerji|gıda|teknoloji|hizmetler|hizmet|insaat|inşaat|mühendislik|muhendislik|madencilik|tarim|tarım|otomotiv|elektronik|yatırım|yatirim|danışmanlık|danismanlik|gayrimenkul|menkul|kıymetler|kiymetler|sağlık|saglik|ilaç|ilac|tekstil|turizm|lojistik|yazılım|yazilim|perakende|giyim|savunma|havacılık|havacilik|demir|çelik|celik|plastik|ambalaj|kağıt|kagit|mobilya|deri)\b", "", s)
             s = re.sub(r"[^\w\s]", "", s)
             # Yalniz kalan "aş" veya "as" kisaltmasini sil (Anonim Şirket / Şirketi — noktasiz)
             s = re.sub(r"\s+aş\b|\s+as\b", "", s)
@@ -786,16 +807,16 @@ class HalkArzScraper:
             return True
 
         # 3. Ilk kelime eslesme (en az 4 karakter)
-        first_word_post = norm_post.split()[0] if norm_post.split() else ""
-        first_word_ipo = norm_ipo.split()[0] if norm_ipo.split() else ""
+        words_post = norm_post.split()
+        words_ipo = norm_ipo.split()
+        first_word_post = words_post[0] if words_post else ""
+        first_word_ipo = words_ipo[0] if words_ipo else ""
 
         if len(first_word_post) >= 4 and first_word_post == first_word_ipo:
             return True
 
         # 4. Ilk 2 kelime eslesme
-        words_post = norm_post.split()[:2]
-        words_ipo = norm_ipo.split()[:2]
-        if len(words_post) >= 2 and words_post == words_ipo:
+        if len(words_post) >= 2 and len(words_ipo) >= 2 and words_post[:2] == words_ipo[:2]:
             return True
 
         return False
@@ -884,7 +905,7 @@ async def scrape_halkarz():
                 matched_post = None
 
                 for post in posts:
-                    if scraper.match_post_to_ipo(post["title"], ipo.company_name):
+                    if scraper.match_post_to_ipo(post["title"], ipo.company_name, ipo_ticker=ipo.ticker):
                         matched_post = post
                         break
 
@@ -895,6 +916,15 @@ async def scrape_halkarz():
                 # 4. Detay sayfasina git
                 detail = await scraper.fetch_detail_page(matched_post["link"])
                 if not detail:
+                    continue
+
+                # 4b. Ticker dogrulama — detay sayfasindaki ticker DB'dekiyle uyusmali
+                detail_ticker = detail.get("ticker", "")
+                if detail_ticker and ipo.ticker and detail_ticker.upper() != ipo.ticker.upper():
+                    logger.warning(
+                        "HalkArz: %s ticker uyumsuzlugu! DB=%s, sayfa=%s, post=%s — atlaniyor",
+                        ipo.company_name, ipo.ticker, detail_ticker, matched_post["title"],
+                    )
                     continue
 
                 # 5. Admin kilitli alanlari atla
@@ -936,6 +966,10 @@ async def scrape_halkarz():
                 # prospectus_url ilk kez set ediliyorsa AI analiz icin flag
                 prospectus_url_newly_detected = False
 
+                # Kritik alanlar — zaten deger varsa UYAR (admin'in set etmis olabilir)
+                _CRITICAL_FIELDS = {"subscription_start", "subscription_end", "subscription_hours",
+                                    "trading_start", "ipo_price", "total_lots"}
+
                 for scrape_key, db_field in field_mapping.items():
                     if scrape_key in safe_data and safe_data[scrape_key] is not None:
                         if db_field is None:
@@ -945,6 +979,13 @@ async def scrape_halkarz():
 
                         # Sadece bos alanlari doldur VEYA guncelleme varsa yaz
                         if current_val is None or current_val != new_val:
+                            # Kritik alan degisiyorsa logla
+                            if db_field in _CRITICAL_FIELDS and current_val is not None and current_val != new_val:
+                                logger.warning(
+                                    "HalkArz: %s — %s degisiyor: %s → %s (manual_fields: %s)",
+                                    ipo.ticker or ipo.company_name, db_field,
+                                    current_val, new_val, manual,
+                                )
                             # trading_start ilk kez set ediliyorsa isaretle
                             if db_field == "trading_start" and current_val is None:
                                 trading_start_newly_detected = True
