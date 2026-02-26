@@ -682,15 +682,28 @@ HASHTAG KURALI (COK ONEMLI):
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
 
-❌ KOTU ornek (hallusinasyon + kaynak atfi + yuzeysel):
-"Piyasalar bugun yukselis kaydetti. (Kaynak: halkarz.com) BESTE tavan yaptı. Yatirimcilara tavsiyemiz..."
+❌ KOTU ornek (dunu anlatiyor, oval yorum yok, yuzeysel):
+"BESTE dun tavan yapti, 7. gun tamamlandi. EMPAE halka arz sureci devam ediyor."
 
-✅ IYI ornek (veri bazli + kaynak yok + derinlikli):
-"BIST 100 sabah seansinda %0.8 yukselerek 9.840 puandan basladi. Fed faiz kararinin beklenti dahilinde
-gelmesiyle global risk istahi artti. Halka arz tarafinda BESTE 7. islem gununde tavan serisini koruyor;
-tavan_seri_gun=7 verisi bunu dogruluyor. EMPAE ise ilk islem gunune yaklasıyor."
+✅ IYI ornek — HALKA ARZ BÖLÜMÜ (bugunü ve beklentiyi anlatiyor, oval yorum var):
+"EMPAE (Empa Teknoloji): Bugün borsadaki ilk islem gunu! Acilis seansinda tavan serisi
+baslatip baslatamaycagi merakla izlenecek. Sektor genelindeki alici istahi acilis icin
+belirleyici olacak — ilk dakikalarda olusan derinlige gore pozisyon almak daha saglikli.
 
-Ciktin her zaman ikinci ornege yakin olmali: somut rakamlar, veri bazli yorumlar, kaynak atfi YOK.
+Tavan Serilerinde Kritik Esik:
+• BESTE: 7. islem gunune giriyor. Bu noktada tavan surme ihtimali devam etse de kar
+  realizasyonu riskini gormezden gelmemek gerekiyor; 34,26 TL destek seviyesi onemli.
+• ATATR: 5 gunluk tavan serisinde %60 primiyle dikkat cekiyor. Bugün satici baskisi
+  gelebilir — islem hacmini takip etmek kritik.
+
+Yeni SPK Onaylılar: Gentaş ve Metropal dagitim takvimini bekliyor. Bu hafta aciklama
+gelmesi halinde talep yogunlasacak; yatirimci radarinda tutulmali."
+
+Halka arz bolumunde DAIMA bu tarzda yaz:
+- Ilk islem gunu hisseleri icin acilis beklentisi + sektor yorumu
+- Tavan serisi hisseleri icin bugun ne olabilir (kar realizasyonu? tavan devam? destek?)
+- Yeni onaylılar icin kisa 1-2 cumle beklenti
+- ASLA sadece "dun tavan yapti" deme — BUGUN ne olacak anlat
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
 📊 AÇILIŞ RAPORU — [gun_adi], [tarih]
@@ -712,18 +725,40 @@ FORMAT:
 [Etkinlik yoksa bu bolumu atla]
 
 🏦 Halka Arz Takibi
-[Bu bolumde GELECEGe bak — dun ne oldu degil, BUGUN ne bekleniyor yaz]
-[ISLEMDEKI halka arzlar (ceiling_tracks verisi olanlar): bugunku beklenti ve olasilik yorumu yap]
-  → Tavan serisine devam edebilir mi? Tavan kiriildi mi? Kisa vadeli beklenti nedir? (oval yorum — "Bu performans...")
-  → Tavan serisi bilgisini SADECE tavan_seri_gun ve daily_tracks'ten al
-  → Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL
-[YAKLASAN HALKA ARZ ETKINLIKLERI'ni de bu bolumde ozet olarak yaz:]
-  → YENI_ONAY (LXGYO, Gentaş, Metropal gibi): "Yeni SPK onaylı halka arzlar beklenti yaratıyor" tarzinda 1-2 cumle
-  → DAGITIMDA olanlar: basvuru durumu + "talep toplanıyor, sonuçlar bekleniyor" gibi gelecek odakli
-  → ILK_ISLEM_BUGUN/YARIN: "Bugün/yarın borsaya giriyor, açılış beklentisi..." oval yorum yap
-  → ISLEM_BEKLENIYOR: "Dağıtım sonuçları açıklanırsa bugün giriş yapabilir" tarzında
-[Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
-[ONEMLI: Sadece "dun tavan yapti" deme — "bugün X. gününde tavan sürmesi bekleniyor / tavan kırılabilir" gibi ileriye bak]
+
+⭐ BU BOLUM ICIN ZORUNLU YAZIM TARZI — ASAGIDAKI SOMUT ORNEGI AYNEN TAKLIT ET:
+
+✅ MUKEMMEL ORNEK (bu stili yaz — rakamlar/hisseler farkli olacak ama ton ve yaklasim AYNI olmali):
+---
+🏦 Halka Arz Takibi
+
+EMPAE (Empa Teknoloji): Bugün borsadaki ilk işlem günü! Gözler açılış seansında oluşacak
+tavan serisi beklentisinde. Teknoloji sektöründeki güçlü hava EMPAE için pozitif bir
+rüzgar yaratabilir — ancak piyasa geneli belirleyici olacak.
+
+SVGYO (Sevgi GYO): Talep toplama sürecinde ikinci gün. Yarın (Cuma) son gün olduğu için
+bugün katılımın zirve yapması bekleniyor. GYO sektörüne olan ilgi ve portföy yapısı,
+katılım sayısını belirleyecek ana unsur.
+
+Tavan Serilerinde Kritik Eşik:
+• BESTE: Dün gelen ilk taban kapanışı sonrası bugün 34,26 TL seviyesinde dengelenip
+  dengelenmeyeceği izlenecek. Kurumsal taraftan gelecek alımlar takibimizde.
+• ATATR: 5 gündür tavan giden hissede bugün kâr realizasyonu riskine karşı dikkatli
+  olunmalı. %60,9 primle piyasa ortalamasının üzerinde bir performans sergiliyor.
+
+Yeni SPK Onaylılar: LXGYO, Gentaş ve Metropal dağıtım takvimini bekliyor.
+Yatırımcı radarında olan bu 3 halka arz için takvim netleştikçe ilgi artacak.
+---
+
+KURALLARI:
+- Ilk islem gunu: "Bugün borsadaki ilk islem gunu! Gözler... pozitif/temkinli rüzgar" tarzı
+- Dagitimda: "Talep toplama X. gün, [son gun varsa 'Yarın son gün!']... belirleyici unsur"
+- Tavan serisi: "X. islem gununde, bugün kar realizasyonu riski / tavan kırılma ihtimali..."
+- Yeni onaylar: "dağıtım takvimini bekliyor, yatırımcı radarında"
+- YASAK: "Dün tavan yaptı" gibi dünü anlatma — bugünü ve beklentiyi anlat
+- YASAK: Veri olmayan hisse için kesin tavan garantisi verme — "olabilir", "bekleniyor" kullan
+- Kapanış fiyatini daily_tracks'ten oku ve yaz (orn "34,26 TL seviyesinde")
+- Tavan serisi sayisini SADECE tavan_seri_gun alanından al
 
 📌 Gunun Beklentileri
 [kisa ozet, dikkat edilecekler]
