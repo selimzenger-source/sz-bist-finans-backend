@@ -90,9 +90,9 @@ SPESİFİK YAKALAMA KURALLARI — bunları mutlaka çıkar:
   "key_risk": "en kritik tek risk (max 100 karakter, spesifik)"
 }
 
-MADDE SAYISI: Olumlu 6-8 madde, Olumsuz 6-8 madde. Kesinlikle 6'dan az olmamalı.
-TEKİL KONU KURALI: Her madde FARKLI konuyu ele almalı — aynı konuyu farklı söyleyişle tekrarlama YASAK. Her madde yeni, özgün bir bilgi içermeli.
-KATEGORI DAĞILIMI: 6+ madde varsa en az 3 farklı kategoriden (Finansal / Risk / Fon Kullanımı / Ortaklık / Büyüme / Hukuki) olmalı.
+MADDE SAYISI: Hedef olumlu 6-8, olumsuz 6-8 madde. PDF'te yeterli bilgi varsa bu kadar çıkar; bilgi yoksa uydurmak YASAK — o zaman 4-5 madde de olabilir.
+TEKİL KONU KURALI: Her madde FARKLI konuyu ele almalı — aynı konuyu farklı söyleyişle tekrarlama YASAK. Tekrar edeceksen o maddeyi yazma.
+KATEGORI DAĞILIMI: Mümkünse en az 3 farklı kategoriden (Finansal / Risk / Fon Kullanımı / Ortaklık / Büyüme / Hukuki) madde çıkar.
 FORMAT: Her madde max 140 karakter. Türkçe, net. SADECE JSON döndür."""
 
 
