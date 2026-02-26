@@ -224,7 +224,9 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
-        max_pages = min(total_pages, 60)  # Maks 60 sayfa (maliyet kontrolü)
+        # İlk 20 sayfa yeterli: kapak + içindekiler + izahname özeti + risk faktörlerinin başı
+        # Daha fazla sayfa = çok yavaş (her 10 sayfa ~1 dk API çağrısı)
+        max_pages = min(total_pages, 20)
 
         # Sayfaları düşük çözünürlüklü gri JPEG olarak render et
         page_images = []
@@ -242,9 +244,10 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         logger.info("Vision OCR: %d/%d sayfa render edildi", len(page_images), total_pages)
 
-        # 15’er sayfalık batch’ler halinde Claude Vision’a gönder
+        # 10’ar sayfalık batch’ler halinde Claude Vision’a gönder
+        # (max 2 batch = max 2 API çağrısı = ~2 dakika)
         all_texts = []
-        batch_size = 15
+        batch_size = 10
 
         for batch_start in range(0, len(page_images), batch_size):
             batch = page_images[batch_start:batch_start + batch_size]
@@ -265,7 +268,7 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
                 })
 
             try:
-                with _httpx.Client(timeout=120) as hcl:
+                with _httpx.Client(timeout=90) as hcl:  # 90s per batch
                     resp = hcl.post(
                         _ABACUS_URL,
                         headers={
@@ -570,11 +573,13 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
             return False
 
         # Metin çıkar (sync — run in executor)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         pdf_text = await loop.run_in_executor(None, extract_pdf_text, pdf_path)
-        if not pdf_text or len(pdf_text) < 500:
-            logger.error("PDF metni çok kısa veya boş: %s", pdf_url)
+        if not pdf_text or len(pdf_text) < 200:
+            logger.error("PDF metni çok kısa veya boş (%d karakter): %s",
+                         len(pdf_text) if pdf_text else 0, pdf_url)
             return False
+        logger.info("PDF metin çıkarıldı: %d karakter — ipo_id=%d", len(pdf_text), ipo_id)
 
         # AI analiz
         analysis = await analyze_with_ai(pdf_text, company_name, ipo_price)
@@ -624,7 +629,7 @@ async def _post_analysis_actions(
         img_path = None
         try:
             from app.services.prospectus_image import generate_prospectus_analysis_image
-            img_path = await asyncio.get_event_loop().run_in_executor(
+            img_path = await asyncio.get_running_loop().run_in_executor(
                 None,
                 generate_prospectus_analysis_image,
                 company_name,
