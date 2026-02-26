@@ -56,6 +56,13 @@ _FINANCE_KEYWORDS = [
     "finansal durum", "özet finansal", "mali tablo",
     "gelir tablosu", "nakit akış", "özkaynak",
     "hasılat", "net kâr", "brüt kâr", "ebitda",
+    "bilanço", "kâr veya zarar", "kar veya zarar",
+    "finansal bilgiler", "finansal tablo",
+    "dönem kârı", "dönem karı", "brüt kar",
+    "toplam varlıklar", "toplam yükümlülükler",
+    "kısa vadeli", "uzun vadeli",
+    "faaliyet kârı", "faaliyet geliri",
+    "satış gelirleri", "net satışlar",
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -79,8 +86,19 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
   - CAGR → "Yıllık Bileşik Büyüme Oranı", BDDK → tam yazılabilir (kurum adı)
   - SA → "Sermaye Artırımı", OS → "Ortak Satışı", HA → "Halka Arz"
   Kısaca: Okuyucu hiçbir kısaltmayı açmak zorunda kalmamalı.
-• "BULUNAMADI" YASAK: "Finansal tablo bulunamadı", "Veri tespit edilemedi" gibi ifadeler YAZMA.
+• "BULUNAMADI" / "EKSİK" YASAK: "Finansal tablo bulunamadı", "Veri tespit edilemedi",
+  "kritik finansal veriler eksik", "tam değerlendirme yapılamıyor" gibi ifadeler KESİNLİKLE YAZMA.
   Bilgi yoksa o maddeyi hiç yazma — yokluğu rapor etme.
+
+  ÖNEMLİ UYARI: SPK mevzuatı gereği TÜM izahnamelerde şunlar ZORUNLU olarak bulunur:
+  - Net kâr/zarar, bilanço, gelir tablosu, nakit akış tablosu
+  - Ortakların hisse satış yasağı (lock-up) süreleri ve taahhütleri
+  - Halka arz sonrası pay dağılım oranları (tahsisat)
+  - Borç yapısı, özkaynak bilgileri
+  Bu bilgiler PDF'te MUTLAKA vardır. Eğer metin çıkarımında bulamadıysan, bu senin
+  okuyamadığın anlamına gelir — "eksik" veya "belirtilmemiş" deme. O maddeyi ATLA.
+  Sakın "veriler eksik" diye olumsuz madde yazma — bu HER ZAMAN YANLIŞLIK olur.
+
 • YAZIM HATASI: Her kelimeyi kontrol et. OCR kaynaklı bozukluklar olabilir — düzelt:
   "üçlü" → "güçlü", "ıasılat" → "hasılat" gibi bozuk kelimeleri düzgün yaz.
   Cümle bozukluğu YAPMA — her cümleyi yaz, oku, kontrol et.
@@ -483,6 +501,67 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         return []
 
 
+def _extract_tables_pdfplumber(pdf_path: str) -> str:
+    """pdfplumber ile finansal tabloları yapılandırılmış metin olarak çıkarır.
+
+    İzahnamelerdeki çok sütunlu finansal tablolar düz metin çıkarımında
+    karışır. Bu fonksiyon tabloları satır-sütun formatında çıkarır.
+    """
+    try:
+        tables_text = []
+        with pdfplumber.open(pdf_path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                try:
+                    page_tables = page.extract_tables()
+                    if not page_tables:
+                        continue
+                    for t_idx, table in enumerate(page_tables):
+                        if not table or len(table) < 2:
+                            continue
+                        # Tablonun finansal veri içerip içermediğini kontrol et
+                        table_text = " ".join(
+                            str(cell or "") for row in table for cell in row
+                        ).lower()
+                        is_financial = any(
+                            kw in table_text
+                            for kw in [
+                                "hasılat", "hasilat", "satış", "gelir",
+                                "kâr", "kar", "zarar", "borç", "borc",
+                                "varlık", "varlik", "yükümlülük",
+                                "nakit", "özkaynak", "sermaye",
+                                "ebitda", "faaliyet", "brüt", "brut",
+                                "bilanço", "bilanco", "aktif", "pasif",
+                            ]
+                        )
+                        if not is_financial:
+                            continue
+
+                        # Tabloyu okunabilir formata çevir
+                        rows_formatted = []
+                        for row in table:
+                            cells = [str(c or "").strip() for c in row]
+                            if any(cells):  # Boş satırları atla
+                                rows_formatted.append(" | ".join(cells))
+                        if rows_formatted:
+                            tables_text.append(
+                                f"\n[S.{i+1} — Finansal Tablo]\n"
+                                + "\n".join(rows_formatted)
+                            )
+                except Exception:
+                    continue
+
+        combined = "\n".join(tables_text)
+        if combined:
+            logger.info(
+                "pdfplumber tablo çıkarımı: %d tablo, %d karakter",
+                len(tables_text), len(combined),
+            )
+        return combined
+    except Exception as e:
+        logger.warning("pdfplumber tablo çıkarma hatası: %s", e)
+        return ""
+
+
 def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
     """PDF’ten metin çıkarır. PyMuPDF → pdfplumber → Tesseract → Vision OCR.
 
@@ -563,7 +642,7 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             # Finansal bölüm
             if any(kw in text_lower for kw in ["finansal durum", "özet finansal", "mali tablo", "gelir tablosu"]):
                 in_finance_section = True
-            if in_finance_section and len(finance_section_text) > 12:
+            if in_finance_section and len(finance_section_text) > 20:
                 in_finance_section = False
             if in_finance_section:
                 finance_section_text.append(f"[S.{i+1}] {text}")
@@ -577,7 +656,12 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
                 fund_usage_text.append(f"[S.{i+1}] {text}")
 
             # Ortaklık yapısı bölümü
-            if any(kw in text_lower for kw in ["ortaklık yapısı", "pay sahipliği", "sermaye yapısı", "lock-up", "lock up"]):
+            if any(kw in text_lower for kw in [
+                "ortaklık yapısı", "pay sahipliği", "sermaye yapısı",
+                "lock-up", "lock up", "satmama taahhüd", "satış yasağı",
+                "halka arz sonrası", "tahsisat", "pay dağılım",
+                "hisse satış", "satmama süresi",
+            ]):
                 in_ownership_section = True
             if in_ownership_section and len(ownership_text) > 5:
                 in_ownership_section = False
@@ -588,31 +672,54 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             logger.warning("PDF’ten metin çıkarılamadı: %s", pdf_path)
             return None, 0
 
+        # ─── Tablo çıkarma (finansal tablolar için kritik) ───
+        structured_tables = _extract_tables_pdfplumber(pdf_path)
+
         # Öncelikli metin birleştirme — önemli bölümler önce
         combined = ""
 
+        # 1. Yapılandırılmış finansal tablolar (en yüksek öncelik)
+        if structured_tables:
+            combined += "\n\n=== YAPILANDIRILMIŞ FİNANSAL TABLOLAR ===\n"
+            combined += structured_tables[:30_000]
+
+        # 2. Risk bölümü
         if risk_section_text:
             risk_combined = "\n\n=== RİSK FAKTÖRLERİ BÖLÜMÜ ===\n" + "\n".join(risk_section_text)
-            combined += risk_combined[:60_000]
+            combined += risk_combined[:50_000]
 
+        # 3. Finansal bilgiler (metin bazlı)
         if finance_section_text:
             fin_combined = "\n\n=== FİNANSAL BİLGİLER ===\n" + "\n".join(finance_section_text)
             combined += fin_combined[:25_000]
 
+        # 4. Fon kullanımı
         if fund_usage_text:
             fund_combined = "\n\n=== FON KULLANIM YERLERİ ===\n" + "\n".join(fund_usage_text)
             combined += fund_combined[:15_000]
 
+        # 5. Ortaklık yapısı
         if ownership_text:
             own_combined = "\n\n=== ORTAKLIK YAPISI & LOCK-UP ===\n" + "\n".join(ownership_text)
             combined += own_combined[:15_000]
 
+        # 6. Genel metin — baş + orta + son (ortayı ATLAMIYORUZ)
         full_text = "\n\n".join(all_pages_text)
         remaining_budget = _MAX_PDF_CHARS - len(combined)
         if remaining_budget > 10_000:
-            start_chunk = full_text[:int(remaining_budget * 0.6)]
-            end_chunk   = full_text[-int(remaining_budget * 0.4):]
-            combined = (f"\n\n=== İZAHNAME TAM METNİ (ÖZET) ===\n{start_chunk}\n\n...[ORTA BÖLÜMLER ATLANMIŞ]...\n\n{end_chunk}\n\n{combined}")
+            # Baştan %35 + ortadan %30 + sondan %35 al
+            third = int(remaining_budget * 0.35)
+            mid_budget = int(remaining_budget * 0.30)
+            start_chunk = full_text[:third]
+            mid_start = len(full_text) // 3
+            mid_chunk = full_text[mid_start:mid_start + mid_budget]
+            end_chunk = full_text[-third:]
+            combined = (
+                f"\n\n=== İZAHNAME METNİ (BAŞ) ===\n{start_chunk}"
+                f"\n\n=== İZAHNAME METNİ (ORTA — Finansal Bölge) ===\n{mid_chunk}"
+                f"\n\n=== İZAHNAME METNİ (SON) ===\n{end_chunk}"
+                f"\n\n{combined}"
+            )
 
         pages_count = len(all_pages_text)
         logger.info(
