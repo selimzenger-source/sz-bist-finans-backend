@@ -1137,11 +1137,11 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         draw.text((logo_x, footer_y + 12), site_text,
                   fill=ORANGE, font=font_footer)
 
-        # Disclaimer (sag)
-        disc_text = "YZ destekli bildirimdir"
-        db = font_footer_sm.getbbox(disc_text)
-        dw = db[2] - db[0]
-        draw.text((width - padding - dw, footer_y + 14), disc_text,
+        # Sag taraf — BIST Haber & Arz
+        right_text = "BIST Haber & Arz"
+        rb = font_footer_sm.getbbox(right_text)
+        rw = rb[2] - rb[0]
+        draw.text((width - padding - rw, footer_y + 14), right_text,
                   fill=GRAY, font=font_footer_sm)
 
         # Watermark
