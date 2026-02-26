@@ -45,10 +45,10 @@ _TWEET_LOOKUP_URL = "https://api.twitter.com/2/tweets/{tweet_id}"
 _TWEET_POST_URL   = "https://api.twitter.com/2/tweets"
 _USER_LOOKUP_URL  = "https://api.twitter.com/2/users/{user_id}"
 
-JITTER_MIN = 25   # saniye
-JITTER_MAX = 55   # saniye
+JITTER_MIN = 45    # saniye — doğal görünüm için rastgele gecikme
+JITTER_MAX = 180   # saniye (3 dk) — çok hızlı cevap robot gibi görünür
 
-_MAX_TWEET_AGE_MINUTES = 5    # 5 dakikadan eski mention'lara cevap verme (since_id ile zaten sadece yeniler gelir)
+_MAX_TWEET_AGE_MINUTES = 20   # 20 dakikadan eski mention'lara cevap verme (since_id ile zaten sadece yeniler gelir)
 _MAX_REPLIES_PER_CYCLE = 3    # tek döngüde max 3 yanıt (spam önleme)
 
 _MENTIONS_REPLY_LOCK   = asyncio.Lock()
