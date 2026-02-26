@@ -38,6 +38,14 @@ YAZIM KURALLARI:
 - Emoji kullanma.
 - Dolgu paragraf yazma. Her cumle yeni bilgi tasimali.
 
+KAYNAK YASAGI (MUTLAK):
+- HICBIR kaynak, referans, link veya web sitesi ADI yazma.
+- "Gedik Yatirim", "gedik.com", "halkarztakip.com", "KAP", "isyatirim.com.tr" gibi kaynak ASLA belirtme.
+- "X kaynagina gore", "Y sitesinde", "Z'ye gore" gibi ifadeler YASAK.
+- Veriyi dogrudan yaz, kaynagini soyleme. Ornek: "Tahmini katilimci sayisi 200.000-300.000 araliginda" DE, "Gedik verisine gore..." DEME.
+- Bu kurallar tum alanlar icin gecerli: analysis, how_to_participate, lot_estimate_explanation, sector_comparison, recommendation.
+- Kural ihlali durumunda rapor REDDEDILIR.
+
 RAPOR FORMATI (JSON):
 {
   "overall_score": <1.0 ile 10.0 arasi puan — ondalikli>,
@@ -74,9 +82,8 @@ ALAN DETAYLARI:
 
 3. lot_estimate_explanation (en az 120 kelime):
    - Toplam lot ve dagitim yontemine gore tahmini kisi basi lot
-   - Eger gecmis halka arz tahsisat verileri verilmisse: benzer dagitim yontemli halka arzlardaki katilimci sayisi ve lot dagitimini referans al
+   - Eger gecmis halka arz tahsisat verileri verilmisse: benzer dagitim yontemli halka arzlardaki katilimci sayisi ve lot dagitimini baz al
    - Senaryo tablosu verilmisse: "100K kisi katilirsa X lot, 500K kisi katilirsa Y lot" seklinde ACIKLA
-   - Gedik tahmini varsa belirt
    - Oransal dagitimsa mekanizmayi acikla
 
 4. scenario_table (JSON dizisi):
@@ -226,7 +233,7 @@ def _build_lot_scenario_table(ipo) -> str:
             lines.append(f"  {threshold:,} kisi → {est} lot")
 
     if ipo.estimated_lots_per_person:
-        lines.append(f"\nGedik Yatirim Tahmini (500K katilimci varsayimi): kisi basi {ipo.estimated_lots_per_person} lot")
+        lines.append(f"\n500.000 katilimci varsayiminda tahmini kisi basi: {ipo.estimated_lots_per_person} lot")
 
     return "\n".join(lines)
 
