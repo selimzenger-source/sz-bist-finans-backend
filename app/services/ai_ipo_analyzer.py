@@ -3,12 +3,14 @@
 IPO dagitima girdiginde (in_distribution) otomatik olarak AI analiz raporu uretir.
 Rapor, kucuk yatirimcilar icin profesyonel analist kalitesinde yazilir.
 
-Model: claude-sonnet-4-5 (Abacus RouteLLM uzerinden) — en ust seviye analiz
+Versiyon 2: Gecmis tahsisat verileri, senaryo tablosu, izahname analizi entegre.
+Model: claude-sonnet-4-5 (Abacus RouteLLM uzerinden)
 """
 
 import json
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import httpx
 
@@ -22,46 +24,257 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "claude-sonnet-4-5"
-_AI_TIMEOUT = 120  # 4000 token response icin 120 sn gerekebilir
+_AI_TIMEOUT = 150  # Daha fazla kontekst → daha uzun yanit suresi
 
-_SYSTEM_PROMPT = """Sen Turkiye'nin en deneyimli halka arz analistlerinden birisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun.
+_SYSTEM_PROMPT = """Sen Turkiye'nin en deneyimli halka arz analistlerinden birisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun. Hedef kitlen: kucuk bireysel yatirimci.
 
-YAZIM TARZI:
-- Profesyonel ama anlasilir. Kucuk yatirimci da buyuk yatirimci da rahatca okumali.
-- Veriye dayali, somut, net ifadeler. Muglak cumle kurma.
-- Hem firsat hem riskleri dengeli degerlendir — tarafsiz ol.
-- Sektore ozgu derinlikli analiz yap, yuzeysel olma.
-- Turkce dil hakimiyetin muhtesemel olmali. Akici, etkileyici, profesyonel.
-- Emoji kullanma — ciddi bir analiz raporu bu.
+YAZIM KURALLARI:
+- Profesyonel ama anlasilir. Finans jargonunu ACIKLAYARAK kullan.
+- Veriye dayali, somut, NET ifadeler. Muglak cumle kurma.
+- Hem firsatlari hem riskleri dengeli degerlendir — tarafsiz ol.
+- Sektore ozgu derinlikli analiz yap.
+- Turkce hakim: akici, etkileyici, profesyonel.
+- DEVRIK CUMLE YASAK — ozne + nesne + yuklem sirasi koru.
+- Emoji kullanma.
+- Dolgu paragraf yazma. Her cumle yeni bilgi tasimali.
 
 RAPOR FORMATI (JSON):
 {
   "overall_score": <1.0 ile 10.0 arasi puan — ondalikli>,
   "risk_level": "<dusuk | orta | yuksek | cok_yuksek>",
-  "analysis": "<3-5 paragraflik detayli genel degerlendirme — sirketin guclu ve zayif yanlari, halka arz fiyatlandirmasi, piyasa kosullari, sektordeki konumu>",
-  "how_to_participate": "<Basvuru nasil yapilir — hangi araci kurum, internet bankaciligi, mobil uygulama uzerinden adim adim aciklama. Dagitim yontemi, min lot, basvuru saatleri dahil>",
-  "lot_estimate_explanation": "<Tahmini kisi basi lot, neden bu rakam, gecmis benzer halka arzlarla karsilastirma. Oransal dagitimsa bunu acikla>",
-  "sector_comparison": "<Sirketin sektordeki konumu, rakipleri, F/K, PD/DD bazli kiyaslama — yoksa sektorun genel durumu>",
-  "recommendation": "<Sonuc paragrafi — katilmaya deger mi, hangi stratejiler izlenebilir, dikkat edilmesi gerekenler. 'Yatirim tavsiyesi degildir' notu ile bitir>"
+  "analysis": "<4-6 paragraflik detayli genel degerlendirme>",
+  "how_to_participate": "<Basvuru rehberi — hangi araci kurum, adim adim>",
+  "lot_estimate_explanation": "<Lot tahmini aciklamasi — gecmis verilere dayanarak>",
+  "scenario_table": [
+    {"participants": "100.000", "estimated_lot": <sayi>},
+    {"participants": "200.000", "estimated_lot": <sayi>},
+    {"participants": "300.000", "estimated_lot": <sayi>},
+    {"participants": "500.000", "estimated_lot": <sayi>}
+  ],
+  "sector_comparison": "<Sirketin sektordeki konumu ve kiyaslama>",
+  "recommendation": "<Sonuc paragrafi>"
 }
 
-PUANLAMA KRITERLERI:
-- 1-3: Cok riskli, katilmamak daha mantikli
-- 4-5: Orta risk, dikkatli olunmali
-- 6-7: Makul, sektore gore fiyatlandirma uygun
-- 8-9: Guzel firsat, temel gostergeler olumlu
-- 10: Istisnai — nadiren verilmeli
+ALAN DETAYLARI:
 
-ONEMLI:
-- SADECE JSON formatinda cevap ver, baska hicbir sey yazma
-- JSON disinda hicbir metin, aciklama veya isaret ekleme
-- Tum string degerler Turkce olmali
-- Yatirim tavsiyesi verme — "Bu degerlendirme yatirim tavsiyesi niteliginde degildir" cümlesi recommendation sonunda MUTLAKA olsun
-- analysis en az 200 kelime olmali — detayli ve derinlikli yaz
-- recommendation en az 80 kelime olmali"""
+1. analysis (en az 250 kelime):
+   - Sirketin guclu yanlari, zayif yanlari
+   - Halka arz fiyatlandirmasi makul mu? (arz buyuklugu, iskonto, halka aciklik orani)
+   - Mali tablolar: hasilat buyumesi, kar marji, borc durumu
+   - Eger izahname analiz verileri sunulmussa, olumlu ve olumsuz bulgulari raporuna entegre et
+   - Piyasa kosullari ve zamanlama degerlendirmesi
+   - Fon kullanim hedefleri makul mu?
+
+2. how_to_participate (en az 100 kelime):
+   - Dagitim yontemi: esit/oransal/karma ne demek, yatirimci icin ne anlama gelir
+   - Hangi araci kurum/bankadan basvurulur
+   - Minimum lot, basvuru saatleri
+   - Talep toplama mi, borsada satis mi — fark ne
+   - Lock-up suresi varsa etkisi
+
+3. lot_estimate_explanation (en az 120 kelime):
+   - Toplam lot ve dagitim yontemine gore tahmini kisi basi lot
+   - Eger gecmis halka arz tahsisat verileri verilmisse: benzer dagitim yontemli halka arzlardaki katilimci sayisi ve lot dagitimini referans al
+   - Senaryo tablosu verilmisse: "100K kisi katilirsa X lot, 500K kisi katilirsa Y lot" seklinde ACIKLA
+   - Gedik tahmini varsa belirt
+   - Oransal dagitimsa mekanizmayi acikla
+
+4. scenario_table (JSON dizisi):
+   - Sana verilen senaryo tablosundaki degerleri AYNEN kullan
+   - Eger senaryo tablosu verilmemisse, toplam lot sayisina gore kendin hesapla:
+     participants (formatli string: "100.000"), estimated_lot (tam sayi)
+   - 4 satir: 100K, 200K, 300K, 500K katilimci
+   - Hesaplama: bireysel_tahsisat_lotu / katilimci_sayisi (esit dagitimda)
+   - Oransal dagitimda: "Oransal dagitimda lot tahmini yapilamaz" yazilip bos dizi [] dondurulebilir
+
+5. sector_comparison (en az 100 kelime):
+   - Sirketin sektordeki konumu
+   - Varsa F/K, PD/DD kiyaslamasi (halka arz fiyatindan hesaplanabiliyorsa)
+   - Sektorun genel durumu ve buyume potansiyeli
+   - Rakiplerle kiyaslama (halka acik rakipler varsa)
+
+6. recommendation (en az 100 kelime):
+   - Net sonuc: katilmaya deger mi?
+   - Hangi stratejiler izlenebilir (kisa/orta/uzun vade)
+   - Dikkat edilmesi gerekenler
+   - SON CUMLE MUTLAKA: "Bu degerlendirme yatirim tavsiyesi niteliginde degildir."
+
+PUANLAMA REHBERI:
+- 1.0-3.0: Cok riskli, ciddi kaygılar var, katilmamak mantikli
+- 3.1-5.0: Orta-yuksek risk, dikkatli olunmali, sektor/sirket zayif
+- 5.1-7.0: Makul, fiyatlama uygun, orta risk, sektore gore kabul edilebilir
+- 7.1-8.5: Iyi firsat, temel gostergeler olumlu, fiyatlama cazip
+- 8.6-10.0: Istisnai firsat — cok nadiren verilmeli, her sey mukemmel
+
+KRITIK:
+- SADECE JSON formatinda cevap ver. Baska hicbir sey yazma.
+- JSON disinda hicbir metin, aciklama, markdown isareti ekleme.
+- Tum string degerler Turkce olmali.
+- scenario_table icerisindeki participants alanı formatli string olmali (orn: "100.000").
+- Verisi olmayan konularda spekülasyon yapma, "veri bulunamadi" de."""
 
 
-def _build_ipo_context(ipo) -> str:
+# ────────────────────────────────────────────
+# Kontekst Olusturma Fonksiyonlari
+# ────────────────────────────────────────────
+
+async def _build_historical_allocation_context(session, ipo) -> str:
+    """Gecmis halka arzlarin tahsisat verilerinden lot tahmini konteksti olusturur."""
+    from app.models.ipo import IPO, IPOAllocation
+    from sqlalchemy import select, and_
+
+    try:
+        result = await session.execute(
+            select(IPO, IPOAllocation)
+            .join(IPOAllocation)
+            .where(and_(
+                IPOAllocation.group_name == "bireysel",
+                IPOAllocation.participant_count.isnot(None),
+                IPOAllocation.avg_lot_per_person.isnot(None),
+                IPO.id != ipo.id,
+                IPO.status.in_(["trading", "awaiting_trading", "archived"]),
+            ))
+            .order_by(IPO.trading_start.desc().nullslast())
+            .limit(15)
+        )
+        rows = result.all()
+    except Exception as e:
+        logger.warning("Gecmis tahsisat verisi cekilemedi: %s", e)
+        return ""
+
+    if not rows:
+        return ""
+
+    method_labels = {
+        "esit": "Esit",
+        "bireysele_esit": "Bireysel Esit",
+        "tamami_esit": "Tum Esit",
+        "oransal": "Oransal",
+        "karma": "Karma",
+    }
+
+    lines = [
+        "",
+        "--- GECMIS HALKA ARZ TAHSISAT VERILERI (Referans) ---",
+        "Asagidaki veriler son halka arzlarin GERCEKLESEN bireysel yatirimci sonuclaridir:",
+    ]
+
+    for past_ipo, alloc in rows:
+        method = method_labels.get(past_ipo.distribution_method or "", past_ipo.distribution_method or "?")
+        lines.append(
+            f"  {past_ipo.company_name} ({past_ipo.ticker or '?'}): "
+            f"{alloc.participant_count:,} kisi basvurdu, "
+            f"kisi basi {alloc.avg_lot_per_person} lot dagitildi, "
+            f"dagitim: {method}"
+        )
+
+    # Istatistikler
+    participants = [r[1].participant_count for r in rows]
+    lots = [float(r[1].avg_lot_per_person) for r in rows]
+    avg_p = sum(participants) / len(participants)
+    avg_l = sum(lots) / len(lots)
+    min_l = min(lots)
+    max_l = max(lots)
+
+    lines.append(f"\nSon {len(rows)} halka arz ortalamasi: {avg_p:,.0f} basvuru, kisi basi {avg_l:.1f} lot")
+    lines.append(f"Aralik: kisi basi {min_l:.0f} - {max_l:.0f} lot")
+
+    # Benzer dagitim yontemli olanlari filtrele
+    if ipo.distribution_method:
+        similar = [
+            (p, a) for p, a in rows
+            if p.distribution_method == ipo.distribution_method
+        ]
+        if similar:
+            sim_avg = sum(float(a.avg_lot_per_person) for _, a in similar) / len(similar)
+            lines.append(
+                f"Ayni dagitim yontemli ({method_labels.get(ipo.distribution_method, ipo.distribution_method)}) "
+                f"ortalama: kisi basi {sim_avg:.1f} lot ({len(similar)} halka arz)"
+            )
+
+    return "\n".join(lines)
+
+
+def _build_lot_scenario_table(ipo) -> str:
+    """Lot senaryo tablosu olusturur — AI'a scenario_table uretmesi icin veri saglar."""
+    if not ipo.total_lots:
+        return ""
+
+    # Bireysel yatirimci tahsisat oranini belirle
+    bireysel_pct = 0.40  # varsayilan %40
+    if hasattr(ipo, 'allocations') and ipo.allocations:
+        for alloc in ipo.allocations:
+            if alloc.group_name == "bireysel" and alloc.allocation_pct:
+                bireysel_pct = float(alloc.allocation_pct) / 100
+                break
+
+    bireysel_lots = int(ipo.total_lots * bireysel_pct)
+
+    lines = [
+        "",
+        "--- LOT SENARYO TABLOSU ---",
+        f"Toplam lot: {ipo.total_lots:,} | Bireysel tahsisat (%{bireysel_pct*100:.0f}): {bireysel_lots:,} lot",
+        "",
+        "Katilimci Sayisi | Tahmini Kisi Basi Lot",
+    ]
+
+    for threshold in [100_000, 200_000, 300_000, 500_000]:
+        if ipo.distribution_method == "oransal":
+            lines.append(f"  {threshold:,} kisi → Oransal dagitim (yatirim tutarina gore degisir)")
+        else:
+            est = max(1, bireysel_lots // threshold)
+            lines.append(f"  {threshold:,} kisi → {est} lot")
+
+    if ipo.estimated_lots_per_person:
+        lines.append(f"\nGedik Yatirim Tahmini (500K katilimci varsayimi): kisi basi {ipo.estimated_lots_per_person} lot")
+
+    return "\n".join(lines)
+
+
+def _build_prospectus_context(ipo) -> str:
+    """Izahname AI analiz sonuclarini kontekst olarak ekler."""
+    if not ipo.prospectus_analysis:
+        return ""
+
+    try:
+        pa = json.loads(ipo.prospectus_analysis)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+
+    lines = [
+        "",
+        "--- IZAHNAME AI ANALIZ SONUCLARI ---",
+        "Asagidaki bulgular izahname PDF'inden otomatik cikarilmistir:",
+        f"Risk Seviyesi: {pa.get('risk_level', 'bilinmiyor')}",
+    ]
+
+    if pa.get("key_risk"):
+        lines.append(f"Kritik Risk: {pa['key_risk']}")
+
+    positives = pa.get("positives", [])
+    if positives:
+        lines.append("\nOlumlu Bulgular:")
+        for p in positives[:6]:
+            lines.append(f"  + {p}")
+
+    negatives = pa.get("negatives", [])
+    if negatives:
+        lines.append("\nOlumsuz Bulgular:")
+        for n in negatives[:6]:
+            lines.append(f"  - {n}")
+
+    if pa.get("summary"):
+        lines.append(f"\nIzahname Ozeti: {pa['summary']}")
+
+    return "\n".join(lines)
+
+
+def _build_ipo_context(
+    ipo,
+    historical_context: str = "",
+    scenario_table: str = "",
+    prospectus_context: str = "",
+) -> str:
     """IPO verisini AI icin okunabilir formata cevirir."""
     lines = []
     lines.append(f"SIRKET: {ipo.company_name}")
@@ -177,14 +390,36 @@ def _build_ipo_context(ipo) -> str:
         growth = float((ipo.revenue_current_year - ipo.revenue_previous_year) / ipo.revenue_previous_year * 100)
         lines.append(f"Hasilat Buyume: %{growth:.1f}")
 
+    # ── Yeni bolumler ──
+    if scenario_table:
+        lines.append(scenario_table)
+
+    if historical_context:
+        lines.append(historical_context)
+
+    if prospectus_context:
+        lines.append(prospectus_context)
+
     return "\n".join(lines)
 
 
-async def generate_ipo_report(ipo) -> dict | None:
+# ────────────────────────────────────────────
+# AI Rapor Uretimi
+# ────────────────────────────────────────────
+
+async def generate_ipo_report(
+    ipo,
+    historical_context: str = "",
+    scenario_table: str = "",
+    prospectus_context: str = "",
+) -> dict | None:
     """AI ile profesyonel halka arz degerlendirme raporu uretir.
 
     Args:
         ipo: IPO model instance (tum verileri icermeli)
+        historical_context: Gecmis halka arz tahsisat verileri
+        scenario_table: Lot senaryo tablosu
+        prospectus_context: Izahname analiz sonuclari
 
     Returns:
         JSON dict veya None (basarisiz)
@@ -194,7 +429,12 @@ async def generate_ipo_report(ipo) -> dict | None:
         logger.error("Abacus API key yok — IPO rapor uretilemedi")
         return None
 
-    context = _build_ipo_context(ipo)
+    context = _build_ipo_context(
+        ipo,
+        historical_context=historical_context,
+        scenario_table=scenario_table,
+        prospectus_context=prospectus_context,
+    )
     user_message = f"Asagidaki halka arz icin detayli degerlendirme raporu yaz:\n\n{context}"
 
     try:
@@ -211,8 +451,8 @@ async def generate_ipo_report(ipo) -> dict | None:
                         {"role": "system", "content": _SYSTEM_PROMPT},
                         {"role": "user", "content": user_message},
                     ],
-                    "temperature": 0.2,
-                    "max_tokens": 4000,
+                    "temperature": 0.15,
+                    "max_tokens": 5000,
                 },
             )
 
@@ -238,8 +478,7 @@ async def generate_ipo_report(ipo) -> dict | None:
 
             # JSON parse — bazen markdown ```json ... ``` ile sarar
             if content.startswith("```"):
-                # ```json\n{...}\n``` formatini temizle
-                content = content.split("\n", 1)[-1]  # ilk satiri at
+                content = content.split("\n", 1)[-1]
                 if content.endswith("```"):
                     content = content[:-3].strip()
 
@@ -256,6 +495,10 @@ async def generate_ipo_report(ipo) -> dict | None:
                 logger.error("AI IPO raporu eksik alanlar: %s", missing)
                 return None
 
+            # scenario_table yoksa bos liste ata (frontend guvenli)
+            if "scenario_table" not in report:
+                report["scenario_table"] = []
+
             # Skor dogrulama
             score = float(report["overall_score"])
             if not (1.0 <= score <= 10.0):
@@ -263,10 +506,11 @@ async def generate_ipo_report(ipo) -> dict | None:
                 report["overall_score"] = max(1.0, min(10.0, score))
 
             logger.info(
-                "AI IPO raporu uretildi: %s — skor=%.1f, risk=%s, %d karakter",
+                "AI IPO raporu uretildi: %s — skor=%.1f, risk=%s, senaryo=%d satir, %d karakter",
                 ipo.ticker or ipo.company_name,
                 report["overall_score"],
                 report["risk_level"],
+                len(report.get("scenario_table", [])),
                 len(content),
             )
             return report
@@ -298,10 +542,13 @@ async def generate_and_save_ipo_report(ipo_id: int) -> bool:
         from app.database import async_session
         from app.models.ipo import IPO
         from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
 
         async with async_session() as session:
             result = await session.execute(
-                select(IPO).where(IPO.id == ipo_id)
+                select(IPO)
+                .options(selectinload(IPO.allocations))
+                .where(IPO.id == ipo_id)
             )
             ipo = result.scalar_one_or_none()
 
@@ -310,10 +557,28 @@ async def generate_and_save_ipo_report(ipo_id: int) -> bool:
                 return False
 
             if ipo.ai_report:
-                logger.info("IPO zaten rapor var: %s — atlanıyor", ipo.ticker or ipo.company_name)
+                logger.info("IPO zaten rapor var: %s — atlaniyor", ipo.ticker or ipo.company_name)
                 return True
 
-            report = await generate_ipo_report(ipo)
+            # ── Ek kontekstleri topla ──
+            historical_ctx = await _build_historical_allocation_context(session, ipo)
+            scenario_ctx = _build_lot_scenario_table(ipo)
+            prospectus_ctx = _build_prospectus_context(ipo)
+
+            logger.info(
+                "IPO rapor kontekst: %s — historical=%d, scenario=%d, prospectus=%d karakter",
+                ipo.ticker or ipo.company_name,
+                len(historical_ctx),
+                len(scenario_ctx),
+                len(prospectus_ctx),
+            )
+
+            report = await generate_ipo_report(
+                ipo,
+                historical_context=historical_ctx,
+                scenario_table=scenario_ctx,
+                prospectus_context=prospectus_ctx,
+            )
 
             if report is None:
                 logger.error("IPO rapor uretilemedi: %s", ipo.ticker or ipo.company_name)
@@ -324,20 +589,25 @@ async def generate_and_save_ipo_report(ipo_id: int) -> bool:
 
             await session.commit()
             logger.info(
-                "IPO AI raporu kaydedildi: %s (id=%d)",
+                "IPO AI raporu kaydedildi: %s (id=%d) — skor=%.1f",
                 ipo.ticker or ipo.company_name,
                 ipo_id,
+                report["overall_score"],
             )
 
             # Admin Telegram bildirimi
             try:
                 from app.services.admin_telegram import send_admin_notification
+                scenario_count = len(report.get("scenario_table", []))
                 await send_admin_notification(
-                    f"🤖 AI IPO Raporu Uretildi\n\n"
+                    f"\U0001f916 AI IPO Raporu Uretildi\n\n"
                     f"Sirket: {ipo.company_name}\n"
-                    f"Kod: {ipo.ticker or '—'}\n"
+                    f"Kod: {ipo.ticker or '\u2014'}\n"
                     f"Skor: {report['overall_score']}/10\n"
                     f"Risk: {report['risk_level']}\n"
+                    f"Senaryo: {scenario_count} satir\n"
+                    f"Izahname: {'Entegre' if prospectus_ctx else 'Yok'}\n"
+                    f"Gecmis Veri: {'Var' if historical_ctx else 'Yok'}\n"
                     f"Karakter: {len(ipo.ai_report)}"
                 )
             except Exception:
