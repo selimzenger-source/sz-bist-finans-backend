@@ -1180,6 +1180,55 @@ async def debug_prospectus_analysis(
             result["steps"]["4b_pymupdf"] = f"HATA: {e}"
             result["text_sample"] = text_plumber[:300]
 
+        # Adım 4c: Vision OCR testi (sadece her iki extractor 0 karakter döndürdüyse)
+        if not text_fitz.strip() and not text_plumber.strip():
+            try:
+                import fitz, base64
+                from app.config import get_settings as _gs
+                import httpx as _hx
+                _api_key = _gs().ABACUS_API_KEY
+                if _api_key:
+                    # Sadece ilk 2 sayfayı test amaçlı gönder
+                    doc_test = fitz.open(tmp_path)
+                    test_pages = min(2, len(doc_test))
+                    content_vision = [{
+                        "type": "text",
+                        "text": "Bu Türkçe belgenin ilk sayfalarındaki metni çıkar. Sadece metni yaz."
+                    }]
+                    for i in range(test_pages):
+                        mat = fitz.Matrix(1.0, 1.0)
+                        pix = doc_test[i].get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+                        b64 = base64.b64encode(pix.tobytes("jpeg")).decode("utf-8")
+                        content_vision.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+                        })
+                    doc_test.close()
+
+                    with _hx.Client(timeout=60) as hcl:
+                        vresp = hcl.post(
+                            "https://routellm.abacus.ai/v1/chat/completions",
+                            headers={"Authorization": f"Bearer {_api_key}", "Content-Type": "application/json"},
+                            json={
+                                "model": "claude-sonnet-4-5",
+                                "messages": [{"role": "user", "content": content_vision}],
+                                "max_tokens": 1000,
+                                "temperature": 0,
+                            },
+                        )
+                    if vresp.status_code == 200:
+                        vision_text = vresp.json()["choices"][0]["message"]["content"]
+                        result["steps"]["4c_vision_ocr"] = f"OK ({len(vision_text)} karakter, ilk {test_pages} sayfa)"
+                        result["text_sample"] = vision_text[:300]
+                    else:
+                        result["steps"]["4c_vision_ocr"] = f"HTTP {vresp.status_code}: {vresp.text[:100]}"
+                else:
+                    result["steps"]["4c_vision_ocr"] = "ATLA (API key yok)"
+            except Exception as ve:
+                result["steps"]["4c_vision_ocr"] = f"HATA: {ve}"
+        else:
+            result["steps"]["4c_vision_ocr"] = "ATLA (metin zaten çıkarıldı)"
+
         # Adım 5: Abacus API test
         try:
             from app.config import get_settings

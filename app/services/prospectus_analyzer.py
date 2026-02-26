@@ -203,14 +203,128 @@ def _extract_pages_pdfplumber(pdf_path: str) -> list:
         return []
 
 
+def _extract_pages_vision_sync(pdf_path: str) -> list:
+    """Taranmış/görüntü tabanlı PDF için Claude Vision OCR.
+
+    PyMuPDF ile sayfaları JPEG görüntüye çevir → Claude Vision ile metin çıkar.
+    Sync fonksiyon (run_in_executor içinde çalışır).
+
+    Returns: [(batch_start_page, extracted_text), ...]
+    """
+    try:
+        import fitz  # PyMuPDF
+        import base64
+        import httpx as _httpx
+
+        from app.config import get_settings
+        api_key = get_settings().ABACUS_API_KEY
+        if not api_key:
+            logger.warning("Vision OCR: Abacus API key yok")
+            return []
+
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+        max_pages = min(total_pages, 60)  # Maks 60 sayfa (maliyet kontrolü)
+
+        # Sayfaları düşük çözünürlüklü gri JPEG olarak render et
+        page_images = []
+        mat = fitz.Matrix(1.0, 1.0)  # 72 DPI — küçük, token tasarruflu
+        for i in range(max_pages):
+            try:
+                pix = doc[i].get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+                img_bytes = pix.tobytes("jpeg")
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                page_images.append((i, b64))
+                pix = None  # Hızlı GC
+            except Exception as pe:
+                logger.warning("Vision OCR sayfa render hatası s.%d: %s", i, pe)
+        doc.close()
+
+        logger.info("Vision OCR: %d/%d sayfa render edildi", len(page_images), total_pages)
+
+        # 15’er sayfalık batch’ler halinde Claude Vision’a gönder
+        all_texts = []
+        batch_size = 15
+
+        for batch_start in range(0, len(page_images), batch_size):
+            batch = page_images[batch_start:batch_start + batch_size]
+            end_page = batch_start + len(batch)
+
+            content = [{
+                "type": "text",
+                "text": (
+                    f"Bu Türkçe halka arz izahnamesinin sayfa {batch_start + 1}-{end_page} "
+                    "içeriğini metin olarak çıkar. Sadece gerçek metni yaz, "
+                    "başka açıklama ekleme."
+                ),
+            }]
+            for _, b64 in batch:
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                })
+
+            try:
+                with _httpx.Client(timeout=120) as hcl:
+                    resp = hcl.post(
+                        _ABACUS_URL,
+                        headers={
+                            "Authorization": f"Bearer {api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": _AI_MODEL,
+                            "messages": [{"role": "user", "content": content}],
+                            "max_tokens": 4000,
+                            "temperature": 0,
+                        },
+                    )
+
+                if resp.status_code == 200:
+                    extracted = (
+                        resp.json()
+                        .get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                    )
+                    all_texts.append((batch_start, extracted))
+                    logger.info(
+                        "Vision OCR batch s.%d-%d: %d karakter",
+                        batch_start + 1, end_page, len(extracted),
+                    )
+                else:
+                    logger.warning(
+                        "Vision OCR HTTP %d: %s",
+                        resp.status_code, resp.text[:200],
+                    )
+
+            except Exception as batch_err:
+                logger.warning(
+                    "Vision OCR batch s.%d hatası: %s — %s",
+                    batch_start + 1, type(batch_err).__name__, batch_err,
+                )
+
+        total_chars = sum(len(t) for _, t in all_texts)
+        logger.info(
+            "Vision OCR tamamlandı: %d batch, toplam %d karakter",
+            len(all_texts), total_chars,
+        )
+        return all_texts
+
+    except Exception as e:
+        logger.error("Vision OCR genel hata: %s — %s", type(e).__name__, e)
+        return []
+
+
 def extract_pdf_text(pdf_path: str) -> Optional[str]:
-    """PDF’ten metin çıkarır. PyMuPDF önce, fallback pdfplumber.
+    """PDF’ten metin çıkarır. PyMuPDF → pdfplumber → Vision OCR.
 
     Strateji:
     1. PyMuPDF (fitz) dene — geniş PDF format desteği
     2. Sonuç boşsa pdfplumber dene
-    3. Risk faktörleri bölümünü öncelikli tut
-    4. _MAX_PDF_CHARS sınırında kırp
+    3. İkisi de boşsa Vision OCR (Claude) dene — taranmış PDF’ler için
+    4. Risk faktörleri bölümünü öncelikli tut
+    5. _MAX_PDF_CHARS sınırında kırp
     """
     try:
         # Önce PyMuPDF dene
@@ -220,6 +334,11 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
         if not page_tuples:
             logger.info("PyMuPDF 0 karakter — pdfplumber deneniyor...")
             page_tuples = _extract_pages_pdfplumber(pdf_path)
+
+        # İkisi de boşsa Vision OCR dene (taranmış PDF)
+        if not page_tuples:
+            logger.info("Her iki text extractor 0 karakter — Vision OCR (Claude) deneniyor...")
+            page_tuples = _extract_pages_vision_sync(pdf_path)
 
         if not page_tuples:
             logger.warning("PDF’ten hiçbir yöntemle metin çıkarılamadı: %s", pdf_path)
