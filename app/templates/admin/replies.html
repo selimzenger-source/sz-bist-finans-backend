@@ -273,6 +273,39 @@
         {% endif %}
     </div>
 
+    <!-- ============================================ -->
+    <!-- BOLUM: Mentions Auto-Reply -->
+    <!-- ============================================ -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
+        <div class="flex items-center justify-between mb-3">
+            <div>
+                <h2 class="text-lg font-bold text-gray-100 flex items-center gap-2">
+                    &#128172; Mentions Auto-Reply
+                </h2>
+                <p class="text-xs text-gray-400 mt-1">
+                    Bize mention atan veya tweet'lerimize yorum yapanlara AI ile otomatik Türkçe yanıt verir.
+                    Her 5 dakikada bir kontrol eder. Yanıt 25-55 saniye jitter ile gönderilir.
+                </p>
+            </div>
+            <form method="post" action="/admin/replies/toggle-mentions" class="inline ml-4 flex-shrink-0">
+                <button type="submit"
+                        class="px-4 py-2 rounded-lg text-sm font-medium transition
+                               {% if mentions_reply_on %}
+                               bg-emerald-600 hover:bg-emerald-500 text-white
+                               {% else %}
+                               bg-gray-600 hover:bg-gray-500 text-gray-300
+                               {% endif %}">
+                    {% if mentions_reply_on %}&#9989; Açık{% else %}&#9940; Kapalı{% endif %}
+                </button>
+            </form>
+        </div>
+        <div class="bg-gray-700/50 rounded-lg p-3 text-xs text-gray-400 space-y-1">
+            <p>&#128313; <strong class="text-gray-300">Nasıl çalışır?</strong> Birisi @SZAlgoFinans'ı mention edince veya tweetimize yorum yapınca AI otomatik Türkçe yanıt üretir.</p>
+            <p>&#128313; <strong class="text-gray-300">Neden farklı?</strong> Bize mention atan kişi zaten engage ettiği için API reply kısıtlaması yok — tweet direkt thread'e gider.</p>
+            <p>&#128313; <strong class="text-gray-300">Güvenli mi?</strong> Sadece finans/borsa konularına yanıt verir. Siyaset, TA, hakaret vs. otomatik atlanır.</p>
+        </div>
+    </div>
+
 </div>
 
 <script>

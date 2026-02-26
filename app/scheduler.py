@@ -3112,12 +3112,27 @@ def _setup_scheduler_impl():
     )
 
     # 25. X Otomatik Reply — her 30 dakika (API kredi tasarrufu: 48 döngü/gün × 8 hedef = max 384 GET)
+    # NOT: Bu sistem şimdilik DEVRE DIŞI — admin panelinden AUTO_REPLY_ENABLED=false olarak kapalı
     from app.services.twitter_reply_service import auto_reply_cycle
     scheduler.add_job(
         auto_reply_cycle,
         IntervalTrigger(minutes=30),
         id="auto_reply",
         name="X Otomatik Reply (30dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 26. X Mentions Auto-Reply — her 5 dakika
+    # Bize mention atan / tweetlerimize yorum yapanlara AI ile Türkçe yanıt verir
+    # Admin panelinden MENTIONS_REPLY_ENABLED=true yapılınca aktif olur (default: kapalı)
+    from app.services.mentions_reply_service import mentions_reply_cycle
+    scheduler.add_job(
+        mentions_reply_cycle,
+        IntervalTrigger(minutes=5),
+        id="mentions_reply",
+        name="X Mentions Auto-Reply (5dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -2321,6 +2321,15 @@ async def admin_replies_page(
     if toggle_setting:
         auto_reply_on = toggle_setting.value.lower() in ("true", "1", "yes")
 
+    # Mentions auto-reply toggle durumu
+    mentions_result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "MENTIONS_REPLY_ENABLED")
+    )
+    mentions_setting = mentions_result.scalar_one_or_none()
+    mentions_reply_on = False  # Default: kapalı
+    if mentions_setting:
+        mentions_reply_on = mentions_setting.value.lower() in ("true", "1", "yes")
+
     # Bugün kaç reply atıldı
     from sqlalchemy import func as sa_func_inner
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2344,6 +2353,7 @@ async def admin_replies_page(
         "targets": targets,
         "reply_log": reply_log,
         "auto_reply_on": auto_reply_on,
+        "mentions_reply_on": mentions_reply_on,
         "today_count": today_count,
         "daily_limit": daily_limit,
         "success": request.query_params.get("success"),
@@ -2562,6 +2572,38 @@ async def admin_reply_toggle_auto(
 
     return RedirectResponse(
         f"/admin/replies?success=Otomatik+reply+{new_state}", status_code=302
+    )
+
+
+@router.post("/replies/toggle-mentions")
+async def admin_toggle_mentions_reply(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mentions auto-reply sistemini aç/kapat."""
+    from app.models.app_setting import AppSetting
+
+    admin = get_current_admin(request)
+    if not admin:
+        return RedirectResponse("/admin/login", status_code=302)
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "MENTIONS_REPLY_ENABLED")
+    )
+    setting = result.scalar_one_or_none()
+
+    if setting:
+        current = setting.value.lower() in ("true", "1", "yes")
+        setting.value = "false" if current else "true"
+        new_state = "kapalı" if current else "açık"
+    else:
+        db.add(AppSetting(key="MENTIONS_REPLY_ENABLED", value="true"))
+        new_state = "açık"
+
+    await db.flush()
+
+    return RedirectResponse(
+        f"/admin/replies?success=Mentions+reply+{new_state}", status_code=302
     )
 
 
