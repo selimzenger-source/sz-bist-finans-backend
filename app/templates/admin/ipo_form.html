@@ -413,19 +413,56 @@
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
                     {% if ipo and ipo.id and ipo.prospectus_url %}
                     <div class="mt-2 flex items-center gap-3">
-                        <form method="POST" action="/admin/ipo/{{ ipo.id }}/run-prospectus-analysis"
-                              onsubmit="return confirm('İzahname AI analizi başlatılsın mı? Bu işlem 2-3 dakika sürebilir.')">
-                            <button type="submit"
-                                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition-colors">
-                                🤖 AI İzahname Analiz Et
-                            </button>
-                        </form>
+                        <button type="button" id="analyzeBtn"
+                                onclick="runProspectusAnalysis({{ ipo.id }})"
+                                class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                            🤖 AI İzahname Analiz Et
+                        </button>
+                        <span id="analyzeStatus" class="text-xs text-gray-500">
                         {% if ipo.prospectus_analyzed_at %}
-                        <span class="text-xs text-green-400">✅ Analiz mevcut ({{ ipo.prospectus_analyzed_at.strftime('%d.%m.%Y %H:%M') }})</span>
+                            ✅ Analiz mevcut ({{ ipo.prospectus_analyzed_at.strftime('%d.%m.%Y %H:%M') }})
                         {% else %}
-                        <span class="text-xs text-gray-500">⏳ Henüz analiz edilmedi</span>
+                            ⏳ Henüz analiz edilmedi
                         {% endif %}
+                        </span>
                     </div>
+                    <script>
+                    async function runProspectusAnalysis(ipoId) {
+                        if (!confirm('İzahname AI analizi başlatılsın mı? Bu işlem 2-3 dakika sürebilir.')) return;
+                        const btn = document.getElementById('analyzeBtn');
+                        const status = document.getElementById('analyzeStatus');
+                        btn.disabled = true;
+                        btn.textContent = '⏳ Analiz ediliyor...';
+                        btn.classList.add('opacity-50', 'cursor-not-allowed');
+                        status.textContent = '🔄 PDF indiriliyor ve analiz başlatılıyor...';
+                        try {
+                            const resp = await fetch('/admin/ipo/' + ipoId + '/quick-analyze', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                            });
+                            // Route 303 → redirect takip edilir, final URL'ye bak
+                            const finalUrl = new URL(resp.url);
+                            const errMsg = finalUrl.searchParams.get('error');
+                            const successMsg = finalUrl.searchParams.get('success');
+                            if (errMsg) {
+                                status.textContent = '❌ ' + decodeURIComponent(errMsg);
+                                status.classList.add('text-red-400');
+                                btn.disabled = false;
+                                btn.textContent = '🤖 AI İzahname Analiz Et';
+                                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                            } else {
+                                status.textContent = successMsg ? '✅ ' + decodeURIComponent(successMsg) : '✅ Tamamlandı!';
+                                status.classList.add('text-green-400');
+                                setTimeout(() => location.reload(), 2000);
+                            }
+                        } catch(e) {
+                            status.textContent = '❌ Bağlantı hatası: ' + e.message;
+                            btn.disabled = false;
+                            btn.textContent = '🤖 AI İzahname Analiz Et';
+                            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        }
+                    }
+                    </script>
                     {% endif %}
                 </div>
                 <div>
