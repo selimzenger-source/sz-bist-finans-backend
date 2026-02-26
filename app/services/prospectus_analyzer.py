@@ -166,89 +166,135 @@ async def download_pdf(url: str) -> Optional[str]:
         return None
 
 
-def extract_pdf_text(pdf_path: str) -> Optional[str]:
-    """pdfplumber ile PDF'ten metin çıkarır.
-
-    Strateji:
-    1. Tüm sayfaları çıkar
-    2. Risk faktörleri bölümünü tespit et (daha fazla ağırlık ver)
-    3. _MAX_PDF_CHARS sınırında kırp — önemli bölümler önce
-    """
+def _extract_pages_pymupdf(pdf_path: str) -> list:
+    """PyMuPDF (fitz) ile sayfa metinlerini çıkar."""
     try:
-        all_pages_text = []
-        risk_section_text = []
-        finance_section_text = []
+        import fitz  # PyMuPDF
+        pages = []
+        doc = fitz.open(pdf_path)
+        for i, page in enumerate(doc):
+            text = page.get_text("text") or ""
+            if text.strip():
+                pages.append((i, text))
+        doc.close()
+        logger.info("PyMuPDF: %d sayfadan %d'ünde metin bulundu", len(doc), len(pages))
+        return pages
+    except Exception as e:
+        logger.warning("PyMuPDF çıkarma hatası: %s", e)
+        return []
 
+
+def _extract_pages_pdfplumber(pdf_path: str) -> list:
+    """pdfplumber ile sayfa metinlerini çıkar."""
+    try:
+        pages = []
         with pdfplumber.open(pdf_path) as pdf:
-            total_pages = len(pdf.pages)
-            logger.info("PDF sayfa sayısı: %d", total_pages)
-
-            in_risk_section = False
-            in_finance_section = False
-
             for i, page in enumerate(pdf.pages):
                 try:
                     text = page.extract_text() or ""
-                    if not text.strip():
-                        continue
-
-                    all_pages_text.append(text)
-
-                    # Risk bölümü tespiti
-                    text_lower = text.lower()
-                    if any(kw in text_lower for kw in ["risk faktörleri", "riskler"]):
-                        in_risk_section = True
-                    if in_risk_section and any(kw in text_lower for kw in ["finansal bilgiler", "izahname özeti"]):
-                        in_risk_section = False  # Risk bölümü bitti
-
-                    if in_risk_section:
-                        risk_section_text.append(f"[S.{i+1}] {text}")
-
-                    # Finansal bölüm tespiti
-                    if any(kw in text_lower for kw in ["finansal durum", "özet finansal"]):
-                        in_finance_section = True
-                    if in_finance_section and len(finance_section_text) > 10:
-                        in_finance_section = False  # Max 10 sayfa finansal
-
-                    if in_finance_section:
-                        finance_section_text.append(f"[S.{i+1}] {text}")
-
-                except Exception as page_err:
-                    logger.debug("Sayfa %d hatası: %s", i + 1, page_err)
+                    if text.strip():
+                        pages.append((i, text))
+                except Exception:
                     continue
+        logger.info("pdfplumber: %d sayfada metin bulundu", len(pages))
+        return pages
+    except Exception as e:
+        logger.warning("pdfplumber çıkarma hatası: %s", e)
+        return []
 
-        if not all_pages_text:
-            logger.warning("PDF'ten metin çıkarılamadı: %s", pdf_path)
+
+def extract_pdf_text(pdf_path: str) -> Optional[str]:
+    """PDF’ten metin çıkarır. PyMuPDF önce, fallback pdfplumber.
+
+    Strateji:
+    1. PyMuPDF (fitz) dene — geniş PDF format desteği
+    2. Sonuç boşsa pdfplumber dene
+    3. Risk faktörleri bölümünü öncelikli tut
+    4. _MAX_PDF_CHARS sınırında kırp
+    """
+    try:
+        # Önce PyMuPDF dene
+        page_tuples = _extract_pages_pymupdf(pdf_path)
+
+        # Boşsa pdfplumber ile dene
+        if not page_tuples:
+            logger.info("PyMuPDF 0 karakter — pdfplumber deneniyor...")
+            page_tuples = _extract_pages_pdfplumber(pdf_path)
+
+        if not page_tuples:
+            logger.warning("PDF’ten hiçbir yöntemle metin çıkarılamadı: %s", pdf_path)
             return None
 
-        # Öncelikli metin birleştirme:
-        # 1. Risk bölümü (en önemli — tam alınsın)
-        # 2. Finansal özet
-        # 3. Geri kalan metin (baştan kırp)
+        all_pages_text = []
+        risk_section_text = []
+        finance_section_text = []
+        in_risk_section = False
+        in_finance_section = False
+
+        for i, text in page_tuples:
+            all_pages_text.append(text)
+
+            text_lower = text.lower()
+            if any(kw in text_lower for kw in ["risk faktörleri", "riskler"]):
+                in_risk_section = True
+            if in_risk_section and any(kw in text_lower for kw in ["finansal bilgiler", "izahname özeti"]):
+                in_risk_section = False
+
+            if in_risk_section:
+                risk_section_text.append(f"[S.{i+1}] {text}")
+
+            if any(kw in text_lower for kw in ["finansal durum", "özet finansal"]):
+                in_finance_section = True
+            if in_finance_section and len(finance_section_text) > 10:
+                in_finance_section = False
+
+            if in_finance_section:
+                finance_section_text.append(f"[S.{i+1}] {text}")
+
+        if not all_pages_text:
+            logger.warning("PDF’ten metin çıkarılamadı: %s", pdf_path)
+            return None
+
+        # Öncelikli metin birleştirme
         combined = ""
 
-        # Risk faktörleri tam olsun
         if risk_section_text:
-            risk_combined = "\n\n=== RİSK FAKTÖRLERİ BÖLÜMÜ ===\n" + "\n".join(risk_section_text)
+            risk_combined = "
+
+=== RİSK FAKTÖRLERİ BÖLÜMÜ ===
+" + "
+".join(risk_section_text)
             combined += risk_combined[:60_000]
 
-        # Finansal özet
         if finance_section_text:
-            fin_combined = "\n\n=== FİNANSAL BİLGİLER ===\n" + "\n".join(finance_section_text)
+            fin_combined = "
+
+=== FİNANSAL BİLGİLER ===
+" + "
+".join(finance_section_text)
             combined += fin_combined[:20_000]
 
-        # Genel metin (baştan + ortadan + sondan örnek alarak kapsam artır)
-        full_text = "\n\n".join(all_pages_text)
+        full_text = "
+
+".join(all_pages_text)
         remaining_budget = _MAX_PDF_CHARS - len(combined)
         if remaining_budget > 10_000:
-            # Baştan %60, sondan %40 al
             start_chunk = full_text[:int(remaining_budget * 0.6)]
             end_chunk   = full_text[-int(remaining_budget * 0.4):]
-            combined = f"\n\n=== İZAHNAME TAM METNİ (ÖZET) ===\n{start_chunk}\n\n...[ORTA BÖLÜMLER ATLANMIS]...\n\n{end_chunk}\n\n{combined}"
+            combined = f"
+
+=== İZAHNAME TAM METNİ (ÖZET) ===
+{start_chunk}
+
+...[ORTA BÖLÜMLER ATLANMIŞ]...
+
+{end_chunk}
+
+{combined}"
 
         logger.info(
             "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d)",
-            total_pages, len(combined),
+            len(all_pages_text), len(combined),
             len("".join(risk_section_text)),
             len("".join(finance_section_text)),
         )
@@ -258,13 +304,11 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
         logger.error("PDF metin çıkarma hatası: %s — %s", pdf_path, e)
         return None
     finally:
-        # Geçici dosyayı sil
         try:
             if os.path.exists(pdf_path):
                 os.remove(pdf_path)
         except Exception:
             pass
-
 
 # ─────────────────────────────────────────────────────────────
 # AI Analiz
