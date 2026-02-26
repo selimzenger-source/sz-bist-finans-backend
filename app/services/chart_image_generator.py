@@ -6,6 +6,7 @@ Tweet'e resim olarak eklenir.
 - Gunluk takip gorseli (generate_daily_tracking_image) — 6+ gun
 """
 
+import gc
 import logging
 import os
 import tempfile
@@ -338,6 +339,7 @@ def generate_25day_image(
         filename = f"{ticker}_25day_{ts}.png"
         filepath = os.path.join(tempfile.gettempdir(), filename)
         img.save(filepath, "PNG", optimize=True)
+        del img, draw; gc.collect()
 
         file_size = os.path.getsize(filepath)
         logger.info("25 gun karne gorseli olusturuldu: %s (%d KB)", filepath, file_size // 1024)
@@ -528,6 +530,7 @@ def generate_daily_tracking_image(
         filename = f"{ticker}_{trading_day}day_{ts}.png"
         filepath = os.path.join(tempfile.gettempdir(), filename)
         img.save(filepath, "PNG", optimize=True)
+        del img, draw; gc.collect()
 
         file_size = os.path.getsize(filepath)
         logger.info("Gunluk takip gorseli olusturuldu: %s (%d KB) — %d. gun",
@@ -826,6 +829,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         filename = f"market_snapshot_{ts}.png"
         filepath = os.path.join(tempfile.gettempdir(), filename)
         img.save(filepath, "PNG", optimize=True)
+        del img, draw; gc.collect()
         logger.info("Market snapshot gorsel olusturuldu: %s (%d hisse)", filepath, num_cards)
         return filepath
 
@@ -1152,6 +1156,7 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         filename = f"opening_summary_{ts}.png"
         filepath = os.path.join(tempfile.gettempdir(), filename)
         img.save(filepath, "PNG", optimize=True)
+        del img, draw; gc.collect()
         logger.info("Opening summary gorsel olusturuldu: %s (%d hisse, %dx%d)",
                      filepath, num_stocks, width, total_h)
         return filepath
@@ -1413,6 +1418,7 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         filename  = f"spk_onay_{ts}.png"
         filepath  = os.path.join(tempfile.gettempdir(), filename)
         img.save(filepath, "PNG", optimize=True)
+        del img, draw; gc.collect()
         logger.info("SPK onay gorseli olusturuldu: %s (%d onay)", filepath, count)
         return filepath
 

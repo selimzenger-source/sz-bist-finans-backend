@@ -7,6 +7,7 @@ Versiyon 2: Gecmis tahsisat verileri, senaryo tablosu, izahname analizi entegre.
 Model: claude-sonnet-4-5 (Abacus RouteLLM uzerinden)
 """
 
+import gc
 import json
 import logging
 from datetime import datetime, timezone
@@ -634,3 +635,5 @@ async def generate_and_save_ipo_report(ipo_id: int) -> bool:
     except Exception as e:
         logger.error("IPO rapor kaydetme hatasi (id=%d): %s", ipo_id, e)
         return False
+    finally:
+        gc.collect()  # Bellek tasarrufu — Render 512MB limiti
