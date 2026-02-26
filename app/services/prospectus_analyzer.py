@@ -378,38 +378,19 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
         combined = ""
 
         if risk_section_text:
-            risk_combined = "
-
-=== RİSK FAKTÖRLERİ BÖLÜMÜ ===
-" + "
-".join(risk_section_text)
+            risk_combined = "\n\n=== RİSK FAKTÖRLERİ BÖLÜMÜ ===\n" + "\n".join(risk_section_text)
             combined += risk_combined[:60_000]
 
         if finance_section_text:
-            fin_combined = "
-
-=== FİNANSAL BİLGİLER ===
-" + "
-".join(finance_section_text)
+            fin_combined = "\n\n=== FİNANSAL BİLGİLER ===\n" + "\n".join(finance_section_text)
             combined += fin_combined[:20_000]
 
-        full_text = "
-
-".join(all_pages_text)
+        full_text = "\n\n".join(all_pages_text)
         remaining_budget = _MAX_PDF_CHARS - len(combined)
         if remaining_budget > 10_000:
             start_chunk = full_text[:int(remaining_budget * 0.6)]
             end_chunk   = full_text[-int(remaining_budget * 0.4):]
-            combined = f"
-
-=== İZAHNAME TAM METNİ (ÖZET) ===
-{start_chunk}
-
-...[ORTA BÖLÜMLER ATLANMIŞ]...
-
-{end_chunk}
-
-{combined}"
+            combined = (f"\n\n=== İZAHNAME TAM METNİ (ÖZET) ===\n{start_chunk}\n\n...[ORTA BÖLÜMLER ATLANMIŞ]...\n\n{end_chunk}\n\n{combined}")
 
         logger.info(
             "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d)",
