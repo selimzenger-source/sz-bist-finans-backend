@@ -1529,21 +1529,19 @@ async def toggle_auto_send(
 
 
 # -------------------------------------------------------
-# TWEET AYARLARI — Sabit degerler (APP_LINK, SLOGAN vb.)
+# TWEET ONIZLEME — Sadece goruntuleme
 # -------------------------------------------------------
 
-# Global ayarlar — tüm tweetlerde kullanılır
-_GLOBAL_SETTINGS = [
-    ("APP_LINK", "Uygulama Linki", "szalgo.net.tr"),
-    ("SLOGAN", "Slogan", "\U0001F514 İlk bilen siz olun!"),
-    ("DISCLAIMER", "Yasal Uyarı (Uzun)", "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
-    ("DISCLAIMER_SHORT", "Yasal Uyarı (Kısa)", "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez."),
-    ("HASHTAGS", "Hashtagler", "#HalkaArz #BIST #Borsa"),
-    ("LOT_DISCLAIMER", "Lot Uyarısı", "tahmini değerdir"),
-]
+@router.get("/tweet-preview", response_class=HTMLResponse)
+async def tweet_preview_page(request: Request):
+    """Tweet şablonları önizleme — ATATR + EREGL örnekleri."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    return templates.TemplateResponse("admin/tweet_preview.html", {"request": request})
 
-# 15 tweet tipinin düzenlenebilir sabit metinleri
-# (key, label, default, group_id, group_label)
+
+# Not: _TWEET_TEMPLATES ve _TWEET_EXAMPLES artık kullanılmıyor — /admin/tweet-preview sayfasında
+# statik HTML olarak gösteriliyor. Aşağıda sadece referans olarak bırakıldı.
 _TWEET_TEMPLATES = [
     # 1. Yeni Halka Arz
     ("T1_BASLIK", "Başlık", "\U0001F6A8 SPK Bülteni Yayımlandı!", "1", "Yeni Halka Arz (SPK Onayı)"),
@@ -1732,96 +1730,6 @@ _TWEET_EXAMPLES = {
     ),
 }
 
-# Birleşik liste (eski uyumluluk) — _info alanları hariç
-_TWEET_SETTING_KEYS = _GLOBAL_SETTINGS + [
-    (k, l, d) for k, l, d, *_ in _TWEET_TEMPLATES if l != "_info"
-]
-
-
-@router.get("/tweet-settings", response_class=HTMLResponse)
-async def tweet_settings_page(
-    request: Request,
-    success: Optional[str] = None,
-    db: AsyncSession = Depends(get_db),
-):
-    """Tweet sabit ayarlarını gösterir — global + 15 tweet tipi."""
-    if not get_current_admin(request):
-        return RedirectResponse(url="/admin/login", status_code=303)
-
-    from app.models.app_setting import AppSetting
-
-    result = await db.execute(select(AppSetting))
-    db_settings = {s.key: s.value for s in result.scalars().all()}
-
-    # Global ayarlar
-    global_settings = []
-    for key, label, default in _GLOBAL_SETTINGS:
-        global_settings.append({
-            "key": key,
-            "label": label,
-            "value": db_settings.get(key, default),
-            "default": default,
-        })
-
-    # Tweet şablonları — gruplara ayır
-    tweet_groups = []
-    current_group = None
-    for key, label, default, group_id, group_label in _TWEET_TEMPLATES:
-        if group_label:
-            current_group = {
-                "id": group_id,
-                "label": group_label,
-                "fields": [],
-                "example": _TWEET_EXAMPLES.get(group_id, ""),
-            }
-            tweet_groups.append(current_group)
-        if current_group:
-            current_group["fields"].append({
-                "key": key,
-                "label": label,
-                "value": db_settings.get(key, default),
-                "default": default,
-            })
-
-    return templates.TemplateResponse("admin/tweet_settings.html", {
-        "request": request,
-        "global_settings": global_settings,
-        "tweet_groups": tweet_groups,
-        "success": success,
-    })
-
-
-@router.post("/tweet-settings")
-async def update_tweet_settings(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-):
-    """Tweet sabit ayarlarını günceller."""
-    if not get_current_admin(request):
-        return RedirectResponse(url="/admin/login", status_code=303)
-
-    from app.models.app_setting import AppSetting
-
-    form = await request.form()
-
-    for key, label, default in _TWEET_SETTING_KEYS:
-        value = form.get(key, default).strip()
-        # Upsert
-        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
-        existing = result.scalar_one_or_none()
-        if existing:
-            existing.value = value
-        else:
-            db.add(AppSetting(key=key, value=value))
-
-    await db.commit()
-
-    # Cache temizle
-    from app.services.twitter_service import clear_settings_cache
-    clear_settings_cache()
-
-    logger.info("[ADMIN] Tweet ayarları güncellendi")
-    return RedirectResponse(url="/admin/tweet-settings?success=1", status_code=303)
 
 
 # -------------------------------------------------------

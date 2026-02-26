@@ -1,0 +1,616 @@
+{% extends "admin/base.html" %}
+{% block title %}Tweet Önizleme{% endblock %}
+
+{% block content %}
+<style>
+  /* Tweet card stilleri */
+  .tw-card {
+    background: #1e2535;
+    border: 1px solid #2f3a50;
+    border-radius: 14px;
+    padding: 18px;
+    max-width: 560px;
+    margin: 0 auto 28px;
+  }
+  .tw-header { display: flex; gap: 11px; margin-bottom: 12px; align-items: flex-start; }
+  .tw-avatar {
+    width: 42px; height: 42px; border-radius: 50%;
+    background: linear-gradient(135deg, #1d9bf0, #0063c6);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; flex-shrink: 0; font-weight: 700; color: #fff;
+  }
+  .tw-name { font-weight: 700; font-size: 14px; color: #e7e9ea; display: flex; align-items: center; gap: 4px; }
+  .tw-username { color: #71767b; font-size: 13px; }
+  .tw-badge { font-size: 10px; background: #1d9bf0; color: #fff; padding: 1px 6px; border-radius: 8px; font-weight: 600; }
+  .tw-body { font-size: 14.5px; line-height: 1.65; white-space: pre-wrap; color: #e7e9ea; margin-bottom: 12px; }
+  .tw-body a, .tw-link { color: #1d9bf0; text-decoration: none; }
+  .tw-body .ht { color: #1d9bf0; }
+  .tw-img {
+    width: 100%; border-radius: 10px; margin-bottom: 10px;
+    background: linear-gradient(135deg, #162035 0%, #0d1625 100%);
+    border: 1px solid #2f3a50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 18px 12px; color: #71767b; font-size: 12px; gap: 5px; text-align: center;
+  }
+  .tw-img .imlbl { font-size: 13px; color: #1d9bf0; font-weight: 600; }
+  .tw-img-chart { background: linear-gradient(135deg, #0c1a0c 0%, #0d1f0d 100%) !important; }
+  .tw-footer { display: flex; gap: 20px; color: #71767b; font-size: 12px; padding-top: 10px; border-top: 1px solid #2f3a50; }
+  .tw-label {
+    max-width: 560px; margin: 0 auto 7px;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .tw-num { background: #1d9bf0; color: #fff; border-radius: 7px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+  .tw-title { font-size: 14px; color: #e7e9ea; font-weight: 600; }
+  .tw-trigger { font-size: 11px; color: #71767b; }
+  .section-bar {
+    max-width: 560px; margin: 0 auto 18px;
+    border-left: 3px solid #1d9bf0; padding-left: 10px;
+  }
+  .info-box {
+    max-width: 560px; margin: 0 auto 18px;
+    background: rgba(29,155,240,.08); border: 1px solid rgba(29,155,240,.2);
+    border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #8ab4f8;
+  }
+  /* Tabs */
+  .tab-bar { display: flex; gap: 6px; margin-bottom: 24px; flex-wrap: wrap; }
+  .tab-btn {
+    padding: 7px 14px; border-radius: 18px; border: 1.5px solid #2f3a50;
+    background: transparent; color: #71767b; cursor: pointer; font-size: 12px; transition: all .15s;
+  }
+  .tab-btn.active { border-color: #1d9bf0; color: #1d9bf0; background: rgba(29,155,240,.08); }
+  .tab-btn:hover:not(.active) { border-color: #4a5568; color: #e7e9ea; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+</style>
+
+<div class="flex items-center justify-between mb-6">
+  <div>
+    <h1 class="text-2xl font-bold text-white flex items-center gap-2">🐦 Tweet Şablonları</h1>
+    <p class="text-gray-400 text-sm mt-1">Örnek: <span class="text-blue-400 font-semibold">ATATR</span> halka arz akışı + <span class="text-blue-400 font-semibold">EREGL</span> KAP haberi</p>
+  </div>
+</div>
+
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="showTab('atatr',this)">📋 ATATR — Halka Arz Akışı</button>
+  <button class="tab-btn" onclick="showTab('eregl',this)">📡 EREGL — KAP Haberi</button>
+  <button class="tab-btn" onclick="showTab('genel',this)">📊 Genel / Periyodik</button>
+</div>
+
+<!-- ===== ATATR ===== -->
+<div id="tab-atatr" class="panel active">
+
+  <div class="section-bar">
+    <p class="text-blue-400 font-semibold text-sm">ATATR — Gentaş Kimya Sanayi A.Ş.</p>
+    <p class="text-gray-500 text-xs mt-0.5">Halka arz fiyatı: 11 TL &nbsp;|&nbsp; Sektör: Kimya &nbsp;|&nbsp; İlk işlem: 07.03.2026</p>
+  </div>
+
+  <!-- T1 -->
+  <div class="tw-label">
+    <span class="tw-num">#1</span>
+    <span class="tw-title">Yeni Halka Arz (SPK Onayı)</span>
+    <span class="tw-trigger">• SPK bülteni yayımlandığında</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓ <span class="tw-badge">Blue</span></div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ SPK Onay Görseli</div><div>Şirket adı · Mevcut sermaye · Yeni sermaye · Fiyat</div></div>
+    <div class="tw-body">🚨 SPK Bülteni Yayımlandı!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) için halka arz başvurusu SPK tarafından onaylandı.
+💰 Halka arz fiyatı: 11 TL
+
+📲 Bilgiler geldikçe bildirim göndereceğiz.
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #borsa #yatırım</span></div>
+    <div class="tw-footer"><span>💬 12</span><span>🔁 28</span><span>❤️ 147</span><span>👁 4.2K</span></div>
+  </div>
+
+  <!-- T2 -->
+  <div class="tw-label">
+    <span class="tw-num">#2</span><span class="tw-title">Dağıtıma Çıkış</span>
+    <span class="tw-trigger">• Başvurular başladığında</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Başvurular Başlıyor Banner</div></div>
+    <div class="tw-body">📋 Halka Arz Başvuruları Başladı!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) için talep toplama süreci başlamıştır.
+💰 Fiyatı: 11 TL
+📅 Son başvuru: 28.02.2026
+📊 Tahmini dağıtım: ~3 lot/kişi (tahmini değerdir)
+
+❌ Katılınamayacak Kurumlar:
+İş Yatırım, Garanti BBVA
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #yatırım</span></div>
+    <div class="tw-footer"><span>💬 31</span><span>🔁 55</span><span>❤️ 310</span><span>👁 9.8K</span></div>
+  </div>
+
+  <!-- T3 -->
+  <div class="tw-label">
+    <span class="tw-num">#3</span><span class="tw-title">Kesinleşen Dağıtım Sonuçları</span>
+    <span class="tw-trigger">• Sonuçlar açıklandığında</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Dağıtım Sonuçları Banner</div></div>
+    <div class="tw-body">✅ Kesinleşen Dağıtım Sonuçları
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>)
+
+📌 Bireysel
+Kişi: 182.450 | Lot: 547.350 | Oran: %40
+
+📌 Kurumsal Yurt İçi
+Kişi: 48 | Lot: 420.000 | Oran: %35
+
+📌 Kurumsal Yurt Dışı
+Lot: 300.000 | Oran: %25
+
+👤 Bireysel yatırımcıya düşen: ~3 lot/kişi
+📊 Toplam başvuran: 182.450 kişi
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 64</span><span>🔁 120</span><span>❤️ 488</span><span>👁 22K</span></div>
+  </div>
+
+  <!-- T4 -->
+  <div class="tw-label">
+    <span class="tw-num">#4</span><span class="tw-title">Son 4 Saat Hatırlatma</span>
+    <span class="tw-trigger">• Kapanışa 4 saat kala (otomatik)</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Son 4 Saat Banner</div></div>
+    <div class="tw-body">⏰ Son 4 Saat!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) halka arz başvurusu için kapanışa son 4 saat kaldı!
+📊 Tahmini: ~3 lot/kişi (tahmini değerdir)
+
+⏳ Başvurular saat 17:00'a kadar devam ediyor.
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #yatırım</span></div>
+    <div class="tw-footer"><span>💬 19</span><span>🔁 44</span><span>❤️ 201</span><span>👁 7.1K</span></div>
+  </div>
+
+  <!-- T5 -->
+  <div class="tw-label">
+    <span class="tw-num">#5</span><span class="tw-title">Son 30 Dakika Hatırlatma</span>
+    <span class="tw-trigger">• Kapanışa 30 dakika kala</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Son 30 Dakika Banner</div></div>
+    <div class="tw-body">🚨 Son 30 Dakika!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) halka arz başvurusu kapanmak üzere!
+📊 Tahmini: ~3 lot/kişi (tahmini değerdir)
+
+Saat 17:00'da başvurular kapanıyor, acele edin!
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #yatırım</span></div>
+    <div class="tw-footer"><span>💬 28</span><span>🔁 67</span><span>❤️ 312</span><span>👁 12K</span></div>
+  </div>
+
+  <!-- T12 -->
+  <div class="tw-label">
+    <span class="tw-num">#12</span><span class="tw-title">Son Başvuru Günü Sabahı</span>
+    <span class="tw-trigger">• Son gün 07:30'da</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Son Başvuru Günü Banner</div></div>
+    <div class="tw-body">📢 Son Başvuru Günü!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) için halka arz başvuruları bugün saat 17:00'a kadar devam ediyor.
+💰 Fiyat: 11 TL
+
+⏰ Son anlara kadar hatırlatma yapacağız.
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #yatırım</span></div>
+    <div class="tw-footer"><span>💬 22</span><span>🔁 38</span><span>❤️ 178</span><span>👁 5.9K</span></div>
+  </div>
+
+  <!-- T13 -->
+  <div class="tw-label">
+    <span class="tw-num">#13</span><span class="tw-title">Şirket Tanıtım</span>
+    <span class="tw-trigger">• SPK onayından 12 saat sonra (otomatik)</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Halka Arz Hakkında Banner</div></div>
+    <div class="tw-body">📋 Halka Arz Hakkında
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>)
+🏭 Sektör: Kimya
+💰 Halka arz fiyatı: 11 TL
+
+💼 Fon Kullanım Yerleri:
+• %45-55 İşletme sermayesi güçlendirme
+• %15-25 Yeni pazarlara erişim ve ihracat kapasitesi
+• %10-15 Teknoloji yatırımları ve Ar-Ge
+• %10-20 Borç ödeme
+
+1985 yılında kurulan Gentaş Kimya, tekstil, deri ve plastik sektörlerine yönelik özel kimyasal formülasyonlar üretmektedir. Türkiye'nin önde gelen kimyasal yardımcı madde üreticilerinden biri olan şirket, 12 ülkeye ihracat yapmaktadır...
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #yatırım</span></div>
+    <div class="tw-footer"><span>💬 44</span><span>🔁 89</span><span>❤️ 376</span><span>👁 14K</span></div>
+  </div>
+
+  <!-- T6 -->
+  <div class="tw-label">
+    <span class="tw-num">#6</span><span class="tw-title">İlk İşlem Günü — Gong</span>
+    <span class="tw-trigger">• İlk işlem günü 09:00'da</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Gong Çalıyor Banner</div></div>
+    <div class="tw-body">🔔 Gong Çalıyor!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>) bugün borsada işleme başlıyor!
+💰 Halka arz fiyatı: 11 TL
+
+25 günlük tavan/taban takibini uygulamamızdan yapabilirsiniz.
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 57</span><span>🔁 134</span><span>❤️ 621</span><span>👁 31K</span></div>
+  </div>
+
+  <!-- T7 -->
+  <div class="tw-label">
+    <span class="tw-num">#7</span><span class="tw-title">Açılış Fiyatı</span>
+    <span class="tw-trigger">• İlk işlem günü 09:56'da</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Açılış Fiyatı Banner</div></div>
+    <div class="tw-body">📈 Açılış Fiyatı Belli Oldu!
+
+Gentaş Kimya Sanayi A.Ş. (<span class="ht">#ATATR</span>)
+
+• Halka arz fiyatı: 11.00 TL
+• Açılış fiyatı: 12.10 TL
+• 🟢 Tavandan açıldı!
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 83</span><span>🔁 201</span><span>❤️ 894</span><span>👁 42K</span></div>
+  </div>
+
+  <!-- T8 1-5 -->
+  <div class="tw-label">
+    <span class="tw-num">#8</span><span class="tw-title">Günlük Takip (1-5. Gün — Metin)</span>
+    <span class="tw-trigger">• Her işlem günü 18:20'de</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Günlük Takip Banner</div></div>
+    <div class="tw-body">📊 <span class="ht">#ATATR</span> — 3. Gün Sonu
+
+Kümülatif Toplam:
+1. 🟢 %+10.0
+2. 🟢 %+9.5
+3. 🟢 %+9.8 ◀
+
+🟢 Kapanış: 14.58 TL | %+9.80 | 🟢 Tavan
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 48</span><span>🔁 112</span><span>❤️ 537</span><span>👁 19K</span></div>
+  </div>
+
+  <!-- T8 6+ -->
+  <div class="tw-label">
+    <span class="tw-num">#8</span><span class="tw-title">Günlük Takip (6-25. Gün — Dinamik Grafik)</span>
+    <span class="tw-trigger">• 6. günden itibaren PNG grafik ile</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img tw-img-chart" style="height:100px;">
+      <div class="imlbl">📈 Dinamik Günlük Grafik</div>
+      <div>Çizgi grafik · Halka arz fiyatı · Günlük kapanışlar · Tavan/taban sayısı</div>
+    </div>
+    <div class="tw-body">📊 <span class="ht">#ATATR</span> — 12/25 Gün Sonu
+
+Halka Arz: 11.00 TL
+🟢 Kapanış: 15.23 TL | %+11.50 | 🟢 Tavan
+Kümülatif: %+38.5
+
+Tavan: 9 | Taban: 0 | Normal İşlem Aralığı: 3
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 62</span><span>🔁 155</span><span>❤️ 712</span><span>👁 26K</span></div>
+  </div>
+
+  <!-- T9 -->
+  <div class="tw-label">
+    <span class="tw-num">#9</span><span class="tw-title">25 Gün Performans Özeti</span>
+    <span class="tw-trigger">• 25. işlem günü tamamlandığında</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img tw-img-chart" style="height:100px;">
+      <div class="imlbl">🏁 25 Gün Dinamik Tablo Görseli</div>
+      <div>Tüm günlerin grafiği · Tavan/taban dağılımı · Ort lot kazanç hesabı</div>
+    </div>
+    <div class="tw-body">📋 <span class="ht">#ATATR</span> — 25 Günü Bitirdi
+
+Halka Arz: 11.00 TL
+Kişi Başı Ort Lot: 3
+Ort Lotla Karne: +12.870 TL (%+39.0)
+
+Tavan: 18 | Taban: 0 | Normal İşlem Aralığı: 7
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #ATATR #hisse</span></div>
+    <div class="tw-footer"><span>💬 114</span><span>🔁 298</span><span>❤️ 1.4K</span><span>👁 61K</span></div>
+  </div>
+
+</div><!-- /atatr -->
+
+<!-- ===== EREGL ===== -->
+<div id="tab-eregl" class="panel">
+
+  <div class="section-bar">
+    <p class="text-blue-400 font-semibold text-sm">EREGL — KAP Haberi (BIST50)</p>
+    <p class="text-gray-500 text-xs mt-0.5">Ereğli Demir ve Çelik Fabrikaları T.A.Ş. · Anlık KAP bildirimi</p>
+  </div>
+
+  <div class="info-box">
+    ℹ️ <strong>KAP haberleri</strong> <code>TWITTER_AUTO_SEND</code> modundan bağımsız, <strong>force_send=True</strong> ile direkt atılır. &nbsp;|&nbsp; AI Puanı ≥8 → 🔥 &nbsp;|&nbsp; ≥6 → 📊 &nbsp;|&nbsp; Özet max 200 karakter
+  </div>
+
+  <!-- T11 High -->
+  <div class="tw-label">
+    <span class="tw-num">#11</span><span class="tw-title">KAP Haberi — AI Puanı Yüksek (≥8) 🔥</span>
+    <span class="tw-trigger">• Anlık</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img" style="background:linear-gradient(135deg,#1a1a2e,#16213e)!important;"><div class="imlbl">📡 kap_bildirim.png</div><div>Statik KAP bildirim görseli</div></div>
+    <div class="tw-body">🟢 <span class="ht">#EREGL</span> — Haber Bildirimi
+
+Anlık Haber Yakalandı 14:22:08
+
+İlişkili Kelime : Kapasite Artışı Yatırımı
+🔥 AI Puanı: 8.2/10
+💬 Şirket 2 milyar TL yatırımla üretim kapasitesini %30 artırmayı planlıyor. Yeni tesisin 2027'de faaliyete geçmesi bekleniyor.
+
+📎 KAP: <a>https://kap.org.tr/tr/...</a>
+
+Ücretsiz BIST 50 bildirimleri için:
+📲 <a>szalgo.net.tr/telegram-kap</a>
+⚠️YT değildir
+<span class="ht">#BIST50 #EREGL #KAP #BorsaIstanbul #Sanayi #demir</span></div>
+    <div class="tw-footer"><span>💬 38</span><span>🔁 92</span><span>❤️ 441</span><span>👁 18K</span></div>
+  </div>
+
+  <!-- T11 Mid -->
+  <div class="tw-label">
+    <span class="tw-num">#11</span><span class="tw-title">KAP Haberi — AI Puanı Orta (6-7.9) 📊</span>
+    <span class="tw-trigger">• Anlık</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img" style="background:linear-gradient(135deg,#1a1a2e,#16213e)!important;"><div class="imlbl">📡 kap_bildirim.png</div></div>
+    <div class="tw-body">🟢 <span class="ht">#EREGL</span> — Haber Bildirimi
+
+Anlık Haber Yakalandı 10:45:31
+
+İlişkili Kelime : Kâr Payı Dağıtımı
+📊 AI Puanı: 6.8/10
+💬 Yönetim kurulu 2025 yılı net kârından hisse başına 1,20 TL temettü dağıtımı önerdi.
+
+📎 KAP: <a>https://kap.org.tr/tr/...</a>
+
+Ücretsiz BIST 50 bildirimleri için:
+📲 <a>szalgo.net.tr/telegram-kap</a>
+⚠️YT değildir
+<span class="ht">#BIST50 #EREGL #KAP #BorsaIstanbul #temettü</span></div>
+    <div class="tw-footer"><span>💬 27</span><span>🔁 61</span><span>❤️ 289</span><span>👁 11K</span></div>
+  </div>
+
+  <!-- T11 Neg -->
+  <div class="tw-label">
+    <span class="tw-num">#11</span><span class="tw-title">KAP Haberi — Negatif Sentiment 🔴</span>
+    <span class="tw-trigger">• Anlık</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img" style="background:linear-gradient(135deg,#1a1a2e,#16213e)!important;"><div class="imlbl">📡 kap_bildirim.png</div></div>
+    <div class="tw-body">🔴 <span class="ht">#EREGL</span> — Haber Bildirimi
+
+Anlık Haber Yakalandı 16:10:44
+
+İlişkili Kelime : Zarar Açıklaması
+📊 AI Puanı: 5.1/10
+💬 Şirket Q4 2025 döneminde artan hammadde maliyetleri nedeniyle net zarar açıkladı.
+
+📎 KAP: <a>https://kap.org.tr/tr/...</a>
+
+Ücretsiz BIST 50 bildirimleri için:
+📲 <a>szalgo.net.tr/telegram-kap</a>
+⚠️YT değildir
+<span class="ht">#BIST50 #EREGL #KAP #BorsaIstanbul</span></div>
+    <div class="tw-footer"><span>💬 44</span><span>🔁 78</span><span>❤️ 203</span><span>👁 14K</span></div>
+  </div>
+
+</div><!-- /eregl -->
+
+<!-- ===== GENEL ===== -->
+<div id="tab-genel" class="panel">
+
+  <div class="section-bar">
+    <p class="text-blue-400 font-semibold text-sm">Genel / Periyodik Tweetler</p>
+    <p class="text-gray-500 text-xs mt-0.5">Tarih/saat bazlı otomatik atılan tweetler</p>
+  </div>
+
+  <!-- T10 -->
+  <div class="tw-label">
+    <span class="tw-num">#10</span><span class="tw-title">Ay Sonu Halka Arz Raporu</span>
+    <span class="tw-trigger">• Her ayın son günü gece yarısı</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ Ay Sonu Rapor Banner</div></div>
+    <div class="tw-body">📊 2026 Halka Arz — Şubat Sonu Raporu
+
+• Toplam halka arz: 8
+• 25 günü doldu: 5
+• Kar/zarar: 4/5
+• Ort. getiri: 🔥 %+22.4
+• En iyi: <span class="ht">#ATATR</span> (%+39.0)
+• En kötü: <span class="ht">#XXXXK</span> (%-4.2)
+
+⚠️ İlk 25 işlem günü baz alınmıştır.
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #borsa #yatırım</span></div>
+    <div class="tw-footer"><span>💬 91</span><span>🔁 224</span><span>❤️ 1.1K</span><span>👁 48K</span></div>
+  </div>
+
+  <!-- T14 -->
+  <div class="tw-label">
+    <span class="tw-num">#14</span><span class="tw-title">SPK Bekleyenler (Aylık Görsel)</span>
+    <span class="tw-trigger">• Her ayın 1'inde</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img"><div class="imlbl">🖼️ SPK Bekleyenler Dinamik Görseli</div><div>Şirket listesi · Bülten tarihleri · Bekleme süresi</div></div>
+    <div class="tw-body">📊 SPK Onay Bekleyenler
+
+Şu an 12 şirket SPK onayı beklemektedir.
+
+Güncel listeyi uygulamamızdan takip edebilirsiniz.
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #SPK #BIST100 #borsa #yatırım</span></div>
+    <div class="tw-footer"><span>💬 33</span><span>🔁 78</span><span>❤️ 344</span><span>👁 13K</span></div>
+  </div>
+
+  <!-- T15 -->
+  <div class="tw-label">
+    <span class="tw-num">#15</span><span class="tw-title">Öğle Arası Market Snapshot</span>
+    <span class="tw-trigger">• Her gün 14:00'de (aktif işlem gören hisseler)</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img tw-img-chart" style="height:90px;">
+      <div class="imlbl">📊 Market Snapshot Dinamik Grafik</div>
+      <div>Her hisse için kart · Fiyat · Günlük %değişim</div>
+    </div>
+    <div class="tw-body">📊 Öğle Arası — 3 Hisse
+
+<span class="ht">#ATATR</span>  12/25
+%+9.8
+
+<span class="ht">#TGBRT</span>  4/25
+%+6.2
+
+<span class="ht">#KMPUR</span>  8/25
+%-1.4
+
+Tavan: 1 | Taban: 0 | Normal: 2
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #borsa #hisse</span></div>
+    <div class="tw-footer"><span>💬 24</span><span>🔁 47</span><span>❤️ 198</span><span>👁 7.4K</span></div>
+  </div>
+
+  <!-- T16 -->
+  <div class="tw-label">
+    <span class="tw-num">#16</span><span class="tw-title">Açılış Bilgileri (İlk 5 Gün)</span>
+    <span class="tw-trigger">• Excel sync sonrası, ilk 5 günde</span>
+  </div>
+  <div class="tw-card">
+    <div class="tw-header">
+      <div class="tw-avatar">SZ</div>
+      <div><div class="tw-name">SZAlgo Finans ✓</div><div class="tw-username">@SZAlgoFinans</div></div>
+    </div>
+    <div class="tw-img tw-img-chart" style="height:90px;">
+      <div class="imlbl">📈 Açılış Özeti Dinamik Görsel</div>
+    </div>
+    <div class="tw-body">📊 Yeni Halka Arzlar — Açılış Bilgileri
+
+🟢 <span class="ht">#ATATR</span> 3. Gün | Açılış: 14.58 TL | %+9.8 TAVAN
+🟢 <span class="ht">#TGBRT</span> 1. Gün | Açılış: 18.20 TL | %+8.5 TAVAN
+🔴 <span class="ht">#KMPUR</span> 5. Gün | Açılış: 11.40 TL | %-2.1
+
+Daha detaylı bilgiler için 📲 <a>szalgo.net.tr/halkaarz</a>
+<span class="ht">#HalkaArz #BIST100 #borsa #hisse</span></div>
+    <div class="tw-footer"><span>💬 36</span><span>🔁 88</span><span>❤️ 421</span><span>👁 16K</span></div>
+  </div>
+
+</div><!-- /genel -->
+
+<script>
+function showTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+{% endblock %}
