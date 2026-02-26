@@ -274,8 +274,10 @@ def generate_prospectus_analysis_image(
         y = top_stripe_h
         draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG)
 
-        # Logo
-        logo_path = os.path.join(_IMG_DIR, "logo.jpg")
+        # Logo (megafon+candlestick)
+        logo_path = os.path.join(_IMG_DIR, "logo.png")
+        if not os.path.exists(logo_path):
+            logo_path = os.path.join(_IMG_DIR, "logo.jpg")
         logo_x = padding
         logo_size = 70
         try:
