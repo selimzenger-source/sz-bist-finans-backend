@@ -288,6 +288,10 @@ def find_ilk_halka_arz_table(tables: list[list[list[str]]], full_text: str) -> l
             # Kisa notlari temizle: "(1)", "(2)" gibi dipnotlar
             company_name = re.sub(r"\s*\(\d+\)\s*$", "", company_name).strip()
 
+            # Basta gelen parantez icindeki marka/tanitim isimlerini temizle:
+            # "(MetropolCard) Metropal Kurumsal..." → "Metropal Kurumsal..."
+            company_name = re.sub(r"^\([^)]*\)\s*", "", company_name).strip()
+
             # "Ortaklik" header kelimesini atla — ama "Ortaklik" TAMAMEN header ise
             # Sirket adi "... Ortakligi AS" olabilir, bunu ATLAMA!
             cn_lower = company_name.lower().replace("\n", " ")
@@ -377,6 +381,8 @@ def find_halka_acik_pay_ihraclari(tables: list[list[list[str]]]) -> list[dict]:
 
             company_name = str(row[0] or "").strip()
             company_name = re.sub(r"\s*\(\d+\)\s*$", "", company_name).strip()
+            # Basta gelen parantez icindeki marka isimlerini temizle
+            company_name = re.sub(r"^\([^)]*\)\s*", "", company_name).strip()
             if not company_name or len(company_name) < 3:
                 continue
 
