@@ -511,6 +511,7 @@ class _DynSetting:
 # f-string icinde {APP_LINK} yazildiginda otomatik DB'den okur
 APP_LINK = _DynSetting("APP_LINK")
 HALKAARZ_LINK = "https://szalgo.net.tr/halkaarz"
+HALKAARZ_BEKLEYENLER_LINK = "https://szalgo.net.tr/halkaarz/onay-bekleyenler"
 KAP_HABER_LINK = "https://szalgo.net.tr/telegram-kap"
 SLOGAN = _DynSetting("SLOGAN")
 DISCLAIMER = _DynSetting("DISCLAIMER")
@@ -1448,8 +1449,8 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         text = (
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
-            f"{_get_setting('T14_ACIKLAMA')}\n\n"
-            f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
+            f"Güncel listeyi 📲 {HALKAARZ_BEKLEYENLER_LINK}\n"
+            f"sitesinden ve uygulamamızdan takip edebilirsiniz.\n"
             f"#HalkaArz #SPK #BIST100 #borsa #yatırım"
         )
 
