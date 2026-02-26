@@ -1,5 +1,6 @@
 """Admin panel route'lari — IPO CRUD + Dagitim Sonuclari + SPK Yonetimi + Kupon."""
 
+import asyncio
 import logging
 import os
 import re
@@ -8,6 +9,18 @@ import string
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
+
+# ── Arka plan görev takibi (GC koruması) ──────────────────────────
+# asyncio.create_task() weak reference kullanır — referans tutmazsan
+# task GC tarafından silinebilir. Bu set tüm aktif görevleri tutar.
+_bg_tasks: set = set()
+
+def _fire_and_forget(coro) -> asyncio.Task:
+    """Coroutine'i arka planda başlat; GC'den korumak için referans tut."""
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
 
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -1074,10 +1087,9 @@ async def run_prospectus_analysis_admin(
     await db.commit()
 
     try:
-        import asyncio
         from app.services.prospectus_analyzer import analyze_prospectus
-        # Arka planda çalıştır — admin paneli bloke etme
-        asyncio.create_task(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
+        # GC korumalı arka plan görevi (_bg_tasks referans tutar)
+        _fire_and_forget(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
         msg = f"İzahname analizi başlatıldı: {ipo.company_name} — birkaç dakika içinde tamamlanır"
         return RedirectResponse(url=f"/admin/?success={msg}", status_code=303)
     except Exception as e:

@@ -12,6 +12,7 @@ Calisma Mantigi:
 Kaynak: https://halkarz.com
 """
 
+import asyncio
 import json
 import re
 import logging
@@ -24,6 +25,15 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 
 logger = logging.getLogger(__name__)
+
+# ── Arka plan görev takibi (GC koruması) ────────────────────────────
+_bg_tasks: set = set()
+
+def _fire_and_forget(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
 
 HALKARZ_BASE = "https://halkarz.com"
 HALKARZ_WP_API = f"{HALKARZ_BASE}/wp-json/wp/v2"
@@ -1064,12 +1074,9 @@ async def scrape_halkarz():
                         _company, _pdf_url,
                     )
                     try:
-                        import asyncio
                         from app.services.prospectus_analyzer import analyze_prospectus
-                        # Arkaplan görevi — scraper'ı bloke etmez
-                        asyncio.create_task(
-                            analyze_prospectus(_ipo_id, _pdf_url, delay_seconds=0)
-                        )
+                        # GC korumalı arka plan görevi
+                        _fire_and_forget(analyze_prospectus(_ipo_id, _pdf_url, delay_seconds=0))
                         logger.info("HalkArz: %s — AI izahname analiz görevi başlatıldı", _company)
                     except Exception as pa_err:
                         logger.warning(
