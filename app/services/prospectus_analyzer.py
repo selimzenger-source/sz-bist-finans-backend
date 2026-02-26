@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL   = "claude-sonnet-4-5"
-_AI_TIMEOUT = 180   # 140 sayfa PDF → uzun analiz → 3 dk
+_AI_TIMEOUT = 90    # Vision OCR 5 sayfa → kısa metin → 90s yeterli
 
 # PDF çıkarımında max karakter (büyük PDF'ler için kırp)
 _MAX_PDF_CHARS = 180_000    # ~100k token — güvenli
@@ -224,9 +224,10 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
-        # İlk 10 sayfa: kapak + izahname özeti + risk faktörleri başı
-        # 1 batch = 1 API çağrısı = ~60-90s → toplam analiz ~2-3 dk
-        max_pages = min(total_pages, 10)
+        # İlk 5 sayfa: kapak + izahname özeti başı — hızlı ve güvenilir
+        # Debug'da 2 sayfa = 2311 karakter çıkarıldı, 5 sayfa yeterli
+        # Daha az sayfa = daha az token = daha az timeout riski
+        max_pages = min(total_pages, 5)
 
         # Sayfaları düşük çözünürlüklü gri JPEG olarak render et
         page_images = []
@@ -244,10 +245,9 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         logger.info("Vision OCR: %d/%d sayfa render edildi", len(page_images), total_pages)
 
-        # 10’ar sayfalık batch’ler halinde Claude Vision’a gönder
-        # (max 2 batch = max 2 API çağrısı = ~2 dakika)
+        # 5’er sayfalık batch — max 1 batch, ~60s, güvenilir
         all_texts = []
-        batch_size = 10
+        batch_size = 5
 
         for batch_start in range(0, len(page_images), batch_size):
             batch = page_images[batch_start:batch_start + batch_size]
