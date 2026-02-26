@@ -1154,19 +1154,31 @@ async def debug_prospectus_analysis(
             result["steps"]["error"] = f"PDF indirme hatası: {e}"
             return JSONResponse(result)
 
-        # Adım 4: PDF metin çıkar
+        # Adım 4a: pdfplumber metin çıkar
         try:
-            text = ""
+            text_plumber = ""
             with pdfplumber.open(tmp_path) as pdf:
                 pages_read = min(5, len(pdf.pages))
                 for page in pdf.pages[:pages_read]:
-                    text += page.extract_text() or ""
-            result["steps"]["4_pdf_text"] = f"OK ({len(text)} karakter, ilk 5 sayfa)"
-            result["text_sample"] = text[:300]
+                    text_plumber += page.extract_text() or ""
+            result["steps"]["4a_pdfplumber"] = f"OK ({len(text_plumber)} karakter, ilk 5 sayfa)"
         except Exception as e:
-            result["steps"]["4_pdf_text"] = False
-            result["steps"]["error"] = f"PDF metin çıkarma hatası: {e}"
-            return JSONResponse(result)
+            result["steps"]["4a_pdfplumber"] = f"HATA: {e}"
+
+        # Adım 4b: PyMuPDF metin çıkar
+        try:
+            import fitz  # PyMuPDF
+            text_fitz = ""
+            doc = fitz.open(tmp_path)
+            pages_read = min(5, len(doc))
+            for page in doc[:pages_read]:
+                text_fitz += page.get_text("text") or ""
+            doc.close()
+            result["steps"]["4b_pymupdf"] = f"OK ({len(text_fitz)} karakter, ilk 5 sayfa)"
+            result["text_sample"] = text_fitz[:300] if text_fitz else text_plumber[:300]
+        except Exception as e:
+            result["steps"]["4b_pymupdf"] = f"HATA: {e}"
+            result["text_sample"] = text_plumber[:300]
 
         # Adım 5: Abacus API test
         try:
