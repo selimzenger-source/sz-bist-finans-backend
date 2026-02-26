@@ -1152,6 +1152,51 @@ async def quick_analyze_admin(
         )
 
 
+@router.post("/ipo/{ipo_id}/regenerate-ai-report")
+async def regenerate_ai_report_admin(
+    ipo_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """AI halka arz değerlendirme raporunu sıfırla ve yeniden üret.
+    Admin panelden test / yeniden oluşturma için kullanılır.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.models.ipo import IPO
+        from sqlalchemy import select
+        result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = result.scalar_one_or_none()
+        if not ipo:
+            return RedirectResponse(url=f"/admin/?error=IPO bulunamadı: {ipo_id}", status_code=303)
+
+        # Mevcut raporu sıfırla
+        ipo.ai_report = None
+        ipo.ai_report_generated_at = None
+        await db.commit()
+
+        # Senkron çalıştır — await ile bekle
+        from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+        success = await generate_and_save_ipo_report(ipo_id)
+
+        if success:
+            msg = f"AI rapor yeniden üretildi ✅ — {ipo.company_name}"
+            return RedirectResponse(url=f"/admin/ipo/{ipo_id}/edit?success={msg}", status_code=303)
+        else:
+            return RedirectResponse(
+                url=f"/admin/ipo/{ipo_id}/edit?error=AI rapor üretilemedi — loglara bakın",
+                status_code=303,
+            )
+    except Exception as e:
+        logger.error("AI rapor regenerate hatası ipo_id=%d: %s", ipo_id, e)
+        return RedirectResponse(
+            url=f"/admin/ipo/{ipo_id}/edit?error={str(e)[:150]}",
+            status_code=303,
+        )
+
+
 @router.get("/ipo/{ipo_id}/prospectus-debug")
 async def debug_prospectus_analysis(
     ipo_id: int,
