@@ -224,15 +224,28 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
-        # İlk 5 sayfa: kapak + izahname özeti başı — hızlı ve güvenilir
-        # Debug'da 2 sayfa = 2311 karakter çıkarıldı, 5 sayfa yeterli
-        # Daha az sayfa = daha az token = daha az timeout riski
-        max_pages = min(total_pages, 5)
 
-        # Sayfaları düşük çözünürlüklü gri JPEG olarak render et
+        # Akıllı sayfa örnekleme: başı + ortası + sonu
+        # İzahnamede: kapak(1-3), özet(4-10), risk(10-30), finansal(30-60+)
+        # Her bölümden 2’şer sayfa = 3 batch × 2 sayfa = 6 sayfa, ~3 API çağrısı
+        if total_pages <= 8:
+            # Kısa belge: tamamını al
+            sample_indices = list(range(total_pages))
+        else:
+            # Stratejik örnekleme: 3 bölgeden 2’şer sayfa
+            s1 = max(0, min(3, total_pages - 1))               # Sayfa 4-5 (özet başı)
+            s2 = max(0, total_pages // 3)                      # 1/3 noktası (risk faktörleri)
+            s3 = max(0, total_pages * 2 // 3)                  # 2/3 noktası (finansal)
+            sample_indices = sorted(set([
+                s1, min(s1+1, total_pages-1),
+                s2, min(s2+1, total_pages-1),
+                s3, min(s3+1, total_pages-1),
+            ]))
+
+        # Sayfaları 150 DPI gri JPEG olarak render et (daha iyi OCR kalitesi)
         page_images = []
-        mat = fitz.Matrix(1.0, 1.0)  # 72 DPI — küçük, token tasarruflu
-        for i in range(max_pages):
+        mat = fitz.Matrix(1.5, 1.5)  # 108 DPI — 72 DPI’dan 2x daha iyi kalite
+        for i in sample_indices:
             try:
                 pix = doc[i].get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
                 img_bytes = pix.tobytes("jpeg")
@@ -243,11 +256,12 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
                 logger.warning("Vision OCR sayfa render hatası s.%d: %s", i, pe)
         doc.close()
 
-        logger.info("Vision OCR: %d/%d sayfa render edildi", len(page_images), total_pages)
+        logger.info("Vision OCR: %d sayfa örneklendi (toplam=%d), stratejik: %s",
+                    len(page_images), total_pages, sample_indices)
 
-        # 5’er sayfalık batch — max 1 batch, ~60s, güvenilir
+        # 2’şer sayfalık batch — her biri ~30-45s, 3 batch = ~90-135s toplam
         all_texts = []
-        batch_size = 5
+        batch_size = 2
 
         for batch_start in range(0, len(page_images), batch_size):
             batch = page_images[batch_start:batch_start + batch_size]
