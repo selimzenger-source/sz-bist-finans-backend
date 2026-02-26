@@ -48,7 +48,7 @@ _USER_LOOKUP_URL  = "https://api.twitter.com/2/users/{user_id}"
 JITTER_MIN = 25   # saniye
 JITTER_MAX = 55   # saniye
 
-_MAX_TWEET_AGE_HOURS   = 2    # 2 saatten eski mention'lara cevap verme
+_MAX_TWEET_AGE_MINUTES = 5    # 5 dakikadan eski mention'lara cevap verme (since_id ile zaten sadece yeniler gelir)
 _MAX_REPLIES_PER_CYCLE = 3    # tek döngüde max 3 yanıt (spam önleme)
 
 _MENTIONS_REPLY_LOCK   = asyncio.Lock()
@@ -445,13 +445,13 @@ async def _run_mentions_cycle() -> None:
             author_id  = mention.get("author_id", "")
             created_at = mention.get("created_at", "")
 
-            # Yaş kontrolü
+            # Yaş kontrolü — sadece son 5 dakikadaki mention'lara cevap ver
             if created_at:
                 try:
                     dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                    age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-                    if age_hours > _MAX_TWEET_AGE_HOURS:
-                        logger.debug(f"  {tweet_id} çok eski ({age_hours:.1f}h), atlandı")
+                    age_minutes = (datetime.now(timezone.utc) - dt).total_seconds() / 60
+                    if age_minutes > _MAX_TWEET_AGE_MINUTES:
+                        logger.debug(f"  {tweet_id} çok eski ({age_minutes:.1f}dk), atlandı")
                         continue
                 except Exception:
                     pass
