@@ -306,6 +306,23 @@ class HalkArzDetailParser:
         """h5 basliklarindan: Halka Arz Sekli, Tahsisat, Lot Tahmini, vs."""
         body_text = self.soup.get_text(separator="\n", strip=True)
 
+        # Halka Arz Satis Yontemi → participation_method
+        # "Borsa'da Satış", "Borsada Satış" → borsada_satis
+        # Aksi halde (Talep Toplama, Eşit Dağıtım vs.) → talep_toplama
+        satis_yontemi_match = re.search(
+            r"(?:Halka\s+Arz\s+)?Satış\s+Yöntemi\s*[-–:.]?\s*(.{5,120})",
+            body_text, re.IGNORECASE,
+        )
+        if satis_yontemi_match:
+            yontem_text = satis_yontemi_match.group(1).strip().lower()
+            if re.search(r"borsa['\u2019]?da\s+sat[ıi]", yontem_text):
+                self.data["participation_method"] = "borsada_satis"
+            else:
+                self.data["participation_method"] = "talep_toplama"
+            logger.info("HalkArz: Satis yontemi tespit: '%s' → %s",
+                        satis_yontemi_match.group(1).strip()[:80],
+                        self.data["participation_method"])
+
         # Katilim Endeksi
         katilim_match = re.search(
             r"Katılım\s+Endeks[ieİ]ne\s+(uygun|uygun\s+değil)",
@@ -959,6 +976,7 @@ async def scrape_halkarz():
                     "fund_usage": "fund_usage",
                     "company_description": "company_description",
                     "katilim_endeksi": "katilim_endeksi",
+                    "participation_method": "participation_method",
                 }
 
                 # trading_start ilk kez set ediliyorsa tweet + bildirim icin flag
