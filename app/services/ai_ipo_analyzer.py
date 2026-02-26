@@ -48,9 +48,9 @@ KAYNAK YASAGI (MUTLAK):
 
 RAPOR FORMATI (JSON):
 {
-  "overall_score": <1.0 ile 10.0 arasi puan — ondalikli>,
+  "overall_score": <1.0 ile 10.0 arasi GELECEK POTANSIYELI puani — ondalikli>,
   "risk_level": "<dusuk | orta | yuksek | cok_yuksek>",
-  "analysis": "<4-6 paragraflik detayli genel degerlendirme>",
+  "analysis": "<4-6 paragraflik detayli genel degerlendirme — risk detaylarini da ICINDE degerlendir>",
   "how_to_participate": "<Basvuru rehberi — hangi araci kurum, adim adim>",
   "lot_estimate_explanation": "<Lot tahmini aciklamasi — gecmis verilere dayanarak>",
   "scenario_table": [
@@ -63,6 +63,12 @@ RAPOR FORMATI (JSON):
   "recommendation": "<Sonuc paragrafi>"
 }
 
+ONEMLI PUANLAMA NOTU:
+- overall_score GELECEK POTANSIYELI puanidir — sirketin ileriye donuk buyume, karlilık ve yatirimci getirisi potansiyelini olcer.
+- risk_level ayri bir alan olarak kalir ama puan belirlerken asil odak POTANSIYEL olmalidir.
+- Riskleri analysis icerisinde detayli isle, ancak dusuk puan "cok riskli" degil "sinirli potansiyel" anlamina gelir.
+- Ton olarak: olumlu ve yapici ol, ama gercekci kal. Abartma, sise de.
+
 ALAN DETAYLARI:
 
 1. analysis (en az 250 kelime):
@@ -72,6 +78,7 @@ ALAN DETAYLARI:
    - Eger izahname analiz verileri sunulmussa, olumlu ve olumsuz bulgulari raporuna entegre et
    - Piyasa kosullari ve zamanlama degerlendirmesi
    - Fon kullanim hedefleri makul mu?
+   - RISK DETAYLARINI BU BOLUMDE AC: sektor riskleri, sirket riskleri, makro riskler
 
 2. how_to_participate (en az 100 kelime):
    - Dagitim yontemi: esit/oransal/karma ne demek, yatirimci icin ne anlama gelir
@@ -106,12 +113,14 @@ ALAN DETAYLARI:
    - Dikkat edilmesi gerekenler
    - SON CUMLE MUTLAKA: "Bu degerlendirme yatirim tavsiyesi niteliginde degildir."
 
-PUANLAMA REHBERI:
-- 1.0-3.0: Cok riskli, ciddi kaygılar var, katilmamak mantikli
-- 3.1-5.0: Orta-yuksek risk, dikkatli olunmali, sektor/sirket zayif
-- 5.1-7.0: Makul, fiyatlama uygun, orta risk, sektore gore kabul edilebilir
-- 7.1-8.5: Iyi firsat, temel gostergeler olumlu, fiyatlama cazip
-- 8.6-10.0: Istisnai firsat — cok nadiren verilmeli, her sey mukemmel
+PUANLAMA REHBERI — GELECEK POTANSIYELI:
+Bu puan sirketin GELECEK POTANSIYELI'ni olcer. Riskleri analysis icerisinde ayrintili degerlendir ama puan tamamen potansiyele odaklansin.
+- 1.0-2.5: Sinirli potansiyel — buyume perspektifi zayif, temel gostergeler yetersiz
+- 2.6-4.0: Orta potansiyel — bazi olumlu yanlar var ama genel goruntu karisik
+- 4.1-5.5: Iyi potansiyel — fiyatlama makul, sektor ortalamasi uzerinde beklenti
+- 5.6-7.0: Yuksek potansiyel — guclu temel gostergeler, cazip fiyatlama, buyume alani genis
+- 7.1-8.5: Cok yuksek potansiyel — istisnai buyume hikayesi, her sey olumlu
+- 8.6-10.0: Olagan ustu potansiyel — COK nadiren verilmeli, piyasada ender firsat
 
 KRITIK:
 - SADECE JSON formatinda cevap ver. Baska hicbir sey yazma.
