@@ -422,12 +422,13 @@ def generate_prospectus_analysis_image(
             info_text, fill=CYAN, font=f_footer_sm,
         )
 
-        disc = "Yatırım tavsiyesi değildir"
-        db   = f_footer_sm.getbbox(disc)
-        dw   = db[2] - db[0]
+        # Sağ taraf — BIST Haber & Arz
+        app_text = "BIST Haber & Arz"
+        ab = f_footer_sm.getbbox(app_text)
+        aw = ab[2] - ab[0]
         draw.text(
-            (width - padding - dw, y + 14),
-            disc, fill=GRAY, font=f_footer_sm,
+            (width - padding - aw, y + 14),
+            app_text, fill=GRAY, font=f_footer_sm,
         )
 
         # ─── Watermark ────────────────────────────────────────

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL   = "claude-sonnet-4-5"
-_AI_TIMEOUT = 90    # Vision OCR 5 sayfa → kısa metin → 90s yeterli
+_AI_TIMEOUT = 120   # Derin analiz için daha fazla süre
 
 # PDF çıkarımında max karakter (büyük PDF'ler için kırp)
 _MAX_PDF_CHARS = 180_000    # ~100k token — güvenli
@@ -62,54 +62,98 @@ _FINANCE_KEYWORDS = [
 # SYSTEM PROMPT — Hallüsinasyon koruması + Yüksek kalite
 # ─────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı bir halka arz analistsin. Görevin: izahname PDF'inden yatırımcı için EN KRİTİK, EN SPESİFİK bilgileri çıkarmak. Genel cümleler değil, gerçek rakamlar ve somut tespitler.
+_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı, kıdemli bir halka arz analistisin. Görevin: izahname PDF'inden yatırımcının para yatırma/yatırmama kararını etkileyecek SOMUT, KRİTİK bilgileri çıkarmak.
 
-TEMEL KURAL — HALLÜSINASYON YASAĞI:
-• Sadece PDF'te gerçekten yazan bilgileri kullan. Uydurma / varsayım YASAK.
-• Her madde somut: rakam, yüzde, tutar, tarih veya doğrudan alıntı içermeli.
-• "Genellikle şirketler..." / "sektörde risk var..." gibi genel bilgiler YASAK.
+SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bilgi taşımalı.
 
-ANALİZ ADIMLARI — sırayla tara:
-1. FİNANSAL TABLOLAR → Hasılat (TL), net kar/zarar, EBITDA, borç/özkaynak oranı, nakit pozisyonu
-2. RİSK FAKTÖRLERİ → Lisans/ruhsat riski, müşteri bağımlılığı, kur riski, yasal uyuşmazlıklar
-3. FON KULLANIM → Sermaye artırımı mı ortak çıkışı mı? Fon nereye gidiyor (%), gerçek yatırım var mı?
-4. ORTAKLIK YAPISI → Halka arz sonrası büyük ortak %'leri, lock-up süreleri, yönetim çıkışı var mı?
-5. BÜYÜME & PAZAR → CAGR, pazar payı, müşteri sayısı, kapasite kullanımı, AR-GE harcaması
-6. HUKUKİ / DÜZENLEYİCİ → Devam eden davalar, SPK/BDDK/diğer düzenleyici riskler, vergi ihtilafları
+═══ MUTLAK YASAKLAR ═══
+• HALLÜSINASYON: PDF'te yazmayan bilgiyi uydurma. Emin değilsen o maddeyi YAZMA.
+• GEÇİŞTİRME: "...olabilir", "...muhtemeldir", "...beklenebilir" gibi belirsiz ifadeler YASAK.
+• DOLGU MADDE: Bilgi değeri sıfır olan maddeler YASAK. Her madde yatırımcıya yeni bilgi vermeli.
+• DEVRİK CÜMLE: Türkçe düzgün, özne-yüklem uyumlu olmalı. Devrik/karmaşık cümle kurma.
 
-SPESİFİK YAKALAMA KURALLARI — bunları mutlaka çıkar:
-✅ OLUMLU için ara: CAGR / büyüme yüzdesi, pazar payı, net nakit pozisyonu, lisans avantajı, patent, export geliri, AR-GE merkezi, güçlü müşteri tabanı, düşük borç oranı
-❌ OLUMSUZ için ara: ortak satışı var (şirkete para gitmiyor), kısa vadeli borç yoğunluğu (>%70), tek müşteri bağımlılığı (>%30), ruhsat kaybı riski, devam eden dava tutarı, ilişkili taraf işlem yüzdesi, going concern riski, negatif özkaynak
+═══ YASAK MADDE ÖRNEKLERİ (bunları asla yazma) ═══
+✗ "Kayıtlı sermaye tavanı X TL olarak belirlenmiştir" → HERKESİN izahnamesinde var, bilgi değeri YOK
+✗ "Piyasa koşullarına bağlı riskler mevcuttur" → Her şirket için geçerli, spesifik değil
+✗ "Şirketin büyüme potansiyeli bulunmaktadır" → Kanıtsız genel yorum
+✗ "Halka arz geliri işletme sermayesine kullanılacaktır" → Ne kadar, ne için? Detay yoksa yazma
+✗ "Sektörde rekabetin artması risk oluşturabilir" → Her sektörde rekabet var
+✗ "Yatırımcılar dikkatli değerlendirmelidir" → Tavsiye değil analiz yap
 
-ÇIKTI FORMAT — geçerli JSON:
+═══ İYİ MADDE ÖRNEKLERİ (bu kalitede yaz) ═══
+✓ "2022-2024 hasılat CAGR %78 — sektör ortalaması %12'nin 6 katı büyüme"
+✓ "Toplam borcun %81'i kısa vadeli; 94M TL borç vs 12M TL nakit — likidite riski"
+✓ "Halka arz gelirinin %100'ü şirkete; ortak satışı yok — tüm sermaye büyümeye gidiyor"
+✓ "En büyük müşteri cironun %47'si — tek müşteriye aşırı bağımlılık"
+✓ "BDDK lisanslı ödeme kuruluşu — lisans kaybı durumunda faaliyet durur"
+
+═══ ANALİZ ADIMLARI (sırayla tara) ═══
+1. FİNANSAL: Hasılat, net kar/zarar, EBITDA, borç yapısı, nakit, karlılık marjları
+2. RİSK: Lisans/ruhsat, tek müşteri bağımlılığı, kur riski, davalar, ilişkili taraf
+3. FON KULLANIMI: Sermaye artırımı mı ortak çıkışı mı? Para nereye gidiyor (%)
+4. ORTAKLIK: HA sonrası %'ler, lock-up süreleri, yönetim çıkışı var mı
+5. BÜYÜME: CAGR, pazar payı, kapasite, AR-GE, ihracat
+6. HUKUKİ: Devam eden davalar (tutar!), vergi ihtilafları, düzenleyici risk
+
+═══ ÇIKTI FORMAT (geçerli JSON) ═══
 {
-  "positives": ["somut olumlu madde — rakam/yüzde içermeli", ...],
-  "negatives": ["somut olumsuz madde — rakam/yüzde/risk içermeli", ...],
-  "summary": "yatırımcıya net mesaj — 1-2 cümle, en kritik bulgu",
+  "positives": ["somut olumlu — mutlaka rakam/yüzde/tutar içermeli", ...],
+  "negatives": ["somut olumsuz — mutlaka rakam/risk/tutar içermeli", ...],
+  "summary": "Düzgün Türkçe, 1-2 kısa cümle. Yatırımcıya net mesaj. DEVRİK CÜMLE KURMA.",
   "risk_level": "düşük|orta|yüksek|çok yüksek",
-  "key_risk": "en kritik tek risk (max 100 karakter, spesifik)"
+  "key_risk": "en kritik tek risk (max 100 karakter)"
 }
 
-MADDE SAYISI: Hedef olumlu 6-8, olumsuz 6-8 madde. PDF'te yeterli bilgi varsa bu kadar çıkar; bilgi yoksa uydurmak YASAK — o zaman 4-5 madde de olabilir.
-TEKİL KONU KURALI: Her madde FARKLI konuyu ele almalı — aynı konuyu farklı söyleyişle tekrarlama YASAK. Tekrar edeceksen o maddeyi yazma.
-KATEGORI DAĞILIMI: Mümkünse en az 3 farklı kategoriden (Finansal / Risk / Fon Kullanımı / Ortaklık / Büyüme / Hukuki) madde çıkar.
-FORMAT: Her madde max 140 karakter. Türkçe, net. SADECE JSON döndür."""
+═══ MADDE KURALLARI ═══
+• Hedef: olumlu 5-7, olumsuz 5-7. PDF yetersizse 3-4 de olur — uydurma YASAK.
+• Her madde FARKLI konu. Aynı konuyu tekrarlama — tekrar edeceksen yazma.
+• En az 3 farklı kategori (Finansal/Risk/Fon/Ortaklık/Büyüme/Hukuki).
+• Max 130 karakter. Kısa, yoğun, bilgi dolu. Türkçe, net.
+• "summary" alanı: DÜZ CÜMLE yaz. Özne + nesne + yüklem sırası. Devrik yapma.
+SADECE JSON döndür — başka hiçbir şey yazma."""
 
 
 _FEW_SHOT_EXAMPLES = """
-İyi analiz örnekleri (bunları referans al):
+═══ REFERANS ANALİZ ÖRNEKLERİ ═══
 
-ÖRNEK 1 — Metropal Kurumsal Hizmetler:
-Pozitif: "Tera Yatırım liderliğiyle yıldız pazara açılıyor; ortak satışı yok, tüm gelir şirkete"
-Pozitif: "%45 işletme sermayesi + %35 yurt içi/dışı şirket kurulumu — büyüme odaklı kullanım"
-Negatif: "MetropolCard faaliyetleri için gerekli izin ve ruhsatlar muhafaza edilemeyebilir (İzahname s.94)"
-Negatif: "İlişkili taraf işlemleri toplam cironun önemli bölümünü oluşturuyor — bağımlılık riski"
+ÖRNEK — Kimya Sektörü Şirketi (iyi analiz):
+{
+  "positives": [
+    "2023 hasılatı 892M TL, EBITDA marjı %18.4 — sektör ortalaması %11",
+    "İhracat payı %34; Avrupa ve Orta Asya'ya 28 ülkeye satış — coğrafi çeşitlilik",
+    "Fon kullanımı: %45 yeni üretim hattı + %30 AR-GE — somut kapasite artışı",
+    "Ortak satışı yok, halka arz gelirinin %100'ü şirkete gidiyor",
+    "5 patent + 12 faydalı model tescili — teknoloji bariyeri yüksek"
+  ],
+  "negatives": [
+    "Kısa vadeli borç 340M TL, toplam borcun %76'sı — refinansman riski",
+    "En büyük 3 müşteri cironun %52'si — müşteri konsantrasyon riski yüksek",
+    "Ham madde maliyetleri dövize endeksli; kur %10 artışta marj 3 puan düşer",
+    "2022'de 45M TL net zarar; 2023'te kara geçiş henüz 1 yıllık",
+    "Devam eden 3 dava, toplam risk tutarı 28M TL"
+  ],
+  "summary": "Şirket ihracat ağırlıklı güçlü hasılata sahip ancak kısa vadeli borç yükü ve müşteri bağımlılığı dikkat çekiyor.",
+  "risk_level": "orta",
+  "key_risk": "Kısa vadeli borç oranı %76 — refinansman riski"
+}
 
-ÖRNEK 2 — Genel İyi Madde Formatı:
-✓ "2022-2024 hasılat CAGR %78 — sektör ortalamasının 3 katı büyüme"
-✓ "BDDK lisanslı ödeme kuruluşu; lisans yenileme riski mevzuatla bağlantılı"
-✗ KÖTÜ: "Şirket büyüme potansiyeline sahip" (çok belirsiz, PDF'ten değil)
-✗ KÖTÜ: "Piyasa koşullarına bağlı riskler mevcuttur" (her şirket için geçerli genel bilgi)
+✗ KÖTÜ ÖRNEKLER (asla böyle yazma):
+✗ "Kayıtlı sermaye tavanı 500M TL olarak belirlenmiştir" → bilgi değeri sıfır
+✗ "Şirketin güçlü bir büyüme potansiyeli bulunmaktadır" → kanıtsız, genel
+✗ "Piyasa dalgalanmalarından etkilenebilir" → her şirket için geçerli
+✗ "Yatırımcıların riskleri dikkate alması gerekmektedir" → tavsiye değil analiz yap
+✗ "Sektörde artan rekabet baskısı söz konusu olabilir" → spesifik değil
+
+═══ FİNANSAL ANALİZ KILAVUZU (karşılaştırma için kullan) ═══
+Borç/Özkaynak: <%50 iyi, %50-100 normal, >%100 riskli, >%200 tehlikeli
+Kısa Vadeli Borç Oranı: <%60 iyi, >%70 riskli — refinansman baskısı
+Cari Oran: >1.5 sağlıklı, <1.0 likidite riski
+Net Kar Marjı: Sektöre göre değişir ama negatif = zarar, <%5 zayıf
+Hasılat Büyümesi (CAGR): >%20 güçlü, %10-20 normal, <%10 zayıf
+Tek Müşteri Bağımlılığı: >%30 dikkat, >%50 ciddi risk
+İlişkili Taraf İşlemleri: Cironun >%20'si ise şeffaflık riski
+Ortak Satışı: %100 şirkete → çok iyi, karışık → fon kullanımına bak
+Lock-up: 180 gün standart, daha kısa → ortak güvensizliği olabilir
 """
 
 
@@ -440,34 +484,55 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
         all_pages_text = []
         risk_section_text = []
         finance_section_text = []
+        fund_usage_text = []      # Fon kullanım yerleri
+        ownership_text = []       # Ortaklık yapısı
         in_risk_section = False
         in_finance_section = False
+        in_fund_section = False
+        in_ownership_section = False
 
         for i, text in page_tuples:
             all_pages_text.append(text)
 
             text_lower = text.lower()
-            if any(kw in text_lower for kw in ["risk faktörleri", "riskler"]):
-                in_risk_section = True
-            if in_risk_section and any(kw in text_lower for kw in ["finansal bilgiler", "izahname özeti"]):
-                in_risk_section = False
 
+            # Risk bölümü
+            if any(kw in text_lower for kw in ["risk faktörleri", "riskler", "risk factors"]):
+                in_risk_section = True
+            if in_risk_section and any(kw in text_lower for kw in ["finansal bilgiler", "izahname özeti", "fon kullanım"]):
+                in_risk_section = False
             if in_risk_section:
                 risk_section_text.append(f"[S.{i+1}] {text}")
 
-            if any(kw in text_lower for kw in ["finansal durum", "özet finansal"]):
+            # Finansal bölüm
+            if any(kw in text_lower for kw in ["finansal durum", "özet finansal", "mali tablo", "gelir tablosu"]):
                 in_finance_section = True
-            if in_finance_section and len(finance_section_text) > 10:
+            if in_finance_section and len(finance_section_text) > 12:
                 in_finance_section = False
-
             if in_finance_section:
                 finance_section_text.append(f"[S.{i+1}] {text}")
+
+            # Fon kullanımı bölümü
+            if any(kw in text_lower for kw in ["fon kullanım", "halka arz geliri", "sermaye artırımı"]):
+                in_fund_section = True
+            if in_fund_section and len(fund_usage_text) > 5:
+                in_fund_section = False
+            if in_fund_section:
+                fund_usage_text.append(f"[S.{i+1}] {text}")
+
+            # Ortaklık yapısı bölümü
+            if any(kw in text_lower for kw in ["ortaklık yapısı", "pay sahipliği", "sermaye yapısı", "lock-up", "lock up"]):
+                in_ownership_section = True
+            if in_ownership_section and len(ownership_text) > 5:
+                in_ownership_section = False
+            if in_ownership_section:
+                ownership_text.append(f"[S.{i+1}] {text}")
 
         if not all_pages_text:
             logger.warning("PDF’ten metin çıkarılamadı: %s", pdf_path)
             return None, 0
 
-        # Öncelikli metin birleştirme
+        # Öncelikli metin birleştirme — önemli bölümler önce
         combined = ""
 
         if risk_section_text:
@@ -476,7 +541,15 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
 
         if finance_section_text:
             fin_combined = "\n\n=== FİNANSAL BİLGİLER ===\n" + "\n".join(finance_section_text)
-            combined += fin_combined[:20_000]
+            combined += fin_combined[:25_000]
+
+        if fund_usage_text:
+            fund_combined = "\n\n=== FON KULLANIM YERLERİ ===\n" + "\n".join(fund_usage_text)
+            combined += fund_combined[:15_000]
+
+        if ownership_text:
+            own_combined = "\n\n=== ORTAKLIK YAPISI & LOCK-UP ===\n" + "\n".join(ownership_text)
+            combined += own_combined[:15_000]
 
         full_text = "\n\n".join(all_pages_text)
         remaining_budget = _MAX_PDF_CHARS - len(combined)
@@ -487,10 +560,12 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
 
         pages_count = len(all_pages_text)
         logger.info(
-            "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d)",
+            "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d, fon=%d, ort=%d)",
             pages_count, len(combined),
             len("".join(risk_section_text)),
             len("".join(finance_section_text)),
+            len("".join(fund_usage_text)),
+            len("".join(ownership_text)),
         )
         return combined[:_MAX_PDF_CHARS], pages_count
 
@@ -548,8 +623,8 @@ async def analyze_with_ai(
                         {"role": "system", "content": full_system},
                         {"role": "user",   "content": user_message},
                     ],
-                    "temperature": 0.1,   # Düşük — hallüsinasyon azalt
-                    "max_tokens": 2000,
+                    "temperature": 0.15,  # Düşük ama yaratıcı analiz için biraz esneklik
+                    "max_tokens": 2500,  # Daha detaylı analiz
                 },
             )
 
