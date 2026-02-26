@@ -889,6 +889,8 @@ async def scrape_halkarz():
 
                 # trading_start ilk kez set ediliyorsa tweet + bildirim icin flag
                 trading_start_newly_detected = False
+                # prospectus_url ilk kez set ediliyorsa AI analiz icin flag
+                prospectus_url_newly_detected = False
 
                 for scrape_key, db_field in field_mapping.items():
                     if scrape_key in safe_data and safe_data[scrape_key] is not None:
@@ -902,6 +904,9 @@ async def scrape_halkarz():
                             # trading_start ilk kez set ediliyorsa isaretle
                             if db_field == "trading_start" and current_val is None:
                                 trading_start_newly_detected = True
+                            # prospectus_url ilk kez set ediliyorsa isaretle
+                            if db_field == "prospectus_url" and current_val is None:
+                                prospectus_url_newly_detected = True
                             setattr(ipo, db_field, new_val)
                             update_fields[db_field] = new_val
 
@@ -1047,6 +1052,29 @@ async def scrape_halkarz():
                         logger.info("HalkArz: %s — trading date bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
                     except Exception as notif_err:
                         logger.warning("HalkArz: %s — trading date bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
+
+                # prospectus_url yeni tespit: arkaplanda AI izahname analizi baslat
+                if prospectus_url_newly_detected and ipo.prospectus_url:
+                    await db.flush()  # DB'ye flush (ipo.id kesin olsun)
+                    _ipo_id = ipo.id
+                    _pdf_url = ipo.prospectus_url
+                    _company = ipo.company_name
+                    logger.info(
+                        "HalkArz: %s — izahname URL tespit edildi, AI analiz planlanıyor: %s",
+                        _company, _pdf_url,
+                    )
+                    try:
+                        import asyncio
+                        from app.services.prospectus_analyzer import analyze_prospectus
+                        # Arkaplan görevi — scraper'ı bloke etmez
+                        asyncio.create_task(
+                            analyze_prospectus(_ipo_id, _pdf_url, delay_seconds=0)
+                        )
+                        logger.info("HalkArz: %s — AI izahname analiz görevi başlatıldı", _company)
+                    except Exception as pa_err:
+                        logger.warning(
+                            "HalkArz: %s — izahname analiz başlatma hatası: %s", _company, pa_err
+                        )
 
                 # 7. Rejected broker listesini senkronize et (admin kilidi: "brokers")
                 # Sadece basvurulamaz broker'lar kaydedilir (kullaniciya uyari icin)

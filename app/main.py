@@ -455,6 +455,43 @@ async def get_ipo_detail(ipo_id: int, db: AsyncSession = Depends(get_db)):
     return ipo
 
 
+@app.get("/api/v1/ipos/{ipo_id}/prospectus-analysis")
+async def get_prospectus_analysis(ipo_id: int, db: AsyncSession = Depends(get_db)):
+    """İzahname AI analizi — JSON veri + görsel URL.
+
+    Uygulama içinde tam sayfa görsel gösterimi için kullanılır.
+    Görsel: /static/prospectus/{ipo_id}.png (otomatik üretilir)
+    """
+    import json as _json
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    if not ipo.prospectus_analysis:
+        raise HTTPException(status_code=404, detail="İzahname analizi henüz hazır değil")
+
+    # JSON'u parse et
+    try:
+        analysis_data = _json.loads(ipo.prospectus_analysis)
+    except Exception:
+        analysis_data = {}
+
+    # Görsel URL — statik sunucudan serve edilir (prospectus_image.py: prospectus_{ipo_id}.png)
+    img_url = f"/static/prospectus/prospectus_{ipo_id}.png"
+
+    return {
+        "ipo_id": ipo_id,
+        "company_name": ipo.company_name,
+        "ticker": ipo.ticker,
+        "ipo_price": str(ipo.ipo_price) if ipo.ipo_price else None,
+        "analysis": analysis_data,
+        "image_url": img_url,
+        "analyzed_at": ipo.prospectus_analyzed_at.isoformat() if ipo.prospectus_analyzed_at else None,
+        "prospectus_url": ipo.prospectus_url,
+    }
+
+
 # -------------------------------------------------------
 # TELEGRAM HABER ENDPOINTS (YENi)
 # -------------------------------------------------------

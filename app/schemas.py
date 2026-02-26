@@ -178,6 +178,11 @@ class IPODetailOut(BaseModel):
     ai_report: Optional[str] = None
     ai_report_generated_at: Optional[datetime] = None
 
+    # İzahname Analizi
+    prospectus_analysis: Optional[str] = None
+    prospectus_analyzed_at: Optional[datetime] = None
+    prospectus_tweeted: bool = False
+
     # Zaman
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

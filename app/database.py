@@ -399,3 +399,17 @@ async def init_db():
             """))
         except Exception:
             pass
+
+        # v34 migration: ipos izahname analiz alanlari (AI prospectus analysis)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_analysis TEXT")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_analyzed_at TIMESTAMPTZ")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_tweeted BOOLEAN DEFAULT FALSE")
+            )
+        except Exception:
+            pass

@@ -1905,3 +1905,95 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
     except Exception as e:
         logger.error("tweet_spk_bulletin_analysis hatasi: %s", e)
         return False
+
+
+# ================================================================
+# 17. İZAHNAME ANALİZ TWEETİ (AI prospektüs analizi — görsel)
+# ================================================================
+def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
+    """İzahname AI analizi tamamlandığında görsel + metin tweeti atar.
+
+    analysis: {"positives": [...], "negatives": [...], "summary": str,
+               "risk_level": str, "key_risk": str}
+    img_path: /static/prospectus/{ipo_id}.png (Pillow ile üretilmiş görsel)
+
+    Zaten tweeted ise (prospectus_tweeted=True) atlamaz — bu flag
+    caller tarafından kontrol edilmelidir (prospectus_analyzer.py).
+    """
+    try:
+        if not _validate_ipo_for_tweet(ipo, ["company_name"], "İzahname Analizi"):
+            return False
+
+        # Şirket adı ve ticker
+        clean_name = " ".join(ipo.company_name.replace("\n", " ").replace("\r", " ").split())
+        ticker_tag = f" (#{ipo.ticker})" if ipo.ticker else ""
+
+        # Risk seviyesi emoji
+        risk_level = analysis.get("risk_level", "ORTA").upper()
+        risk_emoji = {"DÜŞÜK": "🟢", "ORTA": "🟡", "YÜKSEK": "🔴"}.get(risk_level, "🟡")
+
+        # Olumlu dipnotlar — en fazla 2 madde, kısaltılmış
+        positives = analysis.get("positives", [])
+        pos_lines = []
+        for p in positives[:2]:
+            short = p[:90] + "…" if len(p) > 90 else p
+            pos_lines.append(f"  • {short}")
+        pos_block = "\n".join(pos_lines) if pos_lines else "  • Belirgin pozitif dipnot bulunamadı"
+
+        # Olumsuz dipnotlar — en fazla 2 madde, kısaltılmış
+        negatives = analysis.get("negatives", [])
+        neg_lines = []
+        for n in negatives[:2]:
+            short = n[:90] + "…" if len(n) > 90 else n
+            neg_lines.append(f"  • {short}")
+        neg_block = "\n".join(neg_lines) if neg_lines else "  • Belirgin negatif dipnot bulunamadı"
+
+        # Özet cümle
+        summary = analysis.get("summary", "")
+        summary_short = summary[:180] + "…" if len(summary) > 180 else summary
+
+        # Halka arz fiyatı (varsa)
+        price_text = ""
+        if ipo.ipo_price:
+            price_text = f"\n💰 Arz Fiyatı: {ipo.ipo_price} TL"
+
+        text = (
+            f"📄 {clean_name}{ticker_tag} — İzahname Analizi\n"
+            f"{risk_emoji} Risk Seviyesi: {risk_level}{price_text}\n\n"
+            f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
+            f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
+            f"📝 {summary_short}\n\n"
+            f"⚠️ YZ destekli analiz, yatırım tavsiyesi değildir.\n"
+            f"📲 {_get_setting('APP_LINK')}\n"
+            f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
+        )
+
+        # 4000 karakter Twitter limiti — gerekirse summary'yi kırp
+        if len(text) > 3950:
+            max_sum = 3950 - (len(text) - len(summary_short)) - 10
+            summary_short = summary_short[:max(max_sum, 60)] + "…"
+            text = (
+                f"📄 {clean_name}{ticker_tag} — İzahname Analizi\n"
+                f"{risk_emoji} Risk Seviyesi: {risk_level}{price_text}\n\n"
+                f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
+                f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
+                f"📝 {summary_short}\n\n"
+                f"⚠️ YZ destekli analiz, yatırım tavsiyesi değildir.\n"
+                f"📲 {_get_setting('APP_LINK')}\n"
+                f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
+            )
+
+        # Görsel varsa medialı tweet, yoksa sadece metin
+        import os
+        if img_path and os.path.exists(img_path):
+            return _safe_tweet_with_media(text, img_path, source="tweet_izahname_analysis")
+        else:
+            logger.warning(
+                "tweet_izahname_analysis: %s — görsel bulunamadı (%s), sadece metin",
+                clean_name, img_path,
+            )
+            return _safe_tweet(text, source="tweet_izahname_analysis")
+
+    except Exception as e:
+        logger.error("tweet_izahname_analysis hatasi: %s", e)
+        return False

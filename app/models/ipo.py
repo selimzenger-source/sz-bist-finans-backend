@@ -139,6 +139,17 @@ class IPO(Base):
         DateTime(timezone=True), nullable=True, comment="AI rapor uretim zamani"
     )
 
+    # --- İzahname Analizi ---
+    prospectus_analysis: Mapped[str | None] = mapped_column(
+        Text, nullable=True, comment="İzahname AI analizi (JSON: positives, negatives, summary, risk_level)"
+    )
+    prospectus_analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, comment="İzahname analiz zamani"
+    )
+    prospectus_tweeted: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="İzahname analiz tweeti atildi mi"
+    )
+
     # --- Tweet Tracking ---
     intro_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="Sirket tanitim tweeti atildi mi"
