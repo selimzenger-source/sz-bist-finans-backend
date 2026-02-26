@@ -202,8 +202,8 @@ def generate_prospectus_analysis_image(
     try:
         _ensure_dirs()
 
-        positives   = analysis.get("positives", [])[:5]
-        negatives   = analysis.get("negatives", [])[:5]
+        positives   = analysis.get("positives", [])[:7]
+        negatives   = analysis.get("negatives", [])[:7]
         summary     = analysis.get("summary", "")[:300]
         risk_level  = analysis.get("risk_level", "orta")
         key_risk    = analysis.get("key_risk", "")

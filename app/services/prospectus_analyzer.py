@@ -90,7 +90,9 @@ SPESİFİK YAKALAMA KURALLARI — bunları mutlaka çıkar:
   "key_risk": "en kritik tek risk (max 100 karakter, spesifik)"
 }
 
-MADDE SAYISI: Olumlu 5-7 madde, Olumsuz 5-7 madde. Kesinlikle 4'ten az olmamalı. PDF yeterliyse 6-7 madde bekleniyor.
+MADDE SAYISI: Olumlu 6-8 madde, Olumsuz 6-8 madde. Kesinlikle 6'dan az olmamalı.
+TEKİL KONU KURALI: Her madde FARKLI konuyu ele almalı — aynı konuyu farklı söyleyişle tekrarlama YASAK. Her madde yeni, özgün bir bilgi içermeli.
+KATEGORI DAĞILIMI: 6+ madde varsa en az 3 farklı kategoriden (Finansal / Risk / Fon Kullanımı / Ortaklık / Büyüme / Hukuki) olmalı.
 FORMAT: Her madde max 140 karakter. Türkçe, net. SADECE JSON döndür."""
 
 
@@ -590,8 +592,8 @@ async def analyze_with_ai(
                            pos_count, neg_count, company_name)
 
         # Karakter limitini uygula (130 karakter/madde)
-        result["positives"] = [p[:140] for p in result["positives"][:7]]
-        result["negatives"] = [n[:140] for n in result["negatives"][:7]]
+        result["positives"] = [p[:140] for p in result["positives"][:8]]
+        result["negatives"] = [n[:140] for n in result["negatives"][:8]]
 
         logger.info(
             "İzahname AI analizi tamamlandı: %s — %d olumlu, %d olumsuz, risk=%s",
