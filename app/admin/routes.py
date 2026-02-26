@@ -438,6 +438,7 @@ async def update_ipo(
             ipo.subscription_hours = f"09:00-{sub_close}"
         # else: degistirme (mevcut degeri koru)
 
+        _old_trading_start = ipo.trading_start  # Bildirim tetiklemesi icin eski degeri sakla
         ipo.trading_start = parse_date(form.get("trading_start"))
         ipo.spk_approval_date = parse_date(form.get("spk_approval_date"))
         ipo.expected_trading_date = parse_date(form.get("expected_trading_date"))
@@ -522,6 +523,31 @@ async def update_ipo(
 
         await db.flush()
         logger.info(f"Admin: IPO guncellendi — {ipo.company_name} (ID: {ipo.id}) [locks: {list(existing_locks)}]")
+
+        # ─── trading_start yeni ayarlandıysa → bildirim + tweet gönder ───
+        _trading_start_newly_set = (_old_trading_start is None and ipo.trading_start is not None)
+        if _trading_start_newly_set:
+            logger.info(f"Admin: trading_start yeni ayarlandı — {ipo.ticker or ipo.company_name} → bildirim + tweet tetikleniyor")
+
+            # Tweet gönder
+            try:
+                from app.services.twitter_service import tweet_trading_date_detected
+                from app.services.admin_telegram import notify_tweet_sent
+                tw_ok = tweet_trading_date_detected(ipo)
+                await notify_tweet_sent("trading_date_tespit", ipo.ticker or ipo.company_name, tw_ok)
+                logger.info(f"Admin: {ipo.ticker or ipo.company_name} — trading date tweet {'basarili' if tw_ok else 'basarisiz'}")
+            except Exception as tw_err:
+                logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — trading date tweet hatasi: {tw_err}")
+
+            # Push bildirim gönder
+            try:
+                from app.services.notification import NotificationService
+                notif_svc = NotificationService(db)
+                sent = await notif_svc.notify_trading_date_detected(ipo)
+                logger.info(f"Admin: {ipo.ticker or ipo.company_name} — trading date bildirim {sent} kisi")
+            except Exception as notif_err:
+                logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — trading date bildirim hatasi: {notif_err}")
+
         return RedirectResponse(url=f"/admin/ipo/{ipo.id}/edit?success=updated", status_code=303)
 
     except Exception as e:
