@@ -3131,16 +3131,16 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # 26. X Mentions Auto-Reply — her 15 dakika
+    # 26. X Mentions Auto-Reply — saatte 1
     # Bize mention atan / tweetlerimize yorum yapanlara AI ile Türkçe yanıt verir
     # Admin panelinden MENTIONS_REPLY_ENABLED=true yapılınca aktif olur (default: kapalı)
-    # since_id ile sadece YENİ mention'lar çekilir, 20dk'dan eski olanlar atlanır
+    # since_id ile sadece YENİ mention'lar çekilir — ~640 okuma/gün (limitin %0.06'sı)
     from app.services.mentions_reply_service import mentions_reply_cycle
     scheduler.add_job(
         mentions_reply_cycle,
-        IntervalTrigger(minutes=15),
+        IntervalTrigger(minutes=45),
         id="mentions_reply",
-        name="X Mentions Auto-Reply (15dk)",
+        name="X Mentions Auto-Reply (45dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
