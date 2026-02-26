@@ -2033,7 +2033,7 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
             f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
             f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
             f"📝 {summary_short}\n\n"
-            f"⚠️ YZ destekli analiz, yatırım tavsiyesi değildir.\n"
+            f"⚠️ Yatırım tavsiyesi değildir.\n"
             f"📲 {_get_setting('APP_LINK')}\n"
             f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
         )
@@ -2048,7 +2048,7 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
                 f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
                 f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
                 f"📝 {summary_short}\n\n"
-                f"⚠️ YZ destekli analiz, yatırım tavsiyesi değildir.\n"
+                f"⚠️ Yatırım tavsiyesi değildir.\n"
                 f"📲 {_get_setting('APP_LINK')}\n"
                 f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
             )
