@@ -1075,23 +1075,17 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             left_mid = cx + card_w // 4
             right_mid = cx + 3 * card_w // 4
 
-            if durum == "tavan" or (_satis == 0 and _alis > 0):
+            if durum == "tavan":
                 _draw_centered(draw, mid_x, y, "Alış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_alis)} lot",
                                font_value, TAVAN_GREEN)
-            elif durum == "taban" or (_alis == 0 and _satis > 0):
+            elif durum == "taban":
                 _draw_centered(draw, mid_x, y, "Satış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
                                font_value, TABAN_RED)
-            else:
-                _draw_centered(draw, mid_x, y, "Normal", font_small, (100, 100, 120))
-                y += 16
-                a_text = f"Alış: {_format_lot(_alis)}"
-                s_text = f"Satış: {_format_lot(_satis)}"
-                _draw_centered(draw, left_mid, y, a_text, font_lot, GREEN)
-                _draw_centered(draw, right_mid, y, s_text, font_lot, RED)
+            # Normal durumda lot gösterme
 
         # ── Footer ────────────────────────────────
         footer_y = total_h - footer_h
