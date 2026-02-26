@@ -598,11 +598,12 @@ async def get_upcoming_ipo_events() -> list[dict]:
                 })
 
             for ipo in newly_approved:
+                price_info = f" — Beklenen fiyat: {ipo.ipo_price} TL" if ipo.ipo_price else ""
                 events.append({
                     "type": "YENI_ONAY",
                     "ticker": ipo.ticker or ipo.company_name,
                     "company": ipo.company_name,
-                    "detail": f"SPK onayi aldi, dagitim sureci bekleniyor",
+                    "detail": f"SPK onayi aldi, dagitim sureci bekleniyor{price_info}. Yatirimci ilgisi yuksek.",
                     "date": today.isoformat(),
                 })
 
@@ -711,10 +712,18 @@ FORMAT:
 [Etkinlik yoksa bu bolumu atla]
 
 🏦 Halka Arz Takibi
-[islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
-[Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL]
-[Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
+[Bu bolumde GELECEGe bak — dun ne oldu degil, BUGUN ne bekleniyor yaz]
+[ISLEMDEKI halka arzlar (ceiling_tracks verisi olanlar): bugunku beklenti ve olasilik yorumu yap]
+  → Tavan serisine devam edebilir mi? Tavan kiriildi mi? Kisa vadeli beklenti nedir? (oval yorum — "Bu performans...")
+  → Tavan serisi bilgisini SADECE tavan_seri_gun ve daily_tracks'ten al
+  → Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL
+[YAKLASAN HALKA ARZ ETKINLIKLERI'ni de bu bolumde ozet olarak yaz:]
+  → YENI_ONAY (LXGYO, Gentaş, Metropal gibi): "Yeni SPK onaylı halka arzlar beklenti yaratıyor" tarzinda 1-2 cumle
+  → DAGITIMDA olanlar: basvuru durumu + "talep toplanıyor, sonuçlar bekleniyor" gibi gelecek odakli
+  → ILK_ISLEM_BUGUN/YARIN: "Bugün/yarın borsaya giriyor, açılış beklentisi..." oval yorum yap
+  → ISLEM_BEKLENIYOR: "Dağıtım sonuçları açıklanırsa bugün giriş yapabilir" tarzında
 [Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
+[ONEMLI: Sadece "dun tavan yapti" deme — "bugün X. gününde tavan sürmesi bekleniyor / tavan kırılabilir" gibi ileriye bak]
 
 📌 Gunun Beklentileri
 [kisa ozet, dikkat edilecekler]
@@ -812,6 +821,13 @@ def _format_full_context(
     lines = [f"RAPOR TURU: {'Sabah Acilis' if report_type == 'morning' else 'Aksam Kapanis'}"]
     lines.append(f"TARIH: {today.isoformat()} ({day_name})")
     lines.append(f"HAFTANIN GUNU: {day_name} (haftanin {today.weekday() + 1}. is gunu)")
+    if report_type == "morning":
+        lines.append("")
+        lines.append("⚠️ SABAH RAPORU OZEL TALIMAT — HALKA ARZ BOLUMU:")
+        lines.append("  Bu sabah raporu. Halka arz bolumunde DUN ne oldu deil, BUGUN ne bekleniyor yaz.")
+        lines.append("  Islemdeki hisseler icin 'bugün X. gününde, tavan sürmesi/kırılması bekleniyor' tarzı oval yorum ekle.")
+        lines.append("  YENI_ONAY / DAGITIMDA / ISLEM_BEKLENIYOR IPO'larini da 🏦 bolumunde ozet ver.")
+        lines.append("  Yatirimci beklenti odakli yorum yap — 'Piyasanin geneline gore performans...' gibi.")
     lines.append("")
 
     # ── Piyasa Verileri ──
