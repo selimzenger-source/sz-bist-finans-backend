@@ -224,9 +224,9 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
 
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
-        # İlk 20 sayfa yeterli: kapak + içindekiler + izahname özeti + risk faktörlerinin başı
-        # Daha fazla sayfa = çok yavaş (her 10 sayfa ~1 dk API çağrısı)
-        max_pages = min(total_pages, 20)
+        # İlk 10 sayfa: kapak + izahname özeti + risk faktörleri başı
+        # 1 batch = 1 API çağrısı = ~60-90s → toplam analiz ~2-3 dk
+        max_pages = min(total_pages, 10)
 
         # Sayfaları düşük çözünürlüklü gri JPEG olarak render et
         page_images = []
@@ -521,6 +521,114 @@ async def analyze_with_ai(
     except Exception as e:
         logger.error("İzahname AI hatası: %s — %s — %s", company_name, type(e).__name__, e)
         return None
+
+
+# ─────────────────────────────────────────────────────────────
+# Hızlı Analiz — DB verisinden (PDF indirme yok, < 1 dk)
+# ─────────────────────────────────────────────────────────────
+
+async def analyze_from_db_data(ipo_id: int) -> bool:
+    """DB'deki şirket bilgilerinden izahname analizi yapar.
+
+    PDF indirme / Vision OCR gerektirmez. Admin panelindeki
+    şirket açıklaması + fon kullanım + finansalları kullanır.
+    Sonuç < 1 dakikada gelir ve DB'ye kaydedilir.
+    """
+    try:
+        from app.database import async_session
+        from app.models.ipo import IPO
+        from sqlalchemy import select
+
+        async with async_session() as db:
+            result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+            ipo = result.scalar_one_or_none()
+            if not ipo:
+                logger.error("IPO bulunamadı: id=%d", ipo_id)
+                return False
+
+            company_name = ipo.company_name
+            ipo_price    = str(ipo.ipo_price) if ipo.ipo_price else None
+
+            # DB'deki tüm mevcut bilgileri context olarak derle
+            lines = [f"ŞİRKET: {company_name}"]
+            if ipo.ticker:
+                lines.append(f"TICKER: {ipo.ticker}")
+            if ipo.sector:
+                lines.append(f"SEKTÖR: {ipo.sector}")
+            if ipo_price:
+                lines.append(f"HALKA ARZ FİYATI: {ipo_price} TL")
+            if ipo.offer_size:
+                lines.append(f"ARZ BÜYÜKLÜĞÜ: {float(ipo.offer_size):,.0f} TL")
+            if ipo.public_float_pct:
+                lines.append(f"HALKA AÇIKLIK: %{ipo.public_float_pct}")
+            lines.append("")
+
+            if ipo.company_description:
+                lines.append("=== ŞİRKET AÇIKLAMASI ===")
+                lines.append(ipo.company_description)
+                lines.append("")
+
+            if ipo.fund_use_goals:
+                lines.append("=== FON KULLANIM YERLERİ ===")
+                goals = ipo.fund_use_goals
+                if isinstance(goals, list):
+                    for g in goals:
+                        lines.append(f"• {g}")
+                else:
+                    lines.append(str(goals))
+                lines.append("")
+
+            fin_lines = []
+            if ipo.current_revenue:
+                fin_lines.append(f"Güncel yıl hasılat: {float(ipo.current_revenue):,.0f} TL")
+            if ipo.prev_revenue:
+                fin_lines.append(f"Önceki yıl hasılat: {float(ipo.prev_revenue):,.0f} TL")
+            if ipo.gross_profit:
+                fin_lines.append(f"Brüt kâr: {float(ipo.gross_profit):,.0f} TL")
+            if fin_lines:
+                lines.append("=== FİNANSAL ÖZET ===")
+                lines.extend(fin_lines)
+                lines.append("")
+
+            if ipo.distribution_method:
+                lines.append(f"DAĞITIM YÖNTEMİ: {ipo.distribution_method}")
+            if ipo.lock_up_days:
+                lines.append(f"LOCK-UP: {ipo.lock_up_days} gün")
+
+            db_context = "\n".join(lines)
+
+        if len(db_context.strip()) < 100:
+            logger.error("DB'de yeterli şirket bilgisi yok (<%d): ipo_id=%d",
+                         len(db_context), ipo_id)
+            return False
+
+        logger.info("DB analizi başlıyor: %s — %d karakter context", company_name, len(db_context))
+
+        # AI analiz
+        analysis = await analyze_with_ai(db_context, company_name, ipo_price)
+        if not analysis:
+            logger.error("DB analizi — AI başarısız: ipo_id=%d", ipo_id)
+            return False
+
+        # DB'ye kaydet
+        async with async_session() as db:
+            result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+            ipo = result.scalar_one_or_none()
+            if not ipo:
+                return False
+            ipo.prospectus_analysis    = json.dumps(analysis, ensure_ascii=False)
+            ipo.prospectus_analyzed_at = datetime.now(timezone.utc)
+            ipo.updated_at             = datetime.now(timezone.utc)
+            await db.commit()
+            logger.info("DB analizi kaydedildi: %s", company_name)
+
+        # Görsel üret + tweet
+        await _post_analysis_actions(ipo_id, analysis, company_name, ipo_price)
+        return True
+
+    except Exception as e:
+        logger.error("DB analizi hata (ipo_id=%d): %s — %s", ipo_id, type(e).__name__, e)
+        return False
 
 
 # ─────────────────────────────────────────────────────────────

@@ -1100,6 +1100,58 @@ async def run_prospectus_analysis_admin(
         )
 
 
+@router.post("/ipo/{ipo_id}/quick-analyze")
+async def quick_analyze_admin(
+    ipo_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """İzahname PDF analizi — senkron çalışır, sonuç gelince DB'ye kaydeder.
+    Arka plan görevi yerine direkt await — Render restart'tan etkilenmez.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.models.ipo import IPO
+        from sqlalchemy import select
+        result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = result.scalar_one_or_none()
+        if not ipo:
+            return RedirectResponse(url=f"/admin/?error=IPO bulunamadı: {ipo_id}", status_code=303)
+
+        if not ipo.prospectus_url:
+            return RedirectResponse(
+                url=f"/admin/ipo/{ipo_id}/edit?error=İzahname PDF URL'si girilmemiş",
+                status_code=303,
+            )
+
+        # Mevcut analizi sıfırla
+        ipo.prospectus_analysis    = None
+        ipo.prospectus_analyzed_at = None
+        ipo.prospectus_tweeted     = False
+        await db.commit()
+
+        # Senkron çalıştır (await) — arka plan değil, Render restart'tan etkilenmez
+        from app.services.prospectus_analyzer import analyze_prospectus
+        success = await analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0)
+
+        if success:
+            msg = f"İzahname analizi tamamlandı ✅ — {ipo.company_name}"
+            return RedirectResponse(url=f"/admin/ipo/{ipo_id}/edit?success={msg}", status_code=303)
+        else:
+            return RedirectResponse(
+                url=f"/admin/ipo/{ipo_id}/edit?error=Analiz tamamlanamadı — loglara bakın",
+                status_code=303,
+            )
+    except Exception as e:
+        logger.error("Quick analyze hatası ipo_id=%d: %s", ipo_id, e)
+        return RedirectResponse(
+            url=f"/admin/ipo/{ipo_id}/edit?error={str(e)[:150]}",
+            status_code=303,
+        )
+
+
 @router.get("/ipo/{ipo_id}/prospectus-debug")
 async def debug_prospectus_analysis(
     ipo_id: int,
