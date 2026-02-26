@@ -467,9 +467,35 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             logger.info("PyMuPDF 0 karakter — pdfplumber deneniyor...")
             page_tuples = _extract_pages_pdfplumber(pdf_path)
 
-        # İkisi de boşsa Tesseract OCR dene (yerel, ücretsiz, 100+ sayfa)
+        # ─── Yetersiz metin kontrolü ───
+        # PyMuPDF/pdfplumber metin bulduysa ama çok azsa (sayfa başı <100 karakter)
+        # bu genellikle dijital imza metadata'sı veya boş sayfa demek → OCR'a düş
+        _text_is_insufficient = False
+        if page_tuples:
+            _total_chars = sum(len(t) for _, t in page_tuples)
+            _total_pages = len(page_tuples)
+            _avg_chars_per_page = _total_chars / max(_total_pages, 1)
+            # Ayrıca PDF'in gerçek sayfa sayısını kontrol et
+            try:
+                import fitz
+                _doc = fitz.open(pdf_path)
+                _real_page_count = len(_doc)
+                _doc.close()
+            except Exception:
+                _real_page_count = _total_pages
+            # Metin çıkan sayfa oranı çok düşükse VEYA ortalama karakter çok azsa → yetersiz
+            if (_total_chars < 2000 and _real_page_count > 10) or (_avg_chars_per_page < 100 and _real_page_count > 5):
+                logger.info(
+                    "Metin yetersiz: %d karakter / %d sayfa (ort: %.0f/sayfa, toplam: %d sayfa) — OCR deneniyor",
+                    _total_chars, _total_pages, _avg_chars_per_page, _real_page_count,
+                )
+                _text_is_insufficient = True
+                page_tuples = []  # Sıfırla, OCR denesin
+
+        # İkisi de boşsa/yetersizse Tesseract OCR dene (yerel, ücretsiz, 100+ sayfa)
         if not page_tuples:
-            logger.info("PyMuPDF/pdfplumber 0 karakter — Tesseract OCR deneniyor...")
+            logger.info("PyMuPDF/pdfplumber %s — Tesseract OCR deneniyor...",
+                        "yetersiz metin" if _text_is_insufficient else "0 karakter")
             page_tuples = _extract_pages_tesseract_sync(pdf_path)
 
         # Tesseract da boşsa Vision OCR dene (son çare — Claude API)
