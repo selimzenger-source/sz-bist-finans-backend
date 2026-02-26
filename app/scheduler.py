@@ -314,6 +314,8 @@ async def scrape_spk():
                 app_data["company_name"] for app_data in applications
                 if app_data.get("company_name")
             }
+            # Normalize edilmis set — fuzzy karsilastirma icin (ilk 2-3 kelime, nokta farki vs)
+            spk_company_names_normalized = {_normalize(n) for n in spk_company_names}
 
             async with async_session() as db:
                 new_count = 0
@@ -388,22 +390,27 @@ async def scrape_spk():
                         ))
                         new_count += 1
 
-                # 2. SPK listesinden kalkmis olanlari isaretle
-                # (onay alip listeden ciktiklari icin approved yapiyoruz)
+                # 2. SPK listesinden kalkmis olanlari sil ve blokla
+                # Ilk 2 kelime fuzzy eslesmesi kullanilir — nokta/format farki gormezden gelinir
+                # Eslesmiyorsa (SPK'da artik yok) → status="deleted" yapilir
+                #   - "deleted" kayitlar bir daha pending'e YAZILMAZ (line 371 kontrolu)
+                #   - SPK listesinde olsa bile eslesmiyorsa (isim farki) → yine sil
                 all_pending = await db.execute(
                     select(SPKApplication).where(
                         SPKApplication.status == "pending"
                     )
                 )
                 for app in all_pending.scalars().all():
-                    if app.company_name not in spk_company_names:
-                        app.status = "approved"
+                    if not _name_in_set(app.company_name, spk_company_names_normalized):
+                        # SPK listesinde yok (ilk 2-3 kelime fuzzy ile de bulunamadi)
+                        # Sil + blokla — tekrar eklenmemesi icin "deleted" yapilir
+                        app.status = "deleted"
                         removed_count += 1
 
                 await db.commit()
 
             logger.info(
-                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d onaylandi (listeden cikti), %d IPO'da mevcut, %d kara listede (atlandi)",
+                "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d silindi+bloklandı (listeden cikti/eslesemedi), %d IPO'da mevcut, %d kara listede (atlandi)",
                 len(applications), new_count, updated_count, removed_count, skipped_ipo, skipped_deleted,
             )
         finally:
