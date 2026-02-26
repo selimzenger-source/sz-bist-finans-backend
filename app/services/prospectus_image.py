@@ -186,6 +186,7 @@ def generate_prospectus_analysis_image(
     ipo_price: Optional[str],
     analysis: dict,
     ipo_id: int,
+    pages_analyzed: int = 0,
 ) -> Optional[str]:
     """İzahname analizi için PNG görsel üretir.
 
@@ -251,7 +252,7 @@ def generate_prospectus_analysis_image(
         if key_risk:
             summary_h += 40
 
-        footer_h     = 70
+        footer_h     = 80
         gap          = 12
 
         total_h = (
@@ -309,31 +310,18 @@ def generate_prospectus_analysis_image(
         )
         draw.text((cx + 14, cy + 7), company_short, fill=WHITE, font=f_badge)
 
-        # Fiyat + Risk badge — sağ
-        right_x = width - padding
+        # Fiyat badge — sağ (Risk badge kaldırıldı, sadece HA fiyatı)
         if ipo_price:
             price_text = f"HA: {ipo_price} TL"
             pb = f_badge.getbbox(price_text)
             pw = pb[2] - pb[0] + 24
-            px = right_x - pw
-            py = y + 20
+            px = width - padding - pw
+            py = y + (header_h - 32) // 2   # Dikey ortalanmış
             draw.rounded_rectangle(
                 [(px, py), (px + pw, py + 32)],
                 radius=6, fill=(35, 50, 35),
             )
             draw.text((px + 12, py + 7), price_text, fill=GREEN, font=f_badge)
-            right_x = px - 10
-
-        risk_text  = f"Risk: {risk_level.upper()}"
-        rb = f_badge.getbbox(risk_text)
-        rw = rb[2] - rb[0] + 24
-        rx = right_x - rw
-        ry = y + 60
-        draw.rounded_rectangle(
-            [(rx, ry), (rx + rw, ry + 32)],
-            radius=6, fill=risk_color,
-        )
-        draw.text((rx + 12, ry + 7), risk_text, fill=(0, 0, 0), font=f_badge)
 
         # Alt divider
         draw.line(
@@ -417,13 +405,26 @@ def generate_prospectus_analysis_image(
         except Exception:
             pass
 
-        draw.text((footer_logo_x, y + 22), "szalgo.net.tr", fill=ORANGE, font=f_footer)
+        draw.text((footer_logo_x, y + 14), "szalgo.net.tr", fill=ORANGE, font=f_footer)
+
+        # Sayfa sayısı + dipnot sayısı — orta
+        dipnot_count = len(positives) + len(negatives)
+        if pages_analyzed > 0:
+            info_text = f"📄 {pages_analyzed} sayfa analiz edildi  •  {dipnot_count} dipnot yakalandı"
+        else:
+            info_text = f"📌 {dipnot_count} dipnot yakalandı"
+        ib = f_footer_sm.getbbox(info_text)
+        iw = ib[2] - ib[0]
+        draw.text(
+            ((width - iw) // 2, y + 18),
+            info_text, fill=CYAN, font=f_footer_sm,
+        )
 
         disc = "Yatırım tavsiyesi değildir"
         db   = f_footer_sm.getbbox(disc)
         dw   = db[2] - db[0]
         draw.text(
-            (width - padding - dw, y + 26),
+            (width - padding - dw, y + 14),
             disc, fill=GRAY, font=f_footer_sm,
         )
 

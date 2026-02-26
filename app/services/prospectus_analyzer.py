@@ -62,49 +62,36 @@ _FINANCE_KEYWORDS = [
 # SYSTEM PROMPT — Hallüsinasyon koruması + Yüksek kalite
 # ─────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı bir halka arz analistsin. Görevin: izahname (prospektüs) PDF metnini analiz ederek yatırımcılar için EN KRİTİK noktaları bulmak.
+_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı bir halka arz analistsin. Görevin: izahname PDF'inden yatırımcı için EN KRİTİK, EN SPESİFİK bilgileri çıkarmak. Genel cümleler değil, gerçek rakamlar ve somut tespitler.
 
 TEMEL KURAL — HALLÜSINASYON YASAĞI:
-• Sadece verilen PDF metninde gerçekten yazan bilgileri kullan
-• Uydurma, tahmin, varsayım YASAK. Metinde yoksa yazma.
-• Her madde PDF'ten doğrudan alıntı veya doğrudan çıkarım olmalı
-• "Genellikle şirketler..." veya "Muhtemelen..." gibi genel bilgiler YASAK
+• Sadece PDF'te gerçekten yazan bilgileri kullan. Uydurma / varsayım YASAK.
+• Her madde somut: rakam, yüzde, tutar, tarih veya doğrudan alıntı içermeli.
+• "Genellikle şirketler..." / "sektörde risk var..." gibi genel bilgiler YASAK.
 
-ANALİZ STRATEJİSİ:
-1. Risk Faktörleri bölümünü tara → Regülatif riskler, lisans/ruhsat kayıpları, bağımlılıklar
-2. Hukuki Bilgiler bölümünü tara → Davalar, uyuşmazlıklar, cezalar
-3. Finansal Özet bölümünü tara → Büyüme, karlılık, borç yükü
-4. Fon kullanım yerleri → Gerçek yatırım mı, ortak çıkışı mı?
-5. Yönetim ve Ortaklık yapısı → Kilit personel bağımlılığı, ilişkili taraf işlemleri
+ANALİZ ADIMLARI — sırayla tara:
+1. FİNANSAL TABLOLAR → Hasılat (TL), net kar/zarar, EBITDA, borç/özkaynak oranı, nakit pozisyonu
+2. RİSK FAKTÖRLERİ → Lisans/ruhsat riski, müşteri bağımlılığı, kur riski, yasal uyuşmazlıklar
+3. FON KULLANIM → Sermaye artırımı mı ortak çıkışı mı? Fon nereye gidiyor (%), gerçek yatırım var mı?
+4. ORTAKLIK YAPISI → Halka arz sonrası büyük ortak %'leri, lock-up süreleri, yönetim çıkışı var mı?
+5. BÜYÜME & PAZAR → CAGR, pazar payı, müşteri sayısı, kapasite kullanımı, AR-GE harcaması
+6. HUKUKİ / DÜZENLEYİCİ → Devam eden davalar, SPK/BDDK/diğer düzenleyici riskler, vergi ihtilafları
 
-EN ÖNEMLİ DİPNOTLAR — bunlara ÖZELLIKLE dikkat et:
-• "ruhsat/lisans muhafaza edilemeyebilir" → kritik negatif
-• "tek/az sayıda müşteriye bağımlılık" → kritik negatif
-• "kilit personel ayrılabilir" → önemli negatif
-• "vergi uyuşmazlıkları / davalar" → önemli negatif
-• "düzenleyici değişiklikler şirketi etkileyebilir" → orta negatif
-• Güçlü büyüme rakamları (hasılat artışı, pazar payı) → olumlu
-• Güçlü bilanço, düşük borç → olumlu
-• Sektörel liderlik, patent, güçlü marka → olumlu
+SPESİFİK YAKALAMA KURALLARI — bunları mutlaka çıkar:
+✅ OLUMLU için ara: CAGR / büyüme yüzdesi, pazar payı, net nakit pozisyonu, lisans avantajı, patent, export geliri, AR-GE merkezi, güçlü müşteri tabanı, düşük borç oranı
+❌ OLUMSUZ için ara: ortak satışı var (şirkete para gitmiyor), kısa vadeli borç yoğunluğu (>%70), tek müşteri bağımlılığı (>%30), ruhsat kaybı riski, devam eden dava tutarı, ilişkili taraf işlem yüzdesi, going concern riski, negatif özkaynak
 
-ÇIKTI FORMAT (kesinlikle geçerli JSON):
+ÇIKTI FORMAT — geçerli JSON:
 {
-  "positives": [
-    "max 130 karakter, somut olumlu dipnot — PDF'ten",
-    ...
-  ],
-  "negatives": [
-    "max 130 karakter, somut olumsuz dipnot/risk — PDF'ten",
-    ...
-  ],
-  "summary": "izahname özeti — en kritik 1-2 cümle, yatırımcıya ne söylüyor",
+  "positives": ["somut olumlu madde — rakam/yüzde içermeli", ...],
+  "negatives": ["somut olumsuz madde — rakam/yüzde/risk içermeli", ...],
+  "summary": "yatırımcıya net mesaj — 1-2 cümle, en kritik bulgu",
   "risk_level": "düşük|orta|yüksek|çok yüksek",
-  "key_risk": "en önemli tek risk faktörü (maksimum 100 karakter)"
+  "key_risk": "en kritik tek risk (max 100 karakter, spesifik)"
 }
 
-MADDE SAYISI: Olumlu 3-5 madde, Olumsuz 3-5 madde. Daha az veya fazla KABUL EDİLMEZ.
-UZUNLUK: Her madde maksimum 130 karakter. Türkçe, net, anlaşılır dil.
-SADECE JSON döndür. Başka hiçbir şey yazma."""
+MADDE SAYISI: Olumlu 5-7 madde, Olumsuz 5-7 madde. Kesinlikle 4'ten az olmamalı. PDF yeterliyse 6-7 madde bekleniyor.
+FORMAT: Her madde max 140 karakter. Türkçe, net. SADECE JSON döndür."""
 
 
 _FEW_SHOT_EXAMPLES = """
@@ -420,15 +407,10 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         return []
 
 
-def extract_pdf_text(pdf_path: str) -> Optional[str]:
-    """PDF’ten metin çıkarır. PyMuPDF → pdfplumber → Vision OCR.
+def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
+    """PDF’ten metin çıkarır. PyMuPDF → pdfplumber → Tesseract → Vision OCR.
 
-    Strateji:
-    1. PyMuPDF (fitz) dene — geniş PDF format desteği
-    2. Sonuç boşsa pdfplumber dene
-    3. İkisi de boşsa Vision OCR (Claude) dene — taranmış PDF’ler için
-    4. Risk faktörleri bölümünü öncelikli tut
-    5. _MAX_PDF_CHARS sınırında kırp
+    Returns: (metin veya None, analiz edilen sayfa sayısı)
     """
     try:
         # Önce PyMuPDF dene
@@ -451,7 +433,7 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
 
         if not page_tuples:
             logger.warning("PDF’ten hiçbir yöntemle metin çıkarılamadı: %s", pdf_path)
-            return None
+            return None, 0
 
         all_pages_text = []
         risk_section_text = []
@@ -481,7 +463,7 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
 
         if not all_pages_text:
             logger.warning("PDF’ten metin çıkarılamadı: %s", pdf_path)
-            return None
+            return None, 0
 
         # Öncelikli metin birleştirme
         combined = ""
@@ -501,17 +483,18 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
             end_chunk   = full_text[-int(remaining_budget * 0.4):]
             combined = (f"\n\n=== İZAHNAME TAM METNİ (ÖZET) ===\n{start_chunk}\n\n...[ORTA BÖLÜMLER ATLANMIŞ]...\n\n{end_chunk}\n\n{combined}")
 
+        pages_count = len(all_pages_text)
         logger.info(
             "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d)",
-            len(all_pages_text), len(combined),
+            pages_count, len(combined),
             len("".join(risk_section_text)),
             len("".join(finance_section_text)),
         )
-        return combined[:_MAX_PDF_CHARS]
+        return combined[:_MAX_PDF_CHARS], pages_count
 
     except Exception as e:
         logger.error("PDF metin çıkarma hatası: %s — %s", pdf_path, e)
-        return None
+        return None, 0
     finally:
         try:
             if os.path.exists(pdf_path):
@@ -607,8 +590,8 @@ async def analyze_with_ai(
                            pos_count, neg_count, company_name)
 
         # Karakter limitini uygula (130 karakter/madde)
-        result["positives"] = [p[:130] for p in result["positives"][:5]]
-        result["negatives"] = [n[:130] for n in result["negatives"][:5]]
+        result["positives"] = [p[:140] for p in result["positives"][:7]]
+        result["negatives"] = [n[:140] for n in result["negatives"][:7]]
 
         logger.info(
             "İzahname AI analizi tamamlandı: %s — %d olumlu, %d olumsuz, risk=%s",
@@ -786,14 +769,15 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
             logger.error("PDF indirilemedi: %s", pdf_url)
             return False
 
-        # Metin çıkar (sync — run in executor)
+        # Metin çıkar (sync — run in executor) → (text, pages_count) tuple
         loop = asyncio.get_running_loop()
-        pdf_text = await loop.run_in_executor(None, extract_pdf_text, pdf_path)
+        pdf_text, pages_analyzed = await loop.run_in_executor(None, extract_pdf_text, pdf_path)
         if not pdf_text or len(pdf_text) < 200:
             logger.error("PDF metni çok kısa veya boş (%d karakter): %s",
                          len(pdf_text) if pdf_text else 0, pdf_url)
             return False
-        logger.info("PDF metin çıkarıldı: %d karakter — ipo_id=%d", len(pdf_text), ipo_id)
+        logger.info("PDF metin çıkarıldı: %d karakter, %d sayfa — ipo_id=%d",
+                    len(pdf_text), pages_analyzed, ipo_id)
 
         # AI analiz
         analysis = await analyze_with_ai(pdf_text, company_name, ipo_price)
@@ -817,7 +801,7 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
             logger.info("İzahname analizi DB'ye kaydedildi: %s", company_name)
 
         # Görsel üret ve Tweet at (arka planda, DB session dışında)
-        await _post_analysis_actions(ipo_id, analysis, company_name, ipo_price)
+        await _post_analysis_actions(ipo_id, analysis, company_name, ipo_price, pages_analyzed)
 
         return True
 
@@ -832,6 +816,7 @@ async def _post_analysis_actions(
     analysis: dict,
     company_name: str,
     ipo_price: Optional[str],
+    pages_analyzed: int = 0,
 ):
     """Görsel üret ve tweet at — DB kaydından bağımsız arka plan işlemi."""
     try:
@@ -850,6 +835,7 @@ async def _post_analysis_actions(
                 ipo_price,
                 analysis,
                 ipo_id,
+                pages_analyzed,
             )
             logger.info("İzahname görseli üretildi: %s", img_path)
         except Exception as img_err:

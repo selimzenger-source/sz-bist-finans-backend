@@ -1994,27 +1994,28 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "İzahname Analizi"):
             return False
 
-        # Şirket adı ve ticker
+        # Şirket adı ve ticker hashtag
         clean_name = " ".join(ipo.company_name.replace("\n", " ").replace("\r", " ").split())
-        ticker_tag = f" (#{ipo.ticker})" if ipo.ticker else ""
+        ticker = ipo.ticker or ""
+        ticker_hashtag = f"#{ticker}" if ticker else ""
 
         # Risk seviyesi emoji
         risk_level = analysis.get("risk_level", "ORTA").upper()
         risk_emoji = {"DÜŞÜK": "🟢", "ORTA": "🟡", "YÜKSEK": "🔴"}.get(risk_level, "🟡")
 
-        # Olumlu dipnotlar — en fazla 2 madde, kısaltılmış
+        # Olumlu dipnotlar — en fazla 3 madde
         positives = analysis.get("positives", [])
         pos_lines = []
-        for p in positives[:2]:
-            short = p[:90] + "…" if len(p) > 90 else p
+        for p in positives[:3]:
+            short = p[:95] + "…" if len(p) > 95 else p
             pos_lines.append(f"  • {short}")
         pos_block = "\n".join(pos_lines) if pos_lines else "  • Belirgin pozitif dipnot bulunamadı"
 
-        # Olumsuz dipnotlar — en fazla 2 madde, kısaltılmış
+        # Olumsuz dipnotlar — en fazla 3 madde
         negatives = analysis.get("negatives", [])
         neg_lines = []
-        for n in negatives[:2]:
-            short = n[:90] + "…" if len(n) > 90 else n
+        for n in negatives[:3]:
+            short = n[:95] + "…" if len(n) > 95 else n
             neg_lines.append(f"  • {short}")
         neg_block = "\n".join(neg_lines) if neg_lines else "  • Belirgin negatif dipnot bulunamadı"
 
@@ -2023,35 +2024,29 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
         summary_short = summary[:180] + "…" if len(summary) > 180 else summary
 
         # Halka arz fiyatı (varsa)
-        price_text = ""
-        if ipo.ipo_price:
-            price_text = f"\n💰 Arz Fiyatı: {ipo.ipo_price} TL"
+        price_text = f"  💰 {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
-        text = (
-            f"📄 {clean_name}{ticker_tag} — İzahname Analizi\n"
-            f"{risk_emoji} Risk Seviyesi: {risk_level}{price_text}\n\n"
-            f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
-            f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
-            f"📝 {summary_short}\n\n"
-            f"⚠️ Yatırım tavsiyesi değildir.\n"
-            f"📲 {_get_setting('APP_LINK')}\n"
-            f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
-        )
+        def _build_text(sum_str):
+            header = f"📋 {ticker_hashtag} İzahname Analizi" if ticker_hashtag else f"📋 {clean_name} İzahname Analizi"
+            return (
+                f"{header}\n"
+                f"{'─' * 32}\n"
+                f"🏢 {clean_name}{price_text}\n\n"
+                f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
+                f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
+                f"📝 {sum_str}\n\n"
+                f"⚠️ Yatırım tavsiyesi değildir.\n"
+                f"📲 {_get_setting('APP_LINK')}\n"
+                f"#HalkaArz #İzahname {ticker_hashtag} #borsa #yatırım"
+            )
 
-        # 4000 karakter Twitter limiti — gerekirse summary'yi kırp
+        text = _build_text(summary_short)
+
+        # 3950 karakter limiti — gerekirse summary kırp
         if len(text) > 3950:
             max_sum = 3950 - (len(text) - len(summary_short)) - 10
             summary_short = summary_short[:max(max_sum, 60)] + "…"
-            text = (
-                f"📄 {clean_name}{ticker_tag} — İzahname Analizi\n"
-                f"{risk_emoji} Risk Seviyesi: {risk_level}{price_text}\n\n"
-                f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
-                f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
-                f"📝 {summary_short}\n\n"
-                f"⚠️ Yatırım tavsiyesi değildir.\n"
-                f"📲 {_get_setting('APP_LINK')}\n"
-                f"#HalkaArz #İzahname #{ipo.ticker or 'BIST100'} #borsa #yatırım"
-            )
+            text = _build_text(summary_short)
 
         # Görsel varsa medialı tweet, yoksa sadece metin
         import os
