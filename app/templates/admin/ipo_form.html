@@ -411,6 +411,22 @@
                     <input type="url" name="prospectus_url"
                            value="{{ ipo.prospectus_url if ipo and ipo.prospectus_url else '' }}"
                            class="w-full px-3 py-2 bg-gray-700 border border-gray-600 text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                    {% if ipo and ipo.id and ipo.prospectus_url %}
+                    <div class="mt-2 flex items-center gap-3">
+                        <form method="POST" action="/admin/ipo/{{ ipo.id }}/run-prospectus-analysis"
+                              onsubmit="return confirm('İzahname AI analizi başlatılsın mı? Bu işlem 2-3 dakika sürebilir.')">
+                            <button type="submit"
+                                    class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition-colors">
+                                🤖 AI İzahname Analiz Et
+                            </button>
+                        </form>
+                        {% if ipo.prospectus_analyzed_at %}
+                        <span class="text-xs text-green-400">✅ Analiz mevcut ({{ ipo.prospectus_analyzed_at.strftime('%d.%m.%Y %H:%M') }})</span>
+                        {% else %}
+                        <span class="text-xs text-gray-500">⏳ Henüz analiz edilmedi</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-400 mb-1">SPK Bülten URL</label>

@@ -1043,6 +1043,51 @@ async def tweets_page(
     })
 
 
+@router.post("/ipo/{ipo_id}/run-prospectus-analysis")
+async def run_prospectus_analysis_admin(
+    ipo_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """İzahname PDF'ini admin panelden manuel olarak AI ile analiz et."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from sqlalchemy import select
+    from app.models.ipo import IPO
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        return RedirectResponse(url=f"/admin/?error=IPO bulunamadı: {ipo_id}", status_code=303)
+
+    if not ipo.prospectus_url:
+        return RedirectResponse(
+            url=f"/admin/ipo/{ipo_id}/edit?error=Bu IPO için izahname URL'si yok",
+            status_code=303,
+        )
+
+    # Mevcut analizi sıfırla (yeniden analiz için)
+    ipo.prospectus_analysis = None
+    ipo.prospectus_analyzed_at = None
+    ipo.prospectus_tweeted = False
+    await db.commit()
+
+    try:
+        import asyncio
+        from app.services.prospectus_analyzer import analyze_prospectus
+        # Arka planda çalıştır — admin paneli bloke etme
+        asyncio.create_task(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
+        msg = f"İzahname analizi başlatıldı: {ipo.company_name} — birkaç dakika içinde tamamlanır"
+        return RedirectResponse(url=f"/admin/?success={msg}", status_code=303)
+    except Exception as e:
+        logger.error("Admin prospectus analiz hatasi: %s", e)
+        return RedirectResponse(
+            url=f"/admin/?error=Analiz başlatılamadı: {str(e)[:100]}",
+            status_code=303,
+        )
+
+
 @router.post("/tweets/trigger-snapshot")
 async def trigger_snapshot_from_admin(
     request: Request,
