@@ -514,19 +514,18 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
 # 3. Reply Gönderme (Twitter API v2)
 # -------------------------------------------------------
 
-async def send_reply(tweet_id: str, reply_text: str, *, allow_quote_fallback: bool = True) -> dict:
-    """Tweet'e reply atar. 403 alınırsa otomatik quote tweet'e düşer.
+async def send_reply(tweet_id: str, reply_text: str) -> dict:
+    """Tweet'e direkt reply atar (thread yorumu). Fallback yok.
 
     Args:
         tweet_id: Yanıtlanacak tweet'in ID'si
         reply_text: Reply metni
-        allow_quote_fallback: 403'te quote tweet denesin mi (default True)
 
     Returns:
         {
             "success": True,
             "reply_tweet_id": str,
-            "method": "reply" | "quote_tweet",
+            "method": "reply",
         }
         veya hata durumunda:
         {"success": False, "error": str}
@@ -583,47 +582,16 @@ async def send_reply(tweet_id: str, reply_text: str, *, allow_quote_fallback: bo
 
         error_text = response.text[:300]
 
-        # ── 403 FALLBACK ZİNCİRİ ──────────────────────────────────────────────
-        # Twitter API Basic tier kısıtlaması:
-        # "Reply/quote not allowed — you have not been mentioned or engaged"
-        # Çözüm: reply → quote tweet → mention tweet (3 aşamalı fallback)
-        if response.status_code == 403 and allow_quote_fallback:
-            reply_403_detail = error_text[:150]
-            logger.warning(
-                "Reply 403 (tweet %s): %s → Fallback 1: quote tweet deneniyor...",
-                tweet_id, reply_403_detail,
-            )
-
-            # Fallback 1: Quote tweet
-            qt_result = await _send_quote_tweet(tweet_id, reply_text, creds)
-            if qt_result.get("success"):
-                return qt_result
-
-            # Fallback 1 de başarısız → Fallback 2: Mention tweet
-            logger.warning(
-                "Quote tweet de 403 (tweet %s) → Fallback 2: @mention tweet deneniyor...",
-                tweet_id,
-            )
-            mention_result = await _send_mention_fallback(tweet_id, reply_text, creds)
-            if mention_result.get("success"):
-                return mention_result
-
-            # Her şey başarısız
-            logger.error(
-                "Tüm fallback'lar başarısız (tweet %s): reply=403, qt=%s, mention=%s",
-                tweet_id, qt_result.get("error", "?")[:80], mention_result.get("error", "?")[:80],
-            )
+        # 403 veya diğer hatalar — fallback yok, direkt hata döndür
+        if response.status_code == 403:
+            logger.warning("Reply 403 (tweet %s): %s", tweet_id, error_text[:200])
             return {
                 "success": False,
-                "error": (
-                    f"Reply 403: {reply_403_detail[:100]} | "
-                    f"Mention: {mention_result.get('error', '?')[:100]}"
-                ),
+                "error": f"Reply 403 — Twitter API kısıtlaması: {error_text[:200]}",
             }
 
-        # Diğer hatalar (non-403)
         logger.error(f"Reply hatası: HTTP {response.status_code} — {error_text}")
-        return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text}"}
+        return {"success": False, "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text[:200]}"}
 
     except httpx.TimeoutException:
         logger.error("Reply gönderme zaman aşımı")
@@ -741,7 +709,236 @@ async def _send_mention_fallback(tweet_id: str, text: str, creds: dict) -> dict:
 
 
 # -------------------------------------------------------
-# 4. Otomatik Reply — Kullanıcı ID Çözümleme
+# 4. Quote Tweet + Analiz (Bağımsız özellik)
+# -------------------------------------------------------
+
+_QUOTE_ANALYSIS_PROMPT = """Sen BIST ve Türk ekonomisini derinlemesine takip eden, analitik düşünen bir finans yorumcususun. @SZAlgoFinans hesabı adına tweet'leri alıntılayarak özgün, değer katan analizler yapıyorsun.
+
+GÖREV: Verilen tweet hakkında 2 FARKLI Türkçe alıntı analizi üret.
+
+═══ ANALİZ FORMATI ═══
+Her analiz:
+- 5 cümle: Konuyla doğrudan ilgili, özgün ve bilgilendirici
+- Her cümle farklı bir açıdan konuya yaklaşsın (arka plan, bağlam, piyasa etkisi, sektör, beklenti)
+- Son satıra yeni satırla 2-3 alakalı hashtag ekle (#BIST #HalkaArz vb.)
+- İki analiz birbirinden TON ve ODAK noktasıyla belirgin şekilde farklı olsun
+  → Analiz 1: Daha geniş piyasa/sektör perspektifi
+  → Analiz 2: Şirket/olay odaklı, spesifik
+
+═══ DİL VE ÜSLUP ═══
+- Profesyonel ama anlaşılır Türkçe
+- Yapay zekanın değil, piyasayı iyi bilen bir yorumcunun sesi
+- Net, kısa ve güçlü cümleler kur — dolgu kelime kullanma
+- "yakından takip etmek lazım", "ilginç gelişme" gibi klişelerden kaçın
+- Gerçekten değer katan, okuyucuyu düşündüren bir analiz yaz
+
+═══ KESİN YASAKLAR ═══
+- Rakam / fiyat / yüzde YAZMA — "hedef 47 TL", "%5 artış bekliyorum" YASAK
+- Tavsiye verme — "al", "sat", "gir", "çık" YASAK
+- Teknik analiz — destek/direnç/indikatör/formasyon YASAK
+- "YT değildir" YAZMA
+
+═══ HASHTAG KURALI ═══
+- Her analizin sonuna yeni satırda 2-3 hashtag
+- Örnekler: #BIST100 #HalkaArz #BorseIstanbul #Hisse #Bankacılık #Enerji #Teknoloji #Ekonomi
+- Konuyla gerçekten alakalı hashtag seç — rastgele koyma
+
+═══ JSON ÇIKTI ═══
+{"is_safe": true, "analyses": ["birinci analiz 5 cümle\n#hashtag1 #hashtag2", "ikinci analiz 5 cümle\n#hashtag1 #hashtag2"]}
+veya
+{"is_safe": false, "analyses": []}
+
+is_safe: false döndür:
+- Siyasi içerik
+- Finans/borsa/ekonomi dışı konu
+- Teknik analiz tweeti (grafik/formasyon/indikatör)
+- Tweet çok kısa veya belirsiz"""
+
+
+async def generate_quote_analysis(tweet_text: str, author_username: str) -> dict:
+    """AI ile tweet için 2 farklı alıntı analizi üretir (5 cümle + hashtag).
+
+    Args:
+        tweet_text: Orijinal tweet metni
+        author_username: Tweet yazarının @kullanıcıadı
+
+    Returns:
+        {
+            "success": True,
+            "is_safe": bool,
+            "analyses": [str, str],   # 2 farklı analiz seçeneği
+        }
+        veya hata durumunda:
+        {"success": False, "error": str}
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return {"success": False, "error": "Abacus AI API key yapılandırılmamış."}
+
+    user_message = f"Tweet (@{author_username}):\n\n{tweet_text}"
+
+    payload = {
+        "model": _AI_MODEL,
+        "messages": [
+            {"role": "system", "content": _QUOTE_ANALYSIS_PROMPT},
+            {"role": "user", "content": user_message},
+        ],
+        "temperature": 0.80,
+        "max_tokens": 800,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+            response = await client.post(_ABACUS_URL, json=payload, headers=headers)
+
+        if response.status_code != 200:
+            logger.error(f"AI quote analiz hatası: HTTP {response.status_code} — {response.text[:200]}")
+            return {"success": False, "error": f"AI servisi hatası (HTTP {response.status_code})"}
+
+        data = response.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+        if not content:
+            return {"success": False, "error": "AI boş yanıt döndü."}
+
+        # JSON parse — ```json ... ``` bloğunu da destekle
+        json_text = content.strip()
+        if json_text.startswith("```"):
+            json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
+            json_text = re.sub(r"\s*```$", "", json_text)
+
+        result = json.loads(json_text)
+
+        is_safe = result.get("is_safe", False)
+        if isinstance(is_safe, str):
+            is_safe = is_safe.lower() in ("true", "1", "yes", "evet")
+
+        if not is_safe:
+            return {
+                "success": True,
+                "is_safe": False,
+                "analyses": [],
+            }
+
+        analyses_raw = result.get("analyses", [])
+        if not isinstance(analyses_raw, list) or len(analyses_raw) == 0:
+            return {"success": False, "error": "AI analiz üretemedi."}
+
+        # Doğrula ve temizle
+        validated = []
+        for item in analyses_raw[:2]:
+            if isinstance(item, str) and item.strip():
+                text = item.strip()
+                if len(text) > 500:
+                    text = text[:497] + "..."
+                validated.append(text)
+
+        if not validated:
+            return {"success": False, "error": "AI geçerli analiz üretemedi."}
+
+        return {
+            "success": True,
+            "is_safe": True,
+            "analyses": validated,
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"AI quote analiz JSON parse hatası: {e}")
+        return {"success": False, "error": "AI yanıtı JSON formatında değil — tekrar deneyin."}
+    except httpx.TimeoutException:
+        logger.error("AI quote analiz zaman aşımı")
+        return {"success": False, "error": "AI servisi zaman aşımı — tekrar deneyin."}
+    except Exception as e:
+        logger.error(f"AI quote analiz hatası: {e}")
+        return {"success": False, "error": f"Beklenmeyen hata: {str(e)[:200]}"}
+
+
+async def send_quote_analysis_tweet(tweet_url: str, analysis_text: str) -> dict:
+    """Tweet'i alıntılayarak AI analiziyle quote tweet atar.
+
+    Args:
+        tweet_url: Alıntılanacak tweet URL'si (https://x.com/...)
+        analysis_text: AI'ın ürettiği analiz metni (5 cümle + hashtag)
+
+    Returns:
+        {
+            "success": True,
+            "quote_tweet_id": str,
+            "tweet_url": str,
+        }
+        veya hata durumunda:
+        {"success": False, "error": str}
+    """
+    tweet_id = _extract_tweet_id(tweet_url)
+    if not tweet_id:
+        return {"success": False, "error": "Geçersiz tweet URL'si."}
+
+    if not analysis_text or not analysis_text.strip():
+        return {"success": False, "error": "Analiz metni gerekli."}
+
+    analysis_text = analysis_text.strip()
+    if len(analysis_text) > 4000:
+        analysis_text = analysis_text[:3997] + "..."
+
+    creds = _load_credentials()
+    if not creds:
+        return {"success": False, "error": "Twitter API anahtarları yapılandırılmamış."}
+
+    from app.services.twitter_service import _wait_for_tweet_rate_limit, _record_tweet_sent
+    wait = _wait_for_tweet_rate_limit()
+    if wait > 0:
+        await asyncio.sleep(wait)
+
+    auth_header = _build_oauth_header(creds, method="POST", url=_TWITTER_TWEET_URL)
+    payload = {
+        "text": analysis_text,
+        "quote_tweet_id": tweet_id,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                _TWITTER_TWEET_URL,
+                json=payload,
+                headers={
+                    "Authorization": auth_header,
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if response.status_code in (200, 201):
+            data = response.json()
+            qt_id = data.get("data", {}).get("id", "?")
+            logger.info(f"Quote analiz tweet başarılı (id={qt_id}) → tweet {tweet_id}")
+            _record_tweet_sent()
+            return {
+                "success": True,
+                "quote_tweet_id": qt_id,
+                "tweet_url": f"https://x.com/SZAlgoFinans/status/{qt_id}",
+            }
+
+        error_text = response.text[:300]
+        logger.error(f"Quote tweet hatası: HTTP {response.status_code} — {error_text}")
+        return {
+            "success": False,
+            "error": f"Twitter API hatası (HTTP {response.status_code}): {error_text[:200]}",
+        }
+
+    except httpx.TimeoutException:
+        logger.error("Quote tweet gönderme zaman aşımı")
+        return {"success": False, "error": "Twitter API zaman aşımı — tekrar deneyin."}
+    except Exception as e:
+        logger.error(f"Quote tweet gönderme hatası: {e}")
+        return {"success": False, "error": f"Beklenmeyen hata: {str(e)[:200]}"}
+
+
+# -------------------------------------------------------
+# 5. Otomatik Reply — Kullanıcı ID Çözümleme
 # -------------------------------------------------------
 
 async def get_user_id_by_username(username: str) -> str | None:
@@ -1376,11 +1573,10 @@ async def auto_reply_cycle():
                         await err_session.commit()
                     break  # Kalan pending_replies'ı atla — kredi yok
 
-                # 403 → reply + quote tweet ikisi de başarısız → bu tweeti atla, devam et
-                # (send_reply zaten quote tweet fallback denedi — ikisi de 403 ise tweet-level sorun)
-                if "HTTP 403" in error_msg or "Quote tweet hatası" in error_msg:
+                # 403 → bu tweeti atla (mention edilmeden reply yasak — tweet-level kısıtlama)
+                if "403" in error_msg:
                     logger.info(
-                        "Reply+QuoteTweet başarısız (403): @%s tweet %s — atlanıyor: %s",
+                        "Reply 403: @%s tweet %s — atlanıyor: %s",
                         target_username, tweet_id, error_msg[:100],
                     )
                     async with async_session() as err_session:
@@ -1390,7 +1586,7 @@ async def auto_reply_cycle():
                             target_text=tweet_text[:1000],
                             reply_text=chosen_reply,
                             status="skipped",
-                            error_message=f"Reply+QT 403: {error_msg[:400]}",
+                            error_message=f"Reply 403: {error_msg[:400]}",
                         ))
                         await err_session.commit()
                     continue  # Bu tweeti atla, sonraki reply'a devam et

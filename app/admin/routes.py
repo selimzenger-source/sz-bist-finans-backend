@@ -2445,6 +2445,92 @@ async def admin_replies_send(request: Request):
 
 
 # -------------------------------------------------------
+# QUOTE TWEET + ANALİZ — Manuel alıntı tweet özelliği
+# -------------------------------------------------------
+
+@router.post("/replies/quote-analyze")
+async def admin_quote_analyze(request: Request):
+    """Tweet URL'sinden 2 farklı AI quote analizi üretir."""
+    from fastapi.responses import JSONResponse
+    from app.services.twitter_reply_service import fetch_tweet_by_url, generate_quote_analysis
+
+    admin = get_current_admin(request)
+    if not admin:
+        return JSONResponse({"error": "Yetkisiz erişim"}, status_code=401)
+
+    form = await request.form()
+    tweet_url = form.get("tweet_url", "").strip()
+
+    if not tweet_url:
+        return JSONResponse({"error": "Tweet URL'si gerekli."}, status_code=400)
+
+    # Tweet'i çek
+    tweet_result = await fetch_tweet_by_url(tweet_url)
+    if not tweet_result.get("success"):
+        return JSONResponse({
+            "error": tweet_result.get("error", "Tweet çekilemedi.")
+        }, status_code=400)
+
+    # AI analiz üret (2 seçenek)
+    ai_result = await generate_quote_analysis(
+        tweet_result["text"],
+        tweet_result["author_username"],
+    )
+    if not ai_result.get("success"):
+        return JSONResponse({
+            "error": ai_result.get("error", "AI analiz üretilemedi.")
+        }, status_code=500)
+
+    return JSONResponse({
+        "tweet": {
+            "id": tweet_result["tweet_id"],
+            "url": tweet_url,
+            "text": tweet_result["text"],
+            "author_username": tweet_result["author_username"],
+            "author_name": tweet_result["author_name"],
+            "likes": tweet_result["likes"],
+            "retweets": tweet_result["retweets"],
+        },
+        "is_safe": ai_result["is_safe"],
+        "analyses": ai_result.get("analyses", []),
+    })
+
+
+@router.post("/replies/send-quote")
+async def admin_send_quote(request: Request):
+    """Seçilen AI analizini quote tweet olarak yayınlar."""
+    from fastapi.responses import JSONResponse
+    from app.services.twitter_reply_service import send_quote_analysis_tweet
+
+    admin = get_current_admin(request)
+    if not admin:
+        return JSONResponse({"error": "Yetkisiz erişim"}, status_code=401)
+
+    form = await request.form()
+    tweet_url = form.get("tweet_url", "").strip()
+    analysis_text = form.get("analysis_text", "").strip()
+
+    if not tweet_url or not analysis_text:
+        return JSONResponse({
+            "error": "Tweet URL ve analiz metni gerekli."
+        }, status_code=400)
+
+    result = await send_quote_analysis_tweet(tweet_url, analysis_text)
+
+    if result.get("success"):
+        return JSONResponse({
+            "success": True,
+            "quote_tweet_id": result["quote_tweet_id"],
+            "tweet_url": result["tweet_url"],
+        })
+    else:
+        return JSONResponse({
+            "success": False,
+            "error": result.get("error", "Quote tweet gönderilemedi."),
+        }, status_code=500)
+
+
+# -------------------------------------------------------
 # REPLY DEBUG — Son hata mesajlarini goster
 # -------------------------------------------------------
 

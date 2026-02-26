@@ -195,6 +195,114 @@
     </div>
 
     <!-- ============================================ -->
+    <!-- BOLUM 2b: Quote Tweet + Analiz (Bağımsız) -->
+    <!-- ============================================ -->
+    <div class="bg-gray-800 rounded-xl shadow-lg border border-purple-700/40 p-6">
+        <h2 class="text-lg font-bold text-gray-100 mb-1 flex items-center gap-2">
+            &#128203; Quote Tweet + Analiz
+        </h2>
+        <p class="text-gray-500 text-xs mb-4">Tweet URL yapıştırın, AI 2 farklı 5 cümlelik analiz üretsin. Birini seçin, düzenleyin, alıntı tweet olarak yayınlayın.</p>
+
+        <div class="flex gap-3">
+            <input type="text" id="qtUrlInput"
+                   class="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2.5
+                          text-gray-100 placeholder-gray-500
+                          focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                   placeholder="https://x.com/kullanici/status/123456789..." />
+            <button type="button" id="qtAnalyzeBtn" onclick="qtAnalyze()"
+                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 px-5
+                           rounded-lg transition flex items-center gap-2 shrink-0 text-sm">
+                <span id="qtAnalyzeBtnIcon">&#128203;</span>
+                <span id="qtAnalyzeBtnText">Analiz Et</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- QT Hata Mesajı -->
+    <div id="qtErrorBox" class="hidden bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg shrink-0">&#10060;</span>
+        <span id="qtErrorText"></span>
+    </div>
+
+    <!-- QT Güvenlik Uyarısı -->
+    <div id="qtUnsafeBox" class="hidden bg-red-900/50 border border-red-600 text-red-300 px-5 py-4 rounded-xl">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-2xl">&#9940;</span>
+            <span class="font-bold text-lg">Analiz Üretilemedi</span>
+        </div>
+        <p class="text-red-400 text-sm">Bu tweet alıntı analize uygun değil — siyasi içerik, teknik analiz, konu dışı veya çok kısa tweet.</p>
+    </div>
+
+    <!-- QT Tweet Kartı -->
+    <div id="qtTweetCard" class="hidden bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-5">
+        <div class="flex items-start gap-3 mb-3">
+            <div class="w-10 h-10 bg-gradient-to-br from-purple-500 to-purple-700 rounded-full
+                        flex items-center justify-center text-xs font-bold text-white shrink-0">
+                <span id="qtTweetAuthorInitial">?</span>
+            </div>
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                    <span id="qtTweetAuthorName" class="font-semibold text-gray-100 text-sm"></span>
+                    <span id="qtTweetAuthorHandle" class="text-gray-500 text-sm"></span>
+                </div>
+                <p id="qtTweetText" class="text-gray-300 text-sm mt-1 whitespace-pre-wrap"></p>
+            </div>
+        </div>
+        <div class="flex items-center gap-4 text-xs text-gray-500 border-t border-gray-700 pt-3">
+            <span>&#10084;&#65039; <span id="qtTweetLikes">0</span></span>
+            <span>&#128260; <span id="qtTweetRetweets">0</span></span>
+        </div>
+    </div>
+
+    <!-- QT Analiz Seçenekleri -->
+    <div id="qtAnalysisOptions" class="hidden space-y-3">
+        <h3 class="text-base font-bold text-gray-100 flex items-center gap-2">
+            &#129302; AI Analiz Seçenekleri
+        </h3>
+        <div id="qtAnalysisCards" class="space-y-3"></div>
+    </div>
+
+    <!-- QT Düzenleme + Gönderim -->
+    <div id="qtEditSection" class="hidden bg-gray-800 rounded-xl shadow-lg border border-purple-700/50 p-6">
+        <h3 class="text-sm font-medium text-purple-300 mb-2">&#9999;&#65039; Analizi Düzenle</h3>
+        <textarea id="qtAnalysisTextarea" rows="6"
+                  class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2.5
+                         text-gray-100 placeholder-gray-500
+                         focus:ring-2 focus:ring-purple-500 focus:border-transparent
+                         resize-none text-sm"
+                  placeholder="Yukarıdan bir analiz seçin veya kendi yazınızı girin..."
+                  oninput="qtUpdateCharCount()"></textarea>
+        <div class="flex items-center justify-between mt-2">
+            <div class="text-xs">
+                <span id="qtCharCount" class="text-gray-400">0</span>
+                <span class="text-gray-600">/ 280</span>
+                <span class="text-gray-600 ml-1">(280+ da çalışır, X Premium aktif)</span>
+            </div>
+            <button type="button" id="qtSendBtn" onclick="qtSendQuote()"
+                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 px-5
+                           rounded-lg transition flex items-center gap-2 text-sm
+                           disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled>
+                <span id="qtSendBtnIcon">&#128203;</span>
+                <span id="qtSendBtnText">Quote Tweet Yayınla</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- QT Başarı Mesajı -->
+    <div id="qtSuccessBox" class="hidden bg-purple-900/50 border border-purple-600 text-purple-300 px-5 py-4 rounded-xl">
+        <div class="flex items-center gap-2 mb-2">
+            <span class="text-2xl">&#10004;</span>
+            <span class="font-bold text-lg">Quote Tweet Yayınlandı!</span>
+        </div>
+        <p class="text-purple-400 text-sm">
+            <a id="qtTweetLink" href="#" target="_blank" class="underline hover:text-purple-300 font-medium">
+                Tweet'i görüntüle &#8599;
+            </a>
+        </p>
+    </div>
+
+    <!-- ============================================ -->
     <!-- BOLUM 3: Otomatik Reply Logu -->
     <!-- ============================================ -->
     <div class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 p-6">
@@ -430,5 +538,129 @@ async function sendReply() {
 }
 
 document.getElementById('tweetUrlInput').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();analyzeTweet();} });
+
+// ─── Quote Tweet + Analiz ─────────────────────────────────────────
+let qtCurrentTweetUrl = null;
+
+function qtShowError(msg) {
+    document.getElementById('qtErrorBox').classList.remove('hidden');
+    document.getElementById('qtErrorText').textContent = msg;
+}
+function qtHideError() { document.getElementById('qtErrorBox').classList.add('hidden'); }
+
+function qtReset() {
+    qtHideError();
+    ['qtUnsafeBox','qtTweetCard','qtAnalysisOptions','qtEditSection','qtSuccessBox'].forEach(
+        id => document.getElementById(id).classList.add('hidden')
+    );
+    document.getElementById('qtAnalysisTextarea').value = '';
+    document.getElementById('qtSendBtn').disabled = true;
+    qtCurrentTweetUrl = null;
+    qtUpdateCharCount();
+}
+
+function qtSetAnalyzeLoading(on) {
+    const btn = document.getElementById('qtAnalyzeBtn');
+    btn.disabled = on;
+    btn.classList.toggle('opacity-60', on);
+    document.getElementById('qtAnalyzeBtnIcon').innerHTML = on ? '&#8987;' : '&#128203;';
+    document.getElementById('qtAnalyzeBtnText').textContent = on ? 'Analiz ediliyor...' : 'Analiz Et';
+}
+
+function qtSetSendLoading(on) {
+    const btn = document.getElementById('qtSendBtn');
+    btn.disabled = on;
+    btn.classList.toggle('opacity-60', on);
+    document.getElementById('qtSendBtnIcon').innerHTML = on ? '&#8987;' : '&#128203;';
+    document.getElementById('qtSendBtnText').textContent = on ? 'Yayınlanıyor...' : 'Quote Tweet Yayınla';
+}
+
+function qtUpdateCharCount() {
+    const len = document.getElementById('qtAnalysisTextarea').value.length;
+    const el = document.getElementById('qtCharCount');
+    el.textContent = len;
+    el.className = len > 280 ? 'text-yellow-400' : len > 120 ? 'text-gray-300' : 'text-gray-400';
+    document.getElementById('qtSendBtn').disabled = len === 0;
+}
+
+function qtSelectAnalysis(text) {
+    document.getElementById('qtAnalysisTextarea').value = text;
+    qtUpdateCharCount();
+    document.querySelectorAll('.qt-analysis-card').forEach(c => {
+        c.classList.remove('border-purple-500','bg-purple-900/20');
+        c.classList.add('border-gray-600');
+    });
+    event.currentTarget.classList.remove('border-gray-600');
+    event.currentTarget.classList.add('border-purple-500','bg-purple-900/20');
+    document.getElementById('qtEditSection').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+async function qtAnalyze() {
+    const url = document.getElementById('qtUrlInput').value.trim();
+    if (!url) { qtShowError('Tweet URL girin.'); return; }
+    qtReset();
+    qtSetAnalyzeLoading(true);
+    try {
+        const fd = new FormData();
+        fd.append('tweet_url', url);
+        const r = await fetch('/admin/replies/quote-analyze', {method:'POST', body:fd});
+        const d = await r.json();
+        if (!r.ok) { qtShowError(d.error||'Hata oluştu.'); return; }
+
+        const tw = d.tweet;
+        qtCurrentTweetUrl = url;
+        document.getElementById('qtTweetAuthorInitial').textContent = (tw.author_name||'?')[0].toUpperCase();
+        document.getElementById('qtTweetAuthorName').textContent = tw.author_name;
+        document.getElementById('qtTweetAuthorHandle').textContent = '@'+tw.author_username;
+        document.getElementById('qtTweetText').textContent = tw.text;
+        document.getElementById('qtTweetLikes').textContent = tw.likes.toLocaleString('tr-TR');
+        document.getElementById('qtTweetRetweets').textContent = tw.retweets.toLocaleString('tr-TR');
+        document.getElementById('qtTweetCard').classList.remove('hidden');
+
+        if (!d.is_safe) {
+            document.getElementById('qtUnsafeBox').classList.remove('hidden');
+            return;
+        }
+
+        const cc = document.getElementById('qtAnalysisCards');
+        cc.innerHTML = '';
+        const labels = ['&#127760; Piyasa / Sektör Perspektifi', '&#127919; Olay Odaklı Analiz'];
+        (d.analyses || []).forEach((analiz, i) => {
+            const card = document.createElement('div');
+            card.className = 'qt-analysis-card bg-gray-700/50 rounded-xl border border-gray-600 p-4 cursor-pointer hover:border-purple-500 hover:bg-purple-900/10 transition';
+            card.onclick = function(){ qtSelectAnalysis(analiz); };
+            card.innerHTML = '<div class="flex justify-between mb-2"><span class="text-xs text-purple-400 font-medium">'+(labels[i]||'Analiz '+(i+1))+'</span><span class="text-xs text-gray-600">'+analiz.length+' chr</span></div><p class="text-gray-200 text-sm whitespace-pre-line">'+escapeHtml(analiz)+'</p>';
+            cc.appendChild(card);
+        });
+
+        document.getElementById('qtAnalysisOptions').classList.remove('hidden');
+        document.getElementById('qtEditSection').classList.remove('hidden');
+    } catch(e) { qtShowError('Ağ hatası: '+e.message); }
+    finally { qtSetAnalyzeLoading(false); }
+}
+
+async function qtSendQuote() {
+    const text = document.getElementById('qtAnalysisTextarea').value.trim();
+    if (!text || !qtCurrentTweetUrl) return;
+    if (!confirm('Quote tweet yayınlanacak:\n\n"'+text.substring(0,150)+(text.length>150?'...':'')+'"')) return;
+    qtSetSendLoading(true); qtHideError();
+    try {
+        const fd = new FormData();
+        fd.append('tweet_url', qtCurrentTweetUrl);
+        fd.append('analysis_text', text);
+        const r = await fetch('/admin/replies/send-quote', {method:'POST', body:fd});
+        const d = await r.json();
+        if (d.success) {
+            document.getElementById('qtTweetLink').href = d.tweet_url;
+            document.getElementById('qtSuccessBox').classList.remove('hidden');
+            document.getElementById('qtSendBtn').disabled = true;
+            document.getElementById('qtAnalysisTextarea').disabled = true;
+            document.getElementById('qtSuccessBox').scrollIntoView({behavior:'smooth',block:'center'});
+        } else { qtShowError(d.error||'Gönderilemedi.'); }
+    } catch(e) { qtShowError('Ağ hatası: '+e.message); }
+    finally { qtSetSendLoading(false); }
+}
+
+document.getElementById('qtUrlInput').addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();qtAnalyze();} });
 </script>
 {% endblock %}
