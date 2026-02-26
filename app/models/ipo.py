@@ -154,6 +154,9 @@ class IPO(Base):
     intro_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="Sirket tanitim tweeti atildi mi"
     )
+    distribution_tweeted: Mapped[bool] = mapped_column(
+        Boolean, default=False, comment="Dagitim baslangic tweeti atildi mi (deploy-safe dedup)"
+    )
 
     # --- Admin Koruma ---
     manual_fields: Mapped[str | None] = mapped_column(

@@ -151,6 +151,9 @@ _init_attempted = False
 _tweet_sent_cache: dict[str, float] = {}
 _TWEET_DEDUP_HOURS = 24
 
+# Son atilan tweet ID — reply/thread için (restartta sıfırlanır, sadece kısa vadeli)
+_last_tweet_id: str = ""
+
 
 def _is_duplicate_tweet(text: str) -> bool:
     """Ayni tweet son 24 saat icinde atildiysa True doner."""
@@ -328,6 +331,54 @@ def _notify_tweet_failure(text: str, error_detail: str):
             asyncio.run(notify_scraper_error("Twitter Tweet Hatası", msg))
     except Exception:
         pass  # Telegram bildirimi de basarisiz olursa sessizce gec
+
+
+def _safe_reply_tweet(reply_text: str, in_reply_to_tweet_id: str) -> bool:
+    """Mevcut bir tweete reply (thread devamı) atar — sadece metin, resim yok.
+
+    Returns:
+        True: reply başarılı
+        False: reply başarısız (ana tweet başarısı etkilenmez)
+    """
+    try:
+        if not in_reply_to_tweet_id or in_reply_to_tweet_id == "?":
+            logger.warning("Reply tweet: geçersiz in_reply_to_tweet_id")
+            return False
+
+        creds = _load_credentials()
+        if not creds:
+            logger.info("[TWITTER-DRY-RUN-REPLY] %s...", reply_text[:60])
+            return False
+
+        _wait_for_tweet_rate_limit()
+
+        auth_header = _build_oauth_header(creds)
+        resp = httpx.post(
+            _TWITTER_TWEET_URL,
+            json={
+                "text": reply_text,
+                "reply": {"in_reply_to_tweet_id": in_reply_to_tweet_id},
+            },
+            headers={
+                "Authorization": auth_header,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+
+        if resp.status_code in (200, 201):
+            reply_id = resp.json().get("data", {}).get("id", "?")
+            logger.info("Reply tweet başarılı (id=%s, reply_to=%s)", reply_id, in_reply_to_tweet_id)
+            _mark_tweet_sent(reply_text)
+            _record_tweet_sent()
+            return True
+        else:
+            logger.error("Reply tweet hatası HTTP %d: %s", resp.status_code, resp.text[:200])
+            return False
+
+    except Exception as e:
+        logger.error("Reply tweet hatası (sistem etkilenmez): %s", e)
+        return False
 
 
 def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) -> bool:
@@ -642,37 +693,54 @@ def _get_rejected_brokers(ipo_id: int) -> list[str]:
 
 
 def tweet_distribution_start(ipo) -> bool:
-    """Dağıtım süreci başladığında tweet atar. Tahmini lot varsa ekler."""
+    """Dağıtım süreci başladığında tweet atar — 2 tweet thread formatında.
+
+    Tweet 1 (görselli): Şirket bilgileri, fiyat, tarih, tahmini lot, link, hashtag
+    Tweet 2 (reply): Katılınamayacak kurumlar listesi — her kurum ayrı satırda
+    """
     try:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "Dağıtıma Çıkış"):
             return False
         ticker_text = f" (#{ipo.ticker})" if ipo.ticker else ""
         end_date = ""
         if ipo.subscription_end:
-            end_date = f"\n\U0001F4C5 Son başvuru: {ipo.subscription_end.strftime('%d.%m.%Y')}"
-        price_text = f"\n\U0001F4B0 Fiyatı: {ipo.ipo_price} TL" if ipo.ipo_price else ""
+            end_date = f"\n📅 Son başvuru: {ipo.subscription_end.strftime('%d.%m.%Y')}"
+        price_text = f"\n💰 Fiyatı: {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
         # Tahmini lot bilgisi varsa ekle (parantez içinde tahminidir notu)
         lot_text = ""
         if ipo.estimated_lots_per_person:
-            lot_text = f"\n\U0001F4CA Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
+            lot_text = f"\n📊 Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
 
-        # Katılınamayacak kurumlar
-        rejected_text = ""
-        rejected = _get_rejected_brokers(ipo.id) if ipo.id else []
-        if rejected:
-            names = ", ".join(rejected)
-            rejected_text = f"\n\n❌ Katılınamayacak Kurumlar:\n{names}"
-
+        # Tweet 1: Ana bilgiler — broker listesi YOK (280 char sınırı)
         text = (
             f"{_get_setting('T2_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
-            f"{price_text}{end_date}{lot_text}"
-            f"{rejected_text}\n\n"
+            f"{price_text}{end_date}{lot_text}\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
-        return _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR)
+        ok = _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR, source="tweet_distribution_start")
+
+        # Tweet 2: Katılınamayacak kurumlar — reply olarak, her kurum ayrı satırda
+        if ok:
+            rejected = _get_rejected_brokers(ipo.id) if ipo.id else []
+            if rejected:
+                # Her kurum ayrı satırda
+                broker_lines = "\n".join(rejected)
+                reply_text = (
+                    f"❌ Katılınamayacak Kurumlar:\n\n"
+                    f"{broker_lines}"
+                )
+                time.sleep(2)  # Kısa bekleme — rate limit
+                reply_id = _last_tweet_id
+                if reply_id and reply_id != "?":
+                    _safe_reply_tweet(reply_text, reply_id)
+                else:
+                    # Fallback: reply yapılamazsa ana tweete ekle (kısaltılmış)
+                    logger.warning("Tweet 2 (broker reply) atlanamadı: tweet_id yok")
+
+        return ok
     except Exception as e:
         logger.error(f"tweet_distribution_start hatası: {e}")
         return False
@@ -1572,6 +1640,8 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
             _mark_tweet_sent(text)
             _record_tweet_sent()
+            global _last_tweet_id
+            _last_tweet_id = tweet_id
             return True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"

@@ -400,6 +400,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v35 migration: ipos.distribution_tweeted (deploy-safe dagitim tweet dedup)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS distribution_tweeted BOOLEAN DEFAULT FALSE")
+            )
+        except Exception:
+            pass
+
         # v34 migration: ipos izahname analiz alanlari (AI prospectus analysis)
         try:
             await conn.execute(

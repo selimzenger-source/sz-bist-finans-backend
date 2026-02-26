@@ -588,6 +588,7 @@ async def tweet_distribution_morning_job():
                         IPO.status == "in_distribution",
                         IPO.subscription_start == today,
                         IPO.archived == False,
+                        IPO.distribution_tweeted == False,  # DB dedup — deploy-safe
                     )
                 )
             )
@@ -603,6 +604,9 @@ async def tweet_distribution_morning_job():
                 try:
                     tw_ok = tweet_distribution_start(ipo)
                     logger.info("Dagitim sabah tweeti: %s", ipo.ticker or ipo.company_name)
+                    if tw_ok:
+                        ipo.distribution_tweeted = True
+                        await db.commit()
                     await notify_tweet_sent("dagitim_baslangic", ipo.ticker or ipo.company_name, tw_ok)
                 except Exception as e:
                     logger.error("Dagitim sabah tweet hatasi (%s): %s", ipo.ticker, e)
@@ -1159,14 +1163,19 @@ async def check_morning_tweets():
                 minutes_to_open = (opening_time - now_tr).total_seconds() / 60
 
                 # --- Dagitim sabah tweeti: acilisa 55-65 dk kala (1 saat) ---
+                # DB dedup (distribution_tweeted) deploy restart'a karşı koruma sağlar
                 if (ipo.subscription_start == today
                         and 55 <= minutes_to_open <= 65
-                        and not _timing_already_sent(ipo.id, "distribution_morning_tweet")):
+                        and not _timing_already_sent(ipo.id, "distribution_morning_tweet")
+                        and not getattr(ipo, "distribution_tweeted", False)):  # deploy-safe DB dedup
                     if tweet_idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_distribution_start(ipo)
                     await notify_tweet_sent("dagitim_sabah_timing", ipo.ticker or ipo.company_name, tw_ok)
                     _timing_mark_sent(ipo.id, "distribution_morning_tweet")
+                    if tw_ok:
+                        ipo.distribution_tweeted = True
+                        await db.commit()
                     tweet_idx += 1
                     logger.info(
                         "Dagitim sabah tweeti (timing): %s — acilisa %d dk",
