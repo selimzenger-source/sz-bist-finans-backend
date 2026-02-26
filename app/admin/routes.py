@@ -1100,6 +1100,90 @@ async def run_prospectus_analysis_admin(
         )
 
 
+@router.get("/ipo/{ipo_id}/prospectus-debug")
+async def debug_prospectus_analysis(
+    ipo_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """İzahname analizi adım adım teşhis — hangi adımda hata olduğunu gösterir."""
+    from fastapi.responses import JSONResponse
+    if not get_current_admin(request):
+        return JSONResponse({"error": "Yetkisiz"}, status_code=401)
+
+    result = {"ipo_id": ipo_id, "steps": {}}
+
+    try:
+        # Adım 1: IPO DB kaydı
+        from app.models.ipo import IPO
+        r = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = r.scalar_one_or_none()
+        if not ipo:
+            return JSONResponse({"error": f"IPO bulunamadı: {ipo_id}"})
+        result["company"] = ipo.company_name
+        result["prospectus_url"] = ipo.prospectus_url
+        result["steps"]["1_ipo_found"] = True
+
+        if not ipo.prospectus_url:
+            result["steps"]["error"] = "prospectus_url yok"
+            return JSONResponse(result)
+
+        # Adım 2: PDF import
+        try:
+            import pdfplumber
+            result["steps"]["2_pdfplumber_import"] = True
+        except Exception as e:
+            result["steps"]["2_pdfplumber_import"] = False
+            result["steps"]["error"] = f"pdfplumber import hatası: {e}"
+            return JSONResponse(result)
+
+        # Adım 3: PDF indir
+        try:
+            import httpx, tempfile
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                tmp_path = f.name
+            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                resp = await client.get(ipo.prospectus_url)
+                with open(tmp_path, "wb") as f:
+                    f.write(resp.content)
+            import os
+            size_kb = os.path.getsize(tmp_path) // 1024
+            result["steps"]["3_pdf_download"] = f"OK ({size_kb} KB, status={resp.status_code})"
+        except Exception as e:
+            result["steps"]["3_pdf_download"] = False
+            result["steps"]["error"] = f"PDF indirme hatası: {e}"
+            return JSONResponse(result)
+
+        # Adım 4: PDF metin çıkar
+        try:
+            text = ""
+            with pdfplumber.open(tmp_path) as pdf:
+                pages_read = min(5, len(pdf.pages))
+                for page in pdf.pages[:pages_read]:
+                    text += page.extract_text() or ""
+            result["steps"]["4_pdf_text"] = f"OK ({len(text)} karakter, ilk 5 sayfa)"
+            result["text_sample"] = text[:300]
+        except Exception as e:
+            result["steps"]["4_pdf_text"] = False
+            result["steps"]["error"] = f"PDF metin çıkarma hatası: {e}"
+            return JSONResponse(result)
+
+        # Adım 5: Abacus API test
+        try:
+            from app.config import get_settings
+            api_key = get_settings().ABACUS_API_KEY
+            result["steps"]["5_api_key"] = "OK" if api_key else "YOK"
+        except Exception as e:
+            result["steps"]["5_api_key"] = f"Hata: {e}"
+
+        result["steps"]["all_ok"] = True
+        return JSONResponse(result)
+
+    except Exception as e:
+        result["steps"]["fatal_error"] = str(e)
+        return JSONResponse(result)
+
+
 @router.post("/tweets/trigger-snapshot")
 async def trigger_snapshot_from_admin(
     request: Request,
