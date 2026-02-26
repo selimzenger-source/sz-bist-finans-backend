@@ -203,6 +203,93 @@ def _extract_pages_pdfplumber(pdf_path: str) -> list:
         return []
 
 
+def _extract_pages_tesseract_sync(pdf_path: str) -> list:
+    """Tesseract OCR ile taranmış PDF'ten metin çıkar.
+
+    PyMuPDF ile sayfaları 200 DPI gri görüntüye çevir → pytesseract ile OCR yap.
+    Vision OCR'dan önce çalışır: yerel, ücretsiz, 100+ sayfalı PDF'leri işler.
+
+    Akıllı örnekleme:
+    - ≤40 sayfa: tüm sayfalar
+    - >40 sayfa: İlk 20 (özet+risk) + 1/3'teki 5 sayfa + 2/3'teki 5 sayfa + son 5 sayfa
+
+    Returns: [(page_index, extracted_text), ...]
+    """
+    try:
+        import fitz  # PyMuPDF
+        import io
+
+        try:
+            import pytesseract
+            from PIL import Image as PilImage
+        except ImportError:
+            logger.warning("Tesseract: pytesseract veya Pillow kurulu değil — atlanıyor")
+            return []
+
+        # Tesseract ikili dosyasının varlığını kontrol et
+        try:
+            import subprocess
+            result = subprocess.run(["tesseract", "--version"], capture_output=True, timeout=5)
+            if result.returncode != 0:
+                logger.warning("Tesseract: binary bulunamadı — atlanıyor")
+                return []
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            logger.warning("Tesseract: binary bulunamadı — atlanıyor")
+            return []
+
+        doc = fitz.open(pdf_path)
+        total_pages = len(doc)
+
+        # Akıllı sayfa örnekleme
+        if total_pages <= 40:
+            sample_indices = list(range(total_pages))
+        else:
+            start_pages = list(range(20))                                         # İlk 20: kapak+özet+risk başı
+            mid1 = total_pages // 3
+            mid1_pages = list(range(mid1, min(mid1 + 5, total_pages)))            # 1/3: risk ortası
+            mid2 = total_pages * 2 // 3
+            mid2_pages = list(range(mid2, min(mid2 + 5, total_pages)))            # 2/3: finansal
+            end_pages = list(range(max(total_pages - 5, 0), total_pages))         # Son 5: ek bilgiler
+            sample_indices = sorted(set(start_pages + mid1_pages + mid2_pages + end_pages))
+
+        logger.info("Tesseract OCR: %d/%d sayfa örnekleniyor...", len(sample_indices), total_pages)
+
+        # 200 DPI — Tesseract için ideal kalite (72 DPI'nın ~7.7 katı çözünürlük)
+        mat = fitz.Matrix(200 / 72, 200 / 72)
+        pages = []
+
+        for i in sample_indices:
+            try:
+                pix = doc[i].get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+                img_bytes = pix.tobytes("png")
+                pix = None  # Hızlı GC
+
+                img = PilImage.open(io.BytesIO(img_bytes))
+                # --psm 6: Düzgün metin bloğu olarak işle (izahname sayfaları için ideal)
+                text = pytesseract.image_to_string(img, lang="tur+eng", config="--psm 6 --oem 3")
+                img.close()
+
+                if text.strip():
+                    pages.append((i, text))
+
+            except Exception as pe:
+                logger.warning("Tesseract sayfa %d hatası: %s", i, pe)
+                continue
+
+        doc.close()
+
+        total_chars = sum(len(t) for _, t in pages)
+        logger.info(
+            "Tesseract OCR tamamlandı: %d sayfadan metin alındı, toplam %d karakter",
+            len(pages), total_chars,
+        )
+        return pages
+
+    except Exception as e:
+        logger.error("Tesseract OCR genel hata: %s — %s", type(e).__name__, e)
+        return []
+
+
 def _extract_pages_vision_sync(pdf_path: str) -> list:
     """Taranmış/görüntü tabanlı PDF için Claude Vision OCR.
 
@@ -352,9 +439,14 @@ def extract_pdf_text(pdf_path: str) -> Optional[str]:
             logger.info("PyMuPDF 0 karakter — pdfplumber deneniyor...")
             page_tuples = _extract_pages_pdfplumber(pdf_path)
 
-        # İkisi de boşsa Vision OCR dene (taranmış PDF)
+        # İkisi de boşsa Tesseract OCR dene (yerel, ücretsiz, 100+ sayfa)
         if not page_tuples:
-            logger.info("Her iki text extractor 0 karakter — Vision OCR (Claude) deneniyor...")
+            logger.info("PyMuPDF/pdfplumber 0 karakter — Tesseract OCR deneniyor...")
+            page_tuples = _extract_pages_tesseract_sync(pdf_path)
+
+        # Tesseract da boşsa Vision OCR dene (son çare — Claude API)
+        if not page_tuples:
+            logger.info("Tesseract 0 karakter — Vision OCR (Claude) deneniyor...")
             page_tuples = _extract_pages_vision_sync(pdf_path)
 
         if not page_tuples:
