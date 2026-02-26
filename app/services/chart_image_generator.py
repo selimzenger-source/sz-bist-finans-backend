@@ -841,8 +841,10 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
 
 # Ek renkler
 LIGHT_BLUE = (96, 165, 250)    # #60a5fa
-DARK_CARD_BG = (22, 22, 42)    # koyu kart ici
-CARD_BORDER = (50, 50, 75)     # kart kenarligi
+DARK_CARD_BG = (30, 30, 56)    # #1e1e38 — belirgin kart ici (BG'den ayrisir)
+CARD_BORDER = (65, 65, 105)    # #41416b — belirgin kart kenarligi
+CARD_SHADOW = (8, 8, 18)       # #080812 — drop shadow rengi
+CARD_HIGHLIGHT = (45, 45, 80)  # #2d2d50 — ust kenar ince parlama
 CYAN = (34, 211, 238)          # #22d3ee
 
 
@@ -866,11 +868,27 @@ def _durum_label(durum: str) -> tuple:
     return mapping.get(durum, ("—", GRAY))
 
 
-def _draw_rounded_rect(draw, xy, radius, fill, outline=None):
+def _draw_rounded_rect(draw, xy, radius, fill, outline=None, outline_width=1):
     """Koseleri yuvarlatilmis dikdortgen cizer."""
     x0, y0, x1, y1 = xy
     draw.rounded_rectangle([(x0, y0), (x1, y1)], radius=radius,
-                           fill=fill, outline=outline)
+                           fill=fill, outline=outline, width=outline_width)
+
+
+def _draw_card_premium(draw, xy, radius, fill, outline, shadow_color=None):
+    """Premium kart cizer — drop shadow + highlight + kalin border."""
+    x0, y0, x1, y1 = xy
+    # 1) Drop shadow (4px offset, biraz buyuk)
+    if shadow_color:
+        _draw_rounded_rect(draw, (x0 + 4, y0 + 4, x1 + 4, y1 + 4),
+                           radius=radius, fill=shadow_color)
+    # 2) Ana kart gövdesi
+    _draw_rounded_rect(draw, (x0, y0, x1, y1),
+                       radius=radius, fill=fill, outline=outline,
+                       outline_width=2)
+    # 3) Üst iç kenar highlight (1px ince parlak çizgi)
+    draw.rounded_rectangle([(x0 + 2, y0 + 2), (x1 - 2, y0 + 6)],
+                           radius=4, fill=CARD_HIGHLIGHT)
 
 
 def generate_opening_summary_image(stocks: list) -> Optional[str]:
@@ -926,19 +944,18 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         # ── Boyutlar ─────────────────────────────
         width = 1200
         padding = 30
-        card_gap = 16           # kartlar arasi bosluk
+        card_gap = 22           # kartlar arasi bosluk (daha genis — ayrisik kartlar)
         card_w = (width - 2 * padding - (cols - 1) * card_gap) // cols
-        card_h = 340            # her kart yuksekligi — genis alan
-        card_radius = 12
+        card_h = 350            # her kart yuksekligi
+        card_radius = 16        # daha yumusak koseler
 
         # Banner
         banner_h = 0
         banner_img = None
         _img_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
-        banner_path = os.path.join(_img_dir, "acilis_bilgileri_banner.jpg")
+        banner_path = os.path.join(_img_dir, "acilis_raporu_banner.png")
         if not os.path.exists(banner_path):
-            # Fallback .png
-            banner_path = os.path.join(_img_dir, "acilis_bilgileri_banner.png")
+            banner_path = os.path.join(_img_dir, "acilis_bilgileri_banner.jpg")
 
         if os.path.exists(banner_path):
             try:
@@ -988,14 +1005,19 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
 
         # ── Header ────────────────────────────────
         hdr_y = banner_h
-        draw.rectangle([(0, hdr_y), (width, hdr_y + header_h)], fill=(18, 18, 36, 240))
+        draw.rectangle([(0, hdr_y), (width, hdr_y + header_h)], fill=(18, 18, 36))
 
         title_text = "YENİ HALKA ARZLAR — AÇILIŞ BİLGİLERİ"
         draw.text((padding, hdr_y + 10), title_text, fill=GOLD, font=font_header)
 
-        date_text = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
+        date_text = datetime.now(_TR_TZ).strftime("%d.%m.%Y")
         info_text = f"{date_text}  |  {num_stocks} Hisse  |  İlk 10 İşlem Günü"
         draw.text((padding, hdr_y + 44), info_text, fill=GRAY, font=font_header_sm)
+
+        # Header alt cizgi — ince gold
+        draw.line([(padding, hdr_y + header_h - 1),
+                   (width - padding, hdr_y + header_h - 1)],
+                  fill=GOLD, width=2)
 
         # ── Grid Kartlari ─────────────────────────
         grid_start_y = banner_h + header_h + padding
@@ -1018,15 +1040,15 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             alis_lot = stock.get("alis_lot")
             satis_lot = stock.get("satis_lot")
 
-            # ─ Kart arka plan ─
-            _draw_rounded_rect(draw, (cx, cy, cx + card_w, cy + card_h),
+            # ─ Premium kart (shadow + highlight + border) ─
+            _draw_card_premium(draw, (cx, cy, cx + card_w, cy + card_h),
                                radius=card_radius, fill=DARK_CARD_BG,
-                               outline=CARD_BORDER)
+                               outline=CARD_BORDER, shadow_color=CARD_SHADOW)
 
-            # ─ Ust kenar renk cizgisi (durum'a gore) ─
-            draw.rectangle(
-                [(cx + 1, cy + 1), (cx + card_w - 1, cy + 5)],
-                fill=durum_color,
+            # ─ Ust kenar renk cizgisi (durum'a gore — daha kalin) ─
+            draw.rounded_rectangle(
+                [(cx + 2, cy + 2), (cx + card_w - 2, cy + 7)],
+                radius=6, fill=durum_color,
             )
 
             mid_x = cx + card_w // 2
@@ -1093,17 +1115,20 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         draw.line([(padding, footer_y), (width - padding, footer_y)],
                   fill=DIVIDER, width=2)
 
-        # Logo (sol — 30x30 boyutunda)
-        logo_path = os.path.join(_img_dir, "logo.jpg")
+        # Logo (sol — 34x34 boyutunda)
+        logo_path = os.path.join(_img_dir, "logo.png")
+        if not os.path.exists(logo_path):
+            logo_path = os.path.join(_img_dir, "logo.jpg")  # fallback
         logo_x = padding
         try:
             if os.path.exists(logo_path):
                 logo_raw = Image.open(logo_path).convert("RGBA")
-                logo_size = 30
+                logo_size = 34
                 logo_resized = logo_raw.resize((logo_size, logo_size), Image.LANCZOS)
                 logo_y_pos = footer_y + (footer_h - logo_size) // 2
-                img.paste(logo_resized.convert("RGB"), (logo_x, logo_y_pos))
-                logo_x += logo_size + 8  # logo'dan sonra bosluk
+                # RGBA paste (seffaflik destegi)
+                img.paste(logo_resized, (logo_x, logo_y_pos), logo_resized)
+                logo_x += logo_size + 8
         except Exception:
             pass
 
@@ -1217,8 +1242,8 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         y = top_stripe_h
         draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG_C)
 
-        # Logo — spk_halka_arz_icon.png (candlestick megaphone), fallback logo.jpg
-        logo_path = os.path.join(_img_dir, "spk_halka_arz_icon.png")
+        # Logo — logo.png (megafon+candlestick), fallback logo.jpg
+        logo_path = os.path.join(_img_dir, "logo.png")
         if not os.path.exists(logo_path):
             logo_path = os.path.join(_img_dir, "logo.jpg")
         logo_x = padding
