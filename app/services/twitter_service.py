@@ -2096,8 +2096,16 @@ Yazında şu bilgileri MUTLAKA içer (bildiklerini):
 - "halka arz onay BAŞVURUSU" ifadesini kullan (bu ONAY değil, başvuru aşaması)
 - Yatırım tavsiyesi VERME, sadece bilgilendir
 - Bilmediğin bilgiyi UYDURMA — emin olmadığın detayı yazma
-- Cümleleri TAM yaz, yarım bırakma
 - Emoji başlıklarda kullan, metin içinde fazla kullanma
+
+═══ ★ YARIM CÜMLE YASAĞI (ÇOK ÖNEMLİ) ★ ═══
+
+- Her cümle MUTLAKA nokta (.) ile bitmeli — yarım, kopuk, anlamsız cümle ASLA kabul edilmez
+- Kelime sayısına ulaşmak için cümleyi uzatma, sığmıyorsa KISALT
+- Son cümle de TAM olmalı — "... ve bu şirketin" gibi yarım biten metin YASAK
+- Saçma sapan, anlamsız veya tekrarlayan cümle yazma
+- Akıcı, düzgün, gazete haberi kalitesinde Türkçe kullan
+- Kontrol: Metni okuyunca her cümle kendi başına anlamlı olmalı
 
 ═══ ÖRNEK ÇIKTI ═══
 
