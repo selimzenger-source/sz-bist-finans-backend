@@ -704,14 +704,14 @@ class NotificationService:
     ) -> int:
         """Ucretli abonelere KAP haber bildirimi gonder.
 
-        2 kaynak:
-        1. ana_yildiz KAP haber aboneleri (UserSubscription) — notify_kap_all kontrollu
-        2. 3 aylik / yillik hisse bildirim paketi sahipleri (StockNotificationSubscription)
-           — notify_kap_all filtresi YOK (hisse paketi aldiysa KAP haberi alir)
+        SADECE ana_yildiz KAP haber aboneleri (UserSubscription) — notify_kap_all kontrollu.
+        Halka Arz bundle (StockNotificationSubscription) sahipleri KAP haberi ALMAZ,
+        onlar sadece halka arz bildirimlerini (tavan, taban, acilis/kapanis, dusus) alir.
+        BIST 50 kapsamindaki haberler ise _send_bist50_free ile ucretsiz gonderilir.
         """
-        from app.models.user import User, UserSubscription, StockNotificationSubscription
+        from app.models.user import User, UserSubscription
 
-        # 1) ana_yildiz KAP haber aboneleri — notify_kap_all == True zorunlu
+        # ana_yildiz KAP haber aboneleri — notify_kap_all == True zorunlu
         kap_sub_result = await self.db.execute(
             select(User)
             .join(UserSubscription, UserSubscription.user_id == User.id)
@@ -731,40 +731,9 @@ class NotificationService:
         )
         kap_users = list(kap_sub_result.scalars().all())
 
-        # 2) 3 aylik / yillik hisse bildirim paketi sahipleri
-        # NOT: notify_kap_all filtresi yok — hisse paketi alan kisi KAP haberini alir
-        stock_bundle_result = await self.db.execute(
-            select(User)
-            .join(
-                StockNotificationSubscription,
-                StockNotificationSubscription.user_id == User.id,
-            )
-            .where(
-                and_(
-                    StockNotificationSubscription.is_active == True,
-                    StockNotificationSubscription.is_annual_bundle == True,
-                    User.notifications_enabled == True,
-                    User.deleted == False,
-                    or_(
-                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
-                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
-                    ),
-                )
-            )
-        )
-        stock_users = list(stock_bundle_result.scalars().all())
-
-        # Dedup — ayni kullaniciya 2 kere gonderme
-        seen_ids: set[int] = set()
-        all_users: list = []
-        for u in kap_users + stock_users:
-            if u.id not in seen_ids:
-                seen_ids.add(u.id)
-                all_users.append(u)
-
         sent_count = 0
         failed_count = 0
-        for user in all_users:
+        for user in kap_users:
             try:
                 success = await self._send_to_user(
                     user=user,
@@ -782,8 +751,8 @@ class NotificationService:
                 logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap=%d, stock_bundle=%d)",
-            ticker, sent_count, len(kap_users), len(stock_users),
+            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap_abone=%d)",
+            ticker, sent_count, len(kap_users),
         )
 
         # Telegram admin raporu
@@ -794,7 +763,7 @@ class NotificationService:
                 title=title,
                 sent_count=sent_count,
                 failed_count=failed_count,
-                detail=f"KAP abone: {len(kap_users)}, Bundle: {len(stock_users)}",
+                detail=f"KAP abone: {len(kap_users)}",
             )
         except Exception:
             pass
@@ -808,30 +777,24 @@ class NotificationService:
         data: dict,
         ticker: str,
     ) -> int:
-        """BIST 50 ucretsiz bildirim — ucretli aboneligi OLMAYAN kullanicilara.
+        """BIST 50 ucretsiz bildirim — ana_yildiz aboneligi OLMAYAN kullanicilara.
 
         Dedup: _send_paid_kap_news ile zaten bildirim alan kullanicilar haric tutulur:
-        - UserSubscription aktif ana_yildiz olanlar
-        - StockNotificationSubscription aktif bundle olanlar
-        """
-        from app.models.user import User, UserSubscription, StockNotificationSubscription
+        - UserSubscription aktif ana_yildiz olanlar (zaten TUM haberleri aliyor)
 
-        # Ucretli abonelerin user_id'leri (haric tutulacak)
+        NOT: Halka Arz bundle sahipleri (StockNotificationSubscription) HARIC TUTULMAZ.
+        Onlar KAP haber abonesi degil, sadece halka arz bildirimi aliyor.
+        BIST 50 haberleri ucretsiz — herkes gibi onlar da alabilir.
+        """
+        from app.models.user import User, UserSubscription
+
+        # Ucretli KAP abonelerin user_id'leri (haric tutulacak — zaten tum haberleri aliyor)
         paid_kap_ids = (
             select(UserSubscription.user_id)
             .where(
                 and_(
                     UserSubscription.is_active == True,
                     UserSubscription.package == "ana_yildiz",
-                )
-            )
-        )
-        paid_bundle_ids = (
-            select(StockNotificationSubscription.user_id)
-            .where(
-                and_(
-                    StockNotificationSubscription.is_active == True,
-                    StockNotificationSubscription.is_annual_bundle == True,
                 )
             )
         )
@@ -847,7 +810,6 @@ class NotificationService:
                         and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
                     ),
                     User.id.notin_(paid_kap_ids),
-                    User.id.notin_(paid_bundle_ids),
                 )
             )
         )
