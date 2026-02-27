@@ -477,8 +477,8 @@ async def get_prospectus_analysis(ipo_id: int, db: AsyncSession = Depends(get_db
     except Exception:
         analysis_data = {}
 
-    # Görsel URL — statik sunucudan serve edilir (prospectus_image.py: prospectus_{ipo_id}.png)
-    img_url = f"/static/prospectus/prospectus_{ipo_id}.png"
+    # Görsel URL — DB'den base64 olarak sunuluyor (Render disk silinince kaybolmasın)
+    img_url = f"/api/v1/ipos/{ipo_id}/prospectus-image" if ipo.prospectus_image_base64 else f"/static/prospectus/prospectus_{ipo_id}.png"
 
     return {
         "ipo_id": ipo_id,
@@ -490,6 +490,35 @@ async def get_prospectus_analysis(ipo_id: int, db: AsyncSession = Depends(get_db
         "analyzed_at": ipo.prospectus_analyzed_at.isoformat() if ipo.prospectus_analyzed_at else None,
         "prospectus_url": ipo.prospectus_url,
     }
+
+
+@app.get("/api/v1/ipos/{ipo_id}/prospectus-image")
+async def get_prospectus_image(ipo_id: int, db: AsyncSession = Depends(get_db)):
+    """İzahname analiz görselini DB'den base64 decode edip PNG olarak sunar.
+
+    Render ephemeral disk silinince dosyalar kayboluyordu.
+    Artık görsel DB'de base64 olarak kalıcı saklanıyor.
+    """
+    import base64
+    from fastapi.responses import Response
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    if not ipo.prospectus_image_base64:
+        raise HTTPException(status_code=404, detail="İzahname görseli henüz hazır değil")
+
+    img_bytes = base64.b64decode(ipo.prospectus_image_base64)
+    return Response(
+        content=img_bytes,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "public, max-age=86400",  # 24 saat cache
+            "Content-Disposition": f"inline; filename=prospectus_{ipo_id}.png",
+        },
+    )
 
 
 # -------------------------------------------------------

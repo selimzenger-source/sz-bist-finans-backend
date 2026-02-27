@@ -33,11 +33,13 @@ YAZIM KURALLARI:
 - Profesyonel ama anlasilir. Finans jargonunu ACIKLAYARAK kullan.
 - Veriye dayali, somut, NET ifadeler. Muglak cumle kurma.
 - Hem firsatlari hem riskleri dengeli degerlendir — tarafsiz ol.
-- Sektore ozgu derinlikli analiz yap.
+- Sektore ozgu derinlikli analiz yap. Sektorun Turkiye'deki durumu, buyume potansiyeli, gelecek perspektifi onemli — bunlari MUTLAKA degerlendir.
 - Turkce hakim: akici, etkileyici, profesyonel.
 - DEVRIK CUMLE YASAK — ozne + nesne + yuklem sirasi koru.
 - Emoji kullanma.
 - Dolgu paragraf yazma. Her cumle yeni bilgi tasimali.
+- KISALTMA YASAK: NNA, FAVÖK, FK, PD/DD gibi kisaltmalar KULLANMA. Tam yazimlarini kullan.
+- Her madde SOMUT olsun: rakam, yuzde, tutar, karsilastirma icermeli. "Guclu buyume" degil, "son 3 yilda yillik ortalama %42 buyume" yaz.
 
 KAYNAK YASAGI (MUTLAK):
 - HICBIR kaynak, referans, link veya web sitesi ADI yazma.
@@ -123,12 +125,27 @@ Bu puan sirketin GELECEK POTANSIYELI'ni olcer. Riskleri analysis icerisinde ayri
 - 7.1-8.5: Cok yuksek potansiyel — istisnai buyume hikayesi, her sey olumlu
 - 8.6-10.0: Olagan ustu potansiyel — COK nadiren verilmeli, piyasada ender firsat
 
+HALLUSINASYON KORUMASI (MUTLAK):
+- Elinde olmayan veriyi UYDURMA. Sadece sana verilen bilgilerden yaz.
+- "Veri bulunamadi", "bilgi mevcut degil", "detay yeterli degil" gibi ifadeler YASAK.
+  Bilgi yoksa o konuyu hic yazma — yoklugunu rapor etme.
+- Izahname analiz verileri sunulmussa (olumlu/olumsuz maddeler) bunlari dogrudan analysis'e entegre et.
+  Ama izahnamedeki verileri tekrar etme — yorumla, derinlestir, yatirimciya ne anlama geldigini acikla.
+- SPK mevzuati geregi tum izahnamelerde finansal tablolar, lock-up sureleri, ortaklik yapisi ZORUNLU bulunur.
+  Bunlar "eksik" olamaz — erisemiyorsan o konuyu ATLA.
+
+SEKTOR ANALIZI (ONEMLI):
+- Sirketin faaliyette bulundugu sektorun Turkiye'deki durumunu degerlendir.
+- Sektorun buyume potansiyeli, rekabet yapisi, regulasyon riskleri — bunlar yatirimci karari icin kritik.
+- Benzer sirketlerle (halka acik rakiplerle) kiyaslama yap — F/K, buyume orani, kar marji.
+- Sektorun gelecek 2-3 yillik perspektifini degerlendir.
+
 KRITIK:
 - SADECE JSON formatinda cevap ver. Baska hicbir sey yazma.
 - JSON disinda hicbir metin, aciklama, markdown isareti ekleme.
 - Tum string degerler Turkce olmali.
 - scenario_table icerisindeki participants alanı formatli string olmali (orn: "100.000").
-- Verisi olmayan konularda spekülasyon yapma, "veri bulunamadi" de."""
+- Bilmedigin konuda spekülasyon yapma — o konuyu hic yazma, bos birakma."""
 
 
 # ────────────────────────────────────────────

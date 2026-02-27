@@ -147,7 +147,7 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
 }
 
 ═══ MADDE KURALLARI ═══
-• Hedef: olumlu 5-7, olumsuz 5-7. PDF yetersizse 3-4 de olur — uydurma YASAK.
+• Hedef: olumlu 7-10, olumsuz 7-10. Olabildiğince fazla somut madde yaz. PDF yetersizse 4-5 de olur — uydurma YASAK.
 • Her madde FARKLI konu. Aynı konuyu tekrarlama — tekrar edeceksen yazma.
 • En az 3 farklı kategori (Finansal/Risk/Fon/Ortaklık/Büyüme/Hukuki).
 • Max 140 karakter. Kısa, yoğun, bilgi dolu. Sade Türkçe, net. KISALTMA YOK.
@@ -787,7 +787,7 @@ async def analyze_with_ai(
                         {"role": "user",   "content": user_message},
                     ],
                     "temperature": 0.15,  # Düşük ama yaratıcı analiz için biraz esneklik
-                    "max_tokens": 2500,  # Daha detaylı analiz
+                    "max_tokens": 3500,  # 7-10 madde hedefi için daha geniş alan
                 },
             )
 
@@ -830,8 +830,8 @@ async def analyze_with_ai(
                            pos_count, neg_count, company_name)
 
         # Karakter limitini uygula (130 karakter/madde)
-        result["positives"] = [p[:140] for p in result["positives"][:8]]
-        result["negatives"] = [n[:140] for n in result["negatives"][:8]]
+        result["positives"] = [p[:140] for p in result["positives"][:10]]
+        result["negatives"] = [n[:140] for n in result["negatives"][:10]]
 
         logger.info(
             "İzahname AI analizi tamamlandı: %s — %d olumlu, %d olumsuz, risk=%s",

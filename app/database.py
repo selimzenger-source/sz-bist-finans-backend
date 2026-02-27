@@ -421,3 +421,44 @@ async def init_db():
             )
         except Exception:
             pass
+
+        # v36 migration: ipos.prospectus_image_base64 (Render ephemeral disk sorunu — görsel DB'de kalıcı)
+        try:
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_image_base64 TEXT")
+            )
+        except Exception:
+            pass
+
+        # v37 migration: Eski hatalı izahname + AI rapor verilerini temizle (hallucination fix sonrası yeniden üretilecek)
+        # SADECE izahname analizi + AI rapor alanları — başka hiçbir şeye dokunmaz
+        try:
+            check = await conn.execute(
+                text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_name = 'ipos' AND column_name = 'prospectus_v37_reset'
+                """)
+            )
+            if not check.fetchone():
+                # 1. İzahname analizlerini temizle
+                await conn.execute(text("""
+                    UPDATE ipos SET
+                        prospectus_analysis = NULL,
+                        prospectus_analyzed_at = NULL,
+                        prospectus_tweeted = FALSE,
+                        prospectus_image_base64 = NULL
+                    WHERE prospectus_analysis IS NOT NULL
+                """))
+                # 2. AI raporları temizle (prompt güncellendi — yeniden üretilecek)
+                await conn.execute(text("""
+                    UPDATE ipos SET
+                        ai_report = NULL,
+                        ai_report_generated_at = NULL
+                    WHERE ai_report IS NOT NULL
+                """))
+                await conn.execute(
+                    text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_v37_reset BOOLEAN DEFAULT TRUE")
+                )
+                logger.info("v37: Eski izahname analizleri + AI raporlar temizlendi — yeniden üretilecek")
+        except Exception:
+            pass
