@@ -10,7 +10,7 @@ from sqlalchemy import (
     String, Text, Integer, BigInteger, Boolean, Date, DateTime,
     Numeric, ForeignKey, Index
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, deferred
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -149,9 +149,9 @@ class IPO(Base):
     prospectus_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="İzahname analiz tweeti atildi mi"
     )
-    prospectus_image_base64: Mapped[str | None] = mapped_column(
+    prospectus_image_base64: Mapped[str | None] = deferred(mapped_column(
         Text, nullable=True, comment="İzahname analiz görseli (base64 PNG — Render disk silinince kaybolmasın)"
-    )
+    ))
 
     # --- Tweet Tracking ---
     intro_tweeted: Mapped[bool] = mapped_column(

@@ -501,7 +501,11 @@ async def generate_missing_ipo_reports():
     Bu fonksiyon catch-up gorevi olarak calisir: deployment sonrasi
     veya status gecisi sirasinda rapor uretilememis IPO'lar icin
     otomatik olarak AI degerlendirme raporu uretir.
+
+    SINIR: Döngü başına MAX 2 rapor — connection pool tükenmesin.
     """
+    MAX_PER_CYCLE = 2  # Döngü başına max rapor sayısı — sunucu aşırı yüklenmesin
+
     try:
         from sqlalchemy import select, and_
         from app.models.ipo import IPO
@@ -525,20 +529,26 @@ async def generate_missing_ipo_reports():
             if not ipos:
                 return
 
-            logger.info(f"AI rapor catch-up: {len(ipos)} IPO rapor bekliyor")
+            logger.info(f"AI rapor catch-up: {len(ipos)} IPO rapor bekliyor (max {MAX_PER_CYCLE}/döngü)")
 
+            generated = 0
             for ipo in ipos:
+                if generated >= MAX_PER_CYCLE:
+                    logger.info(f"AI rapor catch-up: döngü limiti ({MAX_PER_CYCLE}) doldu, kalan {len(ipos) - generated} sonraki döngüde")
+                    break
+
                 try:
                     success = await generate_and_save_ipo_report(ipo.id)
                     if success:
+                        generated += 1
                         logger.info(f"AI rapor uretildi (catch-up): {ipo.ticker or ipo.company_name}")
                     else:
                         logger.warning(f"AI rapor uretilemedi: {ipo.ticker or ipo.company_name}")
                 except Exception as e:
                     logger.error(f"AI rapor catch-up hatasi ({ipo.ticker}): {e}")
 
-                # Rate limit — ardisik istekler arasi 5 sn bekle
-                await asyncio.sleep(5)
+                # Rate limit — ardisik istekler arasi 10 sn bekle
+                await asyncio.sleep(10)
 
     except Exception as e:
         logger.error(f"AI rapor catch-up genel hata: {e}")
