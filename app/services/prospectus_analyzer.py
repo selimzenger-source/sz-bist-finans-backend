@@ -273,6 +273,7 @@ Yazdığın her madde için şu soruları sor:
 
 ═══ ÇIKTI FORMAT (geçerli JSON) ═══
 {
+  "company_brief": "Şirket hakkında 3-4 KISA cümle: ana faaliyet alanı, sektör, ne üretiyor/satıyor, öne çıkan özelliği. Yatırımcı şirketi tanısın. SADECE PDF'ten çıkan bilgiler. Bilmiyorsan bu alanı boş string yap. MAX 400 karakter. YARIM CÜMLE BIRAKMA.",
   "positives": ["somut olumlu — mutlaka rakam/yüzde/tutar içermeli, kısaltma YOK", ...],
   "negatives": ["somut olumsuz — mutlaka rakam/risk/tutar içermeli, kısaltma YOK", ...],
   "summary": "Düzgün Türkçe, 1-2 kısa cümle. Küçük yatırımcıya net mesaj. Kısaltma YOK. DEVRİK CÜMLE KURMA.",
@@ -303,6 +304,7 @@ _FEW_SHOT_EXAMPLES = """
 
 ÖRNEK 1 — Kimya Sektörü (karma yöntem: sermaye artırımı + ortak satışı):
 {
+  "company_brief": "Türkiye'nin önde gelen özel kimyasal üreticisi. 1998'den beri endüstriyel yapıştırıcı ve kaplama ürünleri üretiyor. İstanbul ve Kocaeli'deki 2 fabrikada 420 çalışanıyla Avrupa ve Orta Asya'da 28 ülkeye ihracat yapıyor.",
   "positives": [
     "2023 yılı satışları 892 milyon TL, faiz ve amortisman öncesi kâr marjı %18.4 — sektör ortalaması %11",
     "İhracat payı %34; Avrupa ve Orta Asya'da 28 ülkeye satış yapılıyor — coğrafi çeşitlilik var",
@@ -326,6 +328,7 @@ _FEW_SHOT_EXAMPLES = """
 
 ÖRNEK 2 — Teknoloji Sektörü (%100 sermaye artırımı, yüksek büyüme):
 {
+  "company_brief": "Kurumsal şirketlere bulut tabanlı insan kaynakları ve bordro yazılımı sunan yerli teknoloji şirketi. 2017'de kurulmuş, 85 yazılım mühendisiyle hizmet veriyor. Türkiye'deki 1.200'den fazla kurumsal müşteriye SaaS modeliyle satış yapıyor.",
   "positives": [
     "Son 3 yılda satışlar yıllık ortalama %65 büyümüş — 2021'de 48 milyon TL, 2023'te 131 milyon TL",
     "Halka arzın tamamı sermaye artırımından oluşuyor — ortak satışı yok, gelirin tamamı şirkete girecek",

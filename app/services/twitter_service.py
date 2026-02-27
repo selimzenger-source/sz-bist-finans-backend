@@ -1983,12 +1983,11 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
 def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
     """İzahname AI analizi tamamlandığında görsel + metin tweeti atar.
 
-    analysis: {"positives": [...], "negatives": [...], "summary": str,
-               "risk_level": str, "key_risk": str}
-    img_path: /static/prospectus/{ipo_id}.png (Pillow ile üretilmiş görsel)
+    Tweet formatı: Şirket tanıtımı (3-4 cümle) + hashtag'ler.
+    Olumlu/olumsuz detaylar resimde zaten gösteriliyor — tweet'te tekrarlanmaz.
 
-    Zaten tweeted ise (prospectus_tweeted=True) atlamaz — bu flag
-    caller tarafından kontrol edilmelidir (prospectus_analyzer.py).
+    analysis: {"company_brief": str, "positives": [...], "negatives": [...],
+               "summary": str, "risk_level": str, "key_risk": str}
     """
     try:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "İzahname Analizi"):
@@ -2001,52 +2000,50 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
 
         # Risk seviyesi emoji
         risk_level = analysis.get("risk_level", "ORTA").upper()
-        risk_emoji = {"DÜŞÜK": "🟢", "ORTA": "🟡", "YÜKSEK": "🔴"}.get(risk_level, "🟡")
+        risk_emoji = {
+            "DÜŞÜK": "🟢", "ORTA": "🟡",
+            "YÜKSEK": "🔴", "ÇOK YÜKSEK": "🔴",
+        }.get(risk_level, "🟡")
 
-        # Olumlu dipnotlar — en fazla 3 madde
-        positives = analysis.get("positives", [])
-        pos_lines = []
-        for p in positives[:3]:
-            short = p[:95] + "…" if len(p) > 95 else p
-            pos_lines.append(f"  • {short}")
-        pos_block = "\n".join(pos_lines) if pos_lines else "  • Belirgin pozitif dipnot bulunamadı"
-
-        # Olumsuz dipnotlar — en fazla 3 madde
-        negatives = analysis.get("negatives", [])
-        neg_lines = []
-        for n in negatives[:3]:
-            short = n[:95] + "…" if len(n) > 95 else n
-            neg_lines.append(f"  • {short}")
-        neg_block = "\n".join(neg_lines) if neg_lines else "  • Belirgin negatif dipnot bulunamadı"
-
-        # Özet cümle
-        summary = analysis.get("summary", "")
-        summary_short = summary[:180] + "…" if len(summary) > 180 else summary
+        # Şirket tanıtım metni — AI'dan gelen company_brief, yoksa summary kullan
+        company_brief = analysis.get("company_brief", "")
+        if not company_brief or len(company_brief) < 20:
+            company_brief = analysis.get("summary", "")
+        # Yarım cümle koruması — son cümle nokta ile bitmiyorsa kırp
+        if company_brief and not company_brief.rstrip().endswith((".","!","?")):
+            last_dot = company_brief.rfind(".")
+            if last_dot > 30:
+                company_brief = company_brief[:last_dot + 1]
 
         # Halka arz fiyatı (varsa)
-        price_text = f"  💰 {ipo.ipo_price} TL" if ipo.ipo_price else ""
+        price_line = f"💰 Halka arz fiyatı: {ipo.ipo_price} TL\n" if ipo.ipo_price else ""
 
-        def _build_text(sum_str):
-            header = f"📋 {ticker_hashtag} İzahname Analizi" if ticker_hashtag else f"📋 {clean_name} İzahname Analizi"
+        def _build_text(brief_str):
+            header = f"📋 {ticker_hashtag} #İzahname Analizi" if ticker_hashtag else f"📋 {clean_name} #İzahname Analizi"
             return (
-                f"{header}\n"
-                f"{'─' * 32}\n"
-                f"🏢 {clean_name}{price_text}\n\n"
-                f"✅ Olumlu Dipnotlar:\n{pos_block}\n\n"
-                f"❌ Olumsuz Dipnotlar:\n{neg_block}\n\n"
-                f"📝 {sum_str}\n\n"
+                f"{header}\n\n"
+                f"🏢 {clean_name}\n"
+                f"{price_line}"
+                f"{risk_emoji} Risk: {risk_level.title()}\n\n"
+                f"{brief_str}\n\n"
                 f"⚠️ Yatırım tavsiyesi değildir.\n"
-                f"📲 {_get_setting('APP_LINK')}\n"
-                f"#HalkaArz #İzahname {ticker_hashtag} #borsa #yatırım"
+                f"📲 {_get_setting('APP_LINK')}\n\n"
+                f"#HalkaArz {ticker_hashtag} #borsa #BIST #yatırım #hisse"
             )
 
-        text = _build_text(summary_short)
+        text = _build_text(company_brief)
 
-        # 3950 karakter limiti — gerekirse summary kırp
+        # 3950 karakter limiti — gerekirse brief kırp
         if len(text) > 3950:
-            max_sum = 3950 - (len(text) - len(summary_short)) - 10
-            summary_short = summary_short[:max(max_sum, 60)] + "…"
-            text = _build_text(summary_short)
+            max_brief = 3950 - (len(text) - len(company_brief)) - 10
+            company_brief = company_brief[:max(max_brief, 60)]
+            # Yarım cümle olmasın
+            last_dot = company_brief.rfind(".")
+            if last_dot > 30:
+                company_brief = company_brief[:last_dot + 1]
+            else:
+                company_brief = company_brief + "…"
+            text = _build_text(company_brief)
 
         # Görsel varsa medialı tweet, yoksa sadece metin
         import os
