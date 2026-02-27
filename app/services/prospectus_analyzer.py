@@ -125,14 +125,19 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
 ═══ İYİ MADDE ÖRNEKLERİ (bu kalitede yaz) ═══
 ✓ "Son 3 yılda satışlar her yıl ortalama %78 büyümüş — sektör ortalamasının 6 katı"
 ✓ "Toplam borcun %81'i kısa vadeli; 94 milyon TL borç, sadece 12 milyon TL nakit var"
-✓ "Halka arz gelirinin tamamı şirkete gidecek; ortak satışı yok — para büyümeye harcanacak"
+✓ "Halka arzın %67'si sermaye artırımı (şirkete), %33'ü ortak satışı (mevcut ortaklara) — fon dağılımına dikkat"
 ✓ "En büyük müşteri toplam satışların %47'sini oluşturuyor — tek müşteriye aşırı bağımlılık"
 ✓ "Ödeme kuruluşu lisansına sahip — bu lisansı kaybederse faaliyetleri durur"
 
 ═══ ANALİZ ADIMLARI (sırayla tara) ═══
 1. FİNANSAL: Satışlar, net kâr/zarar, kârlılık, borç yapısı, nakit durumu
 2. RİSK: Lisans/ruhsat, tek müşteri bağımlılığı, kur riski, davalar, ilişkili taraf
-3. FON KULLANIMI: Sermaye artırımı mı ortak çıkışı mı? Para nereye gidiyor (%)
+3. FON KULLANIMI VE HALKA ARZ YAPISI — ÇOK KRİTİK:
+   ★ MUTLAKA kontrol et: Halka arz sadece sermaye artırımı mı, yoksa ortak satışı da var mı?
+   ★ Sermaye artırımı = para şirkete girer. Ortak satışı = para mevcut ortakların cebine gider.
+   ★ Eğer hem sermaye artırımı hem ortak satışı varsa İKİSİNİ DE ayrı ayrı yaz (tutar/nominal).
+   ★ "Halka arz gelirinin tamamı şirkete gidiyor" ANCAK gerçekten ortak satışı YOKSA yazılabilir.
+   ★ Emin değilsen "tamamı şirkete gidiyor" YAZMA — bu çok kritik bir hata olur.
 4. ORTAKLIK: Halka arz sonrası pay oranları, hisse satış yasağı süreleri, yönetim çıkışı var mı
 5. BÜYÜME: Yıllık büyüme, pazar payı, kapasite artışı, araştırma-geliştirme, ihracat
 6. HUKUKİ: Devam eden davalar (tutar!), vergi ihtilafları, düzenleyici risk
@@ -166,7 +171,7 @@ _FEW_SHOT_EXAMPLES = """
     "2023 yılı satışları 892 milyon TL, faiz ve amortisman öncesi kâr marjı %18.4 — sektör ortalaması %11",
     "İhracat payı %34; Avrupa ve Orta Asya'da 28 ülkeye satış yapılıyor — coğrafi çeşitlilik var",
     "Halka arz gelirinin %45'i yeni üretim hattına, %30'u araştırma-geliştirmeye ayrılacak",
-    "Ortak satışı yok, halka arz gelirinin tamamı şirkete gidiyor — para büyümeye harcanacak",
+    "Halka arz gelirinin 84 milyon TL'si sermaye artırımından, 41 milyon TL'si ise ortak satışından oluşuyor",
     "5 patent ve 12 faydalı model tescili var — rakiplerin taklit etmesi zor"
   ],
   "negatives": [
@@ -200,7 +205,7 @@ Net Kâr Marjı: Sektöre göre değişir ama negatif = zarar, <%5 zayıf
 Satış Büyümesi (Yıllık Bileşik): >%20 güçlü, %10-20 normal, <%10 zayıf
 Tek Müşteri Bağımlılığı: >%30 dikkat, >%50 ciddi risk
 İlişkili Taraf İşlemleri: Cironun >%20'si ise şeffaflık riski
-Ortak Satışı: %100 şirkete → çok iyi, karışık → fon kullanımına bak
+Ortak Satışı: ★ KRİTİK — %100 sermaye artırımı → iyi, ortak satışı varsa MUTLAKA belirt (tutar + oran). "Tamamı şirkete" ANCAK ortak satışı yoksa yazılabilir
 Hisse Satış Yasağı (Lock-up): 180 gün standart, daha kısa → ortak güvensizliği
 """
 
@@ -647,10 +652,17 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             if in_finance_section:
                 finance_section_text.append(f"[S.{i+1}] {text}")
 
-            # Fon kullanımı bölümü
-            if any(kw in text_lower for kw in ["fon kullanım", "halka arz geliri", "sermaye artırımı"]):
+            # Fon kullanımı + Halka arz yapısı bölümü
+            if any(kw in text_lower for kw in [
+                "fon kullanım", "halka arz geliri", "sermaye artırımı",
+                "ortak satışı", "pay satışı", "mevcut ortakların",
+                "ortak çıkışı", "secondary offering", "halka arz yapısı",
+                "ihraç edilecek pay", "nominal değerli pay",
+                "satışa sunulacak", "halka arz şekli",
+                "arz edilen pay", "arz büyüklüğü",
+            ]):
                 in_fund_section = True
-            if in_fund_section and len(fund_usage_text) > 5:
+            if in_fund_section and len(fund_usage_text) > 12:
                 in_fund_section = False
             if in_fund_section:
                 fund_usage_text.append(f"[S.{i+1}] {text}")
