@@ -56,6 +56,20 @@ async def get_db() -> AsyncSession:
 async def init_db():
     """Tablo olusturma + migration (yeni kolon ekleme)."""
     async with engine.begin() as conn:
+        # Zombie bağlantıları öldür — önceki deploy'dan kalan idle transaction'lar
+        # ipos tablosunu kilitleyebiliyor
+        try:
+            await conn.execute(text("""
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND state = 'idle in transaction'
+            """))
+            logger.info("Zombie bağlantılar temizlendi")
+        except Exception:
+            pass  # SQLite'da veya yetki yoksa sessizce atla
+
         await conn.run_sync(Base.metadata.create_all)
 
         # v2 migration: durum + pct_change kolonlari
