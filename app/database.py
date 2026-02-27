@@ -423,15 +423,19 @@ async def init_db():
             pass
 
         # v36 migration: ipos.prospectus_image_base64 (Render ephemeral disk sorunu — görsel DB'de kalıcı)
+        # lock_timeout ile koruma — eski instance bağlıyken hang etmesin
         try:
+            await conn.execute(text("SET lock_timeout = '5s'"))
             await conn.execute(
                 text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_image_base64 TEXT")
             )
+            await conn.execute(text("SET lock_timeout = '0'"))
         except Exception:
-            pass
+            logger.warning("v36 migration atlandı (lock timeout) — sonraki restart'ta denenecek")
 
-        # v37 migration: Eski hatalı izahname + AI rapor verilerini temizle (hallucination fix sonrası yeniden üretilecek)
-        # SADECE izahname analizi + AI rapor alanları — başka hiçbir şeye dokunmaz
+        # v37 migration: Eski hatalı izahname analizlerini temizle
+        # ÖNEMLİ: AI raporları TEMİZLENMEDİ — scheduler hepsini aynı anda üretmeye
+        # çalışınca connection pool tükeniyor. AI raporlar admin panelden tek tek yenilenecek.
         try:
             check = await conn.execute(
                 text("""
@@ -440,25 +444,19 @@ async def init_db():
                 """)
             )
             if not check.fetchone():
-                # 1. İzahname analizlerini temizle
+                # Sadece izahname analizlerini temizle (ai_report'a DOKUNMA!)
                 await conn.execute(text("""
                     UPDATE ipos SET
                         prospectus_analysis = NULL,
                         prospectus_analyzed_at = NULL,
-                        prospectus_tweeted = FALSE,
-                        prospectus_image_base64 = NULL
+                        prospectus_tweeted = FALSE
                     WHERE prospectus_analysis IS NOT NULL
                 """))
-                # 2. AI raporları temizle (prompt güncellendi — yeniden üretilecek)
-                await conn.execute(text("""
-                    UPDATE ipos SET
-                        ai_report = NULL,
-                        ai_report_generated_at = NULL
-                    WHERE ai_report IS NOT NULL
-                """))
+                await conn.execute(text("SET lock_timeout = '5s'"))
                 await conn.execute(
                     text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_v37_reset BOOLEAN DEFAULT TRUE")
                 )
-                logger.info("v37: Eski izahname analizleri + AI raporlar temizlendi — yeniden üretilecek")
-        except Exception:
-            pass
+                await conn.execute(text("SET lock_timeout = '0'"))
+                logger.info("v37: Eski izahname analizleri temizlendi")
+        except Exception as e:
+            logger.warning("v37 migration hatası: %s", e)
