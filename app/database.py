@@ -427,30 +427,5 @@ async def init_db():
 
         # v36 migration: KALDIRILDI — prospectus_image_base64 ORM'den çıkarıldı
 
-        # v37 migration: Eski hatalı izahname analizlerini temizle
-        # ÖNEMLİ: AI raporları TEMİZLENMEDİ — scheduler hepsini aynı anda üretmeye
-        # çalışınca connection pool tükeniyor. AI raporlar admin panelden tek tek yenilenecek.
-        try:
-            check = await conn.execute(
-                text("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_name = 'ipos' AND column_name = 'prospectus_v37_reset'
-                """)
-            )
-            if not check.fetchone():
-                # Sadece izahname analizlerini temizle (ai_report'a DOKUNMA!)
-                await conn.execute(text("""
-                    UPDATE ipos SET
-                        prospectus_analysis = NULL,
-                        prospectus_analyzed_at = NULL,
-                        prospectus_tweeted = FALSE
-                    WHERE prospectus_analysis IS NOT NULL
-                """))
-                await conn.execute(text("SET lock_timeout = '5s'"))
-                await conn.execute(
-                    text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_v37_reset BOOLEAN DEFAULT TRUE")
-                )
-                await conn.execute(text("SET lock_timeout = '0'"))
-                logger.info("v37: Eski izahname analizleri temizlendi")
-        except Exception as e:
-            logger.warning("v37 migration hatası: %s", e)
+        # v37 migration: DEVRE DIŞI — izahname analizleri admin panelden temizlenecek
+        # Üretim ortamında sorun çıkardı, güvenli şekilde elle yapılacak.

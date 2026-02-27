@@ -3218,12 +3218,9 @@ def _setup_scheduler_impl():
     import asyncio
     asyncio.get_event_loop().create_task(_restore_boost_on_startup())
 
-    # Startup: Eksik AI raporlarini hemen uret (60 sn sonra — DB hazir olsun)
-    async def _delayed_ai_catchup():
-        await asyncio.sleep(60)
-        await generate_missing_ipo_reports()
-
-    asyncio.get_event_loop().create_task(_delayed_ai_catchup())
+    # Startup AI rapor üretimi devre dışı — connection pool tüketimini önle
+    # Eksik raporlar günlük 10:00 TR cron ile üretilecek (MAX_PER_CYCLE=2)
+    # asyncio.get_event_loop().create_task(_delayed_ai_catchup())
 
 
 def shutdown_scheduler():
