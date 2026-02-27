@@ -63,6 +63,15 @@ _FINANCE_KEYWORDS = [
     "kısa vadeli", "uzun vadeli",
     "faaliyet kârı", "faaliyet geliri",
     "satış gelirleri", "net satışlar",
+    # v2: Araştırma sonucu eklenen eksik keyword'ler
+    "bağımsız denetim", "denetim raporu", "denetçi görüşü",
+    "kar dağıtım", "temettü", "kâr payı",
+    "değerleme", "fiyat kazanç", "piyasa değeri",
+    "ilişkili taraf", "related party",
+    "faiz gideri", "finansman gideri",
+    "stok devir", "alacak devir", "ticari alacak",
+    "amortisman", "yatırım harcaması", "capex",
+    "serbest nakit akışı", "free cash flow",
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -129,18 +138,58 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
 ✓ "En büyük müşteri toplam satışların %47'sini oluşturuyor — tek müşteriye aşırı bağımlılık"
 ✓ "Ödeme kuruluşu lisansına sahip — bu lisansı kaybederse faaliyetleri durur"
 
-═══ ANALİZ ADIMLARI (sırayla tara) ═══
-1. FİNANSAL: Satışlar, net kâr/zarar, kârlılık, borç yapısı, nakit durumu
-2. RİSK: Lisans/ruhsat, tek müşteri bağımlılığı, kur riski, davalar, ilişkili taraf
-3. FON KULLANIMI VE HALKA ARZ YAPISI — ÇOK KRİTİK:
+═══ ANALİZ ADIMLARI (sırayla ve adım adım tara — hiçbirini ATLAMA) ═══
+
+1. FİNANSAL SAĞLIK (en az 3 madde):
+   • Satışlar, net kâr/zarar, kârlılık trendi (son 3 yıl karşılaştırma)
+   • Borç yapısı: toplam borç, kısa/uzun vadeli dağılımı, borç/özsermaye oranı
+   • Nakit durumu: eldeki nakit, serbest nakit akışı, faiz karşılama oranı
+   • Kısa vadeli borçları karşılama oranı (cari oran): 1'in altıysa riskli
+   • Faiz ve amortisman öncesi kâr marjı: sektör ortalamasıyla karşılaştır
+
+2. HALKA ARZ YAPISI VE FON KULLANIMI — ★ EN KRİTİK ★:
    ★ MUTLAKA kontrol et: Halka arz sadece sermaye artırımı mı, yoksa ortak satışı da var mı?
    ★ Sermaye artırımı = para şirkete girer. Ortak satışı = para mevcut ortakların cebine gider.
-   ★ Eğer hem sermaye artırımı hem ortak satışı varsa İKİSİNİ DE ayrı ayrı yaz (tutar/nominal).
+   ★ "karma yöntem" varsa İKİSİNİ DE ayrı ayrı yaz (tutar + nominal + yüzde).
+   ★ "satan pay sahipleri" bölümünü kontrol et — kim ne kadar satıyor?
    ★ "Halka arz gelirinin tamamı şirkete gidiyor" ANCAK gerçekten ortak satışı YOKSA yazılabilir.
-   ★ Emin değilsen "tamamı şirkete gidiyor" YAZMA — bu çok kritik bir hata olur.
-4. ORTAKLIK: Halka arz sonrası pay oranları, hisse satış yasağı süreleri, yönetim çıkışı var mı
-5. BÜYÜME: Yıllık büyüme, pazar payı, kapasite artışı, araştırma-geliştirme, ihracat
-6. HUKUKİ: Devam eden davalar (tutar!), vergi ihtilafları, düzenleyici risk
+   ★ Emin değilsen "tamamı şirkete" YAZMA — bu çok kritik bir hata olur.
+   ★ Fon kullanım yerleri: ne kadar büyümeye, ne kadar borç ödemeye, ne kadar işletme sermayesine?
+   ★ Eğer gelirin büyük kısmı borç ödemeye gidiyorsa, bu olumsuz bir işaret.
+
+3. DEĞERLEME (varsa):
+   • Halka arz fiyatı × toplam pay sayısı = piyasa değeri
+   • Fiyat/Kazanç oranı: sektör ortalamasıyla karşılaştır (yüksekse pahalı)
+   • Piyasa Değeri / Defter Değeri: 1'in altıysa ucuz, çok yüksekse dikkat
+
+4. RİSK FAKTÖRLERİ (en az 2 madde):
+   • Lisans/ruhsat bağımlılığı, tek müşteri/tedarikçi yoğunlaşması
+   • Kur riski, faiz riski, ham madde fiyat riski
+   • Devam eden davalar — MUTLAKA tutar belirt
+   • İlişkili taraf işlemleri — ciro içindeki payı
+   • Denetçi görüşü: şartlı/olumsuz ise çok kritik
+
+5. ORTAKLIK VE YÖNETİM:
+   • Halka arz sonrası ortaklık oranları
+   • Hisse satış yasağı (lock-up) süreleri — 180 günden kısaysa olumsuz
+   • İmtiyazlı pay var mı? Oy hakkı eşit mi?
+   • Kar dağıtım politikası — yatırımcıya temettü dağıtılacak mı?
+
+6. BÜYÜME POTANSİYELİ:
+   • Yıllık satış büyümesi, pazar payı, kapasite artışı
+   • İhracat oranı, coğrafi çeşitlilik
+   • Araştırma-geliştirme yatırımları, patent/lisans
+
+7. HUKUKİ VE DÜZENLEYİCİ:
+   • Devam eden davalar (tutar!), vergi ihtilafları
+   • Düzenleyici risk, sektörel kısıtlamalar
+
+═══ KENDİNİ KONTROL ET (her madde için) ═══
+Yazdığın her madde için şu soruları sor:
+1. Bu bilgi gerçekten PDF'te var mı? → Yoksa SİL.
+2. Somut rakam/yüzde/tutar içeriyor mu? → İçermiyorsa eklemeye çalış veya SİL.
+3. Bu bilgi sadece BU şirkete mi özel, yoksa her şirket için geçerli mi? → Genel ise SİL.
+4. Kısaltma var mı? → Varsa aç.
 
 ═══ ÇIKTI FORMAT (geçerli JSON) ═══
 {
@@ -165,25 +214,48 @@ SADECE JSON döndür — başka hiçbir şey yazma."""
 _FEW_SHOT_EXAMPLES = """
 ═══ REFERANS ANALİZ ÖRNEKLERİ ═══
 
-ÖRNEK — Kimya Sektörü Şirketi (iyi analiz — kısaltma YOK, sade dil):
+ÖRNEK 1 — Kimya Sektörü (karma yöntem: sermaye artırımı + ortak satışı):
 {
   "positives": [
     "2023 yılı satışları 892 milyon TL, faiz ve amortisman öncesi kâr marjı %18.4 — sektör ortalaması %11",
     "İhracat payı %34; Avrupa ve Orta Asya'da 28 ülkeye satış yapılıyor — coğrafi çeşitlilik var",
     "Halka arz gelirinin %45'i yeni üretim hattına, %30'u araştırma-geliştirmeye ayrılacak",
     "Halka arz gelirinin 84 milyon TL'si sermaye artırımından, 41 milyon TL'si ise ortak satışından oluşuyor",
-    "5 patent ve 12 faydalı model tescili var — rakiplerin taklit etmesi zor"
+    "5 patent ve 12 faydalı model tescili var — rakiplerin taklit etmesi zor",
+    "Bağımsız denetçi olumlu görüş vermiş — şartlı veya olumsuz görüş yok"
   ],
   "negatives": [
     "Kısa vadeli borç 340 milyon TL, toplam borcun %76'sı — ödeme sıkıntısı riski var",
     "En büyük 3 müşteri toplam satışların %52'sini oluşturuyor — bir müşteri kaybında ciddi gelir düşüşü",
     "Ham madde maliyetleri dövize bağlı; dolar %10 artarsa kâr marjı 3 puan düşer",
     "2022'de 45 milyon TL zarar yazmış; 2023'te kâra geçiş henüz 1 yıllık — sürdürülebilirliği belirsiz",
-    "Devam eden 3 dava var, toplam risk tutarı 28 milyon TL"
+    "Devam eden 3 dava var, toplam risk tutarı 28 milyon TL",
+    "Halka arzın %33'ü ortak satışı — 41 milyon TL mevcut ortakların cebine gidecek"
   ],
   "summary": "Şirket ihracata dayalı güçlü satışlara sahip ancak kısa vadeli borç yükü yüksek ve az sayıda müşteriye bağımlı.",
   "risk_level": "orta",
   "key_risk": "Kısa vadeli borç oranı %76 — borçları çevirememe riski yüksek"
+}
+
+ÖRNEK 2 — Teknoloji Sektörü (%100 sermaye artırımı, yüksek büyüme):
+{
+  "positives": [
+    "Son 3 yılda satışlar yıllık ortalama %65 büyümüş — 2021'de 48 milyon TL, 2023'te 131 milyon TL",
+    "Halka arzın tamamı sermaye artırımından oluşuyor — ortak satışı yok, gelirin tamamı şirkete girecek",
+    "Halka arz gelirinin %60'ı yeni ürün geliştirmeye, %25'i uluslararası pazara girişe ayrılacak",
+    "Ortaklar 365 gün hisse satış yasağı taahhüdü vermiş — standart 180 günün 2 katı",
+    "Yazılım sektöründe faaliyet kâr marjı %24 — sektör ortalaması %15"
+  ],
+  "negatives": [
+    "En büyük müşteri satışların %41'ini oluşturuyor — tek müşteriye aşırı bağımlılık",
+    "Toplam borç özsermayenin 1.8 katı — borç/özsermaye oranı %180 ile tehlikeli seviyede",
+    "İlişkili taraf işlemleri cironun %22'sini oluşturuyor — şeffaflık riski",
+    "Fiyat/Kazanç oranı 32 — sektör ortalaması 18, halka arz fiyatı yüksek görünüyor",
+    "Şirketin kar dağıtım politikası yok — yatırımcıya temettü ödenip ödenmeyeceği belirsiz"
+  ],
+  "summary": "Hızlı büyüyen teknoloji şirketi ancak tek müşteriye bağımlı, borç yükü yüksek ve halka arz fiyatı sektör ortalamasının üzerinde.",
+  "risk_level": "yüksek",
+  "key_risk": "En büyük müşteri satışların %41'i — bu müşteriyi kaybetmek gelirin yarısını yok eder"
 }
 
 ✗ KÖTÜ ÖRNEKLER (asla böyle yazma):
@@ -196,17 +268,26 @@ _FEW_SHOT_EXAMPLES = """
 ✗ "NNA negatif seyir izliyor" → kısaltma YASAK, "Net nakit akışı negatif" yaz
 ✗ "FAVÖK marjı %18" → kısaltma YASAK, "Faiz ve amortisman öncesi kâr marjı %18" yaz
 ✗ "892M TL hasılat" → "892 milyon TL satış" yaz — M/Mly kısaltma YASAK
+✗ "Halka arz gelirinin tamamı şirkete gidiyor" → SADECE ortak satışı YOKSA yazılabilir!
 
 ═══ FİNANSAL ANALİZ KILAVUZU (karşılaştırma için kullan) ═══
+
 Borç/Özsermaye: <%50 iyi, %50-100 normal, >%100 riskli, >%200 tehlikeli
 Kısa Vadeli Borç Oranı: <%60 iyi, >%70 riskli — borçları çevirememe baskısı
-Kısa Vadeli Borçları Karşılama Oranı (Cari Oran): >1.5 sağlıklı, <1.0 risk
-Net Kâr Marjı: Sektöre göre değişir ama negatif = zarar, <%5 zayıf
+Kısa Vadeli Borçları Karşılama Oranı (Cari Oran): >1.5 sağlıklı, 1.0-1.5 kabul edilebilir, <1.0 risk
+Net Kâr Marjı: Sektöre göre değişir ama negatif = zarar, <%5 zayıf, >%15 güçlü
+Faiz ve Amortisman Öncesi Kâr Marjı: Üretim >%15 iyi, Teknoloji >%20 iyi, Perakende >%8 iyi
 Satış Büyümesi (Yıllık Bileşik): >%20 güçlü, %10-20 normal, <%10 zayıf
-Tek Müşteri Bağımlılığı: >%30 dikkat, >%50 ciddi risk
-İlişkili Taraf İşlemleri: Cironun >%20'si ise şeffaflık riski
-Ortak Satışı: ★ KRİTİK — %100 sermaye artırımı → iyi, ortak satışı varsa MUTLAKA belirt (tutar + oran). "Tamamı şirkete" ANCAK ortak satışı yoksa yazılabilir
-Hisse Satış Yasağı (Lock-up): 180 gün standart, daha kısa → ortak güvensizliği
+Tek Müşteri Bağımlılığı: >%30 dikkat, >%50 ciddi risk — gelir kaybı senaryosu yaz
+İlişkili Taraf İşlemleri: Cironun >%10'u dikkat, >%20'si şeffaflık riski
+Fiyat/Kazanç Oranı: Sektör ortalamasıyla karşılaştır. BİST üretim: 12-18, teknoloji: 15-25, perakende: 10-16
+Piyasa Değeri/Defter Değeri: <1 ucuz (neden düşük?), 1-3 normal, >5 çok pahalı
+Faiz Karşılama Oranı: >3 güçlü, 1.5-3 kabul edilebilir, <1.5 borç ödeme güçlüğü
+Stok Devir Hızı: Sektöre göre değişir — yavaşlama trendi olumsuz
+Ortak Satışı: ★ KRİTİK — %100 sermaye artırımı → iyi, ortak satışı varsa MUTLAKA belirt (tutar + oran + kimin sattığını). "Tamamı şirkete" ANCAK ortak satışı yoksa yazılabilir
+Hisse Satış Yasağı (Lock-up): 365 gün çok iyi, 180 gün standart, <180 gün → ortak güvensizliği
+Kar Dağıtım Politikası: Var mı? Net oran belirtilmiş mi? Yoksa yatırımcı temettü alamayabilir
+Denetçi Görüşü: Olumlu → iyi, şartlı → dikkat (neden?), olumsuz → çok kritik risk
 """
 
 
@@ -660,9 +741,15 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
                 "ihraç edilecek pay", "nominal değerli pay",
                 "satışa sunulacak", "halka arz şekli",
                 "arz edilen pay", "arz büyüklüğü",
+                # v2: Araştırma sonucu eklenen
+                "satan pay sahipleri", "karma yöntem",
+                "hasılat kullanım", "halka arz gelirlerinin kullanım",
+                "talep toplama", "book building",
+                "fiyat istikrar", "fiyat tespit",
+                "halka arz fiyat", "lot miktarı", "pay adedi",
             ]):
                 in_fund_section = True
-            if in_fund_section and len(fund_usage_text) > 12:
+            if in_fund_section and len(fund_usage_text) > 15:
                 in_fund_section = False
             if in_fund_section:
                 fund_usage_text.append(f"[S.{i+1}] {text}")
@@ -673,9 +760,14 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
                 "lock-up", "lock up", "satmama taahhüd", "satış yasağı",
                 "halka arz sonrası", "tahsisat", "pay dağılım",
                 "hisse satış", "satmama süresi",
+                # v2: Araştırma sonucu eklenen
+                "yönetim kurulu", "bağımsız üye", "kilit yönetici",
+                "kontrol eden ortak", "hakim ortak", "imtiyazlı pay",
+                "oy hakkı", "yönetim yapısı",
+                "kurumsal yönetim", "kar dağıtım politikası",
             ]):
                 in_ownership_section = True
-            if in_ownership_section and len(ownership_text) > 5:
+            if in_ownership_section and len(ownership_text) > 10:
                 in_ownership_section = False
             if in_ownership_section:
                 ownership_text.append(f"[S.{i+1}] {text}")
@@ -848,19 +940,62 @@ async def analyze_with_ai(
             "belirtilmemis", "mevcut değil", "mevcut degil", "veri yok",
             "bilgi yok", "okunamadı", "okunamadi", "çıkarılamadı", "cikarilamadi",
             "yetersiz", "detay yok", "erişilemiyor", "erisilemiyor",
+            "tam değerlendirme yapılamı", "tam degerlendirme yapilami",
+            "kritik finansal veri", "tablo tespit", "izahnamede yer almı",
+            "net bir değerlendirme", "net bir degerlendirme",
+            "sınırlı bilgi", "sinirli bilgi", "yeterli veri",
+        ]
+
+        # Genellemeleri ve bilgi değeri düşük maddeleri filtrele
+        _LOW_VALUE_PATTERNS = [
+            "kayıtlı sermaye tavanı",
+            "piyasa koşullarına bağlı",
+            "piyasa kosullarina bagli",
+            "sektörde rekabetin artması",
+            "yatırımcılar dikkatli",
+            "dikkatli değerlendirme",
+            "yatırımcıların riskleri",
+            "riskleri dikkate",
+            "büyüme potansiyeli bulunmakta",
         ]
 
         def _is_hallucination(text: str) -> bool:
             t = text.lower()
             return any(pat in t for pat in _HALLUCINATION_PATTERNS)
 
+        def _is_low_value(text: str) -> bool:
+            t = text.lower()
+            return any(pat in t for pat in _LOW_VALUE_PATTERNS)
+
         orig_pos = len(result.get("positives", []))
         orig_neg = len(result.get("negatives", []))
-        result["positives"] = [p for p in result.get("positives", []) if not _is_hallucination(p)]
-        result["negatives"] = [n for n in result.get("negatives", []) if not _is_hallucination(n)]
+        result["positives"] = [
+            p for p in result.get("positives", [])
+            if not _is_hallucination(p) and not _is_low_value(p)
+        ]
+        result["negatives"] = [
+            n for n in result.get("negatives", [])
+            if not _is_hallucination(n) and not _is_low_value(n)
+        ]
         filtered = (orig_pos - len(result["positives"])) + (orig_neg - len(result["negatives"]))
         if filtered:
-            logger.info("Hallüsinasyon filtresi: %d madde silindi — %s", filtered, company_name)
+            logger.info("Hallüsinasyon/düşük değer filtresi: %d madde silindi — %s", filtered, company_name)
+
+        # ─── Kısaltma filtresi: yaygın kısaltmalar kaldıysa düzelt ───
+        _ABBREVIATION_MAP = {
+            "NNA ": "Net nakit akışı ", "FAVÖK ": "Faiz ve amortisman öncesi kâr ",
+            "FK ": "Fiyat/Kazanç ", "PD/DD": "Piyasa Değeri/Defter Değeri",
+            "ÖS ": "Özsermaye ", "YP ": "Yabancı para ",
+        }
+
+        def _fix_abbreviations(text: str) -> str:
+            for abbr, full in _ABBREVIATION_MAP.items():
+                if abbr in text:
+                    text = text.replace(abbr, full)
+            return text
+
+        result["positives"] = [_fix_abbreviations(p) for p in result["positives"]]
+        result["negatives"] = [_fix_abbreviations(n) for n in result["negatives"]]
 
         # Karakter limitini uygula (140 karakter/madde)
         result["positives"] = [p[:140] for p in result["positives"][:10]]
