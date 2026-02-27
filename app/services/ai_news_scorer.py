@@ -1,15 +1,19 @@
-"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi V4.
+"""Abacus AI (RouteLLM) — KAP Haber Puanlama & Yorum Servisi V5.
 
 Akis:
 1. Telegram'dan Matriks HaberId (kap_notification_id) gelir
 2. TradingView'dan haber icerigini cek (matriks:{id}:0/ URL)
-3. Abacus AI (gpt-4o) ile 1.0-10.0 ondalik puan + 3 cumle Turkce ozet uret
+3. Abacus AI (claude-sonnet-4-6) ile 1.0-10.0 ondalik puan + ozet uret
 4. Sonuc: {"score": float, "summary": str, "kap_url": str|None}
 
-V4 Degisiklikler:
-- Ondalik skor (8.7, 6.3 gibi) — daha hassas ayirim
-- Gelismis prompt — detayli analiz kurallari
-- %100 artis vs %32 artis farkli puan alir
+V5 Degisiklikler (Arastirma bazli):
+- Model: claude-sonnet-4-5 → claude-sonnet-4-6
+- Chain-of-thought analiz adimlari (bildirim turu → nicelik → etki)
+- Anti-notr-kumeleme direktifi (skorlarin cogu 4-6 arasi OLMAMALI)
+- TTK 376 sermaye kaybi seviyeleri (1/2/3)
+- 8 kalibrasyon ornegi (tam skor araligini kapsayan)
+- KAP ozel durum aciklamalari, is iliskileri, sermaye artirimi ayrimi
+- Post-processing: skor dogrulama + ozet kalite filtresi
 
 Icerik Kaynagi (Oncelik sirasi):
 - Oncelik 1: TradingView haber sayfasi (matriks ID ile)
@@ -23,6 +27,7 @@ Hata Toleransi:
 
 import json
 import logging
+import re
 
 import httpx
 
@@ -32,14 +37,14 @@ logger = logging.getLogger(__name__)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
 # Versiyon — deploy dogrulama icin
-_SCORER_VERSION = "v4-decimal"
+_SCORER_VERSION = "v5-research"
 
-# AI model — claude-sonnet-4-5 (Abacus RouteLLM uzerinden)
-_AI_MODEL = "claude-sonnet-4-5"
+# AI model — claude-sonnet-4-6 (Abacus RouteLLM uzerinden)
+_AI_MODEL = "claude-sonnet-4-6"
 
 # Timeouts
 _TV_TIMEOUT = 15   # TradingView icin
-_AI_TIMEOUT = 25   # AI icin (detayli analiz daha uzun surebilir)
+_AI_TIMEOUT = 30   # AI icin (chain-of-thought analiz icin arttirildi)
 
 # TradingView base URL
 TV_NEWS_BASE = "https://tr.tradingview.com/news"
@@ -229,6 +234,149 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
 # ADIM 2: AI Puanlama (Abacus RouteLLM — gpt-4o)
 # -------------------------------------------------------
 
+# -------------------------------------------------------
+# SYSTEM PROMPT — Chain-of-Thought + Anti-Notr-Kumeleme
+# -------------------------------------------------------
+
+_SYSTEM_PROMPT = """Sen 15+ yillik deneyime sahip bir Borsa Istanbul kurumsal yatirimci analistisin.
+KAP bildirimlerini (ozel durum aciklamalari, is iliskileri, sermaye artirimlari, finansal sonuclar,
+ihale/sozlesme kazanimlari, temettu, bedelsiz, dava/ceza, yonetim degisiklikleri vs.) analiz ederek
+yatirimci icin onem puani ve Turkce ozet uretiyorsun.
+
+═══ ANALİZ ADIMLARI (chain-of-thought — her haber icin SIRASI ILE dusun) ═══
+
+1. BİLDİRİM TÜRÜ: Bu hangi tur bir KAP bildirimi?
+   Ozel durum aciklamasi / sozlesme / ihale / sermaye artirimi / bedelsiz pay / temettu /
+   kar aciklamasi / zarar aciklamasi / dava-ceza / birlesme-devralma / yonetim degisikligi /
+   iliskili taraf islemi / denetci gorusu / lisans-ruhsat / uretim-tesis / SPK-BDDK-EPDK /
+   sermaye kaybi (TTK 376) / diger
+
+2. NİCELİKSEL ETKİ: Sayisal buyukluk nedir?
+   TL tutari, yuzde degisim, sozlesme buyuklugu, bedelsiz orani, temettu verimi, zarar miktari
+
+3. ŞİRKET BAĞLAMI: Bu haber sirketin buyuklugune gore ne ifade eder?
+   Mega cap icin 100M TL sozlesme rutin olabilir ama kucuk sirket icin devasa olabilir.
+   Sozlesme/ihale tutari yillik cironun %5'inden azsa kucuk, %15+'iyse buyuk etki.
+
+4. ZAMANLAMA VE BEKLENTİ: Surpriz mi, beklenen mi?
+   Ilk kez aciklanan bilgi mi, tekrar mi? Beklenti ustu mu altinda mi?
+
+5. NİHAİ PUAN: 1.0-10.0 arasi 0.1 hassasiyetle puan ver.
+
+═══ PUANLAMA RUBRIĞI (1.0 — 10.0) ═══
+
+KRİTİK OLUMSUZ (1.0 — 2.4):
+  1.0-1.4: Varolussel tehdit — borca batiklik (TTK 376/3), iflas basvurusu, islem yasagi
+  1.5-1.9: Agir hasar — sermaye kaybi %67+ (TTK 376/2), teknik iflas, going concern
+  2.0-2.4: Ciddi olumsuz — sermaye kaybi %50+ (TTK 376/1), agir SPK/BDDK cezasi, buyuk zarar
+
+OLUMSUZ (2.5 — 4.4):
+  2.5-3.4: Net olumsuz — buyuk dava (ozsermayenin >%10), donem zarari, uretim durdurma, lisans kaybetme
+  3.5-4.4: Hafif olumsuz — kucuk zarar, kucuk ceza (<5M TL), negatif gorunum, olumsuz denetci notu
+
+NOTR (4.5 — 5.9):
+  4.5-5.4: Tam notr — rutin bildirim, genel kurul, yonetim kadrosu degisikligi, adres degisikligi
+  5.5-5.9: Notr+ — icerik belirsiz bildirim, SPK onay, personel alimi, kurumsal uyum
+
+OLUMLU (6.0 — 7.9):
+  6.0-6.4: Hafif olumlu — kucuk sozlesme (<50M TL), yeni is birligi, standart ihracat, lisans alimi
+  6.5-6.9: Olumlu — orta sozlesme (50-200M TL), onemli is ortakligi, kapasite artirimi, yeni tesis
+  7.0-7.4: Iyi — buyuk sozlesme (200M-1B TL), %10-20 kar artisi, bedelsiz %10-30, iyi temettu
+  7.5-7.9: Cok iyi — %20-40 kar artisi, buyuk ihale (>1B TL), bedelsiz %30-50, yuksek temettu verimi
+
+GÜÇLÜ OLUMLU (8.0 — 10.0):
+  8.0-8.4: Guclu — %40-70 kar artisi, bedelsiz %50-75, stratejik birlesme/devralma
+  8.5-8.9: Cok guclu — %70-100 kar artisi, bedelsiz %75-100, mega ihale, sektor liderligi
+  9.0-9.4: Olaganustu — %100+ kar artisi, %100+ bedelsiz, devasa M&A, rekor gelir
+  9.5-10.0: Tarihsel — sektoru degistirecek olay, rekor kar + bedelsiz birlikte, devasa birlesme
+
+═══ KAP ÖZEL DURUM TİPLERİ VE PUANLAMA REHBERİ ═══
+
+SÖZLEŞME / İHALE KAZANIMI:
+  Tutar / Yillik Ciro orani onemli:
+  Cironun >%30'u → 8.0-9.0 | %15-30 → 7.0-8.0 | %5-15 → 6.0-7.0 | <%5 → 5.5-6.0
+
+SERMAYE ARTIRIMI:
+  Bedelsiz (%100+) → 9.0-9.5 | Bedelsiz (%50-99) → 8.0-8.9 | Bedelsiz (%10-49) → 7.0-7.9
+  Bedelli (hakli): Mevcut ortaga ucuz pay → 5.5-6.5 (baglama gore)
+  Bedelli (genel): Seyreltme riski → 4.0-5.0
+
+TEMETTÜ DAĞITIMI:
+  Verim >%10 → 8.0+ | Verim %5-10 → 7.0-8.0 | Verim %2-5 → 6.0-7.0
+  Ilk kez temettu → +0.5 bonus | Temettu iptal → 3.0-4.0
+
+KAR / ZARAR AÇIKLAMASI:
+  Kar artisi >%100 → 9.0+ | %50-100 → 8.0-9.0 | %20-50 → 7.0-8.0 | %5-20 → 6.0-7.0
+  Kar dususu %5-20 → 4.0-5.0 | %20-50 → 3.0-4.0 | %50+ → 2.0-3.0
+  Zarara gecis (kardan zarara) → 2.5-3.5 | Ust uste zarar → 2.0-3.0
+
+SERMAYE KAYBI (TTK 376 — BIST'e ozel kritik bildirim):
+  TTK 376/1 (sermayenin %50'si kayip) → 2.0-2.5
+  TTK 376/2 (sermayenin %67'si kayip, sermaye azaltma/artirma zorunlu) → 1.5-2.0
+  TTK 376/3 (borca batiklik, iflas basvurusu zorunlu) → 1.0-1.4
+
+DAVA / CEZA:
+  Dava tutari / Ozsermaye orani:
+  >%50 → 1.0-1.5 | %20-50 → 1.5-2.5 | %10-20 → 2.5-3.5 | %5-10 → 3.5-4.0 | <%5 → 4.0-4.5
+  SPK idari para cezasi >10M TL → 2.0-3.0 | 1-10M TL → 3.0-4.0 | <1M TL → 4.0-4.5
+
+DENETÇİ GÖRÜŞÜ:
+  Olumlu (standart) → 5.0 notr | Sartli goruslu → 3.0-3.5 | Olumsuz → 1.5-2.5
+  Going concern (sureklilik suphe) → 1.5-2.5
+
+İLİŞKİLİ TARAF İŞLEMLERİ:
+  Toplam varligin >%10'u → 2.5-3.5 | %5-10 → 3.5-4.0 | <%5 → 4.5-5.0
+
+BİRLEŞME / DEVRALMA (M&A):
+  Stratejik ve yuksek primli → 8.0-9.5 | Normal → 6.5-8.0 | Istirak satisi (kucuk) → 5.5-6.5
+
+YÖNETİM DEĞİŞİKLİĞİ:
+  CEO/GM degisikligi → 4.5-5.5 (baglama gore) | Yonetim kurulu → 4.5-5.0 | Rutin atama → 5.0
+
+═══ KRİTİK KURALLAR ═══
+
+• ANTI-NÖTR KÜMELENMESİ: Puanlarin cogunu 4.5-5.5 arasina sikistirma! Her haberin FARKLI etkisi var.
+  Gercekten notr olan rutin bildirimlere 5.0 ver, ama geri kalanlari AYRISTIR.
+• RAKAMSAL HASSASIYET: %100 bedelsiz ≠ %10 bedelsiz. 1 milyar TL ihale ≠ 10M TL ihale.
+• ŞİRKET BÜYÜKLÜĞÜ: Ayni tutar farkli sirketler icin farkli anlam tasir.
+• TELEGRAM ÖZETİ: Kaynak Telegram ozeti ise ve detay yoksa, mevcut bilgiyle en iyi tahmini ver.
+  Eksik bilgi nedeniyle 5.0 verme — eldeki bildirim turune gore skorla.
+• HALLÜSINASYON YASAK: Haberde olmayan bilgiyi uydurma. Sadece metinde yazan bilgileri kullan.
+• SPEKÜLASYON YASAK: "Olumlu/olumsuz olabilir" gibi belirsiz ifadeler kullanma.
+
+═══ KALİBRASYON ÖRNEKLERİ ═══
+
+Ornek 1: "THYAO 2025 net kari 42.8 milyar TL, gecen yil 28.1 milyar TL (%52 artis)"
+→ {{"score": 8.7, "summary": "...", "hashtags": ["havacilik", "karaciklamasi"]}}
+
+Ornek 2: "EREGL hisse basi brut 2.50 TL temettu, gecen yil 1.80 TL idi (%39 artis)"
+→ {{"score": 7.2, "summary": "...", "hashtags": ["temettü", "celik"]}}
+
+Ornek 3: "SASA 500 milyon TL yeni uretim tesisi yatirimi karari"
+→ {{"score": 6.8, "summary": "...", "hashtags": ["yatirim", "kimya"]}}
+
+Ornek 4: "KOZAL yonetim kurulu uyesi degisikligi yapildi"
+→ {{"score": 4.8, "summary": "...", "hashtags": ["yonetim", "madencilik"]}}
+
+Ornek 5: "BRSAN aleyhine 85 milyon TL dava acildi (ozsermaye 1.2 milyar TL, oran %7)"
+→ {{"score": 3.4, "summary": "...", "hashtags": ["dava", "celik"]}}
+
+Ornek 6: "MPARK son 3 ceyrek zarar; sermaye kaybi TTK 376/1 sinirini asti"
+→ {{"score": 2.2, "summary": "...", "hashtags": ["sermayekaybi", "saglik"]}}
+
+Ornek 7: "ENKAI 3.2 milyar TL'lik Irak dogalgaz santral ihalesi kazandi"
+→ {{"score": 8.2, "summary": "...", "hashtags": ["ihale", "enerji"]}}
+
+Ornek 8: "ALFAS %200 bedelsiz sermaye artirimi karari"
+→ {{"score": 9.3, "summary": "...", "hashtags": ["bedelsiz", "otomotiv"]}}
+
+Sadece JSON formatinda yanit ver — baska hicbir sey yazma."""
+
+
+# -------------------------------------------------------
+# ADIM 2: AI Puanlama (Abacus RouteLLM)
+# -------------------------------------------------------
+
 async def score_news(
     ticker: str,
     raw_text: str,
@@ -255,7 +403,7 @@ async def score_news(
     # TradingView icerigi varsa birincil kaynak, yoksa Telegram metni
     has_tv = bool(tv_content and len(tv_content.strip()) > 50)
     content = tv_content if has_tv else raw_text
-    content = content[:4000] if content else ""  # gpt-4o uzun metin isleyebilir
+    content = content[:5000] if content else ""  # claude-sonnet-4-6 uzun metin isleyebilir
 
     if not content.strip():
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
@@ -272,48 +420,21 @@ Kaynak: {source_info}
 {content}
 --- ICERIK BITIS ---
 
-PUANLAMA SISTEMI (1.0 — 10.0 arasi, 0.1 hassasiyetle):
-
-OLUMSUZ BOLGESI (1.0 — 4.9):
-  1.0-2.0: Ciddi olumsuz — iflas, agir ceza, sermaye erimesi, buyuk zarar
-  2.1-3.5: Olumsuz — net donem zarari, yuksek borcluluk, dava/ceza riski
-  3.6-4.9: Hafif olumsuz veya belirsiz — kredi kullanimi, kucuk zarar, belirsiz sonuc
-
-NOTR BOLGESI (5.0 — 5.9):
-  5.0-5.4: Tam notr — rutin bildirim, SPK onay, genel kurul, yonetim kadrosu degisikligi
-  5.5-5.9: Notr+ — detayi belli olmayan bildirim, personel alimi, kurumsal uyum raporu
-
-OLUMLU BOLGESI (6.0 — 10.0):
-  6.0-6.4: Hafif olumlu — kucuk ihale kazanimi (<50M TL), kucuk sozlesme, standart dis ticaret
-  6.5-6.9: Olumlu — orta olcekli sozlesme (50-200M TL), yeni is birligi, ihracat anlasmasi
-  7.0-7.4: Iyi — buyuk sozlesme (200M-1 milyar TL), guclu ihracat artisi, onemli ihale
-  7.5-7.9: Cok iyi — %20-40 arasi kar artisi, buyuk ihale (>1 milyar TL), onemli ortaklik
-  8.0-8.4: Guclu olumlu — %40-70 kar artisi, buyuk bedelsiz (<=%50), yuksek temettu
-  8.5-8.9: Cok guclu — %70-100 kar artisi, buyuk bedelsiz (%50-100), sektor liderligi
-  9.0-9.4: Olaganustu — %100+ kar artisi, %100+ bedelsiz sermaye artirimi, mega ihale
-  9.5-10.0: Tarihsel — sektoru degistirecek haber, devasa birlesme, rekor kar + bedelsiz birlikte
-
-KRITIK KURALLAR:
-- Haberin GERCEK BUYUKLUGUNU deger — rakamsal verileri kullan
-- %100 bedelsiz ≠ %30 kar artisi → FARKLI puanlar verilmeli
-- Ihale tutari onemli: 10M TL = 6.2, 200M TL = 7.0, 1 milyar TL = 7.8
-- Bir sirketin buyuklugune gore degerlendir (BIMAS icin 600M TL sermaye artirimi ≠ kucuk sirket icin)
-- Sadece "pozitif" etiketi tasimasi YETMEZ — gercek etkiyi ol
-- Kaynak "Telegram Ozeti" ise ve detay yoksa: 5.0-5.5 arasi ver (belirsiz)
-
-Haberi yatirimci bakis acisiyla Turkce EN AZ 3, EN FAZLA 5 cumle ile ozetle.
-Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
-Haberin ne oldugunu, sirket icin ne anlama geldigini ve yatirimci icin neden onemli oldugunu acikla.
+GOREV:
+1. Haberi yatirimci bakis acisiyla Turkce EN AZ 3, EN FAZLA 5 cumle ile ozetle.
+2. Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
+3. Haberin ne oldugunu, sirket icin ne anlama geldigini ve yatirimci icin neden onemli oldugunu acikla.
 
 HASHTAG KURALLARI:
-- Haberin konusuyla ilgili 2-3 adet Twitter hashtag uret (# isareti OLMADAN)
+- 2-3 adet Twitter hashtag uret (# isareti OLMADAN)
 - Sirket ticker'i ({ticker}) zaten ekleniyor, onu TEKRAR verme
-- Sektor, konu ve iliskili kavramlardan sec: gayrimenkul, enerji, teknoloji, insaat, gida, saglik, otomotiv, ihracat, ithalat, temettü, bedelsiz, sermayeartirimi, karaciklama, ihale, sozlesme, ortaklik, satis, alim, uretim, yatirim vb.
-- Turkce ve kucuk harf yaz (ornek: gayrimenkul, temettü, ihale)
-- Sadece haberin icerigiyle GERCEKTEN ilgili hashtagler sec, genel/alakasiz olmasin
+- Sektor ve konu bazli sec: gayrimenkul, enerji, teknoloji, insaat, gida, saglik, otomotiv,
+  ihracat, ithalat, temettü, bedelsiz, sermayeartirimi, karaciklamasi, ihale, sozlesme,
+  ortaklik, satis, alim, uretim, yatirim, dava, ceza, madencilik, finans, banka,
+  havacilik, perakende, celik, kimya, iletisim, savunmasanayi vb.
 
-SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
-{{"score": 7.3, "summary": "3-5 cumle detayli Turkce ozet. Haberin icerigini acikla. Sirket icin etkisini belirt. Yatirimci icin onemini vurgula.", "hashtags": ["sektor", "konu"]}}"""
+SADECE asagidaki JSON formatinda yanit ver:
+{{"score": 7.3, "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
@@ -326,21 +447,11 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
                 json={
                     "model": _AI_MODEL,
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Sen 15+ yillik deneyime sahip bir Borsa Istanbul kurumsal yatirimci analistisin. "
-                                "KAP bildirimlerini son derece detayli ve objektif analiz edersin. "
-                                "Haberdeki rakamlari, oranlari ve buyuklukleri dikkatlice degerlendirirsin. "
-                                "Puanlaman cok hassas olmali — 0.1 hassasiyetle score ver. "
-                                "Benzer gorunen ama farkli buyuklukte haberler FARKLI puan almali. "
-                                "Sadece JSON formatinda yanit ver."
-                            ),
-                        },
+                        {"role": "system", "content": _SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
-                    "temperature": 0.1,  # Biraz yaraticilik — daha dogal puanlama
-                    "max_tokens": 500,
+                    "temperature": 0.1,
+                    "max_tokens": 600,
                 },
             )
             if resp.status_code != 200:
@@ -365,28 +476,41 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
         summary = result.get("summary")
         hashtags = result.get("hashtags", [])
 
-        # Score validation: 1.0-10.0 arasinda olmali (ondalik)
+        # ─── Score validation: 1.0-10.0 arasinda olmali (ondalik) ───
         if isinstance(score, (int, float)) and 1.0 <= score <= 10.0:
             score = round(float(score), 1)  # 1 ondalik basamak
         else:
             logger.warning("AI News Scorer: Gecersiz skor=%s (%s)", score, ticker)
             score = None
 
-        # Summary validation
+        # ─── Summary validation ───
         if not isinstance(summary, str) or not summary.strip():
             summary = None
+        elif summary:
+            # Hallusinasyon filtresi: ozette haber metniyle ilgisiz bilgi olmasin
+            _HALLUC_PATTERNS = [
+                "bilgi bulunamadi", "detay mevcut degil", "aciklama yapilmadi",
+                "yeterli bilgi yok", "net bir degerlendirme",
+            ]
+            for pat in _HALLUC_PATTERNS:
+                if pat in summary.lower():
+                    summary = summary.replace(pat, "").strip()
 
-        # Hashtags validation — max 3, her biri string, # isareti temizle
+        # ─── Hashtags validation — max 3, her biri string ───
         if isinstance(hashtags, list):
             clean_tags = []
             for tag in hashtags[:3]:
                 if isinstance(tag, str) and tag.strip():
-                    clean = tag.strip().lstrip("#").replace(" ", "")
-                    if clean and clean.upper() != ticker.upper():
+                    clean = tag.strip().lstrip("#").replace(" ", "").lower()
+                    if clean and clean.upper() != ticker.upper() and len(clean) <= 25:
                         clean_tags.append(clean)
             hashtags = clean_tags
         else:
             hashtags = []
+
+        # ─── Post-processing: bildirim tipi bazli skor dogrulama ───
+        if score is not None and content:
+            score = _validate_score_against_content(score, content, ticker)
 
         logger.info(
             "AI News Scorer: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
@@ -407,6 +531,61 @@ SADECE asagidaki JSON formatinda yanit ver (score ONDALIKLI olmali):
     except Exception as e:
         logger.error("AI News Scorer: Beklenmeyen hata (%s) — %s", ticker, e)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+
+
+# -------------------------------------------------------
+# POST-PROCESSING: Skor Dogrulama
+# -------------------------------------------------------
+
+# Negatif bildirim kaliplari — skor tavan sinirlamasi
+_CRITICAL_NEGATIVE_PATTERNS = [
+    (r"(?:ttk|türk ticaret kanunu)\s*(?:madde\s*)?376\s*/?\s*3|borca\s*bat[ıi]k", 1.4),
+    (r"(?:ttk|türk ticaret kanunu)\s*(?:madde\s*)?376\s*/?\s*2|sermaye(?:nin)?\s*(?:üçte ikisi|2/3|%67)", 2.0),
+    (r"(?:ttk|türk ticaret kanunu)\s*(?:madde\s*)?376\s*/?\s*1|sermaye(?:nin)?\s*(?:yarısı|%50)", 2.5),
+    (r"iflas\s*(?:basvur|karar|talep|ilan)", 1.5),
+    (r"i[sş]lem(?:e)?\s*(?:kapat|durdur|yasak)", 2.0),
+    (r"teknik\s*iflas", 1.8),
+    (r"going\s*concern|süreklili[gğ]e?\s*(?:iliskin\s*)?(?:şüphe|belirsizlik)", 2.5),
+]
+
+# Pozitif bildirim kaliplari — skor taban garantisi
+_STRONG_POSITIVE_PATTERNS = [
+    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})", 9.0),  # %100+ bedelsiz
+    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[5-9]\d)", 8.0),  # %50-99 bedelsiz
+    (r"(?:net\s*)?k[aâ]r[ıi]?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})\s*art", 9.0),  # %100+ kar artisi
+    (r"rekor\s*(?:k[aâ]r|gelir|has[ıi]lat)", 8.0),
+]
+
+
+def _validate_score_against_content(score: float, content: str, ticker: str) -> float:
+    """Icerik patirnlerine gore skoru dogrular ve gerekirse duzeltir.
+
+    Kritik negatif haberler icin skoru tavan sinirlar,
+    guclu pozitif haberler icin taban garantisi uygular.
+    """
+    content_lower = content.lower()
+
+    # Kritik negatif bildirimler — skor asla tavanin uzerine cikmamali
+    for pattern, max_score in _CRITICAL_NEGATIVE_PATTERNS:
+        if re.search(pattern, content_lower):
+            if score > max_score:
+                logger.info(
+                    "Skor dogrulama: %s skor %.1f → %.1f (pattern: %s)",
+                    ticker, score, max_score, pattern[:30],
+                )
+                return max_score
+
+    # Guclu pozitif bildirimler — skor asla tabanin altina dusmemeli
+    for pattern, min_score in _STRONG_POSITIVE_PATTERNS:
+        if re.search(pattern, content_lower):
+            if score < min_score:
+                logger.info(
+                    "Skor dogrulama: %s skor %.1f → %.1f (pattern: %s)",
+                    ticker, score, min_score, pattern[:30],
+                )
+                return min_score
+
+    return score
 
 
 # -------------------------------------------------------
