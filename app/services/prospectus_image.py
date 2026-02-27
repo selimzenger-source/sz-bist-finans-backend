@@ -250,7 +250,9 @@ def generate_prospectus_analysis_image(
         summary_lines = max(1, len(summary) // 90 + 1)
         summary_h     = 20 + summary_lines * 28 + 30
         if key_risk:
-            summary_h += 40
+            # key_risk satır sayısını hesapla (wrap edilecek)
+            _kr_line_count = max(1, len(key_risk) // 70 + 1)
+            summary_h += 10 + _kr_line_count * 26 + 10
 
         footer_h     = 80
         gap          = 12
@@ -382,9 +384,13 @@ def generate_prospectus_analysis_image(
             sum_y += 28
 
         if key_risk:
-            sum_y += 4
-            draw.text((padding, sum_y), f"🔑 Kritik Risk: {key_risk[:100]}",
-                      fill=YELLOW_SOFT, font=_load_font(20))
+            sum_y += 10
+            f_kr = _load_font(20)
+            kr_text = f"🔑 Kritik Risk: {key_risk}"
+            kr_lines = _wrap_text(kr_text, f_kr, inner_w - 20)
+            for kr_line in kr_lines:
+                draw.text((padding, sum_y), kr_line, fill=YELLOW_SOFT, font=f_kr)
+                sum_y += 26
 
         y += summary_h
 

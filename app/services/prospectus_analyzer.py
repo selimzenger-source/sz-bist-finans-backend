@@ -447,17 +447,24 @@ def _extract_pages_tesseract_sync(pdf_path: str) -> list:
         doc = fitz.open(pdf_path)
         total_pages = len(doc)
 
-        # Akıllı sayfa örnekleme
-        if total_pages <= 40:
+        # Kapsamlı sayfa örnekleme — izahnamelerde mal varlıkları, borç, ortaklık gibi
+        # önemli bölümler orta sayfalarda yer alıyor, bunları kaçırmamalıyız
+        if total_pages <= 50:
             sample_indices = list(range(total_pages))
         else:
-            start_pages = list(range(20))                                         # İlk 20: kapak+özet+risk başı
-            mid1 = total_pages // 3
-            mid1_pages = list(range(mid1, min(mid1 + 5, total_pages)))            # 1/3: risk ortası
-            mid2 = total_pages * 2 // 3
-            mid2_pages = list(range(mid2, min(mid2 + 5, total_pages)))            # 2/3: finansal
-            end_pages = list(range(max(total_pages - 5, 0), total_pages))         # Son 5: ek bilgiler
-            sample_indices = sorted(set(start_pages + mid1_pages + mid2_pages + end_pages))
+            indices = set()
+            indices.update(range(min(25, total_pages)))                           # İlk 25: kapak+özet+risk başı
+            # Orta bölgeler: her 10 sayfada 3 sayfa örnekle
+            for checkpoint in range(25, total_pages - 10, 10):
+                indices.update(range(checkpoint, min(checkpoint + 3, total_pages)))
+            t1 = total_pages // 3
+            indices.update(range(t1, min(t1 + 5, total_pages)))                  # 1/3: finansal tablolar
+            t2 = total_pages // 2
+            indices.update(range(t2, min(t2 + 5, total_pages)))                  # 1/2: mal varlıkları
+            t3 = total_pages * 2 // 3
+            indices.update(range(t3, min(t3 + 5, total_pages)))                  # 2/3: ortaklık yapısı
+            indices.update(range(max(total_pages - 8, 0), total_pages))          # Son 8: ek bilgiler
+            sample_indices = sorted(indices)
 
         logger.info("Tesseract OCR: %d/%d sayfa örnekleniyor...", len(sample_indices), total_pages)
 
@@ -522,19 +529,34 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         # Akıllı sayfa örnekleme: başı + ortası + sonu
         # İzahnamede: kapak(1-3), özet(4-10), risk(10-30), finansal(30-60+)
         # Her bölümden 2’şer sayfa = 3 batch × 2 sayfa = 6 sayfa, ~3 API çağrısı
-        if total_pages <= 8:
+        if total_pages <= 15:
             # Kısa belge: tamamını al
             sample_indices = list(range(total_pages))
+        elif total_pages <= 60:
+            # Orta belge: baştan 8 + ortadan 4 + sondan 4 = ~16 sayfa
+            start_pages = list(range(min(8, total_pages)))
+            mid = total_pages // 2
+            mid_pages = list(range(mid - 2, min(mid + 2, total_pages)))
+            end_pages = list(range(max(total_pages - 4, 0), total_pages))
+            sample_indices = sorted(set(start_pages + mid_pages + end_pages))
         else:
-            # Stratejik örnekleme: 3 bölgeden 2’şer sayfa
-            s1 = max(0, min(3, total_pages - 1))               # Sayfa 4-5 (özet başı)
-            s2 = max(0, total_pages // 3)                      # 1/3 noktası (risk faktörleri)
-            s3 = max(0, total_pages * 2 // 3)                  # 2/3 noktası (finansal)
-            sample_indices = sorted(set([
-                s1, min(s1+1, total_pages-1),
-                s2, min(s2+1, total_pages-1),
-                s3, min(s3+1, total_pages-1),
-            ]))
+            # Uzun belge (100-200 sayfa izahname): 7 bölgeden örnekle = ~24 sayfa
+            # Kapak+özet (1-8), risk faktörleri (10-15), şirket bilgileri (20-25),
+            # finansal tablolar (1/3), mal varlıkları (1/2), ortaklık yapısı (2/3), son bölüm
+            indices = set()
+            indices.update(range(min(8, total_pages)))                          # İlk 8: kapak, özet, genel bilgi
+            p10 = min(10, total_pages - 1)
+            indices.update(range(p10, min(p10 + 4, total_pages)))              # 10-14: risk faktörleri başlangıcı
+            p20 = min(20, total_pages - 1)
+            indices.update(range(p20, min(p20 + 3, total_pages)))              # 20-23: şirket detayları
+            t1 = total_pages // 3
+            indices.update(range(t1, min(t1 + 3, total_pages)))                # 1/3: finansal tablolar
+            t2 = total_pages // 2
+            indices.update(range(t2, min(t2 + 3, total_pages)))                # 1/2: mal varlıkları, borçlar
+            t3 = total_pages * 2 // 3
+            indices.update(range(t3, min(t3 + 3, total_pages)))                # 2/3: ortaklık, fon kullanımı
+            indices.update(range(max(total_pages - 4, 0), total_pages))        # Son 4: ek bilgiler
+            sample_indices = sorted(indices)
 
         # Sayfaları 150 DPI gri JPEG olarak render et (daha iyi OCR kalitesi)
         page_images = []
