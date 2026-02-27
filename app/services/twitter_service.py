@@ -2070,22 +2070,44 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
 
 _SPK_APP_BANNER = os.path.join(_IMG_DIR, "spk_basvuru_banner.png")
 
-_SPK_APP_AI_SYSTEM_PROMPT = """Sen Türkiye finans piyasası ve şirketler hakkında bilgi sahibi bir uzmanısın.
-Verilen şirket hakkında kısa bir bilgilendirme hazırlayacaksın.
+_SPK_APP_AI_SYSTEM_PROMPT = """Sen Türkiye'deki şirketler, sektörler ve finans piyasası hakkında derin bilgi sahibi bir araştırmacı ve ekonomi editörüsün.
 
-KURALLAR:
-- SADECE tweet metnini yaz, başka hiçbir şey ekleme (açıklama, not vs.)
-- Max 250 karakter (hashtag/link ayrı eklenecek)
-- Türkçe, sade, bilgilendirici
-- "halka arz onay BAŞVURUSU" ifadesini kullan — bu ONAY değil, BAŞVURU aşaması
-- Şirketin ne iş yaptığını / faaliyet alanını 1-2 cümlede açıkla
-- Emoji az ama etkili kullan (max 2)
-- Yatırım tavsiyesi VERME
-- Bilmediğin bilgiyi UYDURMA — emin değilsen sadece sektör tahmini yap
-- Cümleleri tamamla, yarım bırakma
+Görevin: SPK'ya halka arz onay başvurusu yapan bir şirket hakkında DETAYLI ve BİLGİLENDİRİCİ bir yazı hazırlamak.
 
-ÖRNEK ÇIKTI:
-📝 Tatilbudur Seyahat, online tatil ve tur paketleri sunan dijital seyahat platformu, SPK'ya halka arz onay başvurusunda bulundu."""
+═══ İÇERİK GEREKSİNİMLERİ ═══
+
+Yazında şu bilgileri MUTLAKA içer (bildiklerini):
+
+1. 🏢 Şirket tanıtımı: Ne iş yapıyor, hangi sektörde faaliyet gösteriyor
+2. 📍 Merkezi nerede, kaç yıldır faaliyette (biliniyorsa)
+3. 🔧 Ana ürün/hizmetleri neler — somut örneklerle açıkla
+4. 📊 Sektördeki konumu: Türkiye'de veya bölgesinde kaçıncı büyük, pazar payı vs.
+5. 🌐 Varsa önemli müşterileri, projeleri veya iş ortaklıkları
+6. 💡 Şirketi ilginç/farklı kılan bir detay (varsa)
+
+═══ FORMAT KURALLARI ═══
+
+- SADECE tweet metnini yaz — açıklama, not, yorum EKLEME
+- 120-250 kelime arası (ortalama 150 kelime ideal) — hashtag/link hariç
+- 1-2 paragraf, akıcı ve bilgilendirici
+- İlk satır MUTLAKA: "📝 SPK Halka Arz Onay Başvurusu" başlığı ile başla
+- İkinci satırda şirket adını kalın/net ver
+- Türkçe, sade ama detaylı — gazeteci üslubu
+- "halka arz onay BAŞVURUSU" ifadesini kullan (bu ONAY değil, başvuru aşaması)
+- Yatırım tavsiyesi VERME, sadece bilgilendir
+- Bilmediğin bilgiyi UYDURMA — emin olmadığın detayı yazma
+- Cümleleri TAM yaz, yarım bırakma
+- Emoji başlıklarda kullan, metin içinde fazla kullanma
+
+═══ ÖRNEK ÇIKTI ═══
+
+📝 SPK Halka Arz Onay Başvurusu
+
+🏢 Tatilbudur Seyahat Acenteliği ve Turizm AŞ
+
+Türkiye'nin en bilinen online seyahat platformlarından biri olan Tatilbudur, SPK'ya halka arz onay başvurusunda bulundu. 2000 yılında kurulan şirket, tatil ve tur paketleri, uçak bileti, otel rezervasyonu ve transfer hizmetleri sunuyor.
+
+Tatilbudur, yıllık milyonlarca kullanıcıya hizmet veren dijital platformuyla Türkiye'nin online seyahat sektörünün öncü isimlerinden. Hem yurt içi hem yurt dışı tatil seçenekleri sunan şirket, web sitesi ve mobil uygulaması üzerinden 7/24 rezervasyon imkânı sağlıyor. Şirketin halka arz başvurusu SPK tarafından değerlendirilecek."""
 
 _SPK_APP_AI_MODEL = "gpt-4.1"
 
@@ -2102,9 +2124,11 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
             return None
 
         user_message = (
-            f"{company_name} şirketi SPK'ya halka arz onay başvurusunda bulundu.\n"
-            f"Bu şirket hakkında kısa bilgilendirici tweet hazırla.\n"
-            f"SADECE tweet metnini yaz."
+            f"Şirket: {company_name}\n\n"
+            f"Bu şirket SPK'ya halka arz onay başvurusunda bulundu.\n"
+            f"Şirket hakkında detaylı araştırma yap ve bilgilendirici tweet hazırla.\n"
+            f"1-2 paragraf, 120-250 kelime arası (ortalama 150 kelime), somut bilgilerle zengin bir metin yaz.\n"
+            f"SADECE tweet metnini yaz — açıklama veya not ekleme."
         )
 
         resp = httpx.post(
@@ -2120,9 +2144,9 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
                     {"role": "user", "content": user_message},
                 ],
                 "temperature": 0.4,
-                "max_tokens": 400,
+                "max_tokens": 1000,
             },
-            timeout=30.0,
+            timeout=45.0,
         )
 
         if resp.status_code != 200:
@@ -2132,19 +2156,19 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
         data = resp.json()
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
-        if not content or len(content) < 20:
+        if not content or len(content) < 50:
             logger.error("SPK basvuru AI bos/kisa metin dondu: %d char", len(content) if content else 0)
             return None
 
         # Temizle — AI bazen tirnak isareti veya extra bosluk ekliyor
         content = content.strip('"\'').strip()
 
-        # Max 250 karakter (hashtag/link ayrı eklenir)
-        if len(content) > 250:
+        # Max 3500 karakter (hashtag/link icin 500 char birak — Twitter limiti 4000)
+        if len(content) > 3500:
             # Son cümle noktasına kadar kes
-            cut = content[:250]
-            last_dot = max(cut.rfind('.'), cut.rfind('!'), cut.rfind(','))
-            if last_dot > 100:
+            cut = content[:3500]
+            last_dot = max(cut.rfind('.'), cut.rfind('!'))
+            if last_dot > 2000:
                 content = cut[:last_dot + 1]
             else:
                 content = cut.rstrip() + "…"
