@@ -616,22 +616,10 @@ class NotificationService:
             channel_id="ipo_alerts_v2",
         )
 
-    async def notify_ceiling_broken(self, ipo) -> int:
-        """Tavan bozuldu bildirimi — notify_ceiling_break = True olanlara."""
-        title = "🔓 Tavan Çözüldü"
-        body = f"{ipo.ticker} tavan çözüldü!"
-
-        data = {
-            "type": "ceiling_broken",
-            "ipo_id": str(ipo.id),
-            "ticker": ipo.ticker or "",
-        }
-
-        return await self._send_filtered(
-            "notify_ceiling_break", title, body, data,
-            f"Tavan bozuldu: {ipo.ticker}",
-            channel_id="ceiling_alerts_v2",
-        )
+    # NOTE: notify_ceiling_broken() kaldirildi — kullanilmiyordu.
+    # Tavan/taban/dusus bildirimleri artik /api/v1/realtime-notification
+    # endpoint'i uzerinden StockNotificationSubscription bazli gonderiliyor.
+    # Kullanici toggle kontrolu: main.py _type_toggle_map ile yapiliyor.
 
     # -------------------------------------------------------
     # KAP Haber Bildirimleri

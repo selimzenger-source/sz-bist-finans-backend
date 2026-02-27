@@ -2409,6 +2409,17 @@ async def send_realtime_notification(
         if not user.notifications_enabled:
             continue
 
+        # Kullanici bazli bildirim tipi toggle kontrolu
+        _type_toggle_map = {
+            "tavan_bozulma": "notify_ceiling_break",
+            "taban_acilma": "notify_taban_break",
+            "gunluk_acilis_kapanis": "notify_daily_open_close",
+            "yuzde_dusus": "notify_percent_drop",
+        }
+        _toggle_field = _type_toggle_map.get(data.notification_type)
+        if _toggle_field and not getattr(user, _toggle_field, True):
+            continue  # Kullanici bu bildirim tipini kapatmis
+
         try:
             success = await notif_service._send_to_user(
                 user=user,
