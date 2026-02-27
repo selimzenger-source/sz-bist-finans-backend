@@ -95,18 +95,32 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
   - CAGR → "Yıllık Bileşik Büyüme Oranı", BDDK → tam yazılabilir (kurum adı)
   - SA → "Sermaye Artırımı", OS → "Ortak Satışı", HA → "Halka Arz"
   Kısaca: Okuyucu hiçbir kısaltmayı açmak zorunda kalmamalı.
-• "BULUNAMADI" / "EKSİK" YASAK: "Finansal tablo bulunamadı", "Veri tespit edilemedi",
-  "kritik finansal veriler eksik", "tam değerlendirme yapılamıyor" gibi ifadeler KESİNLİKLE YAZMA.
-  Bilgi yoksa o maddeyi hiç yazma — yokluğu rapor etme.
 
-  ÖNEMLİ UYARI: SPK mevzuatı gereği TÜM izahnamelerde şunlar ZORUNLU olarak bulunur:
+• "BULUNAMADI" / "EKSİK" YASAĞI (★ EN KRİTİK KURAL ★):
+  ASLA bu tür ifadeler kullanma:
+  - "bulunamadı", "eksik", "belirtilmemiş", "yer almıyor", "tespit edilemedi"
+  - "veri yok", "detay yok", "bilgi mevcut değil", "açıklama yapılmamış"
+  - "fon kullanım yerleri yer almıyor", "finansal tablo bulunamadı"
+  - "tam değerlendirme yapılamıyor", "yeterli bilgi yok"
+
+  ★★★ ÇOK ÖNEMLİ UYARI ★★★
+  SPK mevzuatı gereği TÜM izahnamelerde şunlar ZORUNLU olarak bulunur:
   - Net kâr/zarar, bilanço, gelir tablosu, nakit akış tablosu
+  - Fon kullanım yerleri (oran ve tutar bazında)
   - Ortakların hisse satış yasağı (lock-up) süreleri ve taahhütleri
   - Halka arz sonrası pay dağılım oranları (tahsisat)
-  - Borç yapısı, özkaynak bilgileri
-  Bu bilgiler PDF'te MUTLAKA vardır. Eğer metin çıkarımında bulamadıysan, bu senin
-  okuyamadığın anlamına gelir — "eksik" veya "belirtilmemiş" deme. O maddeyi ATLA.
+  - Borç yapısı, özkaynak bilgileri, ortaklık yapısı
+
+  Bu bilgiler PDF'te MUTLAKA vardır. Eğer metin çıkarımında bulamadıysan,
+  bu senin okuyamadığın anlamına gelir — bu BİLGİNİN YOK OLDUĞU anlamına GELMEZ.
+  "Eksik" veya "belirtilmemiş" deme. O maddeyi ATLA — yokluğunu rapor ETME.
   Sakın "veriler eksik" diye olumsuz madde yazma — bu HER ZAMAN YANLIŞLIK olur.
+  "Fon kullanım yerleri yer almıyor" gibi bir madde yazmak BÜYÜK HATADIR
+  çünkü SPK izahnamesinde fon kullanımı ZORUNLU alan.
+
+  ★ ÖZEL DURUM: Şirketin farklı projeleri, farklı lokasyonlardaki yatırımları,
+    gelecek planları, yeni projeler, kapasite genişleme vb. bilgileri de PDF'te
+    olabilir. Bunları göremediğin için "yok" deme. O konuyu atla.
 
 • YAZIM HATASI: Her kelimeyi kontrol et. OCR kaynaklı bozukluklar olabilir — düzelt:
   "üçlü" → "güçlü", "ıasılat" → "hasılat" gibi bozuk kelimeleri düzgün yaz.
@@ -122,14 +136,25 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
 ✗ "Finansal tablo bulunamadı" → Bilgi yoksa o maddeyi YAZMA
 ✗ "Detaylı veri mevcut değil" → Yokluğu rapor etme, var olanı yaz
 
-═══ DİL VE ANLAŞILIRLIK ═══
-• Küçük yatırımcı için yaz — finans profesyoneli için DEĞİL.
-• Her teknik terimi açıkla veya günlük dille ifade et:
-  - "EBITDA marjı %18" yerine → "Faiz ve amortisman öncesi kâr marjı %18"
-  - "Cari oran 0.8" yerine → "Kısa vadeli borçlarını karşılama oranı 0.8 (1'in altı riskli)"
-  - "Lock-up 365 gün" yerine → "Ortaklar 1 yıl boyunca hisse satamayacak"
-• Rakamları anlaşılır yaz: 1.200.000.000 TL yerine "1.2 milyar TL"
-• Karşılaştırma yap: "Sektör ortalaması %12 iken bu şirket %28" gibi
+═══ DİL VE ANLAŞILIRLIK (★ ÇOK ÖNEMLİ ★) ═══
+• HEDEF KİTLE: Borsaya yeni başlamış, 18-55 yaş arası bireysel küçük yatırımcı.
+  Finans eğitimi almamış, teknik terimleri bilmiyor. Annesine anlatır gibi yaz.
+• KISA CÜMLE KURAL: Her madde TAM BİR CÜMLE olmalı. Yarım cümle BIRAKMA.
+  Cümle sığmıyorsa KISALT — bilgiyi özet ver, detaya girme.
+  KÖTÜ: "Halka arz yapısı karma yöntemdir: 208.4 milyon TL nominal değerli pay sermaye artırımı yoluyla şirkete, 87 milyon TL nominal değerli pay ise..."  (YARIM KALDI!)
+  İYİ: "Halka arz gelirinin %70'i şirkete, %30'u mevcut ortaklara gidecek"
+• TEKNİK TERİM YASAK — günlük dille yaz:
+  - "EBITDA marjı %18" → "Vergiden ve amortisman giderlerinden önceki kâr oranı %18"
+  - "Cari oran 0.8" → "Kısa vadeli borçlarını ödeyecek parası yetersiz (0.8 — 1'in altı riskli)"
+  - "Lock-up 365 gün" → "Ortaklar 1 yıl boyunca hisse satamayacak"
+  - "Nominal değerli pay" → "pay" veya "hisse" de yeter
+  - "Sermaye artırımı yoluyla" → "şirkete girecek para"
+  - "Ortak satışı" → "mevcut ortakların cebine gidecek para"
+  - "Bağımsız değerleme" → "uzman kuruluşun biçtiği değer"
+• RAKAM FORMATI: 1.200.000.000 TL → "1.2 milyar TL" yaz. Büyük sayıları okunaklı yaz.
+• KARŞILAŞTIRMA YAP: "Sektör ortalaması %12 iken bu şirket %28" gibi — bağlam ver.
+• MAX 180 KARAKTER: Her madde en fazla 180 karakter. Sığmıyorsa bilgiyi özetle.
+  Cümlenin ortasında kesilmesi ASLA kabul edilemez — kısa ve tam cümle yaz.
 
 ═══ İYİ MADDE ÖRNEKLERİ (bu kalitede yaz) ═══
 ✓ "Son 3 yılda satışlar her yıl ortalama %78 büyümüş — sektör ortalamasının 6 katı"
@@ -148,13 +173,21 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
    • Faiz ve amortisman öncesi kâr marjı: sektör ortalamasıyla karşılaştır
 
 2. HALKA ARZ YAPISI VE FON KULLANIMI — ★ EN KRİTİK ★:
-   ★ MUTLAKA kontrol et: Halka arz sadece sermaye artırımı mı, yoksa ortak satışı da var mı?
-   ★ Sermaye artırımı = para şirkete girer. Ortak satışı = para mevcut ortakların cebine gider.
-   ★ "karma yöntem" varsa İKİSİNİ DE ayrı ayrı yaz (tutar + nominal + yüzde).
+   ★ ÇİFT YÖNLÜ KONTROL: Sadece "sermaye artırımı" tutarına odaklanma!
+     İzahnamede mutlaka "mevcut pay satışı" (ortak satışı) olup olmadığını ara.
+     Halka arz gelirinin yüzde kaçı şirkete girecek, yüzde kaçı ortaklara gidecek — NET yaz.
+   ★ Sermaye artırımı = para şirkete girer (yatırımcı lehine).
+     Ortak satışı = para mevcut ortakların cebine gider (dikkat gerektiren durum).
+   ★ "karma yöntem" varsa İKİSİNİ DE ayrı ayrı yaz (tutar + yüzde — nominal değer yazma).
    ★ "satan pay sahipleri" bölümünü kontrol et — kim ne kadar satıyor?
    ★ "Halka arz gelirinin tamamı şirkete gidiyor" ANCAK gerçekten ortak satışı YOKSA yazılabilir.
    ★ Emin değilsen "tamamı şirkete" YAZMA — bu çok kritik bir hata olur.
-   ★ Fon kullanım yerleri: ne kadar büyümeye, ne kadar borç ödemeye, ne kadar işletme sermayesine?
+   ★ FON KULLANIM YERLERİ — şu anahtar kelimeleri ara:
+     "fon kullanım yeri", "halka arz gelirinin kullanılacağı yerler",
+     "izahnamenin 30. bölümü", "elde edilecek net nakit", "toplanan fonların kullanımı",
+     "yatırım projesi", "kapasite artırımı", "işletme sermayesi", "borç kapama"
+     Bu bilgi SPK izahnamelerinde ZORUNLU bulunur — bulamadıysan ATLA, "yok" deme.
+   ★ Fon kullanımını yüzdelerle belirt: ne kadar yatırıma, ne kadar borca, ne kadar işletmeye.
    ★ Eğer gelirin büyük kısmı borç ödemeye gidiyorsa, bu olumsuz bir işaret.
 
 3. DEĞERLEME (varsa):
@@ -204,10 +237,17 @@ Yazdığın her madde için şu soruları sor:
 • Hedef: olumlu 7-10, olumsuz 7-10. Olabildiğince fazla somut madde yaz. PDF yetersizse 4-5 de olur — uydurma YASAK.
 • Her madde FARKLI konu. Aynı konuyu tekrarlama — tekrar edeceksen yazma.
 • En az 3 farklı kategori (Finansal/Risk/Fon/Ortaklık/Büyüme/Hukuki).
-• Max 140 karakter. Kısa, yoğun, bilgi dolu. Sade Türkçe, net. KISALTMA YOK.
+• Max 180 karakter. KISA, yoğun, bilgi dolu. Sade Türkçe, net. KISALTMA YOK.
+• ★ HER MADDE TAM CÜMLE OLMALI — cümle ortasında BİTİRME, kesME. ★
+  Sığmıyorsa bilgiyi ÖZETLE, kısalt. Yarım cümle ASLA kabul edilmez.
 • "summary" alanı: DÜZ CÜMLE yaz. Özne + nesne + yüklem sırası. Devrik yapma.
-• Bilgi yoksa "bulunamadı" deme — o maddeyi hiç yazma.
-• YAZIM KONTROLÜ: Yazdıktan sonra tüm maddeleri oku — yazım hatası, kısaltma, cümle bozukluğu varsa düzelt.
+• Bilgi yoksa "bulunamadı" deme — o maddeyi hiç yazma, yokluğunu rapor etme.
+• ★ "eksik", "bulunamadı", "belirtilmemiş", "yer almıyor" kelimelerini İÇEREN HERHANGİ BİR MADDE YAZMA. ★
+• YAZIM KONTROLÜ: Yazdıktan sonra tüm maddeleri oku:
+  1. Cümle tam mı? Yarıda mı kalmış? → Yarımsa kısalt
+  2. Teknik terim var mı? → Varsa günlük dile çevir
+  3. Kısaltma var mı? → Varsa aç
+  4. "eksik/bulunamadı" var mı? → Varsa o maddeyi SİL
 SADECE JSON döndür — başka hiçbir şey yazma."""
 
 
@@ -944,6 +984,14 @@ async def analyze_with_ai(
             "kritik finansal veri", "tablo tespit", "izahnamede yer almı",
             "net bir değerlendirme", "net bir degerlendirme",
             "sınırlı bilgi", "sinirli bilgi", "yeterli veri",
+            # v3: Ek halüsinasyon kalıpları
+            "yer almıyor", "yer almiyor", "yer almamakta",
+            "açıklama yapılmamış", "aciklama yapilmamis",
+            "fon kullanım yerleri yer alm", "fon kullanim yerleri yer alm",
+            "detaylı bilgi verilmemiş", "detayli bilgi verilmemis",
+            "okuyamadım", "okuyamadim", "çözümleyemedim", "cozumleyemedim",
+            "ayrıntılı dağılım", "ayrintili dagilim",
+            "net bir şekilde belirtilm", "net bir sekilde belirtilm",
         ]
 
         # Genellemeleri ve bilgi değeri düşük maddeleri filtrele
@@ -997,9 +1045,27 @@ async def analyze_with_ai(
         result["positives"] = [_fix_abbreviations(p) for p in result["positives"]]
         result["negatives"] = [_fix_abbreviations(n) for n in result["negatives"]]
 
-        # Karakter limitini uygula (140 karakter/madde)
-        result["positives"] = [p[:140] for p in result["positives"][:10]]
-        result["negatives"] = [n[:140] for n in result["negatives"][:10]]
+        # Karakter limitini uygula (220 karakter/madde — 180 prompt limiti + güvenlik payı)
+        # Cümleyi ortasından kesmek yerine, son tam kelimede kes
+        def _smart_truncate(text: str, max_len: int = 220) -> str:
+            if len(text) <= max_len:
+                return text
+            # Son noktaya kadar kes (tam cümle)
+            truncated = text[:max_len]
+            last_period = truncated.rfind('.')
+            last_semi = truncated.rfind(';')
+            last_dash = truncated.rfind(' —')
+            cut_point = max(last_period, last_semi, last_dash)
+            if cut_point > max_len * 0.5:  # En az yarısı kalmalı
+                return truncated[:cut_point + 1].strip()
+            # Son boşluğa kadar kes (tam kelime)
+            last_space = truncated.rfind(' ')
+            if last_space > max_len * 0.6:
+                return truncated[:last_space].strip()
+            return truncated.strip()
+
+        result["positives"] = [_smart_truncate(p) for p in result["positives"][:10]]
+        result["negatives"] = [_smart_truncate(n) for n in result["negatives"][:10]]
 
         logger.info(
             "İzahname AI analizi tamamlandı: %s — %d olumlu, %d olumsuz, risk=%s",
