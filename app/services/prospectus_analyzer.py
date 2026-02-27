@@ -74,6 +74,31 @@ _FINANCE_KEYWORDS = [
     "serbest nakit akışı", "free cash flow",
 ]
 
+# Faaliyet alanı / şirket detayları anahtar kelimeleri
+_ACTIVITY_KEYWORDS = [
+    "faaliyet alanı", "faaliyet konusu", "ana faaliyet",
+    "ürün", "hizmet", "üretim", "üretim kapasitesi",
+    "tesis", "fabrika", "şube", "mağaza",
+    "müşteri", "pazar", "sektör", "rekabet",
+    "çalışan", "personel", "istihdam", "insan kaynakları",
+    "coğrafi dağılım", "ihracat", "ithalat",
+    "kuruluş", "tarihçe", "şirketin konusu",
+    "şirketin amacı", "ticaret sicil",
+]
+
+# Mal varlıkları / fiziksel aktifler anahtar kelimeleri
+_ASSET_KEYWORDS = [
+    "maddi duran varlık", "maddi duran varlik",
+    "gayrimenkul", "taşınmaz", "tasinmaz", "arsa", "arazi",
+    "bina", "depo", "fabrika binası",
+    "makine", "ekipman", "tesis", "teçhizat",
+    "yatırım amaçlı gayrimenkul", "taşıt", "araç",
+    "maddi olmayan duran varlık", "patent", "lisans hakkı",
+    "marka", "şerefiye", "goodwill",
+    "kullanım hakkı", "kira", "finansal kiralama",
+    "stok", "envanter", "hammadde",
+]
+
 # ─────────────────────────────────────────────────────────────
 # SYSTEM PROMPT — Hallüsinasyon koruması + Yüksek kalite
 # ─────────────────────────────────────────────────────────────
@@ -165,14 +190,24 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
 
 ═══ ANALİZ ADIMLARI (sırayla ve adım adım tara — hiçbirini ATLAMA) ═══
 
-1. FİNANSAL SAĞLIK (en az 3 madde):
+1. ŞİRKET FAALİYETLERİ VE SEKTÖR (en az 2 madde):
+   • Şirketin ana faaliyet alanı ne? Ne üretiyor, ne satıyor, ne hizmet veriyor?
+   • Hangi sektörde, kaç yıldır faaliyet gösteriyor?
+   • Müşteri profili: bireysel mi, kurumsal mı, kamu mu? Hedef pazar neresi?
+   • Üretim kapasitesi, tesis sayısı, coğrafi konum — varsa belirt
+   • Çalışan sayısı (toplam, beyaz yaka, mavi yaka) — rakam varsa yaz
+   • Sektördeki konumu: pazar payı, rakiplere göre büyüklük
+   • NOT: Bu bölümde SADECE PDF'te yazan somut bilgileri ver.
+     Şirketin ne iş yaptığını bilmiyorsan veya PDF'ten çıkaramadıysan bu bölümü ATLA.
+
+2. FİNANSAL SAĞLIK (en az 3 madde):
    • Satışlar, net kâr/zarar, kârlılık trendi (son 3 yıl karşılaştırma)
    • Borç yapısı: toplam borç, kısa/uzun vadeli dağılımı, borç/özsermaye oranı
    • Nakit durumu: eldeki nakit, serbest nakit akışı, faiz karşılama oranı
    • Kısa vadeli borçları karşılama oranı (cari oran): 1'in altıysa riskli
    • Faiz ve amortisman öncesi kâr marjı: sektör ortalamasıyla karşılaştır
 
-2. HALKA ARZ YAPISI VE FON KULLANIMI — ★ EN KRİTİK ★:
+3. HALKA ARZ YAPISI VE FON KULLANIMI — ★ EN KRİTİK ★:
    ★ ÇİFT YÖNLÜ KONTROL: Sadece "sermaye artırımı" tutarına odaklanma!
      İzahnamede mutlaka "mevcut pay satışı" (ortak satışı) olup olmadığını ara.
      Halka arz gelirinin yüzde kaçı şirkete girecek, yüzde kaçı ortaklara gidecek — NET yaz.
@@ -190,30 +225,42 @@ SEN BİR ARAŞTIRMA RAPORU YAZIYORSUN — köşe yazısı DEĞİL. Her cümle bi
    ★ Fon kullanımını yüzdelerle belirt: ne kadar yatırıma, ne kadar borca, ne kadar işletmeye.
    ★ Eğer gelirin büyük kısmı borç ödemeye gidiyorsa, bu olumsuz bir işaret.
 
-3. DEĞERLEME (varsa):
+4. DEĞERLEME (varsa):
    • Halka arz fiyatı × toplam pay sayısı = piyasa değeri
    • Fiyat/Kazanç oranı: sektör ortalamasıyla karşılaştır (yüksekse pahalı)
    • Piyasa Değeri / Defter Değeri: 1'in altıysa ucuz, çok yüksekse dikkat
 
-4. RİSK FAKTÖRLERİ (en az 2 madde):
+5. MAL VARLIKLARI VE FİZİKSEL AKTİFLER (varsa — PDF'te bilgi bulursan yaz):
+   • Gayrimenkul portföyü: fabrika, arsa, bina, depo — adet ve toplam alan (m²)
+   • Maddi duran varlıklar toplamı (TL) — bilançodaki değer
+   • Üretim tesisleri: kapasite, kullanım oranı, konum
+   • Makine-ekipman: üretim hattı sayısı, teknoloji düzeyi
+   • Araç filosu, envanter — somut sayı varsa belirt
+   • Maddi olmayan varlıklar: marka değeri, patent, lisans, yazılım
+   • ★ ÖNEMLİ: Mal varlığı bilgisi bilanço dipnotlarında, "maddi duran varlıklar" veya
+     "yatırım amaçlı gayrimenkuller" bölümlerinde bulunur. Bulamazsan bu bölümü ATLA.
+
+6. RİSK FAKTÖRLERİ (en az 2 madde):
    • Lisans/ruhsat bağımlılığı, tek müşteri/tedarikçi yoğunlaşması
    • Kur riski, faiz riski, ham madde fiyat riski
    • Devam eden davalar — MUTLAKA tutar belirt
    • İlişkili taraf işlemleri — ciro içindeki payı
    • Denetçi görüşü: şartlı/olumsuz ise çok kritik
 
-5. ORTAKLIK VE YÖNETİM:
+7. ORTAKLIK VE YÖNETİM:
    • Halka arz sonrası ortaklık oranları
    • Hisse satış yasağı (lock-up) süreleri — 180 günden kısaysa olumsuz
    • İmtiyazlı pay var mı? Oy hakkı eşit mi?
    • Kar dağıtım politikası — yatırımcıya temettü dağıtılacak mı?
+   • Yönetim kadrosu deneyimi — kilit isimlerin sektör tecrübesi (yıl)
 
-6. BÜYÜME POTANSİYELİ:
+8. BÜYÜME POTANSİYELİ:
    • Yıllık satış büyümesi, pazar payı, kapasite artışı
    • İhracat oranı, coğrafi çeşitlilik
    • Araştırma-geliştirme yatırımları, patent/lisans
+   • Yeni projeler, genişleme planları — somut yatırım tutarı varsa belirt
 
-7. HUKUKİ VE DÜZENLEYİCİ:
+9. HUKUKİ VE DÜZENLEYİCİ:
    • Devam eden davalar (tutar!), vergi ihtilafları
    • Düzenleyici risk, sektörel kısıtlamalar
 
@@ -769,10 +816,14 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
         finance_section_text = []
         fund_usage_text = []      # Fon kullanım yerleri
         ownership_text = []       # Ortaklık yapısı
+        activity_text = []        # Şirket faaliyet bilgileri
+        asset_text = []           # Mal varlıkları / fiziksel aktifler
         in_risk_section = False
         in_finance_section = False
         in_fund_section = False
         in_ownership_section = False
+        in_activity_section = False
+        in_asset_section = False
 
         for i, text in page_tuples:
             all_pages_text.append(text)
@@ -834,6 +885,42 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             if in_ownership_section:
                 ownership_text.append(f"[S.{i+1}] {text}")
 
+            # Şirket faaliyet bilgileri bölümü
+            if any(kw in text_lower for kw in [
+                "faaliyet alanı", "faaliyet konusu", "ana faaliyet",
+                "şirketin konusu", "şirketin amacı", "ticaret sicil",
+                "üretim kapasitesi", "tesis", "fabrika",
+                "çalışan sayısı", "personel", "istihdam",
+                "müşteri profil", "hedef pazar", "pazar payı",
+                "sektör", "rekabet", "rakip",
+                "kuruluş", "tarihçe", "şirket hakkında",
+                "coğrafi dağılım", "şube", "mağaza",
+                "ihracat", "ithalat", "dış ticaret",
+            ]):
+                in_activity_section = True
+            if in_activity_section and len(activity_text) > 12:
+                in_activity_section = False
+            if in_activity_section:
+                activity_text.append(f"[S.{i+1}] {text}")
+
+            # Mal varlıkları / fiziksel aktifler bölümü
+            if any(kw in text_lower for kw in [
+                "maddi duran varlık", "maddi duran varlik",
+                "gayrimenkul", "taşınmaz", "tasinmaz",
+                "arsa", "arazi", "bina", "depo",
+                "makine", "ekipman", "teçhizat",
+                "yatırım amaçlı gayrimenkul",
+                "taşıt", "araç filosu",
+                "maddi olmayan duran varlık", "patent",
+                "lisans hakkı", "marka", "şerefiye",
+                "kullanım hakkı", "finansal kiralama",
+            ]):
+                in_asset_section = True
+            if in_asset_section and len(asset_text) > 10:
+                in_asset_section = False
+            if in_asset_section:
+                asset_text.append(f"[S.{i+1}] {text}")
+
         if not all_pages_text:
             logger.warning("PDF’ten metin çıkarılamadı: %s", pdf_path)
             return None, 0
@@ -869,7 +956,17 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             own_combined = "\n\n=== ORTAKLIK YAPISI & LOCK-UP ===\n" + "\n".join(ownership_text)
             combined += own_combined[:15_000]
 
-        # 6. Genel metin — baş + orta + son (ortayı ATLAMIYORUZ)
+        # 6. Şirket faaliyet bilgileri
+        if activity_text:
+            act_combined = "\n\n=== ŞİRKET FAALİYET BİLGİLERİ ===\n" + "\n".join(activity_text)
+            combined += act_combined[:15_000]
+
+        # 7. Mal varlıkları / fiziksel aktifler
+        if asset_text:
+            asset_combined = "\n\n=== MAL VARLIKLARI & FİZİKSEL AKTİFLER ===\n" + "\n".join(asset_text)
+            combined += asset_combined[:12_000]
+
+        # 8. Genel metin — baş + orta + son (ortayı ATLAMIYORUZ)
         full_text = "\n\n".join(all_pages_text)
         remaining_budget = _MAX_PDF_CHARS - len(combined)
         if remaining_budget > 10_000:
@@ -889,12 +986,14 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
 
         pages_count = len(all_pages_text)
         logger.info(
-            "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d, fon=%d, ort=%d)",
+            "PDF metin çıkarıldı: %d sayfa → %d karakter (risk=%d, fin=%d, fon=%d, ort=%d, faal=%d, varlik=%d)",
             pages_count, len(combined),
             len("".join(risk_section_text)),
             len("".join(finance_section_text)),
             len("".join(fund_usage_text)),
             len("".join(ownership_text)),
+            len("".join(activity_text)),
+            len("".join(asset_text)),
         )
         return combined[:_MAX_PDF_CHARS], pages_count
 
