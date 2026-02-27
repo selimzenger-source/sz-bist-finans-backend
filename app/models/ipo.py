@@ -150,7 +150,7 @@ class IPO(Base):
         Boolean, default=False, comment="İzahname analiz tweeti atildi mi"
     )
     prospectus_image_base64: Mapped[str | None] = mapped_column(
-        Text, nullable=True, deferred=True, comment="İzahname analiz görseli (base64 PNG — Render disk silinince kaybolmasın)"
+        Text, nullable=True, comment="İzahname analiz görseli (base64 PNG — Render disk silinince kaybolmasın)"
     )
 
     # --- Tweet Tracking ---
