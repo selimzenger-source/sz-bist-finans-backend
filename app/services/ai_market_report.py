@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL = "gpt-4.1"
+_AI_MODEL = "gpt-5.2"
 _AI_TIMEOUT = 60  # Daha fazla veri isliyor, daha uzun sure
 
 # Yahoo Finance ticker'lari

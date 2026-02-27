@@ -4,7 +4,7 @@ IPO dagitima girdiginde (in_distribution) otomatik olarak AI analiz raporu ureti
 Rapor, kucuk yatirimcilar icin profesyonel analist kalitesinde yazilir.
 
 Versiyon 2: Gecmis tahsisat verileri, senaryo tablosu, izahname analizi entegre.
-Model: claude-sonnet-4-5 (Abacus RouteLLM uzerinden)
+Model: claude-sonnet-4-6 (Abacus RouteLLM uzerinden)
 """
 
 import gc
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL = "claude-sonnet-4-5"
+_AI_MODEL = "claude-sonnet-4-6"
 _AI_TIMEOUT = 150  # Daha fazla kontekst → daha uzun yanit suresi
 
 _SYSTEM_PROMPT = """Sen Turkiye'nin en deneyimli halka arz analistlerinden birisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun. Hedef kitlen: kucuk bireysel yatirimci.

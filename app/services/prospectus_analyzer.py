@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL   = "claude-sonnet-4-5"
+_AI_MODEL   = "claude-sonnet-4-6"
 _AI_TIMEOUT = 120   # Derin analiz için daha fazla süre
 
 # PDF çıkarımında max karakter (büyük PDF'ler için kırp)
