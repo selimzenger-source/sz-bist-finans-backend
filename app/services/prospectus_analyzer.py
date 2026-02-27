@@ -829,7 +829,28 @@ async def analyze_with_ai(
             logger.warning("AI az madde döndü: %d pozitif, %d negatif — %s",
                            pos_count, neg_count, company_name)
 
-        # Karakter limitini uygula (130 karakter/madde)
+        # ─── Hallüsinasyon filtresi: "eksik/bulunamadı" içeren maddeleri otomatik sil ───
+        _HALLUCINATION_PATTERNS = [
+            "bulunamadı", "bulunamadi", "eksik", "görülemiyor", "gorulemiyor",
+            "tespit edilemedi", "yapılamıyor", "yapilamiyor", "belirtilmemiş",
+            "belirtilmemis", "mevcut değil", "mevcut degil", "veri yok",
+            "bilgi yok", "okunamadı", "okunamadi", "çıkarılamadı", "cikarilamadi",
+            "yetersiz", "detay yok", "erişilemiyor", "erisilemiyor",
+        ]
+
+        def _is_hallucination(text: str) -> bool:
+            t = text.lower()
+            return any(pat in t for pat in _HALLUCINATION_PATTERNS)
+
+        orig_pos = len(result.get("positives", []))
+        orig_neg = len(result.get("negatives", []))
+        result["positives"] = [p for p in result.get("positives", []) if not _is_hallucination(p)]
+        result["negatives"] = [n for n in result.get("negatives", []) if not _is_hallucination(n)]
+        filtered = (orig_pos - len(result["positives"])) + (orig_neg - len(result["negatives"]))
+        if filtered:
+            logger.info("Hallüsinasyon filtresi: %d madde silindi — %s", filtered, company_name)
+
+        # Karakter limitini uygula (140 karakter/madde)
         result["positives"] = [p[:140] for p in result["positives"][:10]]
         result["negatives"] = [n[:140] for n in result["negatives"][:10]]
 

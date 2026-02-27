@@ -202,8 +202,8 @@ def generate_prospectus_analysis_image(
     try:
         _ensure_dirs()
 
-        positives   = analysis.get("positives", [])[:7]
-        negatives   = analysis.get("negatives", [])[:7]
+        positives   = analysis.get("positives", [])[:10]
+        negatives   = analysis.get("negatives", [])[:10]
         summary     = analysis.get("summary", "")[:300]
         risk_level  = analysis.get("risk_level", "orta")
         key_risk    = analysis.get("key_risk", "")
@@ -299,8 +299,9 @@ def generate_prospectus_analysis_image(
         draw.text((logo_x, brand_y), "SZ Algo Finans", fill=WHITE, font=f_header_brand)
         draw.text((logo_x, brand_y + 44), "İzahname Analizi", fill=GRAY, font=f_header_sm)
 
-        # Şirket adı — orta
-        company_short = company_name if len(company_name) <= 42 else company_name[:40] + "…"
+        # Şirket adı — orta (sadece ilk 2 kelime: "Gentaş Kimya" gibi)
+        _words = company_name.strip().split()
+        company_short = " ".join(_words[:2]).upper() if len(_words) >= 2 else company_name.upper()
         cb = f_badge.getbbox(company_short)
         cw = cb[2] - cb[0] + 28
         ch = 34
