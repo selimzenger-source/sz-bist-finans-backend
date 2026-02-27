@@ -1197,66 +1197,65 @@ async def check_morning_tweets():
                 # Bildirim ve tweet ayni anda atilir (check_morning_tweets yerine)
 
         # ═══════════════════════════════════════════════════════════════
-        # CATCH-UP: Kacirilan dagitim tweetleri — subscription_start gecmis
-        # ama distribution_tweeted hala False olan IPO'lar icin
-        # v2: Timing penceresi kacirilsa bile tweet atilmasini garanti eder
-        # Sadece 09:00-10:00 TR arasinda (is saatleri icinde) calisir
+        # CATCH-UP: Kacirilan dagitim tweetleri + bildirimler
+        # distribution_tweeted hala False/None olan in_distribution IPO'lar
+        # v3: Saat kisitlamasi KALDIRILDI — her 5 dk calisir, max 30 dk gecikme
+        # Dedup: _timing_already_sent ile ayni gun tekrar gonderilmez
         # ═══════════════════════════════════════════════════════════════
-        if 9 <= now_tr.hour <= 10:
-            catchup_result = await db.execute(
-                select(IPO).where(
-                    and_(
-                        IPO.status.in_(["in_distribution", "active"]),
-                        IPO.archived == False,
-                        IPO.subscription_start <= today,
-                        or_(
-                            IPO.distribution_tweeted == False,
-                            IPO.distribution_tweeted.is_(None),
-                        ),
-                    )
+        catchup_result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status.in_(["in_distribution", "active"]),
+                    IPO.archived == False,
+                    IPO.subscription_start <= today,
+                    or_(
+                        IPO.distribution_tweeted == False,
+                        IPO.distribution_tweeted.is_(None),
+                    ),
                 )
             )
-            catchup_ipos = list(catchup_result.scalars().all())
+        )
+        catchup_ipos = list(catchup_result.scalars().all())
 
-            for ipo in catchup_ipos:
-                if _timing_already_sent(ipo.id, "distribution_catchup_tweet"):
-                    continue
+        for ipo in catchup_ipos:
+            if _timing_already_sent(ipo.id, "distribution_catchup_tweet"):
+                continue
 
-                logger.warning(
-                    "CATCH-UP: Kacirilan dagitim tweeti + bildirim — %s (sub_start=%s, bugun=%s)",
-                    ipo.ticker or ipo.company_name, ipo.subscription_start, today,
-                )
+            logger.warning(
+                "CATCH-UP: Kacirilan dagitim tweeti + bildirim — %s (sub_start=%s, bugun=%s)",
+                ipo.ticker or ipo.company_name, ipo.subscription_start, today,
+            )
 
-                # ── Tweet catch-up ──
-                if tweet_idx > 0:
-                    await asyncio.sleep(random.uniform(50, 55))
+            # ── Tweet catch-up ──
+            if tweet_idx > 0:
+                await asyncio.sleep(random.uniform(50, 55))
 
-                tw_ok = tweet_distribution_start(ipo)
-                await notify_tweet_sent("dagitim_catchup", ipo.ticker or ipo.company_name, tw_ok)
-                _timing_mark_sent(ipo.id, "distribution_catchup_tweet")
+            tw_ok = tweet_distribution_start(ipo)
+            await notify_tweet_sent("dagitim_catchup", ipo.ticker or ipo.company_name, tw_ok)
+            _timing_mark_sent(ipo.id, "distribution_catchup_tweet")
 
-                if tw_ok:
-                    ipo.distribution_tweeted = True
-                    await db.commit()
-                tweet_idx += 1
+            if tw_ok:
+                ipo.distribution_tweeted = True
+                await db.commit()
+            tweet_idx += 1
 
-                # ── Push bildirim catch-up ──
-                # Tweet kactiysa bildirim de kacmis olabilir — tekrar gonder
-                try:
-                    from app.services.notification import NotificationService
-                    notif_service = NotificationService(db)
-                    sent = await notif_service.notify_ipo_subscription_start(ipo)
-                    logger.info(
-                        "CATCH-UP bildirim: %s — %s kisi",
-                        ipo.ticker or ipo.company_name, sent,
-                    )
-                except Exception as e:
-                    logger.warning("CATCH-UP bildirim hatasi: %s — %s", ipo.ticker or ipo.company_name, e)
-
+            # ── Push bildirim catch-up ──
+            # Tweet kactiysa bildirim de kacmis olabilir — tekrar gonder
+            try:
+                from app.services.notification import NotificationService
+                notif_service = NotificationService(db)
+                sent = await notif_service.notify_ipo_subscription_start(ipo)
                 logger.info(
-                    "CATCH-UP dagitim tweeti: %s — tw_ok=%s",
-                    ipo.ticker or ipo.company_name, tw_ok,
+                    "CATCH-UP bildirim: %s — %s kisi",
+                    ipo.ticker or ipo.company_name, sent,
                 )
+            except Exception as e:
+                logger.warning("CATCH-UP bildirim hatasi: %s — %s", ipo.ticker or ipo.company_name, e)
+
+            logger.info(
+                "CATCH-UP tamamlandi: %s — tw_ok=%s",
+                ipo.ticker or ipo.company_name, tw_ok,
+            )
 
         if tweet_idx > 0:
             logger.info("Sabah tweet kontrolu: %d tweet atildi (catch-up dahil)", tweet_idx)
