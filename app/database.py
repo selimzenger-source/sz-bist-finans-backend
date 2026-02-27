@@ -56,21 +56,30 @@ async def get_db() -> AsyncSession:
 async def init_db():
     """Tablo olusturma + migration (yeni kolon ekleme)."""
     async with engine.begin() as conn:
+        # Güvenlik: hiçbir migration lock bekleyerek hang etmesin
+        try:
+            await conn.execute(text("SET lock_timeout = '5s'"))
+            await conn.execute(text("SET statement_timeout = '30s'"))
+        except Exception:
+            pass  # SQLite'da bu komutlar yoktur
+
         # Zombie bağlantıları öldür — önceki deploy'dan kalan idle transaction'lar
-        # ipos tablosunu kilitleyebiliyor
         try:
             await conn.execute(text("""
                 SELECT pg_terminate_backend(pid)
                 FROM pg_stat_activity
                 WHERE datname = current_database()
                   AND pid <> pg_backend_pid()
-                  AND state = 'idle in transaction'
+                  AND state IN ('idle in transaction', 'idle in transaction (aborted)')
             """))
             logger.info("Zombie bağlantılar temizlendi")
         except Exception:
             pass  # SQLite'da veya yetki yoksa sessizce atla
 
-        await conn.run_sync(Base.metadata.create_all)
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+        except Exception as e:
+            logger.warning("create_all hatası (devam ediyor): %s", e)
 
         # v2 migration: durum + pct_change kolonlari
         try:
@@ -443,3 +452,10 @@ async def init_db():
 
         # v37 migration: DEVRE DIŞI — izahname analizleri admin panelden temizlenecek
         # Üretim ortamında sorun çıkardı, güvenli şekilde elle yapılacak.
+
+        # Timeout'ları resetle — normal çalışma için
+        try:
+            await conn.execute(text("SET lock_timeout = '0'"))
+            await conn.execute(text("SET statement_timeout = '0'"))
+        except Exception:
+            pass
