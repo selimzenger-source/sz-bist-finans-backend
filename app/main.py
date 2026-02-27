@@ -4157,6 +4157,53 @@ async def admin_delete_ipo(request: Request, ipo_id: int, db: AsyncSession = Dep
 
 
 # -------------------------------------------------------
+# Admin: AI IPO Raporu Oluştur / Yeniden Oluştur
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/generate-ai-report/{ipo_id}")
+@limiter.limit("10/minute")
+async def admin_generate_ai_report(request: Request, ipo_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Belirli bir IPO icin AI raporunu olusturur veya yeniden olusturur.
+
+    {"admin_password": "...", "force": true}
+    force=true ise mevcut rapor silinir ve yeniden olusturulur.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.ipo import IPO
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    ticker = ipo.ticker or ipo.company_name
+    force = payload.get("force", False)
+
+    if ipo.ai_report and not force:
+        return {
+            "success": True,
+            "message": f"{ticker} zaten AI raporu mevcut. Yeniden oluşturmak için force=true gönderin.",
+            "already_exists": True,
+        }
+
+    # Background task olarak başlat (v3: force parametresi destegi)
+    import asyncio
+    from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+    asyncio.create_task(generate_and_save_ipo_report(ipo_id, force=force))
+
+    logger.info(f"Admin: AI rapor üretimi başlatıldı — {ticker} (id={ipo_id}, force={force})")
+
+    return {
+        "success": True,
+        "message": f"{ticker} için AI rapor üretimi başlatıldı. 30-60 saniye içinde hazır olacak.",
+        "ipo_id": ipo_id,
+        "ticker": ticker,
+        "force": force,
+    }
+
+
+# -------------------------------------------------------
 # Admin: BIST 50 Endeks Yonetimi
 # -------------------------------------------------------
 
