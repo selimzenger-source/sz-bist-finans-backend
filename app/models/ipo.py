@@ -149,9 +149,6 @@ class IPO(Base):
     prospectus_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="İzahname analiz tweeti atildi mi"
     )
-    prospectus_image_base64: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="İzahname analiz görseli (base64 PNG — Render disk silinince kaybolmasın)"
-    )
 
     # --- Tweet Tracking ---
     intro_tweeted: Mapped[bool] = mapped_column(

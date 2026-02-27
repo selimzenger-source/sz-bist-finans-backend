@@ -435,44 +435,10 @@ def generate_prospectus_analysis_image(
         # ─── Watermark ────────────────────────────────────────
         _draw_bg_watermark(img, width, total_h)
 
-        # ─── Kaydet (disk + base64 → DB) ────────────────────────
-        import base64
-        import io
-
-        # 1. Disk'e kaydet (lokal test / fallback)
+        # ─── Kaydet ────────────────────────────────────────────
         filename = f"prospectus_{ipo_id}.png"
         filepath = os.path.join(_PROSPECTUS_DIR, filename)
         img.save(filepath, "PNG", optimize=True)
-
-        # 2. Base64 olarak DB'ye kaydet (Render ephemeral disk silinince kaybolmasın)
-        buf = io.BytesIO()
-        img.save(buf, "PNG", optimize=True)
-        b64_data = base64.b64encode(buf.getvalue()).decode("utf-8")
-        buf.close()
-
-        try:
-            from app.database import async_session
-            from app.models.ipo import IPO
-            from sqlalchemy import select
-            import asyncio
-
-            async def _save_base64():
-                async with async_session() as db:
-                    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
-                    ipo = result.scalar_one_or_none()
-                    if ipo:
-                        ipo.prospectus_image_base64 = b64_data
-                        await db.commit()
-                        logger.info("İzahname görseli DB'ye kaydedildi: ipo_id=%d (%d KB base64)", ipo_id, len(b64_data) // 1024)
-
-            # sync fonksiyondan async çağırma (event loop zaten çalışıyorsa)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(_save_base64())
-            except RuntimeError:
-                asyncio.run(_save_base64())
-        except Exception as db_err:
-            logger.warning("İzahname görseli DB kayıt hatası: %s", db_err)
 
         file_size = os.path.getsize(filepath)
         logger.info(

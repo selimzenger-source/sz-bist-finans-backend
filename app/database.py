@@ -422,16 +422,7 @@ async def init_db():
         except Exception:
             pass
 
-        # v36 migration: ipos.prospectus_image_base64 (Render ephemeral disk sorunu — görsel DB'de kalıcı)
-        # lock_timeout ile koruma — eski instance bağlıyken hang etmesin
-        try:
-            await conn.execute(text("SET lock_timeout = '5s'"))
-            await conn.execute(
-                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS prospectus_image_base64 TEXT")
-            )
-            await conn.execute(text("SET lock_timeout = '0'"))
-        except Exception:
-            logger.warning("v36 migration atlandı (lock timeout) — sonraki restart'ta denenecek")
+        # v36 migration: KALDIRILDI — prospectus_image_base64 ORM'den çıkarıldı
 
         # v37 migration: Eski hatalı izahname analizlerini temizle
         # ÖNEMLİ: AI raporları TEMİZLENMEDİ — scheduler hepsini aynı anda üretmeye
