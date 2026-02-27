@@ -622,6 +622,47 @@ class NotificationService:
     # Kullanici toggle kontrolu: main.py _type_toggle_map ile yapiliyor.
 
     # -------------------------------------------------------
+    # SPK Basvuru Bildirimleri
+    # -------------------------------------------------------
+
+    async def notify_spk_applications(self, company_names: list[str]) -> int:
+        """SPK'ya halka arz onay basvurusu yapan yeni sirketleri bildirir.
+
+        Toplu bildirim — ayni scrape dongusunde tespit edilen tum sirketler
+        tek bir push bildirimde gonderilir.
+
+        Filtre: notify_new_ipo (halka arz haberleri isteyen kullanicilar).
+        ⚠️ Title'da "BAŞVURU" kelimesi on planda — yeni halka arz algisi yaratmamali.
+        """
+        if not company_names:
+            return 0
+
+        title = "📝 SPK Halka Arz Başvurusu"
+
+        # Body olustur — sirket sayisina gore
+        count = len(company_names)
+        if count == 1:
+            body = f"{company_names[0]}, SPK'ya halka arz onay başvurusunda bulundu"
+        elif count == 2:
+            body = f"{company_names[0]} ve {company_names[1]}, SPK'ya halka arz onay başvurusunda bulundu"
+        elif count <= 4:
+            joined = ", ".join(company_names[:-1]) + f" ve {company_names[-1]}"
+            body = f"{joined}, SPK'ya halka arz onay başvurusunda bulundu"
+        else:
+            body = f"{count} yeni şirket SPK'ya halka arz onay başvurusunda bulundu"
+
+        data = {
+            "type": "spk_application",
+            "count": str(count),
+        }
+
+        return await self._send_filtered(
+            "notify_new_ipo", title, body, data,
+            f"SPK basvuru bildirimi: {count} sirket",
+            channel_id="ipo_alerts_v2",
+        )
+
+    # -------------------------------------------------------
     # KAP Haber Bildirimleri
     # -------------------------------------------------------
 

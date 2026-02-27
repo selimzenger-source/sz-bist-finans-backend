@@ -4168,6 +4168,112 @@ async def admin_delete_ipo(request: Request, ipo_id: int, db: AsyncSession = Dep
 
 
 # -------------------------------------------------------
+# -------------------------------------------------------
+# Admin: SPK Başvuru Tweet + Bildirim Gönder
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/tweet-spk-application")
+@limiter.limit("10/minute")
+async def admin_tweet_spk_application(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK basvuru sirketleri icin tweet ve/veya bildirim gonder.
+
+    Body:
+    {
+        "admin_password": "...",
+        "company_names": ["Sirket A", "Sirket B"],  // Belirli sirketler
+        "send_tweet": true,     // Tweet at (her sirket icin ayri)
+        "send_notification": true  // Toplu push bildirim gonder
+    }
+
+    company_names verilmezse: tum notified=False + tweeted=False olanlari isler.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.spk_application import SPKApplication
+    from app.services.notification import NotificationService
+    from app.services.twitter_service import tweet_spk_application
+
+    send_tweet = payload.get("send_tweet", True)
+    send_notification = payload.get("send_notification", True)
+    requested_names = payload.get("company_names", None)
+
+    # Hedef sirketleri belirle
+    if requested_names:
+        # Belirli sirketler istenmis
+        from sqlalchemy import or_
+        conditions = [SPKApplication.company_name.ilike(f"%{n}%") for n in requested_names]
+        result = await db.execute(
+            select(SPKApplication).where(
+                SPKApplication.status == "pending",
+                or_(*conditions),
+            )
+        )
+    else:
+        # Tum bildirim/tweet gonderilmemis olanlar
+        result = await db.execute(
+            select(SPKApplication).where(
+                SPKApplication.status == "pending",
+                (SPKApplication.notified == False) | (SPKApplication.tweeted == False),
+            )
+        )
+
+    targets = list(result.scalars().all())
+
+    if not targets:
+        return {"status": "no_targets", "message": "İşlenecek SPK başvurusu bulunamadı"}
+
+    tweets_sent = 0
+    tweets_failed = 0
+    notification_sent = 0
+
+    # 1. Toplu bildirim
+    if send_notification:
+        unnotified = [t for t in targets if not t.notified]
+        if unnotified:
+            short_names = []
+            for t in unnotified:
+                parts = t.company_name.split()
+                short = " ".join(parts[:3]) if len(parts) > 4 else t.company_name
+                short_names.append(short)
+
+            notif_service = NotificationService(db)
+            notification_sent = await notif_service.notify_spk_applications(short_names)
+
+            for t in unnotified:
+                t.notified = True
+
+    # 2. Her sirket icin tweet
+    if send_tweet:
+        import time as _time
+        untweeted = [t for t in targets if not t.tweeted]
+        for i, t in enumerate(untweeted):
+            if i > 0:
+                _time.sleep(5)
+            success = tweet_spk_application(t.company_name)
+            if success:
+                t.tweeted = True
+                tweets_sent += 1
+            else:
+                tweets_failed += 1
+
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "targets": len(targets),
+        "company_names": [t.company_name for t in targets],
+        "tweets_sent": tweets_sent,
+        "tweets_failed": tweets_failed,
+        "notification_sent_to": notification_sent,
+    }
+
+
+# -------------------------------------------------------
 # Admin: AI IPO Raporu Oluştur / Yeniden Oluştur
 # -------------------------------------------------------
 

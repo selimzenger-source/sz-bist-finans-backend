@@ -453,6 +453,17 @@ async def init_db():
         # v37 migration: DEVRE DIŞI — izahname analizleri admin panelden temizlenecek
         # Üretim ortamında sorun çıkardı, güvenli şekilde elle yapılacak.
 
+        # v38 migration: spk_applications bildirim/tweet takip alanlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE spk_applications ADD COLUMN IF NOT EXISTS notified BOOLEAN DEFAULT FALSE")
+            )
+            await conn.execute(
+                text("ALTER TABLE spk_applications ADD COLUMN IF NOT EXISTS tweeted BOOLEAN DEFAULT FALSE")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

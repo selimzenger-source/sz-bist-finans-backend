@@ -2062,3 +2062,140 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
     except Exception as e:
         logger.error("tweet_izahname_analysis hatasi: %s", e)
         return False
+
+
+# ================================================================
+# 18. SPK BAŞVURU TWEETİ (AI şirket araştırması ile)
+# ================================================================
+
+_SPK_APP_BANNER = os.path.join(_IMG_DIR, "spk_basvuru_banner.png")
+
+_SPK_APP_AI_SYSTEM_PROMPT = """Sen Türkiye finans piyasası ve şirketler hakkında bilgi sahibi bir uzmanısın.
+Verilen şirket hakkında kısa bir bilgilendirme hazırlayacaksın.
+
+KURALLAR:
+- SADECE tweet metnini yaz, başka hiçbir şey ekleme (açıklama, not vs.)
+- Max 250 karakter (hashtag/link ayrı eklenecek)
+- Türkçe, sade, bilgilendirici
+- "halka arz onay BAŞVURUSU" ifadesini kullan — bu ONAY değil, BAŞVURU aşaması
+- Şirketin ne iş yaptığını / faaliyet alanını 1-2 cümlede açıkla
+- Emoji az ama etkili kullan (max 2)
+- Yatırım tavsiyesi VERME
+- Bilmediğin bilgiyi UYDURMA — emin değilsen sadece sektör tahmini yap
+- Cümleleri tamamla, yarım bırakma
+
+ÖRNEK ÇIKTI:
+📝 Tatilbudur Seyahat, online tatil ve tur paketleri sunan dijital seyahat platformu, SPK'ya halka arz onay başvurusunda bulundu."""
+
+_SPK_APP_AI_MODEL = "gpt-4.1"
+
+
+def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
+    """Abacus AI ile SPK basvuru sirketini arastirip tweet metni uretir (senkron)."""
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        api_key = settings.ABACUS_API_KEY
+
+        if not api_key:
+            logger.error("SPK basvuru tweet AI: Abacus API key yok")
+            return None
+
+        user_message = (
+            f"{company_name} şirketi SPK'ya halka arz onay başvurusunda bulundu.\n"
+            f"Bu şirket hakkında kısa bilgilendirici tweet hazırla.\n"
+            f"SADECE tweet metnini yaz."
+        )
+
+        resp = httpx.post(
+            _ABACUS_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": _SPK_APP_AI_MODEL,
+                "messages": [
+                    {"role": "system", "content": _SPK_APP_AI_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_message},
+                ],
+                "temperature": 0.4,
+                "max_tokens": 400,
+            },
+            timeout=30.0,
+        )
+
+        if resp.status_code != 200:
+            logger.error("SPK basvuru AI hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            return None
+
+        data = resp.json()
+        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+        if not content or len(content) < 20:
+            logger.error("SPK basvuru AI bos/kisa metin dondu: %d char", len(content) if content else 0)
+            return None
+
+        # Temizle — AI bazen tirnak isareti veya extra bosluk ekliyor
+        content = content.strip('"\'').strip()
+
+        # Max 250 karakter (hashtag/link ayrı eklenir)
+        if len(content) > 250:
+            # Son cümle noktasına kadar kes
+            cut = content[:250]
+            last_dot = max(cut.rfind('.'), cut.rfind('!'), cut.rfind(','))
+            if last_dot > 100:
+                content = cut[:last_dot + 1]
+            else:
+                content = cut.rstrip() + "…"
+
+        logger.info("SPK basvuru AI tweet uretildi: %d karakter — %s", len(content), company_name)
+        return content
+
+    except Exception as e:
+        logger.error("SPK basvuru AI tweet hatasi: %s", e)
+        return None
+
+
+def tweet_spk_application(company_name: str) -> bool:
+    """SPK'ya halka arz onay basvurusu yapan sirket icin tweet atar.
+
+    AI ile sirket arastirmasi yapar, basarisiz olursa fallback metin kullanir.
+    Banner gorseli varsa media'li tweet atar.
+
+    Args:
+        company_name: Sirket adi (SPKApplication.company_name)
+    """
+    try:
+        if not company_name or len(company_name.strip()) < 3:
+            logger.warning("tweet_spk_application: Gecersiz sirket adi")
+            return False
+
+        clean_name = " ".join(company_name.replace("\n", " ").replace("\r", " ").split())
+
+        # AI ile tweet metni uret
+        ai_text = _generate_spk_app_tweet_ai(clean_name)
+
+        if ai_text:
+            text = ai_text
+        else:
+            # Fallback — AI basarisiz
+            text = (
+                f"📝 SPK Halka Arz Başvurusu\n\n"
+                f"{clean_name}, SPK'ya halka arz onay başvurusunda bulundu."
+            )
+
+        # Hashtag + link ekle
+        app_link = _get_setting("APP_LINK")
+        suffix = f"\n\n📲 {app_link}\n#HalkaArz #SPK #Borsa" if app_link else "\n\n#HalkaArz #SPK #Borsa"
+        text = text + suffix
+
+        # Banner gorseli varsa media'li tweet
+        if os.path.exists(_SPK_APP_BANNER):
+            return _safe_tweet_with_media(text, _SPK_APP_BANNER, source="tweet_spk_application")
+        else:
+            return _safe_tweet(text, source="tweet_spk_application")
+
+    except Exception as e:
+        logger.error("tweet_spk_application hatasi (%s): %s", company_name, e)
+        return False

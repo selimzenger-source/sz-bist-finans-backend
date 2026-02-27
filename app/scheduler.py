@@ -409,6 +409,59 @@ async def scrape_spk():
 
                 await db.commit()
 
+                # ── Yeni basvurular icin bildirim + tweet ──
+                if new_count > 0:
+                    try:
+                        from app.services.notification import NotificationService
+                        from app.services.twitter_service import tweet_spk_application
+
+                        # Henuz bildirim gonderilmemis yeni basvurulari cek
+                        unnotified_result = await db.execute(
+                            select(SPKApplication).where(
+                                SPKApplication.status == "pending",
+                                SPKApplication.notified == False,
+                            )
+                        )
+                        unnotified = list(unnotified_result.scalars().all())
+
+                        if unnotified:
+                            # 1. Toplu push bildirim gonder
+                            company_names = [app.company_name for app in unnotified]
+                            # Sirket adlarini kisalt (bildirimde cok uzun olmasin)
+                            short_names = []
+                            for name in company_names:
+                                # "... Sanayi ve Ticaret AŞ" kısmını kes
+                                parts = name.split()
+                                short = " ".join(parts[:3]) if len(parts) > 4 else name
+                                short_names.append(short)
+
+                            notif_service = NotificationService(db)
+                            sent = await notif_service.notify_spk_applications(short_names)
+                            logger.info("SPK basvuru bildirimi: %d kullaniciya gonderildi (%d sirket)", sent, len(unnotified))
+
+                            # notified flag'lerini set et
+                            for app in unnotified:
+                                app.notified = True
+
+                            # 2. Her sirket icin ayri tweet at (senkron, arada 5 sn bekleme)
+                            import time as _time
+                            untweeted = [app for app in unnotified if not app.tweeted]
+                            for i, app in enumerate(untweeted):
+                                if i > 0:
+                                    _time.sleep(5)  # Rate limit korumasi
+                                success = tweet_spk_application(app.company_name)
+                                if success:
+                                    app.tweeted = True
+                                    logger.info("SPK basvuru tweeti atildi: %s", app.company_name)
+                                else:
+                                    logger.warning("SPK basvuru tweeti BASARISIZ: %s", app.company_name)
+
+                            await db.commit()
+
+                    except Exception as notif_err:
+                        logger.error("SPK basvuru bildirim/tweet hatasi: %s", notif_err)
+                        # Ana scraper akisini bozmasin
+
             logger.info(
                 "SPK: %d basvuru tarandi — %d yeni, %d guncellendi, %d silindi+bloklandı (listeden cikti/eslesemedi), %d IPO'da mevcut, %d kara listede (atlandi)",
                 len(applications), new_count, updated_count, removed_count, skipped_ipo, skipped_deleted,

@@ -9,7 +9,7 @@ Scraper tarafindan periyodik olarak guncellenir.
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import String, Text, Numeric, DateTime, Index
+from sqlalchemy import Boolean, String, Text, Numeric, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -70,6 +70,16 @@ class SPKApplication(Base):
     status: Mapped[str] = mapped_column(
         String(20), default="pending",
         comment="pending: onay bekliyor, approved: onaylandi, rejected: reddedildi, deleted: admin sildi (tekrar eklenmez)"
+    )
+
+    # Bildirim / Tweet takibi
+    notified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false",
+        comment="Push bildirim gonderildi mi"
+    )
+    tweeted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false",
+        comment="Tweet atildi mi"
     )
 
     # Zaman damgasi
