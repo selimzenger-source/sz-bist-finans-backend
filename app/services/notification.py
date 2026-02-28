@@ -881,3 +881,94 @@ class NotificationService:
             pass
 
         return sent_count
+
+    async def notify_kap_watchlist(
+        self,
+        disclosure,
+    ) -> int:
+        """Takip listesindeki kullanicilara KAP bildirimi gonderir.
+
+        Kullanicinin takip etigi hisse icin yeni KAP bildirimi geldiginde
+        push bildirim gonderilir.
+
+        Kosullar:
+        - user_watchlist'te ticker eslesen kullanicilar
+        - notify_kap_watchlist=True
+        - notifications_enabled=True
+        - deleted=False
+        """
+        from app.models.user import User
+        from app.models.user_watchlist import UserWatchlist
+
+        ticker = disclosure.company_code
+        sentiment = disclosure.ai_sentiment or ""
+        score = disclosure.ai_impact_score
+
+        # Sentiment emoji
+        emoji = ""
+        if sentiment == "Olumlu":
+            emoji = "📈"
+        elif sentiment == "Olumsuz":
+            emoji = "📉"
+        else:
+            emoji = "📋"
+
+        # Bildirim basligi
+        score_text = f" (AI: {score})" if score else ""
+        title = f"{emoji} KAP: {ticker} — {sentiment}{score_text}"
+
+        # Bildirim govdesi
+        body = (disclosure.title or "")[:200]
+
+        data = {
+            "type": "kap_watchlist",
+            "ticker": ticker,
+            "disclosure_id": str(disclosure.id),
+        }
+
+        # Takip eden kullanicilari bul
+        watchlist_result = await self.db.execute(
+            select(UserWatchlist.device_id).where(
+                UserWatchlist.ticker == ticker
+            )
+        )
+        device_ids = [row[0] for row in watchlist_result.all()]
+
+        if not device_ids:
+            return 0
+
+        # Bildirimleri acik olan kullanicilari getir
+        users_result = await self.db.execute(
+            select(User).where(
+                and_(
+                    User.device_id.in_(device_ids),
+                    User.notifications_enabled == True,
+                    User.notify_kap_watchlist == True,
+                    or_(User.deleted == False, User.deleted.is_(None)),
+                )
+            )
+        )
+        users = list(users_result.scalars().all())
+
+        sent_count = 0
+        for user in users:
+            try:
+                success = await self._send_to_user(
+                    user=user,
+                    title=title,
+                    body=body,
+                    data=data,
+                    channel_id="kap_news_v2",
+                )
+                if success:
+                    sent_count += 1
+            except Exception as e:
+                logger.warning("Watchlist bildirim hatasi (user=%s): %s", user.id, e)
+
+        if sent_count > 0:
+            logger.info(
+                "KAP Watchlist bildirim: %s — %d kullaniciya gonderildi",
+                ticker, sent_count,
+            )
+
+        return sent_count

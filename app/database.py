@@ -464,6 +464,31 @@ async def init_db():
         except Exception:
             pass
 
+        # v39 migration: users.notify_kap_watchlist (Takip Listesi KAP bildirimi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_kap_watchlist BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass
+
+        # v40 migration: kap_all_disclosures + user_watchlist tablolari
+        try:
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_indexes
+                        WHERE tablename = 'kap_all_disclosures' AND indexname = 'idx_kap_all_dedup'
+                    ) THEN
+                        CREATE UNIQUE INDEX idx_kap_all_dedup
+                        ON kap_all_disclosures(company_code, title, published_at);
+                    END IF;
+                END $$;
+            """))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

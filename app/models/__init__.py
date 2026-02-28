@@ -16,6 +16,8 @@ from app.models.telegram_news import TelegramNews
 from app.models.scraper_state import ScraperState
 from app.models.pending_tweet import PendingTweet
 from app.models.app_setting import AppSetting
+from app.models.kap_all_disclosure import KapAllDisclosure
+from app.models.user_watchlist import UserWatchlist
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -34,4 +36,6 @@ __all__ = [
     "ScraperState",
     "PendingTweet",
     "AppSetting",
+    "KapAllDisclosure",
+    "UserWatchlist",
 ]
