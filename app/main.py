@@ -41,6 +41,7 @@ from app.models import (
     WalletTransaction, Coupon, WALLET_COUPONS,
     WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
     Dividend, DividendHistory,
+    KapAllDisclosure, UserWatchlist,
 )
 from app.schemas import (
     IPOListOut, IPODetailOut, IPOSectionsOut,
@@ -56,6 +57,7 @@ from app.schemas import (
     DividendOut,
     WalletBalanceOut, WalletEarnRequest, WalletSpendRequest,
     WalletCouponRequest, WalletTransactionOut,
+    KapAllDisclosureOut, WatchlistItemOut, WatchlistAddRequest,
 )
 from app.scheduler import setup_scheduler, shutdown_scheduler
 from app.admin.routes import router as admin_router
@@ -4077,6 +4079,107 @@ async def admin_create_ipo(request: Request, payload: dict, db: AsyncSession = D
 
 
 # -------------------------------------------------------
+# Admin: AI IPO Rapor Üret (Manuel Tetikleme)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/generate-ai-report/{ipo_id}")
+@limiter.limit("10/minute")
+async def admin_generate_ai_report(request: Request, ipo_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin panelden belirli bir IPO icin AI rapor uretimini tetikler.
+
+    force=True gonderilirse mevcut rapor silinir ve yeniden uretilir.
+    Rapor background task olarak uretilir (30-60 sn surer).
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from sqlalchemy import select
+    from app.models.ipo import IPO
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    force = payload.get("force", False)
+
+    # force=True ise mevcut raporu sil
+    if force and ipo.ai_report:
+        ipo.ai_report = None
+        ipo.ai_report_generated_at = None
+        await db.commit()
+        logger.info(f"Admin: AI rapor silindi (force) — {ipo.ticker or ipo.company_name}")
+
+    if ipo.ai_report and not force:
+        return {
+            "success": True,
+            "message": "Bu IPO icin zaten rapor var. force=True ile yeniden uretebilirsiniz.",
+            "ipo_id": ipo.id,
+            "ticker": ipo.ticker,
+        }
+
+    # Background task olarak rapor uret
+    import asyncio
+    from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+    asyncio.create_task(generate_and_save_ipo_report(ipo.id))
+
+    logger.info(f"Admin: AI rapor uretimi tetiklendi — {ipo.ticker or ipo.company_name} (id={ipo_id})")
+
+    return {
+        "success": True,
+        "message": f"{ipo.ticker or ipo.company_name} icin AI rapor uretimi baslatildi. 30-60 saniye sonra yenileyin.",
+        "ipo_id": ipo.id,
+        "ticker": ipo.ticker,
+    }
+
+
+# -------------------------------------------------------
+# Admin: AI IPO Rapor Güncelle (Düzenle/Kaydet)
+# -------------------------------------------------------
+
+@app.put("/api/v1/admin/update-ai-report/{ipo_id}")
+@limiter.limit("20/minute")
+async def admin_update_ai_report(request: Request, ipo_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin panelden AI rapor icerigini duzenler ve kaydeder.
+
+    Gonderilen JSON:
+        {
+            "admin_password": "...",
+            "report": { ... guncel rapor JSON ... }
+        }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    report_data = payload.get("report")
+    if not report_data or not isinstance(report_data, dict):
+        raise HTTPException(status_code=400, detail="report alani gerekli (JSON object)")
+
+    from sqlalchemy import select
+    from app.models.ipo import IPO
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    import json
+
+    ipo.ai_report = json.dumps(report_data, ensure_ascii=False)
+    await db.commit()
+
+    logger.info(f"Admin: AI rapor guncellendi — {ipo.ticker or ipo.company_name} (id={ipo_id})")
+
+    return {
+        "success": True,
+        "message": f"{ipo.ticker or ipo.company_name} AI raporu guncellendi.",
+        "ipo_id": ipo.id,
+    }
+
+
+# -------------------------------------------------------
 # Admin: Bulk Archive IPO
 # -------------------------------------------------------
 
@@ -4546,3 +4649,148 @@ async def claim_review_reward(
         "already_claimed": False,
         "message": "100 puan cüzdanınıza eklendi!",
     }
+
+
+# -------------------------------------------------------
+# TUM KAP BILDIRIMLERI ENDPOINTS
+# -------------------------------------------------------
+
+@app.get("/api/v1/kap-all-disclosures", response_model=list[KapAllDisclosureOut])
+async def list_kap_all_disclosures(
+    ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
+    hours: Optional[int] = Query(None, ge=1, le=744, description="Son kac saat (1=son 1 saat, 24=son 1 gun)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tum KAP bildirimleri — herkes erisebilir.
+
+    Filtreler:
+    - ticker: Hisse kodu (orn: THYAO)
+    - hours: Son kac saat (1, 24, 168, 720)
+    - limit/offset: Sayfalama
+    """
+    query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.published_at))
+
+    if ticker:
+        query = query.where(KapAllDisclosure.company_code == ticker.upper())
+
+    if hours:
+        since = datetime.utcnow() - timedelta(hours=hours)
+        query = query.where(KapAllDisclosure.published_at >= since)
+
+    query = query.limit(limit).offset(offset)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+# -------------------------------------------------------
+# KULLANICI TAKIP LISTESI (WATCHLIST) ENDPOINTS
+# -------------------------------------------------------
+
+@app.get("/api/v1/users/{device_id}/kap-watchlist", response_model=list[WatchlistItemOut])
+async def get_user_watchlist(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin KAP hisse takip listesini getir."""
+    result = await db.execute(
+        select(UserWatchlist)
+        .where(UserWatchlist.device_id == device_id)
+        .order_by(UserWatchlist.created_at)
+    )
+    return list(result.scalars().all())
+
+
+@app.post("/api/v1/users/{device_id}/kap-watchlist")
+async def add_to_watchlist(
+    device_id: str,
+    body: WatchlistAddRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Takip listesine hisse ekle.
+
+    Free: max 3 hisse. VIP (ana_yildiz): sinirsiz.
+    """
+    ticker = body.ticker.upper().strip()
+    if not ticker or len(ticker) < 2 or len(ticker) > 10:
+        raise HTTPException(status_code=400, detail="Gecersiz hisse kodu")
+
+    # Kullanici kontrolu
+    user_result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    # Zaten takip ediliyor mu?
+    existing = await db.execute(
+        select(UserWatchlist).where(
+            UserWatchlist.device_id == device_id,
+            UserWatchlist.ticker == ticker,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Bu hisse zaten takip listenizde")
+
+    # VIP kontrolu — ana_yildiz abonesi mi?
+    is_vip = False
+    sub_result = await db.execute(
+        select(UserSubscription).where(
+            and_(
+                UserSubscription.user_id == user.id,
+                UserSubscription.is_active == True,
+                UserSubscription.package == "ana_yildiz",
+            )
+        )
+    )
+    if sub_result.scalar_one_or_none():
+        is_vip = True
+
+    # Limit kontrolu (Free: 3, VIP: 50)
+    count_result = await db.execute(
+        select(func.count(UserWatchlist.id)).where(
+            UserWatchlist.device_id == device_id
+        )
+    )
+    current_count = count_result.scalar() or 0
+
+    if is_vip:
+        if current_count >= 50:
+            raise HTTPException(
+                status_code=403,
+                detail="VIP kullanicilar en fazla 50 hisse takip edebilir."
+            )
+    else:
+        if current_count >= 5:
+            raise HTTPException(
+                status_code=403,
+                detail="Ucretsiz kullanicilar en fazla 5 hisse takip edebilir. VIP'e yukselin!"
+            )
+
+    item = UserWatchlist(device_id=device_id, ticker=ticker)
+    db.add(item)
+    await db.flush()
+
+    return {"success": True, "ticker": ticker, "is_vip": is_vip}
+
+
+@app.delete("/api/v1/users/{device_id}/kap-watchlist/{ticker}")
+async def remove_from_watchlist(
+    device_id: str,
+    ticker: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Takip listesinden hisse cikar."""
+    ticker = ticker.upper().strip()
+    result = await db.execute(
+        delete(UserWatchlist).where(
+            UserWatchlist.device_id == device_id,
+            UserWatchlist.ticker == ticker,
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Hisse takip listenizde bulunamadi")
+
+    return {"success": True, "ticker": ticker}

@@ -750,6 +750,19 @@ async def _check_spk_bulletins_inner():
                         except Exception:
                             pass
 
+                        # AI IPO Raporu — SPK onayi alir almaz uret
+                        if not ipo.ai_report:
+                            try:
+                                import asyncio
+                                from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+                                asyncio.create_task(generate_and_save_ipo_report(ipo.id))
+                                logger.info(
+                                    "AI IPO rapor task baslatildi (SPK onayi): %s",
+                                    ipo.ticker or ipo.company_name,
+                                )
+                            except Exception as _ai_err:
+                                logger.warning("AI IPO rapor task hatasi: %s", _ai_err)
+
                     total_approvals += 1
 
                 # Bultendeki tum onaylar islendi — tek tweet at

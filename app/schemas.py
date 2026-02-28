@@ -86,6 +86,13 @@ class IPOListOut(BaseModel):
     trading_day_count: int = 0
     high_from_start: Optional[Decimal] = None
 
+    # AI Rapor (admin panel icin de lazim)
+    ai_report: Optional[str] = None
+    ai_report_generated_at: Optional[datetime] = None
+
+    # Izahname
+    prospectus_analysis: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -331,6 +338,8 @@ class UserUpdate(BaseModel):
     reminder_1h: Optional[bool] = None
     reminder_2h: Optional[bool] = None
     reminder_4h: Optional[bool] = None
+    # KAP Takip Listesi bildirimi
+    notify_kap_watchlist: Optional[bool] = None
     # Hesap silme
     deleted: Optional[bool] = None
 
@@ -363,6 +372,7 @@ class UserOut(BaseModel):
     reminder_1h: bool = True
     reminder_2h: bool = False
     reminder_4h: bool = False
+    notify_kap_watchlist: bool = True
     deleted: bool = False
     subscription_package: Optional[str] = None
 
@@ -559,3 +569,37 @@ class WalletTransactionOut(BaseModel):
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
+# Tum KAP Bildirimleri Schemalari
+# -------------------------------------------------------
+
+class KapAllDisclosureOut(BaseModel):
+    """Tum KAP bildirimleri (AI analiz dahil)."""
+    id: int
+    company_code: str
+    title: str
+    category: Optional[str] = None
+    is_bilanco: bool = False
+    kap_url: Optional[str] = None
+    published_at: Optional[datetime] = None
+    ai_sentiment: Optional[str] = None
+    ai_impact_score: Optional[float] = None
+    ai_summary: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WatchlistItemOut(BaseModel):
+    """Kullanici takip listesi ogesi."""
+    ticker: str
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WatchlistAddRequest(BaseModel):
+    """Takip listesine hisse ekleme istegi."""
+    ticker: str
