@@ -174,6 +174,25 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# Global Exception Handler — production'da stack trace sizintisini engelle
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Beklenmedik hatalarda stack trace yerine genel hata mesaji don."""
+    logger.error("Beklenmedik hata [%s %s]: %s", request.method, request.url.path, exc, exc_info=True)
+    from fastapi.responses import JSONResponse
+    if settings.is_production:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Sunucu hatasi. Lutfen daha sonra tekrar deneyin."},
+        )
+    # Development'ta detayli hata goster
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
+
+
 # CORS — production'da spesifik origin, gelistirmede *
 app.add_middleware(
     CORSMiddleware,
@@ -3325,6 +3344,8 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
         if not hmac.compare_digest(auth_header.encode(), expected.encode()):
             logger.warning("RevenueCat webhook: gecersiz Authorization header")
             raise HTTPException(status_code=401, detail="Unauthorized")
+    else:
+        logger.warning("RevenueCat webhook: REVENUECAT_WEBHOOK_SECRET ayarlanmamis — dogrulama atlaniyor!")
 
     event = payload.get("event", {})
     event_type = event.get("type", "")
@@ -4794,3 +4815,69 @@ async def remove_from_watchlist(
         raise HTTPException(status_code=404, detail="Hisse takip listenizde bulunamadi")
 
     return {"success": True, "ticker": ticker}
+
+
+@app.post("/api/v1/users/{device_id}/kap-watchlist/trim")
+async def trim_watchlist(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """VIP → Free geçişinde watchlist'i FREE limiti (5) ile sınırla.
+
+    En eski eklenen hisseler korunur, fazlası silinir.
+    """
+    FREE_LIMIT = 5
+
+    # VIP kontrolü — hâlâ VIP ise trim yapma
+    user_result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    sub_result = await db.execute(
+        select(UserSubscription).where(
+            and_(
+                UserSubscription.user_id == user.id,
+                UserSubscription.is_active == True,
+                UserSubscription.package == "ana_yildiz",
+            )
+        )
+    )
+    if sub_result.scalar_one_or_none():
+        # Hâlâ VIP — trim gerekmiyor
+        return {"trimmed": False, "remaining": -1}
+
+    # Mevcut watchlist sayısı
+    count_result = await db.execute(
+        select(func.count(UserWatchlist.id)).where(
+            UserWatchlist.device_id == device_id
+        )
+    )
+    current_count = count_result.scalar() or 0
+
+    if current_count <= FREE_LIMIT:
+        return {"trimmed": False, "remaining": current_count}
+
+    # En eski FREE_LIMIT kadarını koru, gerisini sil
+    # Korunacak hisselerin ID'lerini al (en eski eklenenler)
+    keep_result = await db.execute(
+        select(UserWatchlist.id)
+        .where(UserWatchlist.device_id == device_id)
+        .order_by(UserWatchlist.created_at.asc())
+        .limit(FREE_LIMIT)
+    )
+    keep_ids = [row[0] for row in keep_result.fetchall()]
+
+    # Korunmayacakları sil
+    if keep_ids:
+        await db.execute(
+            delete(UserWatchlist).where(
+                UserWatchlist.device_id == device_id,
+                UserWatchlist.id.notin_(keep_ids),
+            )
+        )
+
+    deleted_count = current_count - FREE_LIMIT
+    return {"trimmed": True, "deleted": deleted_count, "remaining": FREE_LIMIT}

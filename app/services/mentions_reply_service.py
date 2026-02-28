@@ -48,7 +48,7 @@ _USER_LOOKUP_URL  = "https://api.twitter.com/2/users/{user_id}"
 JITTER_MIN = 45    # saniye — doğal görünüm için rastgele gecikme
 JITTER_MAX = 180   # saniye (3 dk) — çok hızlı cevap robot gibi görünür
 
-_MAX_TWEET_AGE_MINUTES = 60   # 60 dakikadan eski mention'lara cevap verme (since_id ile zaten sadece yeniler gelir)
+_MAX_TWEET_AGE_MINUTES = 360  # 6 saat — Render restart sonrası kaçırılan mention'ları yakalamak için genişletildi (since_id ile zaten sadece yeniler gelir)
 _MAX_REPLIES_PER_CYCLE = 3    # tek döngüde max 3 yanıt (spam önleme)
 
 _MENTIONS_REPLY_LOCK   = asyncio.Lock()
@@ -396,7 +396,7 @@ async def _run_mentions_cycle() -> None:
         # ── 1. Etkin mi? ──
         enabled_str = await _get_setting(session, _SETTING_ENABLED)
         if not enabled_str or enabled_str.lower() not in ("1", "true", "yes"):
-            logger.debug("MENTIONS_REPLY_ENABLED kapalı, atlandı")
+            logger.info("MENTIONS_REPLY_ENABLED kapalı (değer: %s) — admin panelden açılmalı", enabled_str)
             return
 
         # ── 2. Credentials ──

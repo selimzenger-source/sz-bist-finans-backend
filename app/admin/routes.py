@@ -1710,7 +1710,8 @@ async def trigger_spk_analysis_from_admin(
     """Admin panelden veya API key ile SPK bülten analizini tetikler."""
     # Session auth VEYA API key
     api_key = request.headers.get("X-Admin-Key", "")
-    is_api = api_key == os.getenv("ADMIN_PASSWORD", "SzBist2026Admin!")
+    from app.config import get_settings as _gs
+    is_api = bool(api_key and _gs().ADMIN_PASSWORD and api_key == _gs().ADMIN_PASSWORD)
     is_session = bool(get_current_admin(request))
 
     if not is_api and not is_session:
