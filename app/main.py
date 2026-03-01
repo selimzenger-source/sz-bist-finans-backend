@@ -3677,6 +3677,91 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
 
 
 # -------------------------------------------------------
+# SUBSCRIPTION SYNC — Frontend → Backend senkronizasyon
+# RevenueCat webhook çalışmasa bile abonelik kaydını günceller
+# -------------------------------------------------------
+
+class SyncSubscriptionRequest(BaseModel):
+    """Frontend'den gelen abonelik senkronizasyon verisi."""
+    package: str  # ana_yildiz, yildiz_pazar, free
+    is_active: bool = True
+    store: Optional[str] = None  # play_store, app_store
+    product_id: Optional[str] = None
+    expiration_date: Optional[str] = None  # ISO 8601 string
+
+
+@app.post("/api/v1/users/{device_id}/sync-subscription")
+@limiter.limit("10/minute")
+async def sync_subscription(
+    device_id: str,
+    request: Request,
+    body: SyncSubscriptionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Frontend'den abonelik durumu senkronizasyonu.
+
+    RevenueCat SDK aktif abonelik tespit ettiğinde frontend bu endpoint'i çağırır.
+    Webhook çalışmasa bile abonelik kaydı güncellenir.
+    Mevcut webhook ve puan sistemi etkilenMEZ — sadece ek güvenlik katmanı.
+    """
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+
+    package = body.package
+    if package not in ("ana_yildiz", "yildiz_pazar", "free"):
+        raise HTTPException(status_code=400, detail="Geçersiz paket")
+
+    # UserSubscription bul veya oluştur
+    result = await db.execute(
+        select(UserSubscription).where(UserSubscription.user_id == user.id)
+    )
+    sub = result.scalar_one_or_none()
+
+    if not sub:
+        sub = UserSubscription(user_id=user.id, package="free")
+        db.add(sub)
+
+    # KORUMA: Eğer mevcut abonelik wallet (puan) ile alınmış ve hâlâ aktifse,
+    # frontend sync ile üzerine YAZMA — puan aboneliğini bozma!
+    if sub.store == "wallet" and sub.is_active and sub.package != "free":
+        # Wallet abonelik aktif — sadece webhook veya expiry ile değişir
+        # Ama gelen paket de aktifse ve store play_store/app_store ise → güncelle
+        # (Kullanıcı hem puanla hem parayla almış olabilir — store aboneliği öncelikli)
+        if not (body.is_active and body.store in ("play_store", "app_store")):
+            logger.info(
+                "Sync skip: wallet sub aktif, frontend sync atlandı — device=%s, pkg=%s",
+                device_id, sub.package,
+            )
+            return {"status": "ok", "package": sub.package, "is_active": sub.is_active}
+
+    # Güncelle
+    if body.is_active and package != "free":
+        sub.package = package
+        sub.is_active = True
+        sub.store = body.store or ("play_store" if not sub.store else sub.store)
+        sub.revenue_cat_id = device_id
+        if body.product_id:
+            sub.product_id = body.product_id
+        if body.expiration_date:
+            try:
+                exp_str = body.expiration_date.replace("Z", "+00:00")
+                sub.expires_at = datetime.fromisoformat(exp_str)
+            except (ValueError, TypeError):
+                pass  # Geçersiz tarih — es geç
+
+    await db.flush()
+
+    logger.info(
+        "Subscription sync: device=%s, package=%s, active=%s, store=%s",
+        device_id, sub.package, sub.is_active, sub.store,
+    )
+
+    return {"status": "ok", "package": sub.package, "is_active": sub.is_active}
+
+
+# -------------------------------------------------------
 # TEMETTU (YAKINDA)
 # -------------------------------------------------------
 
