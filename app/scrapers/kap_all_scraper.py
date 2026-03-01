@@ -270,7 +270,7 @@ def _make_item(*, title: str, company_code: str, kap_url: str,
                source: str, body: str = "") -> dict[str, Any]:
     """Standart bildirim dict'i olusturur."""
     category = _infer_category(title)
-    is_bilanco = category == "Bilanço/Finansal Rapor"
+    is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
     return {
         "title": title,
         "company_code": company_code,

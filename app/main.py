@@ -5317,3 +5317,23 @@ async def admin_feature_interest_stats(
     )
     stats = {row[0]: row[1] for row in result.all()}
     return {"stats": stats, "total": sum(stats.values())}
+
+
+# -------------------------------------------------------
+# Admin: KAP All Scraper Manuel Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-kap-scrape")
+@limiter.limit("5/minute")
+async def admin_trigger_kap_scrape(request: Request, payload: dict):
+    """Admin: KAP all scraper'i manuel tetikle (BigPara + AI analiz)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    try:
+        from app.scheduler import kap_all_scrape_job
+        await kap_all_scrape_job()
+        return {"status": "ok", "message": "KAP scrape tamamlandi"}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}

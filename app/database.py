@@ -489,6 +489,16 @@ async def init_db():
         except Exception:
             pass
 
+        # v41 migration: Faaliyet Raporu kategorili kayitlari is_bilanco = True yap
+        try:
+            await conn.execute(text("""
+                UPDATE kap_all_disclosures
+                SET is_bilanco = TRUE
+                WHERE category = 'Faaliyet Raporu' AND is_bilanco = FALSE
+            """))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
