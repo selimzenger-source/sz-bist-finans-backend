@@ -3074,6 +3074,202 @@ async def expire_subscriptions():
             pass
 
 
+async def daily_subscription_report():
+    """Gunluk abonelik raporu — 20:00 TR (17:00 UTC).
+
+    Admin Telegram'a gonderir:
+    - Toplam kullanici sayisi
+    - Aktif haber abonelikleri (ana_yildiz paketleri)
+    - Aktif bildirim abonelikleri (hisse bazli + bundle)
+    - Bugun yeni abone olanlar
+    """
+    try:
+        from sqlalchemy import select, func, and_, desc
+        from app.models import (
+            User, UserSubscription,
+            StockNotificationSubscription, CeilingTrackSubscription,
+            IPO,
+        )
+        from app.services.admin_telegram import send_admin_message
+
+        now = datetime.now(timezone.utc)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        async with async_session() as db:
+            # ── KULLANICI SAYILARI ──
+            total_users = (await db.execute(
+                select(func.count(User.id)).where(User.deleted == False)
+            )).scalar() or 0
+
+            new_users_today = (await db.execute(
+                select(func.count(User.id)).where(
+                    and_(User.created_at >= today_start, User.deleted == False)
+                )
+            )).scalar() or 0
+
+            # ── HABER ABONELIKLERI (ana_yildiz) ──
+            active_news = (await db.execute(
+                select(func.count(UserSubscription.id)).where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.package != "free",
+                    )
+                )
+            )).scalar() or 0
+
+            new_news_today = (await db.execute(
+                select(func.count(UserSubscription.id)).where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.package != "free",
+                        UserSubscription.started_at >= today_start,
+                    )
+                )
+            )).scalar() or 0
+
+            # Store bazli dagilim
+            news_by_store = (await db.execute(
+                select(
+                    UserSubscription.store,
+                    func.count(UserSubscription.id),
+                ).where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.package != "free",
+                    )
+                ).group_by(UserSubscription.store)
+            )).all()
+
+            # ── HISSE BILDIRIM ABONELIKLERI ──
+            # Aktif bundle'lar (3 aylik / yillik)
+            active_bundles = (await db.execute(
+                select(func.count(StockNotificationSubscription.id)).where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.is_annual_bundle == True,
+                    )
+                )
+            )).scalar() or 0
+
+            # Aktif tekil abonelikler (hisse bazli)
+            active_individual = (await db.execute(
+                select(func.count(StockNotificationSubscription.id)).where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.is_annual_bundle == False,
+                    )
+                )
+            )).scalar() or 0
+
+            # Bugun yeni alinan tekil abonelikler
+            new_individual_today = (await db.execute(
+                select(func.count(StockNotificationSubscription.id)).where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.is_annual_bundle == False,
+                        StockNotificationSubscription.purchased_at >= today_start,
+                    )
+                )
+            )).scalar() or 0
+
+            # Hisse bazli dagilim (IPO adiyla)
+            stock_breakdown = (await db.execute(
+                select(
+                    IPO.ticker,
+                    IPO.company_name,
+                    func.count(StockNotificationSubscription.id),
+                ).join(
+                    IPO, StockNotificationSubscription.ipo_id == IPO.id
+                ).where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.is_annual_bundle == False,
+                    )
+                ).group_by(IPO.ticker, IPO.company_name)
+                .order_by(desc(func.count(StockNotificationSubscription.id)))
+            )).all()
+
+            # Bildirim tipi dagilim
+            type_breakdown = (await db.execute(
+                select(
+                    StockNotificationSubscription.notification_type,
+                    func.count(StockNotificationSubscription.id),
+                ).where(
+                    and_(
+                        StockNotificationSubscription.is_active == True,
+                        StockNotificationSubscription.is_annual_bundle == False,
+                    )
+                ).group_by(StockNotificationSubscription.notification_type)
+            )).all()
+
+            # ── TAVAN TAKIP ABONELIKLERI ──
+            active_ceiling = (await db.execute(
+                select(func.count(CeilingTrackSubscription.id)).where(
+                    CeilingTrackSubscription.is_active == True
+                )
+            )).scalar() or 0
+
+            # ── MESAJ OLUSTUR ──
+            tr_time = (now + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
+
+            store_text = ""
+            for store, count in news_by_store:
+                label = {"play_store": "Play Store", "app_store": "App Store", "wallet": "Puan"}.get(store or "", store or "?")
+                store_text += f"  \u2022 {label}: {count}\n"
+
+            stock_text = ""
+            for ticker, name, cnt in stock_breakdown[:10]:  # Top 10
+                stock_text += f"  \u2022 {ticker}: {cnt} paket\n"
+            if len(stock_breakdown) > 10:
+                rest = sum(c for _, _, c in stock_breakdown[10:])
+                stock_text += f"  \u2022 Diger: {rest} paket\n"
+
+            type_text = ""
+            type_labels = {
+                "tavan_bozulma": "Tavan", "taban_acilma": "Taban",
+                "gunluk_acilis_kapanis": "Acilis/Kapanis", "yuzde_dusus": "% Dusus",
+            }
+            for ntype, cnt in type_breakdown:
+                type_text += f"  \u2022 {type_labels.get(ntype, ntype)}: {cnt}\n"
+
+            msg = (
+                f"\U0001f4ca <b>Gunluk Abonelik Raporu</b>\n"
+                f"\U0001f4c5 {tr_time}\n"
+                f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
+                f"\U0001f465 <b>Kullanicilar</b>\n"
+                f"  Toplam: {total_users}  |  Bugun: +{new_users_today}\n\n"
+                f"\U0001f4f0 <b>KAP Haber Aboneligi (Ana+Yildiz)</b>\n"
+                f"  Aktif: {active_news}  |  Bugun: +{new_news_today}\n"
+                f"{store_text}\n"
+                f"\U0001f514 <b>Hisse Bildirim Abonelikleri</b>\n"
+                f"  Bundle (3ay/Yillik): {active_bundles}\n"
+                f"  Tekil (hisse bazli): {active_individual}  |  Bugun: +{new_individual_today}\n\n"
+            )
+
+            if stock_text:
+                msg += f"\U0001f4c8 <b>Hisse Bazli Dagilim</b>\n{stock_text}\n"
+
+            if type_text:
+                msg += f"\U0001f3f7\ufe0f <b>Bildirim Tipi Dagilim</b>\n{type_text}\n"
+
+            if active_ceiling > 0:
+                msg += f"\U0001f4c9 <b>Tavan Takip</b>: {active_ceiling} aktif\n\n"
+
+            msg += "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
+
+            # ── GONDER ──
+            await send_admin_message(msg, parse_mode="HTML")
+            logger.info("Gunluk abonelik raporu gonderildi")
+
+    except Exception as e:
+        logger.error("Gunluk abonelik raporu hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(f"\u274c Abonelik raporu hatasi:\n{str(e)[:300]}")
+        except Exception:
+            pass
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -3488,6 +3684,17 @@ def _setup_scheduler_impl():
         IntervalTrigger(minutes=5),
         id="kap_all_scrape",
         name="Tum KAP Bildirimleri (BigPara + AI Analiz, her 5 dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───
+    scheduler.add_job(
+        daily_subscription_report,
+        CronTrigger(hour=17, minute=0),  # 17:00 UTC = 20:00 TR
+        id="daily_subscription_report",
+        name="Gunluk Abonelik Raporu (20:00 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
