@@ -4955,14 +4955,29 @@ async def claim_review_reward(
 @limiter.limit("10/minute")
 async def list_bist_stocks(
     request: Request,
+    db: AsyncSession = Depends(get_db),
 ):
-    """BigPara BIST Tum endeksinden tum hisse kodlarini dondurur.
+    """Tum BIST hisse kodlarini dondurur (DB + BigPara birlesik).
     Autocomplete ve hisse validasyonu icin kullanilir.
-    12 saat cache'li — _refresh_bist_symbols() kullanir.
     """
-    from app.scrapers.kap_all_scraper import _refresh_bist_symbols
-    symbols = await _refresh_bist_symbols()
-    return [{"ticker": s, "company_name": s} for s in sorted(symbols)]
+    # 1. DB'den: KAP bildirimlerindeki tum unique hisse kodlari
+    result = await db.execute(
+        select(KapAllDisclosure.company_code)
+        .distinct()
+        .order_by(KapAllDisclosure.company_code)
+    )
+    db_codes = set(result.scalars().all())
+
+    # 2. BigPara'dan: BIST Tum endeksi (12h cache)
+    try:
+        from app.scrapers.kap_all_scraper import _refresh_bist_symbols
+        bigpara_codes = await _refresh_bist_symbols()
+    except Exception:
+        bigpara_codes = set()
+
+    # Birlesik set
+    all_codes = db_codes | bigpara_codes
+    return [{"ticker": s, "company_name": s} for s in sorted(all_codes)]
 
 
 # -------------------------------------------------------
