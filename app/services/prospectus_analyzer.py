@@ -873,6 +873,23 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
                 page_tuples = []  # Sıfırla, OCR denesin
                 gc.collect()
 
+            # ─── Çöp metin tespiti (dijital imza/doğrulama kodları) ───
+            # Karakter sayısı yeterli AMA hiçbir izahname keyword'ü eşleşmiyorsa
+            # metin dijital imza hash'leri / sertifika kodlarından oluşuyor demektir
+            if not _text_is_insufficient and page_tuples and _total_chars > 2000:
+                _all_keywords = _RISK_KEYWORDS + _FINANCE_KEYWORDS + _ACTIVITY_KEYWORDS + _ASSET_KEYWORDS
+                _combined_sample = " ".join(t.lower() for _, t in page_tuples[:50])  # İlk 50 sayfa
+                _kw_hits = sum(1 for kw in _all_keywords if kw in _combined_sample)
+                if _kw_hits < 3:  # 3'ten az keyword eşleşmesi = çöp metin
+                    logger.warning(
+                        "ÇÖP METİN TESPİTİ: %d karakter, %d sayfa ama sadece %d keyword eşleşmesi — "
+                        "dijital imza/doğrulama kodları olabilir. OCR deneniyor...",
+                        _total_chars, _total_pages, _kw_hits,
+                    )
+                    _text_is_insufficient = True
+                    page_tuples = []
+                    gc.collect()
+
         # İkisi de boşsa/yetersizse Tesseract OCR dene (yerel, ücretsiz, 100+ sayfa)
         if not page_tuples:
             logger.info("PyMuPDF/pdfplumber %s — Tesseract OCR deneniyor...",

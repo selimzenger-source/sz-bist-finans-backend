@@ -2018,13 +2018,20 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
         # Halka arz fiyatı (varsa)
         price_line = f"💰 Halka arz fiyatı: {ipo.ipo_price} TL\n" if ipo.ipo_price else ""
 
+        # Olumlu/Olumsuz detay sayıları
+        pos_count = len(analysis.get("positives", []))
+        neg_count = len(analysis.get("negatives", []))
+        total_details = pos_count + neg_count
+        details_line = f"✅ Olumlu: {pos_count}  ❌ Olumsuz: {neg_count}  📊 Toplam {total_details} detay\n"
+
         def _build_text(brief_str):
             header = f"📋 {ticker_hashtag} #İzahname Analizi" if ticker_hashtag else f"📋 {clean_name} #İzahname Analizi"
             return (
                 f"{header}\n\n"
                 f"🏢 {clean_name}\n"
                 f"{price_line}"
-                f"{risk_emoji} Risk: {risk_level.title()}\n\n"
+                f"{risk_emoji} Risk: {risk_level.title()}\n"
+                f"{details_line}\n"
                 f"{brief_str}\n\n"
                 f"⚠️ Yatırım tavsiyesi değildir.\n"
                 f"📲 {_get_setting('APP_LINK')}\n\n"
