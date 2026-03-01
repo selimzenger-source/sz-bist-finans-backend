@@ -1993,6 +1993,16 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "İzahname Analizi"):
             return False
 
+        # 0 bulgu kontrolü — analiz boş/başarısızsa tweet atma
+        pos = analysis.get("positives", [])
+        neg = analysis.get("negatives", [])
+        if len(pos) == 0 and len(neg) == 0:
+            logger.warning(
+                "tweet_izahname_analysis: %s — 0 olumlu + 0 olumsuz bulgu, tweet atılmıyor",
+                ipo.company_name,
+            )
+            return False
+
         # Şirket adı ve ticker hashtag
         clean_name = " ".join(ipo.company_name.replace("\n", " ").replace("\r", " ").split())
         ticker = ipo.ticker or ""
