@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 # ─── URL'ler ────────────────────────────────────────────────────────────────
 BIGPARA_URL = "https://bigpara.hurriyet.com.tr/haberler/kap-haberleri/"
 BLOOMBERG_URL = "https://www.bloomberght.com/borsa/hisseler/kap-haberleri"
+UZMANPARA_URL = "https://uzmanpara.milliyet.com.tr/kap-haberleri/"
 BIST_INDEX_BASE = "https://bigpara.hurriyet.com.tr/borsa/hisse-fiyatlari/bist-tum-endeksi/"
 
 HEADERS = {
@@ -201,6 +202,97 @@ async def _bigpara_fetch(max_items: int = 20) -> list[dict[str, Any]]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 1b. EK KAYNAK: Uzmanpara (Milliyet) — hafta sonu dahil guncel
+# ═════════════════════════════════════════════════════════════════════════════
+
+async def _uzmanpara_fetch() -> list[dict[str, Any]]:
+    """Uzmanpara KAP haberleri — BigPara'nin yakalayamadigi haberleri yakalar.
+
+    HTML yapisi:
+      <li>
+        <a class="hisse" href="/kap-haberi/.../">TICKER</a>
+        <a href="/kap-haberi/.../">Baslik</a>
+        <span class="date">01.03.2026<br/>20:31:25</span>
+      </li>
+    """
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
+        try:
+            r = await client.get(UZMANPARA_URL)
+            r.raise_for_status()
+        except Exception as exc:
+            logger.warning("[1b-EK] Uzmanpara hata: %s", exc)
+            return []
+
+    soup = BeautifulSoup(r.text, "lxml")
+
+    # Ticker linklerini bul (class="hisse")
+    hisse_links = soup.find_all("a", class_="hisse", href=re.compile(r"/kap-haberi/"))
+    if not hisse_links:
+        logger.warning("[1b-EK] Uzmanpara: haber linki bulunamadi")
+        return []
+
+    results: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
+
+    for a_hisse in hisse_links:
+        if len(results) >= 20:
+            break
+
+        li = a_hisse.parent
+        if not li or li.name != "li":
+            continue
+
+        company_code = a_hisse.get_text(strip=True).upper()
+        if not company_code or len(company_code) < 2 or len(company_code) > 10:
+            continue
+
+        # Baslik: ikinci <a> (class="hisse" olmayan)
+        all_links = li.find_all("a", href=re.compile(r"/kap-haberi/"))
+        title = ""
+        for link in all_links:
+            if "hisse" not in (link.get("class") or []):
+                title = link.get_text(strip=True)
+                break
+
+        if not title:
+            continue
+
+        # Tarih
+        date_span = li.find("span", class_="date")
+        published_at = None
+        if date_span:
+            date_text = date_span.get_text(" ", strip=True)
+            # "01.03.2026 20:31:25" formatinda
+            try:
+                published_at = datetime.strptime(date_text, "%d.%m.%Y %H:%M:%S")
+            except ValueError:
+                pass
+
+        # Dedup
+        dedup_key = f"{company_code}|{title[:40]}"
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
+        # KAP URL: slug'dan KAP bildirim numarasi cikaramayiz, uzmanpara linki koyariz
+        href = a_hisse.get("href", "")
+        source_url = f"https://uzmanpara.milliyet.com.tr{href}" if href.startswith("/") else href
+
+        results.append(_make_item(
+            title=title,
+            company_code=company_code,
+            kap_url=source_url,
+            source="uzmanpara",
+            body=title,  # Uzmanpara'da detay sayfasi yok, baslik yeterli
+        ))
+        if published_at:
+            results[-1]["published_at"] = published_at
+
+    logger.info("[1b-EK] Uzmanpara -> %d haber", len(results))
+    return results
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 2. YEDEK: Bloomberg HT
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -324,10 +416,11 @@ def _infer_category(title: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
-    """Tum KAP bildirimlerini ceker (BigPara primary, Bloomberg HT fallback).
+    """Tum KAP bildirimlerini ceker (BigPara + Uzmanpara merge, Bloomberg HT fallback).
 
-    BIST whitelist ile filtrelenir. Max 20 haber doner.
-    Scheduler tarafindan cagirilir.
+    BigPara ve Uzmanpara'dan gelen haberler birlestirilir (dedup).
+    Boylece bir kaynak gec kalsa diger yakalar.
+    BIST whitelist ile filtrelenir. Max 30 haber doner.
 
     Returns:
         list[dict]: Bildirim listesi (title, company_code, body, kap_url, category, is_bilanco, source, published_at)
@@ -335,10 +428,38 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
     # BIST whitelist'i guncelle
     bist = await _refresh_bist_symbols()
 
-    # BigPara -> Bloomberg HT
-    data = await _bigpara_fetch()
+    # 1. BigPara (primary — detay sayfasi + tam metin)
+    bigpara_data = await _bigpara_fetch()
+
+    # 2. Uzmanpara (ek kaynak — hafta sonu dahil guncel)
+    uzmanpara_data = await _uzmanpara_fetch()
+
+    # 3. Merge + dedup (BigPara oncelikli — tam metin iceriyor)
+    seen_keys: set[str] = set()
+    data: list[dict[str, Any]] = []
+
+    # Once BigPara (zengin icerik)
+    for d in bigpara_data:
+        key = f"{d['company_code']}|{d['title'][:40].lower()}"
+        if key not in seen_keys:
+            seen_keys.add(key)
+            data.append(d)
+
+    # Sonra Uzmanpara (BigPara'da olmayan haberler eklenir)
+    added_from_uzmanpara = 0
+    for d in uzmanpara_data:
+        key = f"{d['company_code']}|{d['title'][:40].lower()}"
+        if key not in seen_keys:
+            seen_keys.add(key)
+            data.append(d)
+            added_from_uzmanpara += 1
+
+    if added_from_uzmanpara > 0:
+        logger.info("Uzmanpara'dan %d ek haber eklendi (BigPara'da yok)", added_from_uzmanpara)
+
+    # 4. Ikisi de bossa Bloomberg HT dene
     if not data:
-        logger.warning("BigPara bos/hatali -> Bloomberg HT deneniyor...")
+        logger.warning("BigPara + Uzmanpara bos -> Bloomberg HT deneniyor...")
         data = await _bloomberg_fetch()
 
     if not data:
@@ -351,7 +472,7 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
         logger.info("BIST filtre: %d -> %d haber", len(data), len(filtered))
         data = filtered
 
-    return data[:20]
+    return data[:30]
 
 
 async def seed_initial_disclosures(target: int = 50) -> list[dict[str, Any]]:
