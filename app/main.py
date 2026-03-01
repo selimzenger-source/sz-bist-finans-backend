@@ -4333,6 +4333,133 @@ async def admin_update_ai_report(request: Request, ipo_id: int, payload: dict, d
 
 
 # -------------------------------------------------------
+# Admin: AI Prompt Yönetimi (Okuma/Güncelleme)
+# -------------------------------------------------------
+
+@app.get("/api/v1/admin/ai-prompt/{prompt_type}")
+@limiter.limit("30/minute")
+async def admin_get_ai_prompt(request: Request, prompt_type: str):
+    """AI system prompt'unu oku. prompt_type: 'ipo-report' veya 'prospectus'."""
+    # GET isteğinde password query param olarak gelir
+    admin_pw = request.query_params.get("admin_password", "")
+    if not _verify_admin_password(admin_pw):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    if prompt_type == "ipo-report":
+        from app.services.ai_ipo_analyzer import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "ipo-report",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
+    elif prompt_type == "prospectus":
+        from app.services.prospectus_analyzer import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "prospectus",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Geçersiz prompt_type. 'ipo-report' veya 'prospectus' olmalı.")
+
+
+@app.put("/api/v1/admin/ai-prompt/{prompt_type}")
+@limiter.limit("10/minute")
+async def admin_update_ai_prompt(request: Request, prompt_type: str, payload: dict):
+    """AI system prompt'unu güncelle veya default'a döndür.
+
+    {
+        "admin_password": "...",
+        "prompt": "yeni prompt metni..."   // null gönderilirse default'a döner
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    new_prompt = payload.get("prompt")
+    # Boş string = default'a dön
+    if new_prompt is not None and not new_prompt.strip():
+        new_prompt = None
+
+    if prompt_type == "ipo-report":
+        from app.services.ai_ipo_analyzer import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {
+            "success": True,
+            "prompt_type": "ipo-report",
+            "message": "AI Rapor promptu güncellendi." if new_prompt else "AI Rapor promptu default'a döndürüldü.",
+            "prompt_length": len(get_system_prompt()),
+        }
+    elif prompt_type == "prospectus":
+        from app.services.prospectus_analyzer import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {
+            "success": True,
+            "prompt_type": "prospectus",
+            "message": "İzahname Analiz promptu güncellendi." if new_prompt else "İzahname Analiz promptu default'a döndürüldü.",
+            "prompt_length": len(get_system_prompt()),
+        }
+    else:
+        raise HTTPException(status_code=400, detail="Geçersiz prompt_type.")
+
+
+# -------------------------------------------------------
+# Admin: İzahname Analiz Tetikle (Mobil Admin)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/run-prospectus-analysis/{ipo_id}")
+@limiter.limit("10/minute")
+async def admin_run_prospectus_analysis_api(request: Request, ipo_id: int, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Mobil admin panelden izahname PDF analizini tetikler.
+
+    {
+        "admin_password": "...",
+        "force": true     // mevcut analizi sıfırla ve yeniden üret
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    if not ipo.prospectus_url:
+        raise HTTPException(status_code=400, detail="Bu IPO için izahname PDF URL'si girilmemiş.")
+
+    force = payload.get("force", False)
+
+    if ipo.prospectus_analysis and not force:
+        return {
+            "success": True,
+            "message": "Bu IPO için zaten izahname analizi var. force=True ile yeniden üretebilirsiniz.",
+            "ipo_id": ipo.id,
+        }
+
+    # Mevcut analizi sıfırla
+    ipo.prospectus_analysis = None
+    ipo.prospectus_analyzed_at = None
+    ipo.prospectus_tweeted = False
+    await db.commit()
+
+    # Background task olarak analiz başlat
+    import asyncio
+    from app.services.prospectus_analyzer import analyze_prospectus
+    asyncio.create_task(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
+
+    logger.info(f"Admin: İzahname analizi tetiklendi — {ipo.ticker or ipo.company_name} (id={ipo_id})")
+
+    return {
+        "success": True,
+        "message": f"{ipo.ticker or ipo.company_name} için izahname analizi başlatıldı. 1-2 dakika sonra yenileyin.",
+        "ipo_id": ipo.id,
+        "ticker": ipo.ticker,
+    }
+
+
+# -------------------------------------------------------
 # Admin: Bulk Archive IPO
 # -------------------------------------------------------
 

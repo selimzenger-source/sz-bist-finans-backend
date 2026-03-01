@@ -99,11 +99,32 @@ _ASSET_KEYWORDS = [
     "stok", "envanter", "hammadde",
 ]
 
+# ── Prompt Override Mekanizması ──
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    """Aktif system prompt'u döndürür (custom varsa onu, yoksa default)."""
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    """System prompt'u günceller. None gönderilirse default'a döner."""
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+    logger.info("Prospectus Analyzer system prompt %s", "güncellendi" if new_prompt else "default'a döndürüldü")
+
+
+def get_default_system_prompt() -> str:
+    """Default (hardcoded) system prompt'u döndürür."""
+    return _DEFAULT_SYSTEM_PROMPT
+
+
 # ─────────────────────────────────────────────────────────────
 # SYSTEM PROMPT — Hallüsinasyon koruması + Yüksek kalite
 # ─────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı, kıdemli bir halka arz analistisin. Görevin: izahname PDF'inden küçük yatırımcının para yatırma/yatırmama kararını etkileyecek SOMUT, KRİTİK bilgileri çıkarmak.
+_DEFAULT_SYSTEM_PROMPT = """Sen Türkiye sermaye piyasaları uzmanı, kıdemli bir halka arz analistisin. Görevin: izahname PDF'inden küçük yatırımcının para yatırma/yatırmama kararını etkileyecek SOMUT, KRİTİK bilgileri çıkarmak.
 
 HEDEF KİTLE: Bireysel küçük yatırımcılar. Finans jargonu bilmeyebilirler. Her terimi açık ve anlaşılır yaz.
 
@@ -1137,7 +1158,7 @@ async def analyze_with_ai(
 
     user_message = "\n".join(context_lines)
     # Few-shot örneklerini system prompt'a ekle
-    full_system = _SYSTEM_PROMPT + "\n\n" + _FEW_SHOT_EXAMPLES
+    full_system = get_system_prompt() + "\n\n" + _FEW_SHOT_EXAMPLES
 
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:

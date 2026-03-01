@@ -42,7 +42,28 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "claude-sonnet-4-6"
 _AI_TIMEOUT = 180  # v3: daha detayli analiz → daha uzun zaman
 
-_SYSTEM_PROMPT = """Sen Turkiye borsasinda (BIST) uzmanlasmis, 20+ yillik deneyime sahip senior halka arz analistisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun. Hedef kitlen: kucuk bireysel yatirimci.
+# ── Prompt Override Mekanizması ──
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    """Aktif system prompt'u döndürür (custom varsa onu, yoksa default)."""
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    """System prompt'u günceller. None gönderilirse default'a döner."""
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+    logger.info("AI IPO Analyzer system prompt %s", "güncellendi" if new_prompt else "default'a döndürüldü")
+
+
+def get_default_system_prompt() -> str:
+    """Default (hardcoded) system prompt'u döndürür."""
+    return _DEFAULT_SYSTEM_PROMPT
+
+
+_DEFAULT_SYSTEM_PROMPT = """Sen Turkiye borsasinda (BIST) uzmanlasmis, 20+ yillik deneyime sahip senior halka arz analistisin. SZ Algo Trade platformu icin profesyonel halka arz degerlendirme raporlari yaziyorsun. Hedef kitlen: kucuk bireysel yatirimci.
 
 Analiz metodolojin SEBI/ICRA IPO Grading Framework'une dayanir: cok boyutlu, agirlikli, veri odakli.
 
@@ -735,7 +756,7 @@ async def generate_ipo_report(
                 json={
                     "model": _AI_MODEL,
                     "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": get_system_prompt()},
                         {"role": "user", "content": user_message},
                     ],
                     "temperature": 0.12,  # v3: biraz daha deterministik
