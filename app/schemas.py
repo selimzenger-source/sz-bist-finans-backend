@@ -92,6 +92,8 @@ class IPOListOut(BaseModel):
 
     # Izahname
     prospectus_analysis: Optional[str] = None
+    prospectus_url: Optional[str] = None
+    prospectus_analyzed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
