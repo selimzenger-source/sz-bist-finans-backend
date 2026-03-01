@@ -4359,8 +4359,15 @@ async def admin_get_ai_prompt(request: Request, prompt_type: str):
             "current_prompt": get_system_prompt(),
             "is_custom": get_system_prompt() != get_default_system_prompt(),
         }
+    elif prompt_type == "kap-news":
+        from app.services.ai_news_scorer import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "kap-news",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
     else:
-        raise HTTPException(status_code=400, detail="Geçersiz prompt_type. 'ipo-report' veya 'prospectus' olmalı.")
+        raise HTTPException(status_code=400, detail="Geçersiz prompt_type. 'ipo-report', 'prospectus' veya 'kap-news' olmalı.")
 
 
 @app.put("/api/v1/admin/ai-prompt/{prompt_type}")
@@ -4397,6 +4404,15 @@ async def admin_update_ai_prompt(request: Request, prompt_type: str, payload: di
             "success": True,
             "prompt_type": "prospectus",
             "message": "İzahname Analiz promptu güncellendi." if new_prompt else "İzahname Analiz promptu default'a döndürüldü.",
+            "prompt_length": len(get_system_prompt()),
+        }
+    elif prompt_type == "kap-news":
+        from app.services.ai_news_scorer import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {
+            "success": True,
+            "prompt_type": "kap-news",
+            "message": "KAP Haber promptu güncellendi." if new_prompt else "KAP Haber promptu default'a döndürüldü.",
             "prompt_length": len(get_system_prompt()),
         }
     else:

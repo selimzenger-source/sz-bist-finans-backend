@@ -234,11 +234,32 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
 # ADIM 2: AI Puanlama (Abacus RouteLLM — gpt-4o)
 # -------------------------------------------------------
 
+# ── Prompt Override Mekanizması ──
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    """Aktif system prompt'u döndürür (custom varsa onu, yoksa default)."""
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    """System prompt'u günceller. None gönderilirse default'a döner."""
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+    logger.info("KAP News Scorer system prompt %s", "güncellendi" if new_prompt else "default'a döndürüldü")
+
+
+def get_default_system_prompt() -> str:
+    """Default (hardcoded) system prompt'u döndürür."""
+    return _DEFAULT_SYSTEM_PROMPT
+
+
 # -------------------------------------------------------
 # SYSTEM PROMPT — Chain-of-Thought + Anti-Notr-Kumeleme
 # -------------------------------------------------------
 
-_SYSTEM_PROMPT = """Sen 15+ yillik deneyime sahip bir Borsa Istanbul kurumsal yatirimci analistisin.
+_DEFAULT_SYSTEM_PROMPT = """Sen 15+ yillik deneyime sahip bir Borsa Istanbul kurumsal yatirimci analistisin.
 KAP bildirimlerini (ozel durum aciklamalari, is iliskileri, sermaye artirimlari, finansal sonuclar,
 ihale/sozlesme kazanimlari, temettu, bedelsiz, dava/ceza, yonetim degisiklikleri vs.) analiz ederek
 yatirimci icin onem puani ve Turkce ozet uretiyorsun.
@@ -447,7 +468,7 @@ SADECE asagidaki JSON formatinda yanit ver:
                 json={
                     "model": _AI_MODEL,
                     "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": get_system_prompt()},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": 0.1,
