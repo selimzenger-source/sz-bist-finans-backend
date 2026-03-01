@@ -247,10 +247,95 @@ RAPOR FORMATI (JSON)
 }
 
 =====================================================
-ALAN DETAYLARI
+ALAN DETAYLARI (★ SIRASIYLA OKUNACAK — RAPOR AKISI ★)
 =====================================================
 
-1. analysis (en az 350 kelime, en fazla 600 kelime):
+Rapor kullaniciya su sirada gosterilir:
+  1. how_to_participate (ILCE OKUNAN — nasil katilirim?)
+  2. lot_estimate_explanation + scenario_table (kac lot alacagim?)
+  3. analysis (detayli degerlendirme)
+  4. sector_comparison (sektor kiyaslamasi)
+  5. recommendation (sonuc)
+Bu yuzden her alan kendi basina anlamli ve akici olmali.
+
+-----------------------------------------------------
+1. how_to_participate (en az 150 kelime):
+   ★ KULLANICININ ILK GORDUGU BOLUM — EN ONEMLI ★
+   Yatirimci bu bolumu okuyunca "tamam, ne yapmam lazim" demeli.
+
+   KATILIM YONTEMINE GORE ADIM ADIM REHBER YAZ:
+
+   ── EGER TALEP TOPLAMA YONTEMI ISE ──
+   Adim 1: Asagidaki araci kurumlardan birinin mobil uygulamasina veya internet subesine giris yap.
+   Adim 2: "Halka Arz" veya "Talep Toplama" bolumune git.
+   Adim 3: [SIRKET ADI] ([TICKER]) halka arzini sec.
+   Adim 4: Almak istedigin lot miktarini gir (minimum X lot). Her lot Y adet hisse icerir.
+   Adim 5: Islemi onayla. Basvuru tutari kadar nakit hesabinda hazir olmali.
+   Adim 6: Tahsisat sonuclari aciklaninca, sana dusen lotlarin bedeli hesabindan cekilir. Kalan tutar iade edilir.
+
+   ── EGER BORSADA SATIS YONTEMI ISE ──
+   Bu yontemde halka arza katilmak, borsadan hisse senedi almakla AYNI islemdir:
+   Adim 1: Araci kurumun mobil uygulamasina giris yap.
+   Adim 2: Hisse arama bolumune [TICKER] kodunu yaz (ornegin MCARD).
+   Adim 3: "Al" (veya "Alis") butonuna bas.
+   Adim 4: Lot miktarini gir. Fiyat otomatik olarak halka arz fiyati ([IPO_PRICE] TL) gelir.
+   Adim 5: Emri gonder. Normal hisse senedi alis emri gibi islem gorur.
+   Not: Borsada satista emir, borsa saatleri icinde (10:00-18:00) verilir. Talep fazlaysa esit dagitim yapilir.
+
+   ★ ONEMLI: Katilim yontemi "borsada satis" ise MUTLAKA hisse senedi alir gibi anlatmalisin.
+   Yatirimci "TICKER kodunu yaz, al butonuna bas, lot gir, emri gonder" adimlarini gorebilmeli.
+   Katilim yontemi "talep toplama" ise araci kurum uygulamasindaki halka arz bolumunu anlat.
+
+   ARACI KURUMLAR — MADDE MADDE LISTELE:
+   "Basvuru yapilabilecek araci kurumlar:" basligi altinda her kurumu ayri satirda madde isareti ile yaz.
+   Ornek:
+   • Tera Yatirim Menkul Degerler (konsorsiyum lideri)
+   • Ak Yatirim Menkul Degerler
+   • Akbank
+   Eger basvuru YAPILAMAYACAK kurumlar varsa "Bu kurumlardan basvuru yapilamaz:" basligi altinda ayri listele.
+
+   TARIH VE SAAT: Basvuru tarihleri ve saatleri NET yaz (orn: "2-4 Mart 2026, her gun 09:00-17:00").
+   MINIMUM BASVURU: Minimum lot miktarini ve 1 lot kac hisse oldugunu belirt.
+   DAGITIM YONTEMI: Esit/oransal/karma ne demek — 1 cumlede acikla. Esit dagitimda "herkes esit lot alir" de.
+   LOCK-UP: Varsa kac gun ve yatirimci icin ne anlama geldigi 1 cumlede.
+
+   ★ ONEMLI: Uzun paragraf yazma — kisa cumleler, adim numaralari, madde isaretleri kullan.
+   Metin degil, REHBER yaz. Yatirimci bunu okuyup hemen basvuru yapabilmeli.
+   Borsadan hic hisse almamis biri bile bu adimlari takip edebilmeli.
+
+-----------------------------------------------------
+2. lot_estimate_explanation (en az 150 kelime):
+   ★ how_to_participate'den hemen sonra gosterilir ★
+
+   ONCE SONUCU VER: "Bu halka arzda tahmini kisi basi X-Y lot dagitilmasi bekleniyor" diye basla.
+
+   Ardindan:
+   - Toplam lot ve bireysel tahsisat oranini belirt
+   - Dagitim yontemine gore tahmini kisi basi lot hesapla
+   - Eger gecmis halka arz tahsisat verileri verilmisse: MUTLAKA benzer dagitim yontemli halka arzlardaki gerceklesen katilimci sayisi ve lot dagitimini referans al
+   - Senaryo tablosunu ACIKLA: "100.000 kisi katilirsa X lot, 500.000 kisi katilirsa Y lot" seklinde
+   - Tahmini katilimci sayisini gecmis verilere dayanarak tahmin et
+   - Oransal dagitimsa mekanizmayi detayli acikla
+   - Son donem katilimci sayisi trendi hakkinda yorum yap
+
+   ★ YUKSEK LOT VURGUSU: Eger tahmini kisi basi lot 3 veya ustuyse, bunu ACIKCA VURGULA.
+   Ornek: "Bu halka arzda kisi basi 5 lot dagitilmasi bekleniyor — bu son donem ortalamasinin ustunde, yatirimci icin cazip bir firsat."
+   ★ DUSUK LOT UYARISI: Eger tahmini kisi basi lot 1 ise, bunu da belirt.
+   Ornek: "Yuksek katilim beklentisiyle kisi basi 1 lot dagitilma ihtimali yuksek."
+   ★ YUKSEK BASVURU = YUKSEK LOT durumu varsa (orn: toplam lot cok fazla, arz buyuk):
+   Bunu "Arz buyuklugu yuksek, dolayisiyla yuksek basvuru gelse bile kisi basi lot sayisi tatmin edici olabilir" seklinde ACIKCA belirt.
+
+-----------------------------------------------------
+3. scenario_table (JSON dizisi):
+   - Sana verilen senaryo tablosundaki degerleri AYNEN kullan
+   - Eger senaryo tablosu verilmemisse, toplam lot sayisina gore kendin hesapla:
+     participants (formatli string: "100.000"), estimated_lot (tam sayi)
+   - 4 satir: 100K, 200K, 300K, 500K katilimci
+   - Hesaplama: bireysel_tahsisat_lotu / katilimci_sayisi (esit dagitimda)
+   - Oransal dagitimda: "Oransal dagitimda lot tahmini yapilamaz" yazilip bos dizi [] dondurulebilir
+
+-----------------------------------------------------
+4. analysis (en az 350 kelime, en fazla 600 kelime):
    PARAGRAF 1 — SIRKET PROFILI & GENEL GORUNTU:
    - Sirketin ne is yaptigi, sektoru, Turkiye'deki konumu
    - Halka arz fiyati ve arz buyuklugu genel degerlendirmesi
@@ -283,31 +368,7 @@ ALAN DETAYLARI
    - Izahname analiz verileri sunulmussa, olumlu ve olumsuz bulgulari yorumla
    - Izahnamedeki verileri tekrar etme — YORUMLA, yatirimciya ne anlama geldigini acikla
 
-2. how_to_participate (en az 120 kelime):
-   - Dagitim yontemi: esit/oransal/karma ne demek, yatirimci icin ne anlama gelir — somut acikla
-   - ADIM ADIM basvuru rehberi
-   - Hangi araci kurum/bankadan basvurulur — tum konsorsiyum uyelerini listele
-   - Minimum lot ve basvuru saatleri
-   - Talep toplama mi, borsada satis mi — fark ne, ne zaman basvurulur
-   - Lock-up suresi varsa etkisini acikla (yatirimci icin ne anlama gelir)
-
-3. lot_estimate_explanation (en az 150 kelime):
-   - Toplam lot ve bireysel tahsisat oranini belirt
-   - Dagitim yontemine gore tahmini kisi basi lot hesapla
-   - Eger gecmis halka arz tahsisat verileri verilmisse: MUTLAKA benzer dagitim yontemli halka arzlardaki gerceklesen katilimci sayisi ve lot dagitimini referans al
-   - Senaryo tablosunu ACIKLA: "100.000 kisi katilirsa X lot, 500.000 kisi katilirsa Y lot" seklinde
-   - Tahmini katilimci sayisini gecmis verilere dayanarak tahmin et
-   - Oransal dagitimsa mekanizmayi detayli acikla
-   - Son donem katilimci sayisi trendi hakkinda yorum yap
-
-4. scenario_table (JSON dizisi):
-   - Sana verilen senaryo tablosundaki degerleri AYNEN kullan
-   - Eger senaryo tablosu verilmemisse, toplam lot sayisina gore kendin hesapla:
-     participants (formatli string: "100.000"), estimated_lot (tam sayi)
-   - 4 satir: 100K, 200K, 300K, 500K katilimci
-   - Hesaplama: bireysel_tahsisat_lotu / katilimci_sayisi (esit dagitimda)
-   - Oransal dagitimda: "Oransal dagitimda lot tahmini yapilamaz" yazilip bos dizi [] dondurulebilir
-
+-----------------------------------------------------
 5. sector_comparison (en az 150 kelime):
    - Sektorun Turkiye'deki MEVCUT durumu ve buyume perspektifi (2-3 yillik)
    - Sirketin sektordeki KONUMU: lider mi, buyuyen mi, nicoyuncu mu?
@@ -316,6 +377,7 @@ ALAN DETAYLARI
    - Sektorun regulasyon ortami ve olasi degisiklikler
    - Sektorun dijitallesme, ihracat potansiyeli, doviz pozisyonu gibi ozel dinamikleri
 
+-----------------------------------------------------
 6. recommendation (en az 150 kelime):
    - NET SONUC: Katilmaya deger mi? Neden?
    - PUAN OZETI: "7 boyutlu analizimizde sirket 100 uzerinden X puan aldi" seklinde ozetle
