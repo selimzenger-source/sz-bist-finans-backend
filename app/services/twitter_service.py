@@ -1213,30 +1213,94 @@ def tweet_yearly_summary(
     worst_return_pct: float,
     total_completed: int,
     positive_count: int,
+    median_return_pct: float = 0.0,
+    all_returns: list = None,
 ) -> bool:
-    """Ay sonu halka arz raporu tweeti — her ayin son gunu gece yarisi."""
+    """Ay sonu halka arz raporu tweeti — her ayin son gunu gece yarisi.
+    all_returns: [{"ticker": "ZGYO", "pct": 237.8}, ...] — sıralama tablosu için
+    """
     try:
+        negative_count = total_completed - positive_count
+        win_rate = (positive_count / total_completed * 100) if total_completed > 0 else 0
+
         # Performans emoji
         if avg_return_pct >= 10:
-            perf_emoji = "\U0001F525"
+            perf_emoji = "🔥"
         elif avg_return_pct >= 0:
-            perf_emoji = "\U0001F7E2"
+            perf_emoji = "🟢"
         else:
-            perf_emoji = "\U0001F534"
+            perf_emoji = "🔴"
 
-        text = (
-            f"\U0001F4CA {year} Halka Arz \u2014 {month_name} Sonu Raporu\n\n"
-            f"\u2022 Toplam halka arz: {total_ipos}\n"
-            f"\u2022 25 günü doldu: {total_completed}\n"
-            f"\u2022 Kar/zarar: {positive_count}/{total_completed - positive_count}\n"
-            f"\u2022 Ort. getiri: {perf_emoji} %{avg_return_pct:+.1f}\n"
-            f"\u2022 En iyi: #{best_ticker} (%{best_return_pct:+.1f})\n"
-            f"\u2022 En kötü: #{worst_ticker} (%{worst_return_pct:+.1f})\n\n"
-            f"\u26A0\uFE0F İlk 25 işlem günü baz alınmıştır.\n\n"
-            f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
-            f"#HalkaArz #BIST100 #borsa #yatırım"
-        )
-        return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR)
+        # Başarı oranı emoji
+        if win_rate >= 80:
+            rate_emoji = "🏆"
+        elif win_rate >= 50:
+            rate_emoji = "🎯"
+        else:
+            rate_emoji = "⚠️"
+
+        # ── Performans Sıralaması Tablosu ──
+        ranking_section = ""
+        ticker_hashtags = ""
+        if all_returns and len(all_returns) > 0:
+            sorted_rets = sorted(all_returns, key=lambda r: r["pct"], reverse=True)
+
+            def _perf_emoji(pct):
+                if pct >= 100: return "🔥"
+                if pct >= 50: return "🚀"
+                if pct >= 0: return "📈"
+                return "📉"
+
+            ranking_lines = []
+            for i, r in enumerate(sorted_rets, 1):
+                ranking_lines.append(
+                    f"{i}. #{r['ticker']} → %{r['pct']:+.1f} {_perf_emoji(r['pct'])}"
+                )
+            ranking_section = "\n📈 Performans Sıralaması\n" + "\n".join(ranking_lines) + "\n"
+
+            # Tüm hisse ticker'larını hashtag olarak ekle
+            ticker_tags = " ".join(f"#{r['ticker']}" for r in sorted_rets)
+            ticker_hashtags = f" {ticker_tags}"
+
+        def _build_text(rank_sec, t_hashtags):
+            return (
+                f"📊 {year} Halka Arz — {month_name} Raporu\n\n"
+                f"📋 Genel Bakış\n"
+                f"• Toplam halka arz: {total_ipos}\n"
+                f"• 25 işlem günü doldu: {total_completed}\n\n"
+                f"✅ Kâr eden: {positive_count} hisse\n"
+                f"❌ Zarar eden: {negative_count} hisse\n"
+                f"{rate_emoji} Başarı oranı: %{win_rate:.0f}\n\n"
+                f"💰 Getiri Analizi\n"
+                f"• Ortalama: {perf_emoji} %{avg_return_pct:+.1f}\n"
+                f"• Medyan: %{median_return_pct:+.1f}\n"
+                f"{rank_sec}\n"
+                f"⚠️ İlk 25 işlem günü baz alınmıştır.\n\n"
+                f"📲 Detaylar için: {HALKAARZ_LINK}\n"
+                f"#HalkaArz #BIST100 #borsa #yatırım{t_hashtags}"
+            )
+
+        text = _build_text(ranking_section, ticker_hashtags)
+
+        # Karakter limiti kontrolü — sıralama çok uzunsa kısalt
+        if len(text) > 3800 and ranking_section and all_returns:
+            sorted_rets = sorted(all_returns, key=lambda r: r["pct"], reverse=True)
+            top5 = sorted_rets[:5]
+            short_lines = []
+            for i, r in enumerate(top5, 1):
+                short_lines.append(
+                    f"{i}. #{r['ticker']} → %{r['pct']:+.1f} {_perf_emoji(r['pct'])}"
+                )
+            if len(sorted_rets) > 5:
+                short_lines.append(f"... ve {len(sorted_rets) - 5} hisse daha")
+            ranking_section = "\n📈 Performans Sıralaması\n" + "\n".join(short_lines) + "\n"
+            text = _build_text(ranking_section, ticker_hashtags)
+
+        # Hâlâ çok uzunsa hashtag'leri kısalt
+        if len(text) > 3900:
+            text = _build_text(ranking_section, "")
+
+        return _safe_tweet_with_media(text, BANNER_AY_SONU_RAPOR, source="tweet_yearly_summary")
     except Exception as e:
         logger.error(f"tweet_yearly_summary hatasi: {e}")
         return False

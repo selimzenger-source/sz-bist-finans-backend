@@ -2823,6 +2823,14 @@ async def monthly_yearly_summary_tweet():
             worst = min(returns, key=lambda r: r["pct"])
             positive_count = sum(1 for r in returns if r["pct"] > 0)
 
+            # Medyan getiri hesapla
+            sorted_returns = sorted(r["pct"] for r in returns)
+            n = len(sorted_returns)
+            if n % 2 == 1:
+                median_return = sorted_returns[n // 2]
+            else:
+                median_return = (sorted_returns[n // 2 - 1] + sorted_returns[n // 2]) / 2
+
             from app.services.twitter_service import tweet_yearly_summary
             from app.services.admin_telegram import notify_tweet_sent
             tw_ok = tweet_yearly_summary(
@@ -2836,6 +2844,8 @@ async def monthly_yearly_summary_tweet():
                 worst_return_pct=worst["pct"],
                 total_completed=len(returns),
                 positive_count=positive_count,
+                median_return_pct=median_return,
+                all_returns=returns,
             )
             await notify_tweet_sent("aylik_rapor", f"{month_name} {report_year}", tw_ok, f"Toplam: {total_ipos} IPO, Ort: {avg_return:.1f}%")
 
