@@ -678,12 +678,17 @@ async def list_telegram_news(
         )
         user = user_result.scalar_one_or_none()
         if user:
+            # is_active VEYA expires_at hâlâ gelecekte → VIP aktif say
+            # (webhook gecikmesi / hatası durumunda kullanıcı mağdur olmasın)
             sub_result = await db.execute(
                 select(UserSubscription).where(
                     and_(
                         UserSubscription.user_id == user.id,
-                        UserSubscription.is_active == True,
                         UserSubscription.package == "ana_yildiz",
+                        or_(
+                            UserSubscription.is_active == True,
+                            UserSubscription.expires_at > datetime.utcnow(),
+                        ),
                     )
                 )
             )
@@ -5085,14 +5090,17 @@ async def add_to_watchlist(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Bu hisse zaten takip listenizde")
 
-    # VIP kontrolu — ana_yildiz abonesi mi?
+    # VIP kontrolu — ana_yildiz abonesi mi? (is_active VEYA expires_at gelecekte)
     is_vip = False
     sub_result = await db.execute(
         select(UserSubscription).where(
             and_(
                 UserSubscription.user_id == user.id,
-                UserSubscription.is_active == True,
                 UserSubscription.package == "ana_yildiz",
+                or_(
+                    UserSubscription.is_active == True,
+                    UserSubscription.expires_at > datetime.utcnow(),
+                ),
             )
         )
     )
@@ -5201,8 +5209,11 @@ async def trim_watchlist(
         select(UserSubscription).where(
             and_(
                 UserSubscription.user_id == user.id,
-                UserSubscription.is_active == True,
                 UserSubscription.package == "ana_yildiz",
+                or_(
+                    UserSubscription.is_active == True,
+                    UserSubscription.expires_at > datetime.utcnow(),
+                ),
             )
         )
     )
