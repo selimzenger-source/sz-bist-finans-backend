@@ -1228,7 +1228,7 @@ def tweet_yearly_summary(
             f"\U0001F4CA {year} Halka Arz \u2014 {month_name} Sonu Raporu\n\n"
             f"\u2022 Toplam halka arz: {total_ipos}\n"
             f"\u2022 25 günü doldu: {total_completed}\n"
-            f"\u2022 Kar/zarar: {positive_count}/{total_completed}\n"
+            f"\u2022 Kar/zarar: {positive_count}/{total_completed - positive_count}\n"
             f"\u2022 Ort. getiri: {perf_emoji} %{avg_return_pct:+.1f}\n"
             f"\u2022 En iyi: #{best_ticker} (%{best_return_pct:+.1f})\n"
             f"\u2022 En kötü: #{worst_ticker} (%{worst_return_pct:+.1f})\n\n"
