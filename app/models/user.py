@@ -39,6 +39,7 @@ class User(Base):
     notify_taban_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Taban acilinca bildirimi")
     notify_daily_open_close: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunluk acilis kapanis bildirimi")
     notify_percent_drop: Mapped[bool] = mapped_column(Boolean, default=True, comment="Yuzde dusus bildirimi")
+    notify_kap_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, comment="KAP takip listesi bildirimleri")
 
     # Hatirlatma zamanlari (son gun icin)
     reminder_30min: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 30 dk kala")
@@ -433,6 +434,20 @@ class AutoReply(Base):
         comment="replied / failed / skipped / unsafe",
     )
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FeatureInterest(Base):
+    """Kullanıcı özellik talep kaydı — talep ölçümü için."""
+
+    __tablename__ = "feature_interests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    device_id: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="Cihaz ID")
+    feature_name: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True,
+        comment="Özellik adı (bilanco_analizi vb.)",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

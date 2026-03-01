@@ -42,6 +42,7 @@ from app.models import (
     WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
     Dividend, DividendHistory,
     KapAllDisclosure, UserWatchlist,
+    FeatureInterest,
 )
 from app.schemas import (
     IPOListOut, IPODetailOut, IPOSectionsOut,
@@ -5098,7 +5099,7 @@ async def add_to_watchlist(
     if sub_result.scalar_one_or_none():
         is_vip = True
 
-    # Limit kontrolu (Free: 3, VIP: 50)
+    # Limit kontrolu (Free: 5, VIP: 25)
     count_result = await db.execute(
         select(func.count(UserWatchlist.id)).where(
             UserWatchlist.device_id == device_id
@@ -5107,10 +5108,10 @@ async def add_to_watchlist(
     current_count = count_result.scalar() or 0
 
     if is_vip:
-        if current_count >= 50:
+        if current_count >= 25:
             raise HTTPException(
                 status_code=403,
-                detail="VIP kullanicilar en fazla 50 hisse takip edebilir."
+                detail="VIP kullanicilar en fazla 25 hisse takip edebilir."
             )
     else:
         if current_count >= 5:
@@ -5119,11 +5120,42 @@ async def add_to_watchlist(
                 detail="Ucretsiz kullanicilar en fazla 5 hisse takip edebilir. VIP'e yukselin!"
             )
 
-    item = UserWatchlist(device_id=device_id, ticker=ticker)
+    pref = body.notification_preference if body.notification_preference in ("both", "positive_only", "negative_only") else "both"
+    item = UserWatchlist(device_id=device_id, ticker=ticker, notification_preference=pref)
     db.add(item)
     await db.flush()
 
     return {"success": True, "ticker": ticker, "is_vip": is_vip}
+
+
+@app.patch("/api/v1/users/{device_id}/kap-watchlist/{ticker}/preference")
+async def update_watchlist_preference(
+    device_id: str,
+    ticker: str,
+    body: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Takip listesindeki hissenin bildirim tercihini guncelle.
+
+    body: {"notification_preference": "both" | "positive_only" | "negative_only"}
+    """
+    ticker = ticker.upper().strip()
+    pref = body.get("notification_preference", "both")
+    if pref not in ("both", "positive_only", "negative_only"):
+        raise HTTPException(status_code=400, detail="Gecersiz bildirim tercihi")
+
+    result = await db.execute(
+        update(UserWatchlist)
+        .where(
+            UserWatchlist.device_id == device_id,
+            UserWatchlist.ticker == ticker,
+        )
+        .values(notification_preference=pref)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Hisse takip listenizde bulunamadi")
+
+    return {"success": True, "ticker": ticker, "notification_preference": pref}
 
 
 @app.delete("/api/v1/users/{device_id}/kap-watchlist/{ticker}")
@@ -5210,3 +5242,67 @@ async def trim_watchlist(
 
     deleted_count = current_count - FREE_LIMIT
     return {"trimmed": True, "deleted": deleted_count, "remaining": FREE_LIMIT}
+
+
+# ============================================
+# FEATURE INTEREST — Özellik Talep Kaydı
+# ============================================
+
+class FeatureInterestRequest(BaseModel):
+    device_id: Optional[str] = None
+    feature_name: str
+
+
+@app.post("/api/v1/feature-interest")
+@limiter.limit("10/minute")
+async def register_feature_interest(
+    request: Request,
+    body: FeatureInterestRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanıcı özellik talep kaydı oluşturur (talep ölçümü)."""
+    feature = body.feature_name.strip().lower()
+    device = (body.device_id or "").strip()
+
+    if not feature:
+        raise HTTPException(status_code=400, detail="feature_name gerekli.")
+
+    # Aynı device_id + feature için duplicate kontrolü
+    if device:
+        existing = await db.execute(
+            select(FeatureInterest).where(
+                FeatureInterest.device_id == device,
+                FeatureInterest.feature_name == feature,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return {"success": True, "message": "Zaten kayıtlısınız."}
+
+    interest = FeatureInterest(
+        device_id=device or None,
+        feature_name=feature,
+    )
+    db.add(interest)
+    await db.commit()
+    return {"success": True, "message": "Talebiniz kaydedildi!"}
+
+
+@app.post("/api/v1/admin/feature-interest-stats")
+@limiter.limit("10/minute")
+async def admin_feature_interest_stats(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Özellik talep istatistiklerini döner."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(
+        select(
+            FeatureInterest.feature_name,
+            func.count(FeatureInterest.id),
+        ).group_by(FeatureInterest.feature_name)
+    )
+    stats = {row[0]: row[1] for row in result.all()}
+    return {"stats": stats, "total": sum(stats.values())}

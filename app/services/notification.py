@@ -926,22 +926,36 @@ class NotificationService:
             "disclosure_id": str(disclosure.id),
         }
 
-        # Takip eden kullanicilari bul
+        # Takip eden kullanicilari bul — tercihleriyle birlikte
         watchlist_result = await self.db.execute(
-            select(UserWatchlist.device_id).where(
+            select(UserWatchlist.device_id, UserWatchlist.notification_preference).where(
                 UserWatchlist.ticker == ticker
             )
         )
-        device_ids = [row[0] for row in watchlist_result.all()]
+        watchlist_rows = watchlist_result.all()
 
-        if not device_ids:
+        if not watchlist_rows:
+            return 0
+
+        # Sentiment'e gore filtrele
+        filtered_device_ids = []
+        for device_id, pref in watchlist_rows:
+            if pref == "both" or not pref:
+                filtered_device_ids.append(device_id)
+            elif pref == "positive_only" and sentiment == "Olumlu":
+                filtered_device_ids.append(device_id)
+            elif pref == "negative_only" and sentiment == "Olumsuz":
+                filtered_device_ids.append(device_id)
+            # "Notr" → sadece "both" tercih edenler alir (yukarida yakalandi)
+
+        if not filtered_device_ids:
             return 0
 
         # Bildirimleri acik olan kullanicilari getir
         users_result = await self.db.execute(
             select(User).where(
                 and_(
-                    User.device_id.in_(device_ids),
+                    User.device_id.in_(filtered_device_ids),
                     User.notifications_enabled == True,
                     User.notify_kap_watchlist == True,
                     or_(User.deleted == False, User.deleted.is_(None)),

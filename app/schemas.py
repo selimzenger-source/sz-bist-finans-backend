@@ -597,6 +597,7 @@ class KapAllDisclosureOut(BaseModel):
 class WatchlistItemOut(BaseModel):
     """Kullanici takip listesi ogesi."""
     ticker: str
+    notification_preference: str = "both"
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -605,3 +606,4 @@ class WatchlistItemOut(BaseModel):
 class WatchlistAddRequest(BaseModel):
     """Takip listesine hisse ekleme istegi."""
     ticker: str
+    notification_preference: str = "both"

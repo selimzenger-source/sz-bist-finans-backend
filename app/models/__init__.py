@@ -10,6 +10,7 @@ from app.models.user import (
     WalletTransaction, Coupon, WALLET_COUPONS,
     WALLET_REWARD_AMOUNT, WALLET_COOLDOWN_SECONDS, WALLET_MAX_DAILY_ADS,
     ReplyTarget, AutoReply, DEFAULT_REPLY_TARGETS,
+    FeatureInterest,
 )
 from app.models.dividend import Dividend, DividendHistory
 from app.models.telegram_news import TelegramNews
@@ -38,4 +39,5 @@ __all__ = [
     "AppSetting",
     "KapAllDisclosure",
     "UserWatchlist",
+    "FeatureInterest",
 ]

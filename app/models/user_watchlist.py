@@ -29,6 +29,10 @@ class UserWatchlist(Base):
         String(10), nullable=False,
         comment="Takip edilen hisse kodu, orn: THYAO"
     )
+    notification_preference: Mapped[str] = mapped_column(
+        String(20), default="both", nullable=False,
+        comment="Bildirim tercihi: both, positive_only, negative_only"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
