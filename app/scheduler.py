@@ -1225,25 +1225,28 @@ async def check_morning_tweets():
                 )
                 minutes_to_open = (opening_time - now_tr).total_seconds() / 60
 
-                # --- Dagitim sabah tweeti: acilisa 30-75 dk kala (genis pencere) ---
-                # DB dedup (distribution_tweeted) deploy restart'a karşı koruma sağlar
-                # v2: Pencere 55-65 → 30-75 dk genisletildi (5dk interval ile kacirma riski azaltildi)
+                # --- Dagitim tweeti: Açılış saatinde veya hemen sonra ---
+                # v4: "Başvurular Başladı!" tweeti AÇILIŞ SAATİNDE atılır (öncesinde değil)
+                #   - minutes_to_open <= 5 → açılışa 5dk kala veya geçmiş
+                #   - minutes_to_open >= -60 → açılıştan max 1 saat sonrasına kadar kabul
+                #   - 5dk interval ile en fazla 5dk geç atılır
                 if (ipo.subscription_start == today
-                        and 30 <= minutes_to_open <= 75
+                        and -60 <= minutes_to_open <= 5
                         and not _timing_already_sent(ipo.id, "distribution_morning_tweet")
                         and not getattr(ipo, "distribution_tweeted", False)):  # deploy-safe DB dedup
                     if tweet_idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_distribution_start(ipo)
-                    await notify_tweet_sent("dagitim_sabah_timing", ipo.ticker or ipo.company_name, tw_ok)
+                    await notify_tweet_sent("dagitim_basladi", ipo.ticker or ipo.company_name, tw_ok)
                     _timing_mark_sent(ipo.id, "distribution_morning_tweet")
                     if tw_ok:
                         ipo.distribution_tweeted = True
                         await db.commit()
                     tweet_idx += 1
                     logger.info(
-                        "Dagitim sabah tweeti (timing): %s — acilisa %d dk",
-                        ipo.ticker or ipo.company_name, int(minutes_to_open),
+                        "Dagitim tweeti (acilis saati): %s — açılış %02d:%02d, şimdi %s",
+                        ipo.ticker or ipo.company_name, open_h, open_m,
+                        now_tr.strftime("%H:%M"),
                     )
 
                 # --- Son gun sabah tweeti: artik send_last_day_warnings() icinde 09:00 TR'de ---
@@ -1252,14 +1255,48 @@ async def check_morning_tweets():
         # ═══════════════════════════════════════════════════════════════
         # CATCH-UP: Kacirilan dagitim tweetleri + bildirimler
         # distribution_tweeted hala False/None olan in_distribution IPO'lar
-        # v3: Saat kisitlamasi KALDIRILDI — her 5 dk calisir, max 30 dk gecikme
+        # v4: AKILLI ZAMANLAMA — açılış saatinden ÖNCE atma, eski IPO'ları atla
+        #   1. subscription_start > 1 gün önce → ATLA (ör: SVGYO 27 Şubat)
+        #   2. subscription_start == bugün → açılış saatini bekle (subscription_hours)
+        #   3. subscription_start == dün → hemen at (gerçekten kaçırılmış)
         # Dedup: _timing_already_sent ile ayni gun tekrar gonderilmez
         # ═══════════════════════════════════════════════════════════════
+        from datetime import timedelta as _td_catchup
+        yesterday = today - _td_catchup(days=1)
+
+        # ── ESKİ IPO'LARI İŞARETLE: 2+ gün önce başlamış olanları distribution_tweeted=True yap ──
+        # Böylece catch-up ASLA eski IPO'ları yakalamaz (SVGYO gibi durumlar bir daha olmaz)
+        stale_result = await db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status.in_(["in_distribution", "active"]),
+                    IPO.archived == False,
+                    IPO.subscription_start < yesterday,  # 2+ gün önce başlamış
+                    or_(
+                        IPO.distribution_tweeted == False,
+                        IPO.distribution_tweeted.is_(None),
+                    ),
+                )
+            )
+        )
+        stale_ipos = list(stale_result.scalars().all())
+        if stale_ipos:
+            for stale in stale_ipos:
+                stale.distribution_tweeted = True
+                logger.warning(
+                    "ESKİ IPO İŞARETLENDİ: %s (sub_start=%s) — distribution_tweeted=True yapıldı, catch-up'tan çıkarıldı",
+                    stale.ticker or stale.company_name, stale.subscription_start,
+                )
+            await db.commit()
+            logger.info("Toplam %d eski IPO distribution_tweeted=True olarak işaretlendi", len(stale_ipos))
+
         catchup_result = await db.execute(
             select(IPO).where(
                 and_(
                     IPO.status.in_(["in_distribution", "active"]),
                     IPO.archived == False,
+                    # Sadece dün veya bugün başlayan IPO'lar (eski olanları ATLA)
+                    IPO.subscription_start >= yesterday,
                     IPO.subscription_start <= today,
                     or_(
                         IPO.distribution_tweeted == False,
@@ -1273,6 +1310,22 @@ async def check_morning_tweets():
         for ipo in catchup_ipos:
             if _timing_already_sent(ipo.id, "distribution_catchup_tweet"):
                 continue
+
+            # ── BUGÜN BAŞLAYAN IPO: Açılış saatini bekle ──
+            if ipo.subscription_start == today:
+                open_h, open_m = _get_opening_time(ipo)
+                sub_open_time = now_tr.replace(
+                    hour=open_h, minute=open_m, second=0, microsecond=0,
+                )
+                # Açılış saatinden en az 30 dk ÖNCE atılmalı (normal timing)
+                # Catch-up: açılıştan 10 dk öncesine kadar bekle, sonra at
+                if now_tr < sub_open_time - _td_catchup(minutes=10):
+                    logger.debug(
+                        "CATCH-UP bekleniyor: %s açılış %02d:%02d, şu an %s — henüz erken",
+                        ipo.ticker or ipo.company_name, open_h, open_m,
+                        now_tr.strftime("%H:%M"),
+                    )
+                    continue  # Açılış saatine yaklaşana kadar bekle
 
             logger.warning(
                 "CATCH-UP: Kacirilan dagitim tweeti + bildirim — %s (sub_start=%s, bugun=%s)",

@@ -517,8 +517,11 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
 async def send_reply(tweet_id: str, reply_text: str) -> dict:
     """Tweet'e direkt reply atar (thread yorumu). Fallback yok.
 
+    GÜVENLİK: tweet_id boş/geçersiz ise ASLA tweet atmaz (standalone tweet önleme).
+    Başarılı POST sonrası response'ta reply bağlamı doğrulanır.
+
     Args:
-        tweet_id: Yanıtlanacak tweet'in ID'si
+        tweet_id: Yanıtlanacak tweet'in ID'si (numerik string)
         reply_text: Reply metni
 
     Returns:
@@ -530,9 +533,18 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
         veya hata durumunda:
         {"success": False, "error": str}
     """
-    if not tweet_id or not reply_text or not reply_text.strip():
-        return {"success": False, "error": "Tweet ID ve reply metni gerekli."}
+    if not reply_text or not reply_text.strip():
+        return {"success": False, "error": "Reply metni gerekli."}
 
+    # ── GÜVENLİK: tweet_id validasyonu — boş/geçersiz ise standalone tweet riski ──
+    if not tweet_id or not isinstance(tweet_id, str) or not tweet_id.strip().isdigit():
+        logger.error(
+            "STANDALONE TWEET ÖNLENDİ: geçersiz tweet_id=%r — reply atılmadı, text: %s",
+            tweet_id, reply_text[:60],
+        )
+        return {"success": False, "error": f"Geçersiz tweet_id: {tweet_id!r}"}
+
+    tweet_id = tweet_id.strip()
     reply_text = reply_text.strip()
 
     if len(reply_text) > 4000:
@@ -558,6 +570,8 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
         },
     }
 
+    logger.info("Reply gönderiliyor: in_reply_to=%s, text=%s", tweet_id, reply_text[:60])
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
@@ -570,9 +584,27 @@ async def send_reply(tweet_id: str, reply_text: str) -> dict:
             )
 
         if response.status_code in (200, 201):
-            data = response.json()
-            reply_id = data.get("data", {}).get("id", "?")
-            logger.info(f"Reply başarılı (id={reply_id}) → tweet {tweet_id}")
+            resp_json = response.json()
+            reply_data = resp_json.get("data", {})
+            reply_id = reply_data.get("id", "?")
+
+            # ── REPLY DOĞRULAMASI ──
+            ref_tweets = reply_data.get("referenced_tweets", [])
+            is_actual_reply = any(
+                r.get("type") == "replied_to" for r in ref_tweets
+            ) if ref_tweets else False
+
+            if not is_actual_reply:
+                logger.warning(
+                    "⚠️ Reply gönderildi ama referenced_tweets bulunamadı! "
+                    "Standalone tweet olabilir. reply_id=%s, in_reply_to=%s, response=%s",
+                    reply_id, tweet_id, str(resp_json)[:300],
+                )
+
+            logger.info(
+                "Reply başarılı (id=%s → reply_to=%s, verified=%s)",
+                reply_id, tweet_id, is_actual_reply,
+            )
             _record_tweet_sent()
             return {
                 "success": True,

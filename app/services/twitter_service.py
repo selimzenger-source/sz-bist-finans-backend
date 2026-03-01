@@ -693,10 +693,13 @@ def _get_rejected_brokers(ipo_id: int) -> list[str]:
 
 
 def tweet_distribution_start(ipo) -> bool:
-    """Dağıtım süreci başladığında tweet atar — 2 tweet thread formatında.
+    """Dağıtım süreci başladığında TEK tweet atar (thread yok).
 
-    Tweet 1 (görselli): Şirket bilgileri, fiyat, tarih, tahmini lot, link, hashtag
-    Tweet 2 (reply): Katılınamayacak kurumlar listesi — her kurum ayrı satırda
+    Tüm bilgiler tek tweette:
+    - Şirket bilgileri, fiyat, tarih, tahmini lot
+    - Katılınamayacak kurumlar (varsa)
+    - Kurum kısaltma hashtag'leri (#Akbank #Garanti #Bizim vb.)
+    - Link ve genel hashtag'ler
     """
     try:
         if not _validate_ipo_for_tweet(ipo, ["company_name"], "Dağıtıma Çıkış"):
@@ -707,39 +710,47 @@ def tweet_distribution_start(ipo) -> bool:
             end_date = f"\n📅 Son başvuru: {ipo.subscription_end.strftime('%d.%m.%Y')}"
         price_text = f"\n💰 Fiyatı: {ipo.ipo_price} TL" if ipo.ipo_price else ""
 
-        # Tahmini lot bilgisi varsa ekle (parantez içinde tahminidir notu)
+        # Tahmini lot bilgisi varsa ekle
         lot_text = ""
         if ipo.estimated_lots_per_person:
             lot_text = f"\n📊 Tahmini dağıtım: ~{ipo.estimated_lots_per_person} lot/kişi (tahminidir)"
 
-        # Tweet 1: Ana bilgiler — broker listesi YOK (280 char sınırı)
+        # Katılınamayacak kurumlar
+        rejected = _get_rejected_brokers(ipo.id) if ipo.id else []
+        rejected_section = ""
+        broker_hashtags = ""
+        if rejected:
+            broker_lines = "\n".join(rejected)
+            rejected_section = f"\n\n❌ Katılınamayacak Kurumlar:\n{broker_lines}"
+
+            # Kurum adlarından hashtag üret: ilk kelimeyi al, Türkçe karakterleri düzelt
+            broker_tags = set()
+            for name in rejected:
+                first_word = name.split()[0] if name.split() else ""
+                # Sadece harf içeren kısa isimleri hashtag yap
+                clean = first_word.replace(".", "").replace(",", "").strip()
+                if clean and len(clean) >= 2 and clean.isalpha():
+                    broker_tags.add(f"#{clean}")
+            if broker_tags:
+                # Çok fazla hashtag olmasın — max 8
+                sorted_tags = sorted(broker_tags)[:8]
+                broker_hashtags = " ".join(sorted_tags)
+
+        # Tek tweet: Her şey bir arada
         text = (
             f"{_get_setting('T2_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
             f"{price_text}{end_date}{lot_text}\n\n"
-            f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
+            f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}"
+            f"{rejected_section}\n\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
+
+        # Kurum hashtag'leri sığarsa ekle (4000 char limiti — Blue Tick)
+        if broker_hashtags and len(text) + len(broker_hashtags) + 1 < 3900:
+            text += f" {broker_hashtags}"
+
         ok = _safe_tweet_with_media(text, BANNER_BASVURULAR_BASLIYOR, source="tweet_distribution_start")
-
-        # Tweet 2: Katılınamayacak kurumlar — reply olarak, her kurum ayrı satırda
-        if ok:
-            rejected = _get_rejected_brokers(ipo.id) if ipo.id else []
-            if rejected:
-                # Her kurum ayrı satırda
-                broker_lines = "\n".join(rejected)
-                reply_text = (
-                    f"❌ Katılınamayacak Kurumlar:\n\n"
-                    f"{broker_lines}"
-                )
-                time.sleep(2)  # Kısa bekleme — rate limit
-                reply_id = _last_tweet_id
-                if reply_id and reply_id != "?":
-                    _safe_reply_tweet(reply_text, reply_id)
-                else:
-                    # Fallback: reply yapılamazsa ana tweete ekle (kısaltılmış)
-                    logger.warning("Tweet 2 (broker reply) atlanamadı: tweet_id yok")
-
         return ok
     except Exception as e:
         logger.error(f"tweet_distribution_start hatası: {e}")

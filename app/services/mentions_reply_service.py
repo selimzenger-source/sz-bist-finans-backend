@@ -245,9 +245,26 @@ async def _fetch_tweet_text(tweet_id: str, creds: dict) -> str | None:
 
 
 async def _post_reply(tweet_id: str, text: str, creds: dict) -> dict:
-    """Tweet'e direkt reply atar. Mention yapan kişi bizi engage ettiği için 403 yok."""
+    """Tweet'e direkt reply atar. Mention yapan kişi bizi engage ettiği için 403 yok.
+
+    GÜVENLİK: tweet_id boş/geçersiz ise ASLA tweet atmaz (standalone tweet önleme).
+    Başarılı POST sonrası response'ta reply bağlamı doğrulanır.
+    """
+    # ── GÜVENLİK: tweet_id validasyonu — boş/geçersiz ise standalone tweet riski ──
+    if not tweet_id or not isinstance(tweet_id, str) or not tweet_id.strip().isdigit():
+        logger.error(
+            "STANDALONE TWEET ÖNLENDİ: geçersiz tweet_id=%r — reply atılmadı, text: %s",
+            tweet_id, text[:60],
+        )
+        return {"success": False, "error": f"Geçersiz tweet_id: {tweet_id!r}"}
+
+    tweet_id = tweet_id.strip()
+
     auth = _oauth_header(creds, "POST", _TWEET_POST_URL)
     body = {"text": text, "reply": {"in_reply_to_tweet_id": tweet_id}}
+
+    logger.info("Reply gönderiliyor: in_reply_to=%s, text=%s", tweet_id, text[:60])
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             resp = await c.post(
@@ -256,8 +273,34 @@ async def _post_reply(tweet_id: str, text: str, creds: dict) -> dict:
                 headers={"Authorization": auth, "Content-Type": "application/json"},
             )
         if resp.status_code in (200, 201):
-            data = resp.json().get("data", {})
-            return {"success": True, "tweet_id": data.get("id")}
+            resp_json = resp.json()
+            data = resp_json.get("data", {})
+            new_tweet_id = data.get("id")
+
+            # ── REPLY DOĞRULAMASI ──
+            # Twitter API v2 başarılı reply'da referenced_tweets döndürmeli
+            # Eğer yoksa tweet standalone olarak atılmış olabilir
+            ref_tweets = data.get("referenced_tweets", [])
+            is_actual_reply = any(
+                r.get("type") == "replied_to" for r in ref_tweets
+            ) if ref_tweets else False
+
+            if not is_actual_reply:
+                logger.warning(
+                    "⚠️ Reply gönderildi ama referenced_tweets bulunamadı! "
+                    "Standalone tweet olabilir. new_id=%s, in_reply_to=%s, response=%s",
+                    new_tweet_id, tweet_id, str(resp_json)[:300],
+                )
+                # NOT: Silme yapmıyoruz çünkü Twitter bazen response'ta
+                # referenced_tweets dönmeyebilir ama yine de reply olabilir.
+                # Sadece uyarı logla.
+
+            logger.info(
+                "Reply başarılı (id=%s → reply_to=%s, verified=%s)",
+                new_tweet_id, tweet_id, is_actual_reply,
+            )
+            return {"success": True, "tweet_id": new_tweet_id}
+
         logger.error(f"Reply POST {resp.status_code}: {resp.text[:300]}")
         return {"success": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
     except Exception as e:
