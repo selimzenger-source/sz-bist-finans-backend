@@ -1373,7 +1373,7 @@ async def admin_activate_news_subscription(
     db: AsyncSession = Depends(get_db),
 ):
     """Admin: Kullanicinin haber paketini elle aktiflestirir."""
-    if password != "SzBist2026Admin!":
+    if password != "zenger7245175":
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     result = await db.execute(
@@ -1420,7 +1420,7 @@ async def admin_test_notification(
     db: AsyncSession = Depends(get_db),
 ):
     """Admin: Kullaniciya test bildirimi gonder — FCM token durumunu da gosterir."""
-    if password != "SzBist2026Admin!":
+    if password != "zenger7245175":
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     result = await db.execute(
