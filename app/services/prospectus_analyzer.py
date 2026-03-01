@@ -738,21 +738,38 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         return []
 
 
-def _extract_tables_pdfplumber(pdf_path: str) -> str:
+def _extract_tables_pdfplumber(pdf_path: str, target_pages: set | None = None) -> str:
     """pdfplumber ile finansal tabloları yapılandırılmış metin olarak çıkarır.
 
     İzahnamelerdeki çok sütunlu finansal tablolar düz metin çıkarımında
     karışır. Bu fonksiyon tabloları satır-sütun formatında çıkarır.
 
-    Memory optimizasyonu: pdfplumber tablo çıkarma ÇOK ağır — sayfa limiti
-    ve periyodik gc.collect() ile Render 512MB limiti korunur.
+    Memory optimizasyonu:
+    - target_pages verilmişse SADECE o sayfalara bakar (150 yerine ~15-20 sayfa)
+    - target_pages yoksa ilk 50 sayfaya bakar (fallback)
+    - pdfplumber tablo çıkarma ÇOK ağır — Render 512MB limiti korunur.
     """
     try:
         import gc
         tables_text = []
         with pdfplumber.open(pdf_path) as pdf:
-            max_pages = min(len(pdf.pages), _MAX_PAGES)
-            for i in range(max_pages):
+            total_pages = len(pdf.pages)
+            if target_pages and len(target_pages) > 0:
+                # Sadece hedef sayfalarda tablo ara + 2 sayfa buffer (öncesi/sonrası)
+                buffered = set()
+                for p in target_pages:
+                    for offset in range(-2, 3):
+                        bp = p + offset
+                        if 0 <= bp < total_pages:
+                            buffered.add(bp)
+                pages_to_scan = sorted(buffered)
+                logger.info("pdfplumber tablo: %d hedef sayfa (%d buffer ile)", len(target_pages), len(pages_to_scan))
+            else:
+                # Fallback: finansal bölüm bulunamadıysa ilk 50 sayfaya bak
+                pages_to_scan = list(range(min(total_pages, 50)))
+                logger.info("pdfplumber tablo: hedef sayfa yok, ilk %d sayfaya bakılıyor", len(pages_to_scan))
+
+            for i in pages_to_scan:
                 try:
                     page_tables = pdf.pages[i].extract_tables()
                     if not page_tables:
@@ -880,6 +897,7 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
         ownership_text = []       # Ortaklık yapısı
         activity_text = []        # Şirket faaliyet bilgileri
         asset_text = []           # Mal varlıkları / fiziksel aktifler
+        financial_page_indices = set()  # Tablo çıkarma için finansal sayfa numaraları
         in_risk_section = False
         in_finance_section = False
         in_fund_section = False
@@ -907,6 +925,7 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
                 in_finance_section = False
             if in_finance_section:
                 finance_section_text.append(f"[S.{i+1}] {text}")
+                financial_page_indices.add(i)  # Tablo çıkarma için işaretle
 
             # Fon kullanımı + Halka arz yapısı bölümü
             if any(kw in text_lower for kw in [
@@ -988,8 +1007,10 @@ def extract_pdf_text(pdf_path: str) -> tuple[Optional[str], int]:
             return None, 0
 
         # ─── Tablo çıkarma (finansal tablolar için kritik) ───
+        # Sadece finansal bölüm sayfalarında tablo ara (150 yerine ~15-20 sayfa)
+        # Bu, Render 512MB limiti için KRİTİK optimizasyon
         gc.collect()  # Tablo çıkarma öncesi bellek boşalt
-        structured_tables = _extract_tables_pdfplumber(pdf_path)
+        structured_tables = _extract_tables_pdfplumber(pdf_path, target_pages=financial_page_indices)
         gc.collect()  # Tablo çıkarma sonrası temizlik
 
         # Öncelikli metin birleştirme — önemli bölümler önce
