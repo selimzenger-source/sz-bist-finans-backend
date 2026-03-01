@@ -4948,6 +4948,28 @@ async def claim_review_reward(
 
 
 # -------------------------------------------------------
+# BIST HISSE LISTESI — autocomplete icin
+# -------------------------------------------------------
+
+@app.get("/api/v1/bist-stocks")
+@limiter.limit("10/minute")
+async def list_bist_stocks(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """KAP bildirimlerindeki tum unique hisse kodlarini dondurur.
+    Autocomplete ve hisse validasyonu icin kullanilir.
+    """
+    result = await db.execute(
+        select(KapAllDisclosure.company_code)
+        .distinct()
+        .order_by(KapAllDisclosure.company_code)
+    )
+    codes = result.scalars().all()
+    return [{"ticker": c, "company_name": c} for c in codes]
+
+
+# -------------------------------------------------------
 # TUM KAP BILDIRIMLERI ENDPOINTS
 # -------------------------------------------------------
 
