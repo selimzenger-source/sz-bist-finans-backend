@@ -2288,6 +2288,135 @@ async def broadcast_send(
 
 
 # -------------------------------------------------------
+# BROADCAST — Mobil Admin API (JSON, password auth)
+# -------------------------------------------------------
+
+@router.post("/broadcast/send-api")
+async def broadcast_send_api(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Mobil admin panelinden broadcast gonderimi — JSON API.
+
+    Web admin'deki form-based endpoint'in JSON versiyonu.
+    Password ile auth yapar (session gerektirmez).
+    """
+    import hmac
+    from app.config import get_settings
+
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"success": False, "detail": "Gecersiz JSON"}, status_code=400)
+
+    # Password dogrulama
+    admin_pw = get_settings().ADMIN_PASSWORD
+    provided = payload.get("admin_password", "")
+    if not admin_pw or not provided or not hmac.compare_digest(
+        provided.encode("utf-8"), admin_pw.encode("utf-8")
+    ):
+        return JSONResponse({"success": False, "detail": "Gecersiz admin sifresi"}, status_code=401)
+
+    title = (payload.get("title") or "").strip()
+    body = (payload.get("body") or "").strip()
+    audience = payload.get("audience", "all")
+    deep_link_target = payload.get("deep_link_target", "none")
+
+    # Validasyon
+    if not title or len(title) > 100:
+        return JSONResponse({"success": False, "detail": "Baslik 1-100 karakter olmali"}, status_code=400)
+    if not body or len(body) > 500:
+        return JSONResponse({"success": False, "detail": "Mesaj 1-500 karakter olmali"}, status_code=400)
+    if audience not in ("all", "paid", "free"):
+        return JSONResponse({"success": False, "detail": "Gecersiz hedef kitle"}, status_code=400)
+    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar"):
+        deep_link_target = "none"
+
+    from app.services.broadcast import can_broadcast, mark_broadcast_sent
+
+    can_send, cooldown_remaining = can_broadcast()
+    if not can_send:
+        return JSONResponse(
+            {"success": False, "detail": f"Rate limit aktif — {cooldown_remaining} saniye bekleyin"},
+            status_code=429,
+        )
+
+    mark_broadcast_sent()
+
+    from app.services.notification import _init_firebase, is_firebase_initialized, NotificationService
+    _init_firebase()
+
+    if not is_firebase_initialized():
+        return JSONResponse(
+            {"success": False, "detail": "Firebase baslatilamadi"},
+            status_code=500,
+        )
+
+    from app.services.broadcast import _get_target_users
+    users = await _get_target_users(db, audience)
+    total = len(users)
+
+    if total == 0:
+        return JSONResponse(
+            {"success": False, "detail": "Hedef kitle bos — kullanici yok"},
+            status_code=400,
+        )
+
+    safe_data = {
+        "type": "announcement",
+        "title": title,
+        "body": body,
+    }
+    if deep_link_target != "none":
+        safe_data["deep_link"] = deep_link_target
+
+    ns = NotificationService()
+    sent = 0
+    failed = 0
+    error_details: list[str] = []
+
+    import asyncio
+
+    for user in users:
+        token = user.fcm_token
+        if not token:
+            continue
+        try:
+            ok = await ns.send_to_device(
+                token=token,
+                title=title,
+                body=body,
+                data=safe_data,
+            )
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+        except Exception as exc:
+            failed += 1
+            error_details.append(f"User {user.id}: {str(exc)[:80]}")
+
+        await asyncio.sleep(0.5)
+
+    # Telegram rapor
+    from app.services.broadcast import _send_telegram_report
+    try:
+        await _send_telegram_report(
+            title, audience, deep_link_target, total, sent, failed, error_details,
+        )
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "success": sent > 0,
+        "message": f"Broadcast tamamlandi! {sent}/{total} basarili, {failed} basarisiz.",
+        "sent": sent,
+        "total": total,
+        "failed": failed,
+    })
+
+
+# -------------------------------------------------------
 # DEBUG: FCM Token Durumu
 # -------------------------------------------------------
 

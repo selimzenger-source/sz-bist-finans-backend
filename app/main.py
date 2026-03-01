@@ -228,8 +228,13 @@ app.include_router(admin_router)
 
 
 # -------------------------------------------------------
-# Admin sifre dogrulama — timing-safe
+# Admin sifre dogrulama — timing-safe + brute-force korumasi
 # -------------------------------------------------------
+
+_admin_fail_counts: dict[str, int] = {}      # IP → yanlis giris sayisi
+_admin_block_until: dict[str, float] = {}    # IP → engel bitis zamani (epoch)
+_ADMIN_MAX_ATTEMPTS = 5                       # Max yanlis giris
+_ADMIN_BLOCK_SECONDS = 3600                   # 1 saat engel
 
 def _verify_admin_password(provided: str) -> bool:
     """Timing-safe admin sifre dogrulama. Brute force'a karsi hmac kullanir."""
@@ -238,17 +243,68 @@ def _verify_admin_password(provided: str) -> bool:
         return False
     return hmac.compare_digest(provided.encode("utf-8"), admin_pw.encode("utf-8"))
 
+def _get_client_ip(request: Request) -> str:
+    """Client IP adresini al (proxy arkasinda X-Forwarded-For)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
 
 # -------------------------------------------------------
 # Admin Sifre Dogrulama Endpoint
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/verify")
-@limiter.limit("5/minute")
+@limiter.limit("10/minute")
 async def verify_admin_password(request: Request, payload: dict = Body(...)):
-    """Admin sifresini dogrular — client-side hardcoded sifre yerine server-side kontrol."""
+    """Admin sifresini dogrular — brute-force korumasi + Telegram bildirimi."""
+    import time as _time
+    from app.services.admin_telegram import send_admin_message
+
+    client_ip = _get_client_ip(request)
+
+    # Engel kontrolu
+    block_time = _admin_block_until.get(client_ip, 0)
+    if _time.time() < block_time:
+        remaining_min = int((block_time - _time.time()) / 60)
+        raise HTTPException(
+            status_code=429,
+            detail=f"Cok fazla yanlis giris. {remaining_min} dakika sonra tekrar deneyin.",
+        )
+
     if not _verify_admin_password(payload.get("admin_password", "")):
+        # Yanlis giris sayacini artir
+        _admin_fail_counts[client_ip] = _admin_fail_counts.get(client_ip, 0) + 1
+        attempts = _admin_fail_counts[client_ip]
+
+        if attempts >= _ADMIN_MAX_ATTEMPTS:
+            # 1 saat engelle
+            _admin_block_until[client_ip] = _time.time() + _ADMIN_BLOCK_SECONDS
+            _admin_fail_counts[client_ip] = 0
+
+            # Telegram bildirimi gonder
+            try:
+                await send_admin_message(
+                    f"🚨 <b>Admin Brute-Force Tespit!</b>\n"
+                    f"IP: <code>{client_ip}</code>\n"
+                    f"Yanlis giris: {_ADMIN_MAX_ATTEMPTS} kez\n"
+                    f"Engel suresi: 1 saat\n"
+                    f"⚠️ Sifre kirma denemesi olabilir!",
+                )
+            except Exception:
+                pass  # Telegram hatasi login akisini bozmasin
+
+            raise HTTPException(
+                status_code=429,
+                detail="Cok fazla yanlis giris. 1 saat engellendi.",
+            )
+
         raise HTTPException(status_code=401, detail="Gecersiz admin sifresi")
+
+    # Basarili giris — sayaci sifirla
+    _admin_fail_counts.pop(client_ip, None)
+    _admin_block_until.pop(client_ip, None)
     return {"status": "ok", "message": "Admin dogrulandi"}
 
 
