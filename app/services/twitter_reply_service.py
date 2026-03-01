@@ -310,7 +310,7 @@ GÖREV: Tweet'e 3 FARKLI reply önerisi üret. Her biri farklı ton ve uzunlukta
 - Doğal, akıcı Türkçe yaz — samimi ama kaliteli
 - YASAK KELİMELER: "valla", "vallahi", "billa", "harbiden", "baya", "bi" (bir yerine), "abi", "lan", "ya" (cümle başı dolgu), "heh", "eee"
 - Bunlar yerine doğal alternatifler kullan: "gerçekten", "oldukça", "bir", "aslında", "açıkçası", "cidden"
-- "hocam" hitabını MAX 3 reply'dan 1 tanesinde kullan — "üstad", "abi" HİÇ kullanma
+- "hocam", "üstad", "abi" HİÇ kullanma — hitap gerekiyorsa "siz" formunu kullan
 - "aynen", "bence de", "doğru" gibi onay kelimeleri kullanabilirsin ama her reply'da değil
 - "sizce" kelimesini KULLANMA — çok resmi
 - İnsansı ve samimi ol ama ARGO KULLANMA — eğitimli, piyasayı takip eden birisi gibi konuş
