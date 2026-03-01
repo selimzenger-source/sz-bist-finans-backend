@@ -498,8 +498,8 @@ async def get_prospectus_analysis(ipo_id: int, db: AsyncSession = Depends(get_db
     except Exception:
         analysis_data = {}
 
-    # Görsel URL — static dosyadan sunuluyor
-    img_url = f"/static/prospectus/prospectus_{ipo_id}.png"
+    # Görsel URL — on-the-fly generate endpoint
+    img_url = f"/api/v1/ipos/{ipo_id}/prospectus-image"
 
     return {
         "ipo_id": ipo_id,
@@ -511,6 +511,69 @@ async def get_prospectus_analysis(ipo_id: int, db: AsyncSession = Depends(get_db
         "analyzed_at": ipo.prospectus_analyzed_at.isoformat() if ipo.prospectus_analyzed_at else None,
         "prospectus_url": ipo.prospectus_url,
     }
+
+
+@app.get("/api/v1/ipos/{ipo_id}/prospectus-image")
+async def get_prospectus_image(ipo_id: int, db: AsyncSession = Depends(get_db)):
+    """İzahname analiz görselini on-the-fly üretip PNG olarak döner.
+
+    Render her deploy'da ephemeral disk'i sıfırladığı için
+    statik dosya yerine her istekte generate edilir.
+    Dosya cache'i varsa ondan, yoksa yeni üretir.
+    """
+    import json as _json
+    from fastapi.responses import FileResponse
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    if not ipo.prospectus_analysis:
+        raise HTTPException(status_code=404, detail="İzahname analizi yok")
+
+    # Cache: dosya varsa doğrudan dön
+    import os
+    cache_path = os.path.join(
+        os.path.dirname(__file__), "static", "prospectus", f"prospectus_{ipo_id}.png"
+    )
+    if os.path.exists(cache_path):
+        return FileResponse(cache_path, media_type="image/png")
+
+    # JSON parse
+    try:
+        analysis_data = _json.loads(ipo.prospectus_analysis)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Analiz verisi okunamadı")
+
+    # 0 bulgu kontrolü
+    if not analysis_data.get("positives") and not analysis_data.get("negatives"):
+        raise HTTPException(status_code=404, detail="Analiz bulgusu yok")
+
+    # Görsel üret
+    try:
+        import asyncio
+        from app.services.prospectus_image import generate_prospectus_analysis_image
+
+        ipo_price = str(ipo.ipo_price) if ipo.ipo_price else None
+        img_path = await asyncio.get_running_loop().run_in_executor(
+            None,
+            generate_prospectus_analysis_image,
+            ipo.company_name,
+            ipo_price,
+            analysis_data,
+            ipo_id,
+            0,  # pages_analyzed — DB'de tutmuyoruz, 0 olursa footer'da gösterilmez
+        )
+        if img_path and os.path.exists(img_path):
+            return FileResponse(img_path, media_type="image/png")
+        else:
+            raise HTTPException(status_code=500, detail="Görsel üretilemedi")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Prospectus image generation error: %s", e)
+        raise HTTPException(status_code=500, detail="Görsel üretme hatası")
 
 
 # -------------------------------------------------------
