@@ -407,7 +407,26 @@ async def _run_mentions_cycle() -> None:
 
         user_id = _get_my_user_id()
         if not user_id:
-            logger.warning("X_USER_ID tanımlı değil — mentions reply durdu")
+            # Fallback: /2/users/me endpoint'inden çek (twitter_reply_service ile aynı)
+            logger.info("X_USER_ID boş — /2/users/me'den çekiliyor...")
+            try:
+                me_url = "https://api.twitter.com/2/users/me"
+                auth = _oauth_header(creds, "GET", me_url)
+                async with httpx.AsyncClient(timeout=10.0) as c:
+                    resp = await c.get(me_url, headers={"Authorization": auth})
+                if resp.status_code == 200:
+                    user_id = resp.json().get("data", {}).get("id")
+                    if user_id:
+                        logger.info(f"User ID başarıyla alındı: {user_id}")
+                    else:
+                        logger.error("users/me başarılı ama ID bulunamadı")
+                else:
+                    logger.error(f"users/me HTTP {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                logger.error(f"users/me hata: {e}")
+
+        if not user_id:
+            logger.warning("X_USER_ID tanımlı değil ve /users/me'den de alınamadı — mentions reply durdu")
             return
 
         # ── 3. Son görülen ID ──
