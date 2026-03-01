@@ -461,6 +461,7 @@ async def get_archived_ipos(
 @app.get("/api/v1/ipos/{ipo_id}", response_model=IPODetailOut)
 async def get_ipo_detail(ipo_id: int, db: AsyncSession = Depends(get_db)):
     """Halka arz detay — tum bilgileri icerir."""
+    import json as _json_detail
     result = await db.execute(
         select(IPO)
         .options(
@@ -473,6 +474,18 @@ async def get_ipo_detail(ipo_id: int, db: AsyncSession = Depends(get_db)):
     ipo = result.scalar_one_or_none()
     if not ipo:
         raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    # 0 bulgu prospectus_analysis → null olarak dön (frontend crash önlenir)
+    if ipo.prospectus_analysis:
+        try:
+            _pa = _json_detail.loads(ipo.prospectus_analysis)
+            _p = _pa.get("positives", [])
+            _n = _pa.get("negatives", [])
+            if len(_p) == 0 and len(_n) == 0:
+                ipo.prospectus_analysis = None
+        except Exception:
+            pass
+
     return ipo
 
 

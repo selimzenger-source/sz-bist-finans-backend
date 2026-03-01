@@ -1396,6 +1396,13 @@ async def analyze_from_db_data(ipo_id: int) -> bool:
             logger.error("DB analizi — AI başarısız: ipo_id=%d", ipo_id)
             return False
 
+        # 0 bulgu kontrolü — boş analiz sonucu DB'ye kaydedilmez (frontend crash önlenir)
+        _pos = analysis.get("positives", [])
+        _neg = analysis.get("negatives", [])
+        if len(_pos) == 0 and len(_neg) == 0:
+            logger.warning("DB analizi — 0 bulgu, DB'ye kaydedilmiyor: %s (ipo_id=%d)", company_name, ipo_id)
+            return False
+
         # DB'ye kaydet
         async with async_session() as db:
             result = await db.execute(select(IPO).where(IPO.id == ipo_id))
@@ -1485,6 +1492,13 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
         gc.collect()
         if not analysis:
             logger.error("AI analizi başarısız: ipo_id=%d", ipo_id)
+            return False
+
+        # 0 bulgu kontrolü — boş analiz sonucu DB'ye kaydedilmez (frontend crash önlenir)
+        _pos = analysis.get("positives", [])
+        _neg = analysis.get("negatives", [])
+        if len(_pos) == 0 and len(_neg) == 0:
+            logger.warning("İzahname analizi — 0 bulgu, DB'ye kaydedilmiyor: %s (ipo_id=%d)", company_name, ipo_id)
             return False
 
         # DB'ye kaydet + görsel üret + tweet
