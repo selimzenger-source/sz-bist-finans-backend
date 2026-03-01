@@ -416,11 +416,15 @@ def _infer_category(title: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
-    """Tum KAP bildirimlerini ceker (BigPara + Uzmanpara merge, Bloomberg HT fallback).
+    """Tum KAP bildirimlerini ceker (BigPara primary, Uzmanpara/Bloomberg fallback).
 
-    BigPara ve Uzmanpara'dan gelen haberler birlestirilir (dedup).
-    Boylece bir kaynak gec kalsa diger yakalar.
-    BIST whitelist ile filtrelenir. Max 30 haber doner.
+    Oncelik sirasi:
+    1. BigPara (tam metin + gercek KAP linki)
+    2. Uzmanpara (BigPara bossa — hafta sonu gibi)
+    3. Bloomberg HT (her ikisi de bossa)
+
+    Cift haber ve yanlis KAP linki olmasin diye ayni anda sadece 1 kaynak kullanilir.
+    BIST whitelist ile filtrelenir. Max 20 haber doner.
 
     Returns:
         list[dict]: Bildirim listesi (title, company_code, body, kap_url, category, is_bilanco, source, published_at)
@@ -428,36 +432,15 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
     # BIST whitelist'i guncelle
     bist = await _refresh_bist_symbols()
 
-    # 1. BigPara (primary — detay sayfasi + tam metin)
-    bigpara_data = await _bigpara_fetch()
+    # 1. BigPara (primary — tam metin + gercek KAP linki)
+    data = await _bigpara_fetch()
 
-    # 2. Uzmanpara (ek kaynak — hafta sonu dahil guncel)
-    uzmanpara_data = await _uzmanpara_fetch()
+    # 2. BigPara bossa Uzmanpara dene (hafta sonu dahil guncel)
+    if not data:
+        logger.warning("BigPara bos -> Uzmanpara deneniyor...")
+        data = await _uzmanpara_fetch()
 
-    # 3. Merge + dedup (BigPara oncelikli — tam metin iceriyor)
-    seen_keys: set[str] = set()
-    data: list[dict[str, Any]] = []
-
-    # Once BigPara (zengin icerik)
-    for d in bigpara_data:
-        key = f"{d['company_code']}|{d['title'][:40].lower()}"
-        if key not in seen_keys:
-            seen_keys.add(key)
-            data.append(d)
-
-    # Sonra Uzmanpara (BigPara'da olmayan haberler eklenir)
-    added_from_uzmanpara = 0
-    for d in uzmanpara_data:
-        key = f"{d['company_code']}|{d['title'][:40].lower()}"
-        if key not in seen_keys:
-            seen_keys.add(key)
-            data.append(d)
-            added_from_uzmanpara += 1
-
-    if added_from_uzmanpara > 0:
-        logger.info("Uzmanpara'dan %d ek haber eklendi (BigPara'da yok)", added_from_uzmanpara)
-
-    # 4. Ikisi de bossa Bloomberg HT dene
+    # 3. Ikisi de bossa Bloomberg HT dene
     if not data:
         logger.warning("BigPara + Uzmanpara bos -> Bloomberg HT deneniyor...")
         data = await _bloomberg_fetch()
@@ -472,7 +455,7 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
         logger.info("BIST filtre: %d -> %d haber", len(data), len(filtered))
         data = filtered
 
-    return data[:30]
+    return data[:20]
 
 
 async def seed_initial_disclosures(target: int = 50) -> list[dict[str, Any]]:
