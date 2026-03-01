@@ -499,6 +499,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v42 migration: Hatali KAP linkleri olan kayitlari sil (bildirim no < 1000000)
+        # Eski scrape'lerden kalan yanlis BigPara ID'leri — yeniden scrape ile dogru linkler gelecek
+        try:
+            await conn.execute(text("""
+                DELETE FROM kap_all_disclosures
+                WHERE kap_url ~ '/Bildirim/[0-9]+'
+                  AND CAST(substring(kap_url FROM '/Bildirim/([0-9]+)') AS BIGINT) < 1000000
+            """))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
