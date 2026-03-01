@@ -4272,16 +4272,24 @@ async def admin_generate_ai_report(request: Request, ipo_id: int, payload: dict,
             "ticker": ipo.ticker,
         }
 
-    # Background task olarak rapor uret
-    import asyncio
+    # Senkron rapor uret — await ile bekle (Render'da create_task guvenilir degil)
     from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
-    asyncio.create_task(generate_and_save_ipo_report(ipo.id))
+    ticker = ipo.ticker or ipo.company_name
 
-    logger.info(f"Admin: AI rapor uretimi tetiklendi — {ipo.ticker or ipo.company_name} (id={ipo_id})")
+    logger.info(f"Admin: AI rapor uretimi baslatiliyor (senkron) — {ticker} (id={ipo_id})")
+
+    try:
+        success = await generate_and_save_ipo_report(ipo.id, force=force)
+    except Exception as e:
+        logger.error(f"Admin: AI rapor uretim hatasi — {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=f"Rapor uretim hatasi: {str(e)[:200]}")
+
+    if not success:
+        raise HTTPException(status_code=500, detail=f"{ticker} icin AI rapor uretilemedi. Loglari kontrol edin.")
 
     return {
         "success": True,
-        "message": f"{ipo.ticker or ipo.company_name} icin AI rapor uretimi baslatildi. 30-60 saniye sonra yenileyin.",
+        "message": f"{ticker} icin AI rapor basariyla uretildi.",
         "ipo_id": ipo.id,
         "ticker": ipo.ticker,
     }
@@ -4460,18 +4468,24 @@ async def admin_run_prospectus_analysis_api(request: Request, ipo_id: int, paylo
     ipo.prospectus_tweeted = False
     await db.commit()
 
-    # Background task olarak analiz başlat
-    import asyncio
+    # Senkron izahname analizi — await ile bekle (Render'da create_task guvenilir degil)
     from app.services.prospectus_analyzer import analyze_prospectus
-    asyncio.create_task(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
+    ticker = ipo.ticker or ipo.company_name
 
-    logger.info(f"Admin: İzahname analizi tetiklendi — {ipo.ticker or ipo.company_name} (id={ipo_id})")
+    logger.info(f"Admin: Izahname analizi baslatiliyor (senkron) — {ticker} (id={ipo_id})")
+
+    try:
+        success = await analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0)
+    except Exception as e:
+        logger.error(f"Admin: Izahname analiz hatasi — {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=f"Izahname analiz hatasi: {str(e)[:200]}")
 
     return {
         "success": True,
-        "message": f"{ipo.ticker or ipo.company_name} için izahname analizi başlatıldı. 1-2 dakika sonra yenileyin.",
+        "message": f"{ticker} icin izahname analizi {'basariyla' if success else 'tamamlandi ama basarisiz'} uretildi.",
         "ipo_id": ipo.id,
         "ticker": ipo.ticker,
+        "analysis_success": bool(success),
     }
 
 
@@ -4703,16 +4717,23 @@ async def admin_generate_ai_report(request: Request, ipo_id: int, payload: dict,
             "already_exists": True,
         }
 
-    # Background task olarak başlat (v3: force parametresi destegi)
-    import asyncio
+    # Senkron rapor uret — await ile bekle (Render'da create_task guvenilir degil)
     from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
-    asyncio.create_task(generate_and_save_ipo_report(ipo_id, force=force))
 
-    logger.info(f"Admin: AI rapor üretimi başlatıldı — {ticker} (id={ipo_id}, force={force})")
+    logger.info(f"Admin: AI rapor uretimi baslatiliyor (senkron) — {ticker} (id={ipo_id}, force={force})")
+
+    try:
+        success = await generate_and_save_ipo_report(ipo_id, force=force)
+    except Exception as e:
+        logger.error(f"Admin: AI rapor uretim hatasi — {ticker}: {e}")
+        raise HTTPException(status_code=500, detail=f"Rapor uretim hatasi: {str(e)[:200]}")
+
+    if not success:
+        raise HTTPException(status_code=500, detail=f"{ticker} icin AI rapor uretilemedi. Loglari kontrol edin.")
 
     return {
         "success": True,
-        "message": f"{ticker} için AI rapor üretimi başlatıldı. 30-60 saniye içinde hazır olacak.",
+        "message": f"{ticker} icin AI rapor basariyla uretildi.",
         "ipo_id": ipo_id,
         "ticker": ticker,
         "force": force,
