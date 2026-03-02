@@ -1234,6 +1234,12 @@ async def check_morning_tweets():
                         and -60 <= minutes_to_open <= 5
                         and not _timing_already_sent(ipo.id, "distribution_morning_tweet")
                         and not getattr(ipo, "distribution_tweeted", False)):  # deploy-safe DB dedup
+                    # Race-condition koruması: tweet atmadan hemen önce DB'den taze oku
+                    await db.refresh(ipo)
+                    if ipo.distribution_tweeted:
+                        logger.info("Dagitim tweeti zaten atilmis (refresh): %s — atlanıyor", ipo.ticker)
+                        _timing_mark_sent(ipo.id, "distribution_morning_tweet")
+                        continue
                     if tweet_idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_distribution_start(ipo)
@@ -1317,7 +1323,7 @@ async def check_morning_tweets():
                 sub_open_time = now_tr.replace(
                     hour=open_h, minute=open_m, second=0, microsecond=0,
                 )
-                # Açılış saatinden en az 30 dk ÖNCE atılmalı (normal timing)
+                # Açılış saatından en az 30 dk ÖNCE atılmalı (normal timing)
                 # Catch-up: açılıştan 10 dk öncesine kadar bekle, sonra at
                 if now_tr < sub_open_time - _td_catchup(minutes=10):
                     logger.debug(
@@ -1326,6 +1332,13 @@ async def check_morning_tweets():
                         now_tr.strftime("%H:%M"),
                     )
                     continue  # Açılış saatine yaklaşana kadar bekle
+
+            # Race-condition koruması: tweet atmadan hemen önce DB'den taze oku
+            await db.refresh(ipo)
+            if ipo.distribution_tweeted:
+                logger.info("CATCH-UP: Tweet zaten atilmis (refresh): %s — atlanıyor", ipo.ticker)
+                _timing_mark_sent(ipo.id, "distribution_catchup_tweet")
+                continue
 
             logger.warning(
                 "CATCH-UP: Kacirilan dagitim tweeti + bildirim — %s (sub_start=%s, bugun=%s)",
