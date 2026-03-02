@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _AI_MODEL = "claude-sonnet-4-6"
-_GEMINI_MODEL = "gemini-2.5-flash"
+_GEMINI_MODEL = "gemini-2.5-pro"
 _AI_TIMEOUT = 180  # v3: daha detayli analiz → daha uzun zaman
 
 # ── Prompt Override Mekanizması ──
