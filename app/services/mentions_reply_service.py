@@ -398,7 +398,7 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
             {"role": "user",   "content": user_msg},
         ],
         "temperature": 0.85,
-        "max_tokens":  400,
+        "max_tokens":  800,
     }
     gemini_headers = {
         "Authorization": f"Bearer {gemini_key}",
@@ -435,19 +435,32 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
     if not raw:
         return {"is_safe": False, "reason": "Tum AI providerlar basarisiz"}
 
-    try:
-        # JSON bloğu varsa çıkar
-        m = re.search(r"\{[\s\S]*\}", raw)
-        if m:
-            raw = m.group(0)
-        result = json.loads(raw)
+    # ── Gemini Flash basarili ama JSON bozuk olabilir → Pro'yu dene ──
+    from app.services.ai_json_helper import safe_parse_json
+
+    result = safe_parse_json(raw, required_key="is_safe")
+    if result is not None:
         return result
-    except json.JSONDecodeError:
-        logger.error(f"AI JSON parse hatası: {raw[:200]}")
-        return {"is_safe": False, "reason": "JSON parse hatası"}
-    except Exception as e:
-        logger.error(f"AI hata: {e}")
-        return {"is_safe": False, "reason": str(e)}
+
+    # Flash'tan gelen JSON bozuksa Pro'yu dene (Flash HTTP 200 dondugu icin
+    # yukaridaki fallback tetiklenmemis olabilir)
+    logger.warning("Mentions AI: Flash JSON bozuk, Pro deneniyor — icerik: %s", raw[:150])
+
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
+                resp = await c.post(_GEMINI_URL, json={**payload, "model": _GEMINI_PRO_MODEL}, headers=gemini_headers)
+            if resp.status_code == 200:
+                raw2 = resp.json()["choices"][0]["message"]["content"].strip()
+                result2 = safe_parse_json(raw2, required_key="is_safe")
+                if result2 is not None:
+                    logger.info("Mentions reply [Gemini-Pro JSON recovery] kullanildi")
+                    return result2
+        except Exception as e:
+            logger.error("Mentions Gemini-Pro JSON recovery hata: %s", e)
+
+    logger.error("Mentions AI: JSON parse tamamen basarisiz — icerik: %s", raw[:200])
+    return {"is_safe": False, "reason": "JSON parse hatası"}
 
 
 # ───────────────────────────────────────────────

@@ -912,13 +912,13 @@ async def generate_ipo_report(
             logger.error("AI bos IPO raporu dondu (tum providerlar basarisiz) — %s", ipo.ticker or ipo.company_name)
             return None
 
-        # JSON parse — bazen markdown ```json ... ``` ile sarar
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-            if content.endswith("```"):
-                content = content[:-3].strip()
+        # JSON parse — safe_parse_json ile bozuk Gemini ciktisini kurtar
+        from app.services.ai_json_helper import safe_parse_json
 
-        report = json.loads(content)
+        report = safe_parse_json(content, required_key="overall_score")
+        if report is None:
+            logger.error("AI IPO raporu JSON parse basarisiz — icerik: %s", content[:300])
+            return None
 
         # Zorunlu alanlar kontrolu
         required_keys = [

@@ -591,13 +591,13 @@ SADECE asagidaki JSON formatinda yanit ver:
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     try:
-        # JSON blogu temizle
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0].strip()
+        from app.services.ai_json_helper import safe_parse_json
 
-        result = json.loads(text)
+        result = safe_parse_json(text, required_key="score")
+        if result is None:
+            logger.error("AI News Scorer: JSON parse basarisiz (%s) — icerik: %s", ticker, text[:200])
+            return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+
         score = result.get("score")
         summary = result.get("summary")
         hashtags = result.get("hashtags", [])

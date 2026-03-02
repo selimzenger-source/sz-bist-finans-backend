@@ -12,7 +12,6 @@ Sonuc: {"sentiment": str, "impact_score": float, "summary": str}
 
 import json
 import logging
-import re
 
 import httpx
 
@@ -74,76 +73,6 @@ def _rule_based_analyze(title: str, body: str) -> dict:
     elif neg > pos:
         return {"sentiment": "Olumsuz", "impact_score": 3.5, "summary": None}
     return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
-
-
-# ═══════════════════════════════════════════════════════════════════
-# JSON parse helper — bozuk Gemini ciktisini kurtarma
-# ═══════════════════════════════════════════════════════════════════
-
-def _safe_parse_json(text: str) -> dict | None:
-    """Gemini/AI ciktisindaki JSON'u guvenli sekilde parse et.
-
-    Gemini bazen markdown code fence, aciklama metni veya
-    truncated JSON doner. Bu fonksiyon:
-    1. Direkt json.loads dene
-    2. Code fence temizle (```json ... ```)
-    3. Regex ile {..."sentiment"...} blogu bul
-    4. Hepsi basarisiz → None don
-    """
-    if not text:
-        return None
-
-    cleaned = text.strip()
-
-    # 1) Direkt parse
-    try:
-        return json.loads(cleaned)
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # 2) Markdown code fence temizle
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-        try:
-            return json.loads(cleaned)
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # 3) Regex — "sentiment" iceren JSON blogu bul
-    json_match = re.search(
-        r'\{[^{}]*"sentiment"[^{}]*\}',
-        text,
-        re.DOTALL,
-    )
-    if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-    # 4) Daha genis regex — nested braces dahil
-    json_match2 = re.search(r'\{.*"sentiment".*\}', text, re.DOTALL)
-    if json_match2:
-        candidate = json_match2.group(0)
-        # Son kapanan } yi bul
-        depth = 0
-        end_idx = 0
-        for i, ch in enumerate(candidate):
-            if ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
-                if depth == 0:
-                    end_idx = i + 1
-                    break
-        if end_idx > 0:
-            try:
-                return json.loads(candidate[:end_idx])
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -292,7 +221,8 @@ SADECE asagidaki JSON formatinda yanit ver:
         return _rule_based_analyze(title, body)
 
     # JSON parse — bozuk JSON'u da kurtarmaya calis
-    result = _safe_parse_json(ai_text)
+    from app.services.ai_json_helper import safe_parse_json
+    result = safe_parse_json(ai_text, required_key="sentiment")
     if result is None:
         logger.error("KAP Analyzer: [%s] JSON parse basarisiz (%s) — icerik: %s",
                       provider_used, company_code, ai_text[:150])

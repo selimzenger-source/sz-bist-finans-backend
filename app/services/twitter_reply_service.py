@@ -487,14 +487,12 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
         return {"success": False, "error": "AI tum providerlar basarisiz."}
 
     try:
-        # JSON parse — ```json ... ``` bloğunu da destekle
-        json_text = content.strip()
-        if json_text.startswith("```"):
-            # ```json\n{...}\n``` formatını temizle
-            json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
-            json_text = re.sub(r"\s*```$", "", json_text)
+        from app.services.ai_json_helper import safe_parse_json
 
-        result = json.loads(json_text)
+        result = safe_parse_json(content, required_key="is_safe")
+        if result is None:
+            logger.error("AI reply JSON parse basarisiz — icerik: %s", content[:200])
+            return {"success": False, "error": "AI yanıtı JSON formatında değil — tekrar deneyin."}
 
         # Doğrulama
         is_safe = result.get("is_safe", False)
@@ -537,9 +535,6 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
             "replies": validated_replies,
         }
 
-    except json.JSONDecodeError as e:
-        logger.error(f"AI reply JSON parse hatası: {e}")
-        return {"success": False, "error": "AI yanıtı JSON formatında değil — tekrar deneyin."}
     except httpx.TimeoutException:
         logger.error("AI reply zaman aşımı")
         return {"success": False, "error": "AI servisi zaman aşımı — tekrar deneyin."}
@@ -900,13 +895,12 @@ async def generate_quote_analysis(tweet_text: str, author_username: str) -> dict
         return {"success": False, "error": "AI tum providerlar basarisiz."}
 
     try:
-        # JSON parse — ```json ... ``` bloğunu da destekle
-        json_text = content.strip()
-        if json_text.startswith("```"):
-            json_text = re.sub(r"^```(?:json)?\s*", "", json_text)
-            json_text = re.sub(r"\s*```$", "", json_text)
+        from app.services.ai_json_helper import safe_parse_json
 
-        result = json.loads(json_text)
+        result = safe_parse_json(content, required_key="is_safe")
+        if result is None:
+            logger.error("AI quote JSON parse basarisiz — icerik: %s", content[:200])
+            return {"success": False, "error": "AI yanıtı JSON formatında değil — tekrar deneyin."}
 
         is_safe = result.get("is_safe", False)
         if isinstance(is_safe, str):

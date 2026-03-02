@@ -1312,13 +1312,13 @@ async def analyze_with_ai(
             logger.error("AI boş izahname analizi döndü (tüm providerlar basarisiz) — %s", company_name)
             return None
 
-        # JSON parse
-        if content.startswith("```"):
-            content = content.split("\n", 1)[-1]
-            if content.endswith("```"):
-                content = content[:-3].strip()
+        # JSON parse — safe_parse_json ile bozuk AI ciktisini kurtar
+        from app.services.ai_json_helper import safe_parse_json
 
-        result = json.loads(content)
+        result = safe_parse_json(content, required_key="positives")
+        if result is None:
+            logger.error("AI izahname JSON parse basarisiz — icerik: %s", content[:300])
+            return None
 
         # Zorunlu alanlar
         required = ["positives", "negatives", "summary", "risk_level"]

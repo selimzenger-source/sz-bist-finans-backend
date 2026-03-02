@@ -196,16 +196,14 @@ SADECE asagidaki JSON formatinda yanit ver:
 
 
 def _parse_ai_response(response_text: str) -> dict:
-    """AI yanitini parse eder."""
+    """AI yanitini parse eder — safe_parse_json ile bozuk JSON kurtarma."""
     try:
-        text = response_text.strip()
-        # JSON blogu bul
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0].strip()
+        from app.services.ai_json_helper import safe_parse_json
 
-        data = json.loads(text)
+        data = safe_parse_json(response_text, required_key="valid")
+        if data is None:
+            logger.warning("AI Validator: JSON parse basarisiz — raw: %s", response_text[:200])
+            return {"valid": True, "corrections": {}, "reason": "Parse hatasi", "ai_used": False}
 
         is_valid = data.get("valid", True)
         corrections = data.get("corrections", {})
@@ -223,8 +221,8 @@ def _parse_ai_response(response_text: str) -> dict:
             "ai_used": True,
         }
 
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
-        logger.warning(f"AI Validator: Yanit parse hatasi — {e}, raw: {response_text[:200]}")
+    except Exception as e:
+        logger.warning("AI Validator: Yanit parse hatasi — %s, raw: %s", e, response_text[:200])
         return {"valid": True, "corrections": {}, "reason": f"Parse hatasi: {e}", "ai_used": False}
 
 
