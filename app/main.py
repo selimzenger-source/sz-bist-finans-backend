@@ -2167,6 +2167,7 @@ async def wallet_spend(
                         store="wallet",
                         product_id="wallet_spend_notif",
                         purchased_at=_now,
+                        expires_at=_now + timedelta(days=90),
                     )
                     db.add(new_notif)
                     created_count += 1
