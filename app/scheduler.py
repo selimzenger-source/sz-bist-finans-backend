@@ -444,11 +444,10 @@ async def scrape_spk():
                                 app.notified = True
 
                             # 2. Her sirket icin ayri tweet at (senkron, arada 5 sn bekleme)
-                            import time as _time
                             untweeted = [app for app in unnotified if not app.tweeted]
                             for i, app in enumerate(untweeted):
                                 if i > 0:
-                                    _time.sleep(5)  # Rate limit korumasi
+                                    await asyncio.sleep(5)  # Rate limit korumasi — event loop bloklamasin
                                 success = tweet_spk_application(app.company_name)
                                 if success:
                                     app.tweeted = True
@@ -1261,7 +1260,7 @@ async def check_morning_tweets():
                 if (ipo.subscription_end == today
                         and not _timing_already_sent(ipo.id, "last_day_morning_tweet")):
                     # Saat en az 06:30 TR olsun (09:00 yerine catch-up olarak)
-                    if now_tr.hour >= 6 or (now_tr.hour == 6 and now_tr.minute >= 30):
+                    if now_tr.hour > 6 or (now_tr.hour == 6 and now_tr.minute >= 30):
                         logger.warning(
                             "Son gun tweet CATCH-UP: %s — send_last_day_warnings kacirilmis!",
                             ipo.ticker or ipo.company_name,
@@ -1657,22 +1656,29 @@ async def send_last_day_warnings():
             last_day_ipos = list(result.scalars().all())
 
             if last_day_ipos:
-                # 1. Push bildirimler
+                # 1. Push bildirimler + 2. Tweet — dedup korumalı
                 notif_service = NotificationService(db)
-                for ipo in last_day_ipos:
-                    await notif_service.notify_ipo_last_day(ipo)
-                await db.commit()
-
-                # 2. Son gun sabah tweeti — bildirimle ayni anda
                 from app.services.twitter_service import tweet_last_day_morning
                 from app.services.admin_telegram import notify_tweet_sent
+
                 for idx, ipo in enumerate(last_day_ipos):
+                    # check_morning_tweets ile race condition koruması
+                    if _timing_already_sent(ipo.id, "last_day_morning_tweet"):
+                        logger.info("Son gun tweet/push zaten gonderilmis (dedup): %s", ipo.ticker or ipo.company_name)
+                        continue
+
+                    # Push bildirim
+                    await notif_service.notify_ipo_last_day(ipo)
+
+                    # Tweet (arada bekleme)
                     if idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_last_day_morning(ipo)
                     await notify_tweet_sent("son_gun_sabah", ipo.ticker or ipo.company_name, tw_ok)
                     _timing_mark_sent(ipo.id, "last_day_morning_tweet")
                     logger.info("Son gun sabah tweeti: %s", ipo.ticker or ipo.company_name)
+
+                await db.commit()
 
         logger.info(f"Son gun uyarisi: {len(last_day_ipos)} halka arz (bugun son gun)")
 
@@ -1989,7 +1995,7 @@ async def _market_snapshot_attempt(retry_num: int = 0):
             logger.info("Ogle arasi snapshot: Aktif islem goren IPO yok")
             return {"error": "Aktif islem goren IPO yok (status=trading)"}
 
-        today = date_type.today()
+        today = _today_tr()  # UTC yerine TR zamani — gece 00-03 TR arasinda yanlis tarih dönmesin
         snapshot_data = []
         skip_reasons = []
         no_today_track_count = 0  # Bugunku track'i olmayan hisse sayisi
@@ -2782,8 +2788,8 @@ async def monthly_yearly_summary_tweet():
         # UTC 21:00 = TR 00:00 (ertesi gun)
         # Rapor yili: Ocak 1 gece yarisi → onceki yil, diger aylar → bu yil
         now = datetime.now()
-        # TR zamani = UTC + 3
-        tr_now = now + timedelta(hours=3)
+        # TR zamani — timezone-safe
+        tr_now = datetime.now(_TR_TZ)
 
         if tr_now.month == 1 and tr_now.day == 1:
             # Ocak 1 gece yarisi → Aralik sonu → onceki yilin raporu
@@ -3275,7 +3281,7 @@ async def daily_subscription_report():
             )).scalar() or 0
 
             # ── MESAJ OLUSTUR ──
-            tr_time = (now + timedelta(hours=3)).strftime("%d.%m.%Y %H:%M")
+            tr_time = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
 
             store_text = ""
             for store, count in news_by_store:
@@ -3434,6 +3440,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
         max_instances=1,      # Spam koruma: çift çalışmayı önle
         coalesce=True,
+        misfire_grace_time=7200,  # 2 saat grace — Render uykusu koruması
     )
 
     # 7d. Suresi gecmis kuponlari temizle — her 2 saatte
@@ -3464,6 +3471,7 @@ def _setup_scheduler_impl():
         id="ipo_archiver",
         name="IPO Arsivleyici + 25 Gun Tweet (18:30 TR)",
         replace_existing=True,
+        misfire_grace_time=7200,  # 2 saat grace — 25/25 performans tweeti kaybedilmesin
     )
 
     # 9. Hatirlatma Zamani Kontrol — her 15 dakika
@@ -3517,9 +3525,9 @@ def _setup_scheduler_impl():
     # sunucu uyandiginda 3 saat icinde hala calistirilir (gece uykusu koruması)
     scheduler.add_job(
         send_last_day_warnings,
-        CronTrigger(hour=6, minute=0),  # UTC 06:00 = TR 09:00
+        CronTrigger(hour=6, minute=5),  # UTC 06:05 = TR 09:05 — morning_scraper ile çarpışmasın
         id="last_day_warning_morning",
-        name="Son Gun Uyarisi (09:00 TR)",
+        name="Son Gun Uyarisi (09:05 TR)",
         replace_existing=True,
         misfire_grace_time=10800,  # 3 saat grace — Render uyuyorsa bile yakala
     )
@@ -3533,6 +3541,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
         max_instances=1,      # Spam koruma: restart'ta çift çalışmayı önle
         coalesce=True,
+        misfire_grace_time=7200,  # 2 saat grace — günlük takip tweeti kaybedilmesin
     )
 
     # 13b. Tavan Takip Retry — basarisiz olursa saatte bir tekrar dene
@@ -3597,6 +3606,7 @@ def _setup_scheduler_impl():
         id="monthly_yearly_summary_tweet",
         name="Ay Sonu Halka Arz Raporu (Ayin 1'i 00:00 TR)",
         replace_existing=True,
+        misfire_grace_time=10800,  # 3 saat grace — aylik rapor kaybedilmesin
     )
 
     # 18. SPK Onay Tanitim Tweeti — her saat kontrol (created_at + 13 saat sonra)
@@ -3621,6 +3631,7 @@ def _setup_scheduler_impl():
         id="company_intro_tweet",
         name="Sirket Tanitim Tweet (12:00 TR)",
         replace_existing=True,
+        misfire_grace_time=7200,  # 2 saat grace
     )
 
     # 21. SPK Bekleyenler Gorselli Tweet — her ayin 1'i 20:00 TR (UTC 17:00)
@@ -3641,6 +3652,7 @@ def _setup_scheduler_impl():
         id="market_snapshot_tweet",
         name="Ogle Arasi Market Snapshot (14:00 TR)",
         replace_existing=True,
+        misfire_grace_time=3600,  # 1 saat grace
     )
 
     # 22b. T16 Acilis Bilgileri — 09:58 TR (UTC 06:58) Pzt-Cuma
@@ -3648,10 +3660,11 @@ def _setup_scheduler_impl():
     # 09:58'de baslar, veri yoksa 90sn arayla 4 kez dener
     scheduler.add_job(
         opening_summary_tweet,
-        CronTrigger(hour=6, minute=58, day_of_week="mon-fri"),
+        CronTrigger(hour=7, minute=3, day_of_week="mon-fri"),  # 10:03 TR — opening_price ile çarpışmasın
         id="opening_summary_tweet",
-        name="T16 Acilis Bilgileri (09:58 TR)",
+        name="T16 Acilis Bilgileri (10:03 TR)",
         replace_existing=True,
+        misfire_grace_time=3600,  # 1 saat grace
     )
 
     # 23. Push Bildirim Saglik Raporu — 4 saatte bir
@@ -3735,6 +3748,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=7200,  # 2 saat grace — akşam raporu kaybedilmesin
     )
 
     # AI IPO Rapor Catch-up — gunluk 10:00 TR (UTC 07:00)

@@ -168,7 +168,7 @@ def _is_duplicate_tweet(text: str) -> bool:
 
     if text_hash in _tweet_sent_cache:
         age_min = (now - _tweet_sent_cache[text_hash]) / 60
-        logger.warning(f"DUPLICATE tweet engellendi (%.0f dk once atildi): {text[:60]}...", age_min)
+        logger.warning("DUPLICATE tweet engellendi (%.0f dk once atildi): %s...", age_min, text[:60])
         return True
 
     return False
@@ -350,7 +350,9 @@ def _safe_reply_tweet(reply_text: str, in_reply_to_tweet_id: str) -> bool:
             logger.info("[TWITTER-DRY-RUN-REPLY] %s...", reply_text[:60])
             return False
 
-        _wait_for_tweet_rate_limit()
+        wait = _wait_for_tweet_rate_limit()
+        if wait > 0:
+            time.sleep(wait)
 
         auth_header = _build_oauth_header(creds)
         resp = httpx.post(
@@ -1642,7 +1644,7 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
 
         if not os.path.exists(image_path):
             logger.warning(f"Gorsel bulunamadi: {image_path}, sadece metin atiliyor")
-            return _safe_tweet(text)
+            return _safe_tweet(text, source=source, force_send=force_send)
 
         # ── Rate limit: dakikada max 3 tweet ──
         wait = _wait_for_tweet_rate_limit()
@@ -1672,8 +1674,33 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
         )
         auth_header = f"OAuth {header_parts}"
 
-        with open(image_path, "rb") as f:
-            files = {"media": ("image.png", f, "image/png")}
+        # Twitter media upload limiti ~5MB — buyuk PNG'leri otomatik kucult
+        _upload_path = image_path
+        try:
+            file_size = os.path.getsize(image_path)
+            if file_size > 4_800_000:  # 4.8 MB ustu → compress
+                from PIL import Image as PILImage
+                import io
+                with PILImage.open(image_path) as img:
+                    # RGBA → RGB cevir (JPEG icin gerekli)
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    buf = io.BytesIO()
+                    img.save(buf, format="JPEG", quality=85, optimize=True)
+                    buf.seek(0)
+                    _upload_path = image_path + ".compressed.jpg"
+                    with open(_upload_path, "wb") as cf:
+                        cf.write(buf.getvalue())
+                    logger.info("Banner compress: %.1f MB → %.1f MB (%s)",
+                                file_size / 1_000_000, os.path.getsize(_upload_path) / 1_000_000, _upload_path)
+        except Exception as comp_err:
+            logger.warning("Banner compress hatasi (orijinal kullanilacak): %s", comp_err)
+            _upload_path = image_path
+
+        with open(_upload_path, "rb") as f:
+            mime_type = "image/jpeg" if _upload_path.endswith(".jpg") else "image/png"
+            fname = "image.jpg" if _upload_path.endswith(".jpg") else "image.png"
+            files = {"media": (fname, f, mime_type)}
             upload_resp = httpx.post(
                 upload_url,
                 files=files,
@@ -1681,14 +1708,21 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
                 timeout=30.0,
             )
 
+        # Gecici compress dosyasini temizle
+        if _upload_path != image_path and os.path.exists(_upload_path):
+            try:
+                os.remove(_upload_path)
+            except OSError:
+                pass
+
         if upload_resp.status_code not in (200, 201):
             logger.error(f"Media upload hatasi ({upload_resp.status_code}): {upload_resp.text[:200]}")
-            return _safe_tweet(text)  # Gorsel basarisiz → sadece metin at
+            return _safe_tweet(text, source=source, force_send=force_send)  # Gorsel basarisiz → sadece metin at
 
         media_id = upload_resp.json().get("media_id_string")
         if not media_id:
             logger.error("Media upload: media_id alinamadi")
-            return _safe_tweet(text)
+            return _safe_tweet(text, source=source, force_send=force_send)
 
         logger.info(f"Media upload basarili: media_id={media_id}")
 
