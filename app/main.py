@@ -353,6 +353,82 @@ async def verify_admin_password(request: Request, payload: dict = Body(...)):
 
 
 # -------------------------------------------------------
+# Service Status (Kill Switch) — Uygulama Admin
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/service-status")
+@limiter.limit("30/minute")
+async def get_service_status(request: Request, payload: dict = Body(...)):
+    """Servis durumunu oku — bildirim/tweet kill switch + auto_send."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=401, detail="Gecersiz admin sifresi")
+
+    from app.services.twitter_service import is_notifications_killed, is_tweets_killed, is_auto_send
+    return {
+        "notifications_killed": is_notifications_killed(),
+        "tweets_killed": is_tweets_killed(),
+        "auto_send": is_auto_send(),
+    }
+
+
+@app.post("/api/v1/admin/toggle-kill-switch")
+@limiter.limit("10/minute")
+async def toggle_kill_switch(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kill switch toggle — uygulama admin'inden kullanılır.
+
+    payload: { admin_password, switch_type: "notifications" | "tweets" }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=401, detail="Gecersiz admin sifresi")
+
+    switch_type = payload.get("switch_type", "")
+    if switch_type not in ("notifications", "tweets"):
+        raise HTTPException(status_code=400, detail="Gecersiz switch_type. 'notifications' veya 'tweets' olmali.")
+
+    from app.models.app_setting import AppSetting
+    from app.services.twitter_service import (
+        clear_settings_cache, is_notifications_killed, is_tweets_killed,
+    )
+
+    key = "NOTIFICATIONS_KILL_SWITCH" if switch_type == "notifications" else "TWEETS_KILL_SWITCH"
+    current = is_notifications_killed() if switch_type == "notifications" else is_tweets_killed()
+    new_val = "false" if current else "true"
+
+    result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = new_val
+    else:
+        db.add(AppSetting(key=key, value=new_val))
+    await db.commit()
+    clear_settings_cache()
+
+    label = "Bildirimler" if switch_type == "notifications" else "Tweetler"
+    status_text = "DURDURULDU" if new_val == "true" else "AKTİF"
+    logger.info("[APP-ADMIN] %s -> %s", key, new_val)
+
+    # Telegram admin bildirimi
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            f"{'🔴' if new_val == 'true' else '🟢'} {label} {status_text} — uygulama admin'inden degistirildi"
+        )
+    except Exception:
+        pass
+
+    return {
+        "status": "ok",
+        "switch_type": switch_type,
+        "killed": new_val == "true",
+        "message": f"{label} {status_text}",
+    }
+
+
+# -------------------------------------------------------
 # Health Check
 # -------------------------------------------------------
 

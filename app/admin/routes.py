@@ -250,6 +250,11 @@ async def dashboard(
     )
     spk_count = spk_result.scalar() or 0
 
+    # Kill switch durumları
+    from app.services.twitter_service import is_notifications_killed, is_tweets_killed
+    notif_killed = is_notifications_killed()
+    tweets_killed = is_tweets_killed()
+
     return templates.TemplateResponse("admin/dashboard.html", {
         "request": request,
         "ipos": ipos,
@@ -257,6 +262,8 @@ async def dashboard(
         "status_counts": status_counts,
         "spk_count": spk_count,
         "current_status": status,
+        "notif_killed": notif_killed,
+        "tweets_killed": tweets_killed,
     })
 
 
@@ -1852,6 +1859,89 @@ async def toggle_auto_send(
     )
 
     return RedirectResponse(url="/admin/tweets", status_code=303)
+
+
+# -------------------------------------------------------
+# KILL SWITCH — Bildirim & Tweet Acil Durdurma
+# -------------------------------------------------------
+
+@router.post("/toggle-notifications-kill")
+async def toggle_notifications_kill(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bildirim kill switch toggle — True ise TÜM push bildirimler durdurulur."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+    from app.services.twitter_service import clear_settings_cache, is_notifications_killed
+
+    current = is_notifications_killed()
+    new_val = "false" if current else "true"
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "NOTIFICATIONS_KILL_SWITCH")
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = new_val
+    else:
+        db.add(AppSetting(key="NOTIFICATIONS_KILL_SWITCH", value=new_val))
+    await db.commit()
+    clear_settings_cache()
+
+    status_text = "DURDURULDU" if new_val == "true" else "AKTİF"
+    logger.info("[ADMIN] NOTIFICATIONS_KILL_SWITCH -> %s (%s)", new_val, status_text)
+
+    # Telegram admin bildirimi
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(f"{'🔴' if new_val == 'true' else '🟢'} Bildirimler {status_text} — admin tarafindan degistirildi")
+    except Exception:
+        pass
+
+    redirect_to = request.query_params.get("redirect", "/admin/")
+    return RedirectResponse(url=redirect_to, status_code=303)
+
+
+@router.post("/toggle-tweets-kill")
+async def toggle_tweets_kill(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tweet kill switch toggle — True ise TÜM tweetler durdurulur."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+    from app.services.twitter_service import clear_settings_cache, is_tweets_killed
+
+    current = is_tweets_killed()
+    new_val = "false" if current else "true"
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "TWEETS_KILL_SWITCH")
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = new_val
+    else:
+        db.add(AppSetting(key="TWEETS_KILL_SWITCH", value=new_val))
+    await db.commit()
+    clear_settings_cache()
+
+    status_text = "DURDURULDU" if new_val == "true" else "AKTİF"
+    logger.info("[ADMIN] TWEETS_KILL_SWITCH -> %s (%s)", new_val, status_text)
+
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(f"{'🔴' if new_val == 'true' else '🟢'} Tweetler {status_text} — admin tarafindan degistirildi")
+    except Exception:
+        pass
+
+    redirect_to = request.query_params.get("redirect", "/admin/")
+    return RedirectResponse(url=redirect_to, status_code=303)
 
 
 # -------------------------------------------------------

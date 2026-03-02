@@ -14,6 +14,65 @@
 </div>
 {% endif %}
 
+<!-- ═══ KILL SWITCH — Acil Durdurma ═══ -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+    <!-- Bildirim Kill Switch -->
+    <div class="rounded-lg border p-4 flex items-center justify-between {{ 'bg-red-900/30 border-red-600' if notif_killed else 'bg-gray-800 border-green-600' }}">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl">{{ '🔴' if notif_killed else '🟢' }}</span>
+            <div>
+                <h3 class="font-bold text-lg {{ 'text-red-400' if notif_killed else 'text-green-400' }}">
+                    Bildirimler: {{ 'DURDURULDU' if notif_killed else 'AKTİF' }}
+                </h3>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    {{ 'Tüm push bildirimleri durduruldu. Kullanıcılara bildirim gitmez.' if notif_killed else 'Push bildirimler normal çalışıyor.' }}
+                </p>
+            </div>
+        </div>
+        <form method="post" action="/admin/toggle-notifications-kill?redirect=/admin/">
+            {% if notif_killed %}
+            <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('Bildirimleri tekrar AKTİF etmek istediğinize emin misiniz?')">
+                ▶ Aktif Et
+            </button>
+            {% else %}
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('TÜM bildirimleri DURDURMAK istediğinize emin misiniz?\n\nKullanıcılara hiçbir push bildirim gitmeyecek!')">
+                ⏸ Durdur
+            </button>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Tweet Kill Switch -->
+    <div class="rounded-lg border p-4 flex items-center justify-between {{ 'bg-red-900/30 border-red-600' if tweets_killed else 'bg-gray-800 border-green-600' }}">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl">{{ '🔴' if tweets_killed else '🟢' }}</span>
+            <div>
+                <h3 class="font-bold text-lg {{ 'text-red-400' if tweets_killed else 'text-green-400' }}">
+                    Tweetler: {{ 'DURDURULDU' if tweets_killed else 'AKTİF' }}
+                </h3>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    {{ 'Tüm tweetler durduruldu. X\'e hiçbir tweet atılmaz.' if tweets_killed else 'Tweetler normal çalışıyor (onay/otomatik mod).' }}
+                </p>
+            </div>
+        </div>
+        <form method="post" action="/admin/toggle-tweets-kill?redirect=/admin/">
+            {% if tweets_killed %}
+            <button type="submit" class="bg-green-600 hover:bg-green-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('Tweetleri tekrar AKTİF etmek istediğinize emin misiniz?')">
+                ▶ Aktif Et
+            </button>
+            {% else %}
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('TÜM tweetleri DURDURMAK istediğinize emin misiniz?\n\nX\'e hiçbir tweet atılmayacak!')">
+                ⏸ Durdur
+            </button>
+            {% endif %}
+        </form>
+    </div>
+</div>
+
 <!-- Istatistikler -->
 <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
     <a href="/admin/" class="bg-gray-800 rounded-xl p-4 shadow-sm hover:shadow-md hover:bg-gray-750 transition text-center border border-gray-700 {{ 'ring-2 ring-indigo-500' if not current_status else '' }}">

@@ -253,6 +253,15 @@ class NotificationService:
         FCM token varsa Firebase, basarisiz olursa Expo fallback.
         ExponentPushToken varsa Expo Push API kullanilir.
         """
+        # KILL SWITCH — admin panelden tüm bildirimler durduruldu
+        try:
+            from app.services.twitter_service import is_notifications_killed
+            if is_notifications_killed():
+                logger.warning("[NOTIF KILL SWITCH] Bildirim durduruldu: %s → user_id=%s", title[:40], getattr(user, 'id', '?'))
+                return False
+        except Exception:
+            pass  # import hatasi olursa bildirimi gonder, kill switch'i atlama
+
         fcm = (user.fcm_token or "").strip()
         expo = (user.expo_push_token or "").strip()
 
@@ -333,6 +342,15 @@ class NotificationService:
         delay=True ise bildirim gonderildikten sonra NOTIFICATION_DELAY_SECONDS
         kadar bekler — ust uste seri bildirim onleme.
         """
+        # KILL SWITCH — admin panelden tüm bildirimler durduruldu
+        try:
+            from app.services.twitter_service import is_notifications_killed
+            if is_notifications_killed():
+                logger.warning("[NOTIF KILL SWITCH] Topic bildirim durduruldu: %s → topic=%s", title[:40], topic)
+                return False
+        except Exception:
+            pass
+
         if not _firebase_initialized:
             logger.info(f"[DRY-RUN] Push → topic/{topic}: {title} | {body}")
             if delay:

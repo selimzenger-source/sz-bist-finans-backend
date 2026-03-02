@@ -398,6 +398,11 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
+        # KILL SWITCH — admin panelden tüm tweetler durduruldu
+        if not force_send and is_tweets_killed():
+            logger.warning("[TWEET KILL SWITCH] Tweet durduruldu: %s", text[:60])
+            return False
+
         # Onay modu — kuyruğa ekle, direkt atma (DB'den okunur, restart'a dayanıklı)
         if not force_send and not is_auto_send():
             # Caller fonksiyon adini otomatik tespit et
@@ -539,6 +544,19 @@ def is_auto_send() -> bool:
     Restart'tan etkilenmez — değer app_settings tablosunda saklanır.
     """
     val = _get_setting("TWITTER_AUTO_SEND")
+    return val.lower() in ("true", "1", "yes")
+
+
+# ─── KILL SWITCH FONKSİYONLARI ───
+def is_notifications_killed() -> bool:
+    """Bildirim kill switch durumu. True ise TÜM push bildirimler durdurulur."""
+    val = _get_setting("NOTIFICATIONS_KILL_SWITCH")
+    return val.lower() in ("true", "1", "yes")
+
+
+def is_tweets_killed() -> bool:
+    """Tweet kill switch durumu. True ise TÜM tweetler durdurulur (kuyruga da eklenmez)."""
+    val = _get_setting("TWEETS_KILL_SWITCH")
     return val.lower() in ("true", "1", "yes")
 
 
@@ -1617,6 +1635,11 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
     try:
+        # KILL SWITCH — admin panelden tüm tweetler durduruldu
+        if not force_send and is_tweets_killed():
+            logger.warning("[TWEET KILL SWITCH] Tweet+media durduruldu: %s", text[:60])
+            return False
+
         # Onay modu — kuyruğa ekle, direkt atma (DB'den okunur, restart'a dayanıklı)
         if not force_send and not is_auto_send():
             import inspect
