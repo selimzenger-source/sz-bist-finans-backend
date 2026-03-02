@@ -5070,7 +5070,7 @@ async def list_bist_stocks(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Tum BIST hisse kodlarini dondurur (DB + BigPara birlesik).
+    """Tum BIST hisse kodlarini dondurur (DB + BigPara + Halka Arz birlesik).
     Autocomplete ve hisse validasyonu icin kullanilir.
     """
     # 1. DB'den: KAP bildirimlerindeki tum unique hisse kodlari
@@ -5088,8 +5088,19 @@ async def list_bist_stocks(
     except Exception:
         bigpara_codes = set()
 
+    # 3. Halka arz tablosundan: Yeni halka arz hisseleri (ticker'i olan)
+    ipo_codes: set[str] = set()
+    try:
+        from app.models.ipo import IPO
+        ipo_result = await db.execute(
+            select(IPO.ticker).where(IPO.ticker.isnot(None), IPO.ticker != "")
+        )
+        ipo_codes = {t for t in ipo_result.scalars().all() if t and t.strip()}
+    except Exception:
+        pass
+
     # Birlesik set
-    all_codes = db_codes | bigpara_codes
+    all_codes = db_codes | bigpara_codes | ipo_codes
     return [{"ticker": s, "company_name": s} for s in sorted(all_codes)]
 
 

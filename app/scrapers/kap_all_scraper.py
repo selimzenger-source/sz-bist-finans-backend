@@ -62,7 +62,7 @@ async def _refresh_bist_symbols() -> set[str]:
                 codes = {
                     a.get_text(strip=True)
                     for a in links
-                    if re.match(r"^[A-Z]{2,10}$", a.get_text(strip=True))
+                    if re.match(r"^[A-Z][A-Z0-9]{1,9}$", a.get_text(strip=True))
                 }
                 if not codes:
                     break

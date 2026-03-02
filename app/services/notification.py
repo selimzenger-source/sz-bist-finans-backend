@@ -913,9 +913,15 @@ class NotificationService:
         else:
             emoji = "📋"
 
-        # Bildirim basligi
-        score_text = f" (AI: {score})" if score else ""
-        title = f"{emoji} KAP: {ticker} — {sentiment}{score_text}"
+        # Bildirim basligi — kullanici dostu format
+        if sentiment == "Olumlu":
+            sentiment_label = "Olumlu Haber"
+        elif sentiment == "Olumsuz":
+            sentiment_label = "Olumsuz Haber"
+        else:
+            sentiment_label = "Yeni Haber"
+
+        title = f"{emoji} Favori Hisseniz {ticker} — {sentiment_label}"
 
         # Bildirim govdesi
         body = (disclosure.title or "")[:200]
