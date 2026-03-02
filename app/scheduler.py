@@ -1189,6 +1189,7 @@ async def check_morning_tweets():
         from zoneinfo import ZoneInfo
         from sqlalchemy import select, and_, or_
         from app.models.ipo import IPO
+        from app.services.notification import NotificationService
 
         TR_TZ = ZoneInfo("Europe/Istanbul")
         now_tr = datetime.now(TR_TZ)
@@ -1255,8 +1256,29 @@ async def check_morning_tweets():
                         now_tr.strftime("%H:%M"),
                     )
 
-                # --- Son gun sabah tweeti: artik send_last_day_warnings() icinde 09:00 TR'de ---
-                # Bildirim ve tweet ayni anda atilir (check_morning_tweets yerine)
+                # --- Son gun sabah tweeti CATCH-UP ---
+                # send_last_day_warnings (09:00 TR) kacirilmissa burada yakala
+                if (ipo.subscription_end == today
+                        and not _timing_already_sent(ipo.id, "last_day_morning_tweet")):
+                    # Saat en az 06:30 TR olsun (09:00 yerine catch-up olarak)
+                    if now_tr.hour >= 6 or (now_tr.hour == 6 and now_tr.minute >= 30):
+                        logger.warning(
+                            "Son gun tweet CATCH-UP: %s — send_last_day_warnings kacirilmis!",
+                            ipo.ticker or ipo.company_name,
+                        )
+                        from app.services.twitter_service import tweet_last_day_morning
+                        tw_ok = tweet_last_day_morning(ipo)
+                        from app.services.admin_telegram import notify_tweet_sent
+                        await notify_tweet_sent("son_gun_sabah_catchup", ipo.ticker or ipo.company_name, tw_ok)
+                        _timing_mark_sent(ipo.id, "last_day_morning_tweet")
+
+                        # Push bildirim de gonder
+                        try:
+                            notif_service = NotificationService(db)
+                            await notif_service.notify_ipo_last_day(ipo)
+                            await db.commit()
+                        except Exception as notif_err:
+                            logger.warning("Son gun catch-up bildirim hatasi: %s", notif_err)
 
         # ═══════════════════════════════════════════════════════════════
         # CATCH-UP: Kacirilan dagitim tweetleri + bildirimler
@@ -3491,14 +3513,15 @@ def _setup_scheduler_impl():
     )
 
     # 12. Son gun uyarisi — BUGUN son gun olanlara sabah 09:00 TR (UTC 06:00)
-    # Eski: UTC 09:00 = TR 12:00 (gec) + UTC 17:00 = TR 20:00 (aksam oncesi gun)
-    # Yeni: tek job, gercek son gunde sabah 09:00 TR'de bildirim
+    # misfire_grace_time=10800 (3 saat): Render uyurken CronTrigger kacirilirsa
+    # sunucu uyandiginda 3 saat icinde hala calistirilir (gece uykusu koruması)
     scheduler.add_job(
         send_last_day_warnings,
         CronTrigger(hour=6, minute=0),  # UTC 06:00 = TR 09:00
         id="last_day_warning_morning",
         name="Son Gun Uyarisi (09:00 TR)",
         replace_existing=True,
+        misfire_grace_time=10800,  # 3 saat grace — Render uyuyorsa bile yakala
     )
 
     # 13. Tavan Takip Gun Sonu — 18:07 TR (UTC 15:07) Pzt-Cuma
@@ -3541,6 +3564,7 @@ def _setup_scheduler_impl():
         id="morning_scraper",
         name="Sabah Scraper (09:00 TR)",
         replace_existing=True,
+        misfire_grace_time=7200,  # 2 saat grace — Render uykusu koruması
     )
 
     # 15. Ilk Islem Gunu Bildirimi — her gun 09:30 Turkiye (UTC 06:30) Pzt-Cuma
@@ -3551,6 +3575,7 @@ def _setup_scheduler_impl():
         id="first_trading_day_notif",
         name="Ilk Islem Gunu Bildirimi (09:30 TR)",
         replace_existing=True,
+        misfire_grace_time=7200,  # 2 saat grace
     )
 
     # 16. Acilis Fiyati Tweet — her gun 09:58 Turkiye (UTC 06:58) Pzt-Cuma
@@ -3561,6 +3586,7 @@ def _setup_scheduler_impl():
         id="opening_price_tweet",
         name="Acilis Fiyati Tweet (09:58 TR)",
         replace_existing=True,
+        misfire_grace_time=3600,  # 1 saat grace
     )
 
     # 17. Ay Sonu Raporu Tweet — her ayin 1'i 00:00 Turkiye (UTC 21:00 onceki gun)
@@ -3696,6 +3722,7 @@ def _setup_scheduler_impl():
         name="Sabah Piyasa Raporu Tweet (08:15 TR)",
         replace_existing=True,
         max_instances=1,
+        misfire_grace_time=7200,  # 2 saat grace — Render uykusu koruması
         coalesce=True,
     )
 
