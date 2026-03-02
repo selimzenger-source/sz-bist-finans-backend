@@ -3,8 +3,9 @@
 Akis:
 1. Telegram'dan Matriks HaberId (kap_notification_id) gelir
 2. TradingView'dan haber icerigini cek (matriks:{id}:0/ URL)
-3. Abacus AI (claude-sonnet-4-6) ile 1.0-10.0 ondalik puan + ozet uret
-4. Sonuc: {"score": float, "summary": str, "kap_url": str|None}
+3. TradingView basarisizsa → KAP.org.tr direkt erisim (borsapy yontemi)
+4. Abacus AI (claude-sonnet-4-6) ile 1.0-10.0 ondalik puan + ozet uret
+5. Sonuc: {"score": float, "summary": str, "kap_url": str|None}
 
 V5 Degisiklikler (Arastirma bazli):
 - Model: claude-sonnet-4-5 → claude-sonnet-4-6
@@ -17,10 +18,12 @@ V5 Degisiklikler (Arastirma bazli):
 
 Icerik Kaynagi (Oncelik sirasi):
 - Oncelik 1: TradingView haber sayfasi (matriks ID ile)
-- Fallback: Telegram ham metni (TradingView basarisizsa)
+- Oncelik 2: KAP.org.tr direkt erisim (borsapy yontemi — bildirim-sorgu-sonuc)
+- Fallback: Telegram ham metni (TradingView + KAP basarisizsa)
 
 Hata Toleransi:
-- TradingView erisimi basarisiz → Telegram metniyle devam
+- TradingView erisimi basarisiz → KAP.org.tr direkt dene
+- KAP.org.tr de basarisiz → Telegram metniyle devam
 - AI basarisiz → score=None, summary=None don
 - Hicbir hata akisi durdurmaz
 """
@@ -255,6 +258,163 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
 
     except Exception as e:
         logger.warning("TradingView icerik hatasi (matriks:%s): %s", matriks_id, e)
+        return None
+
+
+# -------------------------------------------------------
+# ADIM 1b: KAP.org.tr Direkt Erisim (borsapy yontemi)
+# TradingView basarisiz oldugunda yedek kaynak
+# -------------------------------------------------------
+
+# OID cache — {ticker: mkkMemberOid}  (24 saat gecerli)
+_oid_cache: dict[str, str] = {}
+_oid_cache_time: float = 0
+_OID_CACHE_TTL = 86400  # 24 saat
+
+_KAP_BIST_URL = "https://www.kap.org.tr/tr/bist-sirketler"
+_KAP_DISCLOSURE_URL = "https://www.kap.org.tr/tr/bildirim-sorgu-sonuc"
+_KAP_TIMEOUT = 15
+
+
+async def _refresh_oid_cache() -> dict[str, str]:
+    """KAP bist-sirketler sayfasindan mkkMemberOid haritasini guncelle.
+
+    Next.js SSR HTML'de escaped JSON icinde stockCode ve mkkMemberOid eslesmesi var.
+    Sonuc 24 saat cache'lenir.
+    """
+    import time as _time
+
+    global _oid_cache, _oid_cache_time
+
+    now = _time.time()
+    if _oid_cache and (now - _oid_cache_time) < _OID_CACHE_TTL:
+        return _oid_cache
+
+    try:
+        async with httpx.AsyncClient(timeout=_KAP_TIMEOUT, headers=_HEADERS, follow_redirects=True) as client:
+            resp = await client.get(_KAP_BIST_URL)
+            if resp.status_code != 200:
+                logger.warning("KAP bist-sirketler HTTP %d", resp.status_code)
+                return _oid_cache
+
+            # Parse: \"mkkMemberOid\":\"xxx\",...,\"stockCode\":\"THYAO\"
+            pattern = (
+                r'\\"mkkMemberOid\\":\\"([^\\"]+)\\",'
+                r'\\"kapMemberTitle\\":\\"[^\\"]+\\",'
+                r'\\"relatedMemberTitle\\":\\"[^\\"]*\\",'
+                r'\\"stockCode\\":\\"([^\\"]+)\\"'
+            )
+            matches = re.findall(pattern, resp.text)
+
+            new_map: dict[str, str] = {}
+            for oid, codes_str in matches:
+                for code in codes_str.split(","):
+                    code = code.strip()
+                    if code:
+                        new_map[code] = oid
+
+            if new_map:
+                _oid_cache = new_map
+                _oid_cache_time = now
+                logger.info("KAP OID cache guncellendi: %d sirket", len(new_map))
+            else:
+                logger.warning("KAP bist-sirketler parse sonucu bos")
+
+            return _oid_cache
+
+    except Exception as e:
+        logger.warning("KAP OID cache hatasi: %s", e)
+        return _oid_cache
+
+
+async def fetch_kap_direct_content(ticker: str) -> dict | None:
+    """KAP.org.tr'den direkt bildirim icerigi cek (borsapy yontemi).
+
+    TradingView fallback'i olarak kullanilir.
+
+    Akis:
+    1. bist-sirketler'den mkkMemberOid al (cache'li)
+    2. bildirim-sorgu-sonuc?member={OID} ile son bildirimleri cek
+    3. En son bildirimi sec
+    4. Bildirim sayfasindan icerik cek (fetch_kap_page_content)
+
+    Args:
+        ticker: Hisse kodu (orn: "ASTOR")
+
+    Returns:
+        {"full_text": str, "kap_url": str, "title": str, "disclosure_index": str}
+        Basarisizsa None doner.
+    """
+    ticker = ticker.upper()
+
+    # Adim 1: OID al
+    oid_map = await _refresh_oid_cache()
+    oid = oid_map.get(ticker)
+    if not oid:
+        logger.info("KAP direkt: %s icin OID bulunamadi", ticker)
+        return None
+
+    # Adim 2: Son bildirimleri cek
+    disc_url = f"{_KAP_DISCLOSURE_URL}?member={oid}"
+
+    try:
+        async with httpx.AsyncClient(timeout=_KAP_TIMEOUT, headers=_HEADERS, follow_redirects=True) as client:
+            resp = await client.get(disc_url)
+            if resp.status_code != 200:
+                logger.warning("KAP bildirim-sorgu-sonuc HTTP %d (%s)", resp.status_code, ticker)
+                return None
+
+            # Parse: publishDate\":\"29.12.2025 19:21:18\",...disclosureIndex\":1530826,...title\":\"...\"
+            pattern = (
+                r'publishDate\\":\\"([^\\"]+)\\".*?'
+                r'disclosureIndex\\":(\d+).*?'
+                r'title\\":\\"([^\\"]+)\\"'
+            )
+            matches = re.findall(pattern, resp.text, re.DOTALL)
+
+            if not matches:
+                logger.info("KAP direkt: %s icin bildirim bulunamadi", ticker)
+                return None
+
+            # En son bildirimi al (ilk sirada — varsayilan sira yeniden eskiye)
+            date_str, disc_idx, title = matches[0]
+            kap_url = f"https://www.kap.org.tr/tr/Bildirim/{disc_idx}"
+
+            logger.info(
+                "KAP direkt: %s — %s (%s) [%s]",
+                ticker, title[:50], disc_idx, date_str,
+            )
+
+    except Exception as e:
+        logger.warning("KAP bildirim-sorgu-sonuc hatasi (%s): %s", ticker, e)
+        return None
+
+    # Adim 3: Bildirim sayfasindan icerik cek
+    try:
+        from app.scrapers.kap_all_scraper import fetch_kap_page_content
+        content = await fetch_kap_page_content(kap_url)
+        if content and len(content) > 30:
+            logger.info(
+                "KAP direkt icerik basarili: %s — %s (%d karakter)",
+                ticker, disc_idx, len(content),
+            )
+            return {
+                "full_text": content[:5000],
+                "kap_url": kap_url,
+                "title": title,
+                "disclosure_index": disc_idx,
+            }
+        else:
+            logger.info("KAP direkt: %s bildirim icerigi yetersiz (%s)", ticker, disc_idx)
+            # Icerik yetersiz olsa bile KAP URL'yi don — en azindan link dogru olsun
+            return {
+                "full_text": "",
+                "kap_url": kap_url,
+                "title": title,
+                "disclosure_index": disc_idx,
+            }
+    except Exception as e:
+        logger.warning("KAP direkt icerik hatasi (%s): %s", ticker, e)
         return None
 
 
@@ -720,10 +880,12 @@ async def analyze_news(
     raw_text: str,
     matriks_id: str | None = None,
 ) -> dict:
-    """Tam AI analiz pipeline'i: TradingView icerik cek → AI puanla.
+    """Tam AI analiz pipeline'i: TradingView → KAP direkt → Telegram.
 
-    Matriks ID varsa TradingView'dan tam haber metni cekilir.
-    Yoksa veya basarisizsa Telegram ham metniyle AI puanlama yapilir.
+    Oncelik sirasi:
+    1. TradingView'dan tam haber metni cek (Matriks ID ile)
+    2. TradingView basarisizsa → KAP.org.tr direkt erisim (borsapy yontemi)
+    3. Ikisi de basarisizsa → Telegram ham metniyle AI puanlama
 
     Args:
         ticker: Hisse kodu
@@ -741,7 +903,7 @@ async def analyze_news(
     tv_content = None
     kap_url = None
 
-    # Adim 1: TradingView'dan icerik cek (Matriks ID varsa)
+    # ── Oncelik 1: TradingView'dan icerik cek (Matriks ID varsa) ──
     if matriks_id:
         # Fallback olarak TradingView linki (gercek KAP linki bulunursa degisir)
         kap_url = f"https://tr.tradingview.com/news/matriks:{matriks_id}:0/"
@@ -761,15 +923,41 @@ async def analyze_news(
                     "TradingView eslestirme basarili: %s → matriks:%s (%d karakter)",
                     ticker, matriks_id, len(tv_content),
                 )
-            else:
-                logger.info(
-                    "TradingView icerik alinamadi (%s), Telegram metniyle devam",
-                    ticker,
-                )
         except Exception as e:
             logger.warning("TradingView hatasi (%s): %s", ticker, e)
 
-    # Adim 2: AI puanlama (TradingView icerigi veya Telegram metni ile)
+    # ── Oncelik 2: KAP.org.tr direkt erisim (TradingView basarisizsa) ──
+    if not tv_content and ticker:
+        try:
+            kap_result = await fetch_kap_direct_content(ticker)
+            if kap_result:
+                # KAP URL'yi her zaman al (icerik bos olsa bile link dogru)
+                if kap_result.get("kap_url"):
+                    kap_url = kap_result["kap_url"]
+
+                # Icerik yeterli mi?
+                if kap_result.get("full_text") and len(kap_result["full_text"]) > 30:
+                    tv_content = kap_result["full_text"]
+                    logger.info(
+                        "KAP direkt fallback basarili: %s → %s (%d karakter)",
+                        ticker, kap_url, len(tv_content),
+                    )
+                else:
+                    logger.info(
+                        "KAP direkt: %s — URL bulundu (%s) ama icerik yetersiz, Telegram ile devam",
+                        ticker, kap_url,
+                    )
+        except Exception as e:
+            logger.warning("KAP direkt hatasi (%s): %s", ticker, e)
+
+    # ── Fallback log ──
+    if not tv_content:
+        logger.info(
+            "Icerik kaynagi: Telegram ham metni (%s) — TradingView ve KAP direkt basarisiz",
+            ticker,
+        )
+
+    # ── Adim 3: AI puanlama (TradingView/KAP icerigi veya Telegram metni ile) ──
     try:
         result = await score_news(ticker, raw_text, tv_content, kap_url)
         return result
