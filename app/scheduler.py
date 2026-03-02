@@ -3795,6 +3795,30 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Self-Ping: Render Free Tier Uyku Koruması ───
+    # Render free tier 15 dk trafik olmazsa sunucuyu uyutuyor → tum scheduler durur
+    # Her 10 dk'da kendi /health endpoint'ine istek atarak sunucuyu uyanik tutar
+    async def _self_ping():
+        try:
+            import httpx
+            settings = get_settings()
+            api_url = settings.API_BASE_URL if hasattr(settings, "API_BASE_URL") else "https://sz-bist-finans-api.onrender.com"
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(f"{api_url}/health")
+                logger.debug("Self-ping OK: %d", resp.status_code)
+        except Exception as e:
+            logger.debug("Self-ping hatasi (onemli degil): %s", e)
+
+    scheduler.add_job(
+        _self_ping,
+        IntervalTrigger(minutes=10),
+        id="self_ping_keep_alive",
+        name="Render Keep-Alive Ping (10 dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
