@@ -463,7 +463,16 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
             )
             if resp.status_code == 200:
                 data = resp.json()
-                ai_text = data["choices"][0]["message"]["content"].strip()
+                try:
+                    ai_text = data["choices"][0]["message"]["content"].strip()
+                except (KeyError, IndexError, TypeError) as parse_err:
+                    return {
+                        "status": "error",
+                        "key_exists": True,
+                        "key_prefix": gemini_key[:8] + "...",
+                        "parse_error": str(parse_err),
+                        "raw_response": str(data)[:500],
+                    }
                 return {
                     "status": "ok",
                     "key_exists": True,
