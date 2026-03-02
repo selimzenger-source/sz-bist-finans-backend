@@ -1130,11 +1130,14 @@ async def check_reminders(
                             select(PendingTweet).where(and_(*where_clauses)).limit(1)
                         )
                         existing_tweet = dup_result.scalar_one_or_none()
-                        if existing_tweet and not force_reminder_type:
+                        if existing_tweet:
                             logger.info(
-                                "Hatirlatma tweet DB-dedup: %s icin %s bugun zaten kuyrukte (id=%d), atlandi",
+                                "Hatirlatma tweet DB-dedup: %s icin %s bugun zaten kuyrukte (id=%d), tweet ATLANDI%s",
                                 ticker_name, tweet_source, existing_tweet.id,
+                                " [FORCE — push gonderildi ama tweet tekrar atilmaz]" if force_reminder_type else "",
                             )
+                            # Tweet dedup FORCE modda bile bypass edilmez — çift tweet engellenir
+                            # (Push bildirimi zaten yukarida gonderildi, sadece tweet atlanir)
                             continue
                     except Exception as dd_err:
                         logger.warning("Hatirlatma tweet DB-dedup kontrol hatasi: %s", dd_err)
