@@ -82,7 +82,7 @@ async def validate_ipo_dates(
     payload_base = {
         "messages": messages,
         "temperature": 0,
-        "max_tokens": 500,
+        "max_tokens": 2048,  # Gemini 2.5 thinking token yiyor
     }
 
     content = None
@@ -140,7 +140,7 @@ async def validate_ipo_dates(
                     },
                     json={
                         "model": _CLAUDE_MODEL,
-                        "max_tokens": 500,
+                        "max_tokens": 2048,  # Gemini 2.5 thinking token yiyor
                         "system": system_msg,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0,

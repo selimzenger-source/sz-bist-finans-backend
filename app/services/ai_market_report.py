@@ -1111,7 +1111,7 @@ async def _generate_report(
     payload_base = {
         "messages": messages,
         "temperature": 0.2,
-        "max_tokens": 1500,
+        "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
     }
 
     ai_content = None
@@ -1173,7 +1173,7 @@ async def _generate_report(
                     },
                     json={
                         "model": _CLAUDE_MODEL,
-                        "max_tokens": 1500,
+                        "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
                         "system": system_prompt,
                         "messages": [{"role": "user", "content": user_message}],
                         "temperature": 0.2,

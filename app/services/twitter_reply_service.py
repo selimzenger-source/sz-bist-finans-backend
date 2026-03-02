@@ -439,7 +439,7 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
             {"role": "user", "content": user_message},
         ],
         "temperature": 0.85,
-        "max_tokens": 600,
+        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
     }
 
     gemini_headers = {
@@ -848,7 +848,7 @@ async def generate_quote_analysis(tweet_text: str, author_username: str) -> dict
             {"role": "user", "content": user_message},
         ],
         "temperature": 0.80,
-        "max_tokens": 800,
+        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
     }
 
     gemini_headers = {

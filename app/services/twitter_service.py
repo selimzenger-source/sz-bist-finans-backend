@@ -2031,7 +2031,7 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
         payload_base = {
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 1200,
+            "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
         }
 
         content = None
@@ -2070,7 +2070,7 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
                     },
                     json={
                         "model": _CLAUDE_MODEL,
-                        "max_tokens": 1200,
+                        "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
                         "system": _BULLETIN_ANALYSIS_SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": user_message}],
                         "temperature": 0.3,
@@ -2367,7 +2367,7 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
         payload_base = {
             "messages": messages,
             "temperature": 0.4,
-            "max_tokens": 1000,
+            "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
         }
 
         content = None
@@ -2406,7 +2406,7 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
                     },
                     json={
                         "model": _CLAUDE_MODEL,
-                        "max_tokens": 1000,
+                        "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
                         "system": _SPK_APP_AI_SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": user_message}],
                         "temperature": 0.4,

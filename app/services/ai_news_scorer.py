@@ -494,7 +494,7 @@ SADECE asagidaki JSON formatinda yanit ver:
     payload_base = {
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 600,
+        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
     }
 
     # ── Birincil: Abacus AI ──
@@ -541,7 +541,7 @@ SADECE asagidaki JSON formatinda yanit ver:
                     },
                     json={
                         "model": _CLAUDE_MODEL,
-                        "max_tokens": 600,
+                        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
                         "system": system_content,
                         "messages": [{"role": "user", "content": user_content}],
                         "temperature": 0.1,

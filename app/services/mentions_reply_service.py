@@ -398,7 +398,7 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
             {"role": "user",   "content": user_msg},
         ],
         "temperature": 0.85,
-        "max_tokens":  800,
+        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
     }
     gemini_headers = {
         "Authorization": f"Bearer {gemini_key}",

@@ -161,7 +161,7 @@ SADECE asagidaki JSON formatinda yanit ver:
     payload = {
         "messages": messages,
         "temperature": 0.1,
-        "max_tokens": 800,
+        "max_tokens": 4096,  # Gemini 2.5 thinking token'ları da max_tokens'tan yer — düşük olunca content=null döner
     }
 
     # ── Birincil: Gemini 2.5 Flash ──

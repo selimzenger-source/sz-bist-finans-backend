@@ -450,7 +450,7 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
     test_payload = {
         "model": "gemini-2.5-flash",
         "messages": [{"role": "user", "content": "Say 'test ok' in JSON: {\"result\": \"test ok\"}"}],
-        "max_tokens": 50,
+        "max_tokens": 2048,  # Gemini 2.5 thinking tokens eat into max_tokens
         "temperature": 0,
     }
 
