@@ -157,6 +157,14 @@ class IPO(Base):
     distribution_tweeted: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="Dagitim baslangic tweeti atildi mi (deploy-safe dedup)"
     )
+    last_day_tweeted: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false",
+        comment="Son gun sabah tweeti atildi mi (deploy-safe dedup)"
+    )
+    last_day_notified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false",
+        comment="Son gun push bildirimi gonderildi mi (deploy-safe dedup)"
+    )
 
     # --- Admin Koruma ---
     manual_fields: Mapped[str | None] = mapped_column(

@@ -1256,10 +1256,13 @@ async def check_morning_tweets():
                     )
 
                 # --- Son gun sabah tweeti CATCH-UP ---
-                # send_last_day_warnings (09:00 TR) kacirilmissa burada yakala
-                if (ipo.subscription_end == today
-                        and not _timing_already_sent(ipo.id, "last_day_morning_tweet")):
-                    # Saat en az 06:30 TR olsun (09:00 yerine catch-up olarak)
+                # send_last_day_warnings (09:05 TR) kacirilmissa burada yakala
+                if (ipo.subscription_end == today):
+                    # ── DB-LEVEL DEDUP — deploy/restart'a dayanıklı ──
+                    if ipo.last_day_tweeted:
+                        continue  # Zaten atılmış, atla
+
+                    # Saat en az 06:30 TR olsun (09:05 yerine catch-up olarak)
                     if now_tr.hour > 6 or (now_tr.hour == 6 and now_tr.minute >= 30):
                         logger.warning(
                             "Son gun tweet CATCH-UP: %s — send_last_day_warnings kacirilmis!",
@@ -1269,15 +1272,19 @@ async def check_morning_tweets():
                         tw_ok = tweet_last_day_morning(ipo)
                         from app.services.admin_telegram import notify_tweet_sent
                         await notify_tweet_sent("son_gun_sabah_catchup", ipo.ticker or ipo.company_name, tw_ok)
+                        ipo.last_day_tweeted = True
                         _timing_mark_sent(ipo.id, "last_day_morning_tweet")
 
-                        # Push bildirim de gonder
-                        try:
-                            notif_service = NotificationService(db)
-                            await notif_service.notify_ipo_last_day(ipo)
-                            await db.commit()
-                        except Exception as notif_err:
-                            logger.warning("Son gun catch-up bildirim hatasi: %s", notif_err)
+                        # Push bildirim de gonder (DB dedup)
+                        if not ipo.last_day_notified:
+                            try:
+                                notif_service = NotificationService(db)
+                                await notif_service.notify_ipo_last_day(ipo)
+                                ipo.last_day_notified = True
+                            except Exception as notif_err:
+                                logger.warning("Son gun catch-up bildirim hatasi: %s", notif_err)
+
+                        await db.commit()
 
         # ═══════════════════════════════════════════════════════════════
         # CATCH-UP: Kacirilan dagitim tweetleri + bildirimler
@@ -1656,25 +1663,27 @@ async def send_last_day_warnings():
             last_day_ipos = list(result.scalars().all())
 
             if last_day_ipos:
-                # 1. Push bildirimler + 2. Tweet — dedup korumalı
                 notif_service = NotificationService(db)
                 from app.services.twitter_service import tweet_last_day_morning
                 from app.services.admin_telegram import notify_tweet_sent
 
                 for idx, ipo in enumerate(last_day_ipos):
-                    # check_morning_tweets ile race condition koruması
-                    if _timing_already_sent(ipo.id, "last_day_morning_tweet"):
-                        logger.info("Son gun tweet/push zaten gonderilmis (dedup): %s", ipo.ticker or ipo.company_name)
+                    # ── DB-LEVEL DEDUP — deploy/restart'a dayanıklı ──
+                    if ipo.last_day_tweeted:
+                        logger.info("Son gun tweet DB-dedup: %s zaten atilmis", ipo.ticker or ipo.company_name)
                         continue
 
-                    # Push bildirim
-                    await notif_service.notify_ipo_last_day(ipo)
+                    # Push bildirim (DB dedup)
+                    if not ipo.last_day_notified:
+                        await notif_service.notify_ipo_last_day(ipo)
+                        ipo.last_day_notified = True
 
                     # Tweet (arada bekleme)
                     if idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_last_day_morning(ipo)
                     await notify_tweet_sent("son_gun_sabah", ipo.ticker or ipo.company_name, tw_ok)
+                    ipo.last_day_tweeted = True
                     _timing_mark_sent(ipo.id, "last_day_morning_tweet")
                     logger.info("Son gun sabah tweeti: %s", ipo.ticker or ipo.company_name)
 

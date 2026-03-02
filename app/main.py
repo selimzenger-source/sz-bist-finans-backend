@@ -111,6 +111,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("KAP unique constraint olusturulamadi: %s", e)
 
+    # IPO modeline last_day_tweeted/last_day_notified kolonlarini ekle (migration olmadan)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS last_day_tweeted BOOLEAN DEFAULT FALSE"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS last_day_notified BOOLEAN DEFAULT FALSE"
+            ))
+            await db.commit()
+            logger.info("IPO last_day_tweeted/last_day_notified kolonlari OK")
+    except Exception as e:
+        logger.warning("IPO last_day kolonlari eklenemedi (muhtemelen zaten var): %s", e)
+
     # BIST50 cache'ini DB'den yukle
     try:
         from app.database import async_session
