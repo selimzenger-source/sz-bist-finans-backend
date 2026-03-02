@@ -1,10 +1,13 @@
-"""Tum KAP Haberleri Scraper — BigPara + Bloomberg HT.
+"""KAP Haberleri Scraper — Uzmanpara listing + KAP.org.tr AI analizi.
 
-KAP-TEST projesindeki kap_fetcher.py'den production-ready async port.
-BigPara primary, Bloomberg HT fallback. BIST whitelist filtresi.
+Akis:
+1. Uzmanpara listing sayfasindan yeni KAP bildirimlerini alir
+   (ticker, baslik, KAP bildirim ID, published_at)
+2. KAP bildirim ID'den kap.org.tr URL'i olusturur
+3. AI analizi icin kap.org.tr sayfasindan bildirim icerigi cekilir
 
-Scheduler tarafindan her 5 dakikada bir cagirilir.
-Yeni bildirimler kap_all_disclosures tablosuna kaydedilir.
+Her ~50 saniyede bir calisir (scheduler).
+BigPara ve Bloomberg HT KALDIRILDI — sadece Uzmanpara kaynak.
 """
 
 import logging
@@ -14,16 +17,14 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-_TR_TZ = ZoneInfo("Europe/Istanbul")
-
 import httpx
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+_TR_TZ = ZoneInfo("Europe/Istanbul")
+
 # ─── URL'ler ────────────────────────────────────────────────────────────────
-BIGPARA_URL = "https://bigpara.hurriyet.com.tr/haberler/kap-haberleri/"
-BLOOMBERG_URL = "https://www.bloomberght.com/borsa/hisseler/kap-haberleri"
 UZMANPARA_URL = "https://uzmanpara.milliyet.com.tr/kap-haberleri/"
 BIST_INDEX_BASE = "https://bigpara.hurriyet.com.tr/borsa/hisse-fiyatlari/bist-tum-endeksi/"
 
@@ -86,184 +87,31 @@ async def _refresh_bist_symbols() -> set[str]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 1. ASIL: BigPara
+# Uzmanpara — tek kaynak (anlik takip icin)
 # ═════════════════════════════════════════════════════════════════════════════
-
-async def _fetch_detail_text(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
-    """BigPara detay sayfasindan tam metin + gercek KAP linkini ceker."""
-    try:
-        r = await client.get(url)
-        r.raise_for_status()
-    except Exception as exc:
-        logger.debug("Detay sayfa hata (%s): %s", url[:60], exc)
-        return "", ""
-
-    soup = BeautifulSoup(r.text, "lxml")
-
-    # Tam metin
-    detail_div = soup.find("div", class_="news-detail-text")
-    body = detail_div.get_text(" ", strip=True) if detail_div else ""
-
-    # Gercek KAP linki
-    real_kap = ""
-    kap_link = soup.find("a", href=re.compile(r"kap\.org\.tr.*Bildirim/\d+"))
-    if kap_link:
-        real_kap = kap_link.get("href", "")
-    else:
-        kap_m = re.search(r"(https?://(?:www\.)?kap\.org\.tr/\S*Bildirim/\d+)", r.text)
-        if kap_m:
-            real_kap = kap_m.group(1)
-
-    # URL normalizasyonu
-    if real_kap:
-        real_kap = real_kap.replace("/en/Bildirim/", "/tr/Bildirim/")
-        if "kap.org.tr/Bildirim/" in real_kap:
-            real_kap = real_kap.replace("kap.org.tr/Bildirim/", "kap.org.tr/tr/Bildirim/")
-
-    return body, real_kap
-
-
-async def _bigpara_fetch(max_items: int = 20) -> list[dict[str, Any]]:
-    """BigPara KAP haberleri + detay sayfalarindan tam metin.
-
-    Args:
-        max_items: Maksimum haber sayisi (varsayilan 20, seed icin 50+).
-    """
-    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
-        seen_keys: set[str] = set()
-        results: list[dict[str, Any]] = []
-        max_pages = (max_items // 15) + 2  # ~15-20 haber/sayfa
-
-        for page in range(1, max_pages + 1):
-            if len(results) >= max_items:
-                break
-
-            page_url = BIGPARA_URL if page == 1 else f"{BIGPARA_URL}{page}/"
-            try:
-                r = await client.get(page_url)
-                r.raise_for_status()
-            except Exception as exc:
-                logger.warning("[1-ASIL] BigPara sayfa %d hata: %s", page, exc)
-                break
-
-            soup = BeautifulSoup(r.text, "lxml")
-            links = soup.find_all("a", href=re.compile(r"/haberler/kap-haberleri/.+_ID\d+"))
-            if not links:
-                logger.debug("BigPara sayfa %d: haber yok, durduruluyor", page)
-                break
-
-            page_added = 0
-            for a in links:
-                if len(results) >= max_items:
-                    break
-
-                href = a.get("href", "")
-                full = (
-                    f"https://bigpara.hurriyet.com.tr{href}"
-                    if href.startswith("/") else href
-                )
-
-                text = a.get_text(" ", strip=True)
-
-                # Ticker + baslik bazli dedup
-                ticker_m = re.search(r"\*{1,3}([A-Z]{2,10})\*{1,3}", text)
-                pre_code = ticker_m.group(1) if ticker_m else ""
-                title_m_pre = re.search(r"\(([^)]+)\)", text)
-                pre_title = title_m_pre.group(1).strip() if title_m_pre else text[:40]
-                dedup_key = f"{pre_code}|{pre_title}"
-                if dedup_key in seen_keys:
-                    continue
-                seen_keys.add(dedup_key)
-
-                if not ticker_m:
-                    continue
-                company_code = ticker_m.group(1)
-
-                # Baslik: parantez icindeki bildirim turu
-                title_m = re.search(r"\(([^)]+)\)", text)
-                title = title_m.group(1).strip() if title_m else text
-
-                # Detay sayfasindan tam metin + gercek KAP linki
-                body, real_kap = await _fetch_detail_text(client, full)
-
-                if not real_kap:
-                    real_kap = full
-
-                results.append(_make_item(
-                    title=title,
-                    company_code=company_code,
-                    kap_url=real_kap,
-                    source="bigpara",
-                    body=body or title,
-                ))
-                page_added += 1
-
-            logger.info("[1-ASIL] BigPara sayfa %d -> %d yeni haber", page, page_added)
-
-    logger.info("[1-ASIL] BigPara toplam -> %d haber (tam metin ile)", len(results))
-    return results
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 1b. EK KAYNAK: Uzmanpara (Milliyet) — hafta sonu dahil guncel
-# ═════════════════════════════════════════════════════════════════════════════
-
-async def _uzmanpara_detail(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
-    """Uzmanpara detay sayfasindan body text + gercek KAP linkini ceker.
-
-    Detay sayfasi: <div class="detL" id="budivi"> icerisinde:
-    - Tam haber metni
-    - En altta: https://www.kap.org.tr/Bildirim/XXXXXXX linki
-    """
-    try:
-        r = await client.get(url)
-        r.raise_for_status()
-    except Exception as exc:
-        logger.debug("Uzmanpara detay hata (%s): %s", url[:60], exc)
-        return "", ""
-
-    soup = BeautifulSoup(r.text, "lxml")
-
-    # Body text — div#budivi veya div.detL
-    body = ""
-    detail_div = soup.find("div", id="budivi") or soup.find("div", class_="detL")
-    if detail_div:
-        body = detail_div.get_text(" ", strip=True)
-
-    # Gercek KAP linki — text icinde aranir
-    kap_url = ""
-    text = r.text
-    kap_m = re.search(r"https?://(?:www\.)?kap\.org\.tr/\S*Bildirim/\d+", text)
-    if kap_m:
-        kap_url = kap_m.group(0).rstrip(".,;\"')")
-        # Normalize
-        kap_url = kap_url.replace("/en/Bildirim/", "/tr/Bildirim/")
-        if "kap.org.tr/Bildirim/" in kap_url:
-            kap_url = kap_url.replace("kap.org.tr/Bildirim/", "kap.org.tr/tr/Bildirim/")
-
-    return body, kap_url
-
 
 async def _uzmanpara_fetch() -> list[dict[str, Any]]:
-    """Uzmanpara KAP haberleri + detay sayfalarindan tam metin + KAP linki.
+    """Uzmanpara KAP haberleri listing sayfasindan bildirim listesi.
 
-    HTML yapisi (liste sayfasi):
+    Sadece listing sayfasini tarar — detay sayfasi ACILMAZ.
+    KAP bildirim numarasi Uzmanpara URL'den cikarilir.
+
+    HTML yapisi:
       <li>
         <a class="hisse" href="/kap-haberi/.../">TICKER</a>
         <a href="/kap-haberi/.../">Baslik</a>
         <span class="date">01.03.2026<br/>20:31:25</span>
       </li>
 
-    Detay sayfasi (div#budivi):
-      - Tam haber metni
-      - Gercek KAP linki: https://www.kap.org.tr/Bildirim/XXXXXXX
+    Returns:
+        [{title, company_code, kap_url, published_at, source, category, is_bilanco}, ...]
     """
     async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
         try:
             r = await client.get(UZMANPARA_URL)
             r.raise_for_status()
         except Exception as exc:
-            logger.warning("[1b-EK] Uzmanpara hata: %s", exc)
+            logger.warning("Uzmanpara hata: %s", exc)
             return []
 
         soup = BeautifulSoup(r.text, "lxml")
@@ -271,14 +119,14 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
         # Ticker linklerini bul (class="hisse")
         hisse_links = soup.find_all("a", class_="hisse", href=re.compile(r"/kap-haberi/"))
         if not hisse_links:
-            logger.warning("[1b-EK] Uzmanpara: haber linki bulunamadi")
+            logger.warning("Uzmanpara: haber linki bulunamadi")
             return []
 
         results: list[dict[str, Any]] = []
         seen_keys: set[str] = set()
 
         for a_hisse in hisse_links:
-            if len(results) >= 20:
+            if len(results) >= 30:
                 break
 
             li = a_hisse.parent
@@ -302,15 +150,31 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
             if not title:
                 continue
 
-            # Tarih
+            # KAP bildirim ID'yi Uzmanpara URL'den cikar
+            # Ornek: /kap-haberi/atagy-finansal-rapor-1564240/ -> 1564240
+            kap_id = ""
+            kap_url = ""
+            id_match = re.search(r"-(\d{6,})/?$", detail_href)
+            if id_match:
+                kap_id = id_match.group(1)
+                kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_id}"
+
+            if not kap_url:
+                # Fallback: Uzmanpara URL'yi kullan
+                kap_url = (
+                    f"https://uzmanpara.milliyet.com.tr{detail_href}"
+                    if detail_href.startswith("/") else detail_href
+                )
+
+            # Tarih — Uzmanpara Turkey saati gosterir
             date_span = li.find("span", class_="date")
             published_at = None
             if date_span:
                 date_text = date_span.get_text(" ", strip=True)
                 try:
-                    # BigPara/Uzmanpara Turkey saati gösterir — UTC'ye çevir
                     naive_dt = datetime.strptime(date_text, "%d.%m.%Y %H:%M:%S")
-                    published_at = naive_dt.replace(tzinfo=_TR_TZ).astimezone(timezone.utc)
+                    # Turkey saati olarak sakla — UTC'ye cevirme
+                    published_at = naive_dt.replace(tzinfo=_TR_TZ)
                 except ValueError:
                     pass
 
@@ -320,112 +184,124 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
                 continue
             seen_keys.add(dedup_key)
 
-            # Detay sayfasindan body + gercek KAP linki
-            detail_url = (
-                f"https://uzmanpara.milliyet.com.tr{detail_href}"
-                if detail_href.startswith("/") else detail_href
-            )
-            body, kap_url = await _uzmanpara_detail(client, detail_url)
+            # Kategori cikar
+            category = _infer_category(title)
+            is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
 
-            if not kap_url:
-                kap_url = detail_url  # Fallback
-
-            results.append(_make_item(
-                title=title,
-                company_code=company_code,
-                kap_url=kap_url,
-                source="uzmanpara",
-                body=body or title,
-            ))
+            item = {
+                "title": title,
+                "company_code": company_code,
+                "body": "",  # Body bos — AI analizi KAP sayfasindan yapilacak
+                "kap_url": kap_url,
+                "category": category,
+                "is_bilanco": is_bilanco,
+                "source": "uzmanpara",
+            }
             if published_at:
-                results[-1]["published_at"] = published_at
+                item["published_at"] = published_at
 
-    logger.info("[1b-EK] Uzmanpara -> %d haber", len(results))
+            results.append(item)
+
+    logger.info("Uzmanpara -> %d haber", len(results))
     return results
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 2. YEDEK: Bloomberg HT
+# KAP.org.tr sayfa icerigi (AI analizi icin)
 # ═════════════════════════════════════════════════════════════════════════════
 
-async def _bloomberg_fetch() -> list[dict[str, Any]]:
-    """Bloomberg HT KAP haberleri (yedek kaynak)."""
-    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
-        try:
-            r = await client.get(BLOOMBERG_URL)
-            r.raise_for_status()
-        except Exception as exc:
-            logger.warning("[2-YEDEK] Bloomberg HT hata: %s", exc)
-            return []
+async def fetch_kap_page_content(kap_url: str) -> str:
+    """KAP.org.tr bildirim sayfasindan icerik cekmek.
 
-    soup = BeautifulSoup(r.text, "lxml")
-    links = soup.find_all("a", href=re.compile(r"/borsa/hisse/.+/kap-haberi/\d+"))
-    if not links:
-        logger.warning("[2-YEDEK] Bloomberg HT: haber linki bulunamadi")
-        return []
+    kap.org.tr API endpoint'i kullanir — HTML degil JSON donebilir.
+    Bildirim metni, sirket bilgileri, tarih vb. cekilir.
 
-    results: list[dict[str, Any]] = []
-    for a in links:
-        if len(results) >= 20:
-            break
+    Args:
+        kap_url: https://www.kap.org.tr/tr/Bildirim/1564254
 
-        href = a.get("href", "")
-        full = f"https://www.bloomberght.com{href}" if href.startswith("/") else href
-        text = a.get_text(" ", strip=True)
-        parts = [p.strip() for p in re.split(r"\s{2,}|\t+", text) if p.strip()]
+    Returns:
+        Bildirim icerigi (text) veya bos string
+    """
+    if not kap_url or "kap.org.tr" not in kap_url:
+        return ""
 
-        company_code = title = ""
+    # KAP bildirim ID'yi cikar
+    m = re.search(r"Bildirim/(\d+)", kap_url)
+    if not m:
+        return ""
 
-        if len(parts) >= 3:
-            m = re.match(r"([A-Z]{2,10})/", parts[0])
-            company_code = m.group(1) if m else parts[0].split("/")[0].strip()
-            title = " ".join(parts[1:-1])
-        else:
-            dm = re.search(r"(\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2})", text)
-            date_raw = dm.group(1) if dm else ""
-            remaining = text.replace(date_raw, "").strip() if date_raw else text
-            tm = re.match(r"([A-Z]{2,10})/", remaining)
-            if tm:
-                company_code = tm.group(1)
-                title = remaining[tm.end():].strip()
+    bildirim_id = m.group(1)
 
-        if not company_code:
-            continue
+    # KAP API endpoint — bildirim detay JSON
+    # kap.org.tr/tr/Bildirim/XXXXX sayfasi React/Angular — direkt HTML yetersiz
+    # Bunun yerine KAP'in arka plan API'sini deneriz
+    api_urls = [
+        f"https://www.kap.org.tr/tr/Bildirim/{bildirim_id}",
+    ]
 
-        im = re.search(r"/kap-haberi/(\d+)", href)
-        kap_url = f"https://www.kap.org.tr/tr/Bildirim/{im.group(1)}" if im else full
+    headers = {
+        **HEADERS,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": "https://www.kap.org.tr/",
+    }
 
-        results.append(_make_item(
-            title=title,
-            company_code=company_code,
-            kap_url=kap_url,
-            source="bloomberght",
-        ))
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers=headers) as client:
+        for url in api_urls:
+            try:
+                r = await client.get(url)
+                if r.status_code != 200:
+                    logger.debug("KAP sayfa %s HTTP %d", bildirim_id, r.status_code)
+                    continue
 
-    logger.info("[2-YEDEK] Bloomberg HT -> %d haber", len(results))
-    return results
+                soup = BeautifulSoup(r.text, "lxml")
+
+                # KAP sayfasi genellikle su div'lerde icerik tasiyor:
+                # - div.modal-info (bildirim ozeti)
+                # - div.disclosure-text (tam metin)
+                # - div#bildirimDetayIcerik
+                # - div.w-clearfix (bildirim kutulari)
+                body_parts = []
+
+                # Method 1: Tum metin kutularini topla
+                for sel in [
+                    "div.modal-info",
+                    "div.disclosure-text",
+                    "div#bildirimDetayIcerik",
+                    "div.w-clearfix.comp-cell-row-div",
+                    "div.bildirimContent",
+                ]:
+                    for div in soup.select(sel):
+                        text = div.get_text(" ", strip=True)
+                        if text and len(text) > 10:
+                            body_parts.append(text)
+
+                # Method 2: Genel body text (fallback)
+                if not body_parts:
+                    # Tum sayfa text'ini al (HTML'den temizle)
+                    for tag in soup(["script", "style", "nav", "footer", "header"]):
+                        tag.decompose()
+                    page_text = soup.get_text(" ", strip=True)
+                    # Sadece anlamli kisimlari al (min 50 karakter)
+                    if page_text and len(page_text) > 50:
+                        # Cok uzun ise ilk 3000 karakteri al
+                        body_parts.append(page_text[:3000])
+
+                body = "\n".join(body_parts).strip()
+                if body and len(body) > 20:
+                    logger.info("KAP sayfa icerigi alindi: %s (%d karakter)", bildirim_id, len(body))
+                    return body[:4000]  # Max 4000 karakter (AI prompt siniri)
+
+            except Exception as exc:
+                logger.debug("KAP sayfa hatasi (%s): %s", bildirim_id, exc)
+                continue
+
+    logger.debug("KAP sayfa icerigi alinamadi: %s", bildirim_id)
+    return ""
 
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Ortak yardimcilar
 # ═════════════════════════════════════════════════════════════════════════════
-
-def _make_item(*, title: str, company_code: str, kap_url: str,
-               source: str, body: str = "") -> dict[str, Any]:
-    """Standart bildirim dict'i olusturur."""
-    category = _infer_category(title)
-    is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
-    return {
-        "title": title,
-        "company_code": company_code,
-        "body": body or title,
-        "kap_url": kap_url,
-        "category": category,
-        "is_bilanco": is_bilanco,
-        "source": source,
-        "published_at": datetime.now(timezone.utc),
-    }
-
 
 def _infer_category(title: str) -> str:
     """Bildirim basligindan kategori cikarir."""
@@ -463,10 +339,6 @@ def _infer_category(title: str) -> str:
     return "Genel"
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Public API
-# ═════════════════════════════════════════════════════════════════════════════
-
 def _extract_kap_id(kap_url: str) -> str:
     """KAP URL'den bildirim numarasini cikarir (dedup icin)."""
     m = re.search(r"Bildirim/(\d+)", kap_url)
@@ -482,11 +354,14 @@ def _apply_bist_filter(data: list[dict[str, Any]], bist: set[str]) -> list[dict[
     return filtered
 
 
-async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
-    """Sadece Uzmanpara'dan KAP haberlerini ceker (hizli, 50 sn aralik).
+# ═════════════════════════════════════════════════════════════════════════════
+# Public API
+# ═════════════════════════════════════════════════════════════════════════════
 
-    Uzmanpara en guncel kaynak — yeni bildirimler dakikalar icinde yayinlanir.
-    BigPara'yi ATLAR, sadece Uzmanpara listing + detay sayfalarini tarar.
+async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
+    """Uzmanpara'dan KAP haberlerini ceker.
+
+    Ana ve tek kaynak — her ~50 saniyede bir cagirilir.
     BIST whitelist ile filtrelenir.
 
     Returns:
@@ -500,99 +375,3 @@ async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
 
     data = _apply_bist_filter(data, bist)
     return data[:30]
-
-
-async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
-    """Tum KAP bildirimlerini ceker (Uzmanpara + BigPara merge, Bloomberg fallback).
-
-    BigPara dahil tam tarama — 2 dakikada bir calisir.
-    Uzmanpara oncelikli (daha hizli guncellenir).
-    KAP bildirim numarasina gore dedup yapilir, Bloomberg HT son care.
-    BIST whitelist ile filtrelenir. Max 50 haber doner.
-
-    Returns:
-        list[dict]: Bildirim listesi (title, company_code, body, kap_url, category, is_bilanco, source, published_at)
-    """
-    # BIST whitelist'i guncelle
-    bist = await _refresh_bist_symbols()
-
-    # 1. BigPara (tam metin + gercek KAP linki)
-    bigpara_data = await _bigpara_fetch()
-
-    # 2. Uzmanpara (tam metin + gercek KAP linki — hafta sonu dahil guncel)
-    uzmanpara_data = await _uzmanpara_fetch()
-
-    # 3. Merge — Uzmanpara ONCE (daha guncel)
-    seen_kap_ids: set[str] = set()
-    data: list[dict[str, Any]] = []
-
-    # Once Uzmanpara (daha guncel, hafta sonu dahil hizli guncellenir)
-    for d in uzmanpara_data:
-        kap_id = _extract_kap_id(d.get("kap_url", ""))
-        if kap_id:
-            if kap_id in seen_kap_ids:
-                continue
-            seen_kap_ids.add(kap_id)
-        data.append(d)
-
-    if uzmanpara_data:
-        logger.info("Uzmanpara'dan %d haber eklendi (oncelikli)", len(data))
-
-    # Sonra BigPara — ayni KAP bildirim numarasi yoksa ekle
-    added_from_bigpara = 0
-    for d in bigpara_data:
-        kap_id = _extract_kap_id(d.get("kap_url", ""))
-        if kap_id and kap_id in seen_kap_ids:
-            continue  # Uzmanpara'da zaten var — cift haber onlendi
-        if kap_id:
-            seen_kap_ids.add(kap_id)
-        data.append(d)
-        added_from_bigpara += 1
-
-    if added_from_bigpara > 0:
-        logger.info("BigPara'dan %d ek haber eklendi (Uzmanpara'da yok)", added_from_bigpara)
-
-    # 4. Ikisi de bossa Bloomberg HT dene
-    if not data:
-        logger.warning("BigPara + Uzmanpara bos -> Bloomberg HT deneniyor...")
-        data = await _bloomberg_fetch()
-
-    if not data:
-        logger.warning("Tum kaynaklar bos — 0 KAP haberi")
-        return []
-
-    data = _apply_bist_filter(data, bist)
-    return data[:50]
-
-
-async def seed_initial_disclosures(target: int = 50) -> list[dict[str, Any]]:
-    """Ilk kurulumda DB'ye seed icin BigPara'dan sayfalama ile haber ceker.
-
-    Normal scrape'den farki: birden fazla sayfa tarar (target kadar haber).
-    Startup'ta DB bossa bir kez cagirilir.
-
-    Args:
-        target: Hedef haber sayisi (varsayilan 50)
-
-    Returns:
-        list[dict]: Bildirim listesi
-    """
-    bist = await _refresh_bist_symbols()
-
-    data = await _bigpara_fetch(max_items=target + 10)  # BIST filtresi sonrasi hedef icin fazla cek
-
-    if not data:
-        logger.warning("Seed: BigPara bos — Bloomberg HT deneniyor...")
-        data = await _bloomberg_fetch()
-
-    if not data:
-        logger.warning("Seed: Tum kaynaklar bos — 0 haber")
-        return []
-
-    if bist:
-        filtered = [d for d in data if d.get("company_code", "").strip() in bist]
-        logger.info("Seed BIST filtre: %d -> %d haber", len(data), len(filtered))
-        data = filtered
-
-    logger.info("Seed: %d haber hazir", min(len(data), target))
-    return data[:target]

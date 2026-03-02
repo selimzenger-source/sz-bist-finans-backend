@@ -5317,7 +5317,7 @@ async def list_kap_all_disclosures(
         query = query.where(KapAllDisclosure.company_code == ticker.upper())
 
     if hours:
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = query.where(KapAllDisclosure.published_at >= since)
 
     query = query.limit(limit).offset(offset)
@@ -5611,14 +5611,14 @@ async def admin_feature_interest_stats(
 @app.post("/api/v1/admin/trigger-kap-scrape")
 @limiter.limit("5/minute")
 async def admin_trigger_kap_scrape(request: Request, payload: dict):
-    """Admin: KAP all scraper'i manuel tetikle (BigPara + AI analiz)."""
+    """Admin: KAP scraper'i manuel tetikle (Uzmanpara + KAP.org.tr AI analiz)."""
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     try:
-        from app.scheduler import kap_all_scrape_job
-        await kap_all_scrape_job()
-        return {"status": "ok", "message": "KAP scrape tamamlandi"}
+        from app.scheduler import kap_uzmanpara_quick_job
+        await kap_uzmanpara_quick_job()
+        return {"status": "ok", "message": "KAP scrape tamamlandi (Uzmanpara)"}
     except Exception as e:
         import traceback
         return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}

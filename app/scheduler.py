@@ -3018,9 +3018,15 @@ async def update_bist50_index_job():
 
 
 async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
-    """Ortak KAP bildirim isleme — DB kayit, AI analiz, push bildirim.
+    """KAP bildirim isleme — DB kayit, KAP sayfa fetch, AI analiz, push bildirim.
 
-    Hem hizli Uzmanpara job'u hem tam BigPara+Uzmanpara job'u bu fonksiyonu kullanir.
+    Uzmanpara'dan gelen listing verisini isler:
+    1. Dedup kontrolu (company_code + title)
+    2. DB'ye kaydet
+    3. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
+    4. AI analiz (Gemini) — KAP sayfa icerigi kullanilir
+    5. Watchlist kullanicilarina push bildirim
+
     Cift korumali dedup: 1) SELECT kontrolu, 2) UNIQUE constraint IntegrityError.
     """
     from datetime import datetime, timezone
@@ -3029,6 +3035,7 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
     from app.services.kap_all_analyzer import analyze_disclosure
     from app.models.kap_all_disclosure import KapAllDisclosure
     from app.services.notification import NotificationService
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content
 
     if not disclosures:
         return
@@ -3053,36 +3060,47 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
             if existing.scalar_one_or_none():
                 continue
 
-            # Yeni bildirim — DB'ye kaydet
+            # 2. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
+            kap_url = d.get("kap_url", "")
+            kap_body = ""
+            if kap_url and "kap.org.tr" in kap_url:
+                try:
+                    kap_body = await fetch_kap_page_content(kap_url)
+                except Exception as kap_err:
+                    logger.debug("KAP sayfa fetch hatasi (%s): %s", d["company_code"], kap_err)
+
+            # Body: KAP sayfasi > Uzmanpara body > baslik
+            body = kap_body or d.get("body", "") or d["title"]
+
+            # 3. Yeni bildirim — DB'ye kaydet
             record = KapAllDisclosure(
                 company_code=d["company_code"],
                 title=d["title"],
-                body=d.get("body", ""),
+                body=body,
                 category=d.get("category"),
                 is_bilanco=d.get("is_bilanco", False),
-                kap_url=d.get("kap_url"),
+                kap_url=kap_url,
                 source=d.get("source"),
                 published_at=d.get("published_at"),
             )
             db.add(record)
 
-            # 2. Race condition koruması — UNIQUE constraint ihlali yakala
+            # 4. Race condition koruması — UNIQUE constraint ihlali yakala
             try:
                 await db.flush()
             except IntegrityError:
                 await db.rollback()
                 logger.debug("%s: Duplicate atlandı (race): %s %s", job_name, d["company_code"], d["title"][:40])
-                # Session'ı yeniden açmamız lazım çünkü rollback yaptık
                 continue
 
             new_count += 1
 
-            # AI analiz
+            # 5. AI analiz — KAP sayfa icerigi kullanilir
             try:
                 ai_result = await analyze_disclosure(
                     company_code=d["company_code"],
                     title=d["title"],
-                    body=d.get("body", d["title"]),
+                    body=body,
                     is_bilanco=d.get("is_bilanco", False),
                 )
                 record.ai_sentiment = ai_result.get("sentiment")
@@ -3093,7 +3111,7 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
             except Exception as ai_err:
                 logger.warning("KAP AI analiz hatasi (%s): %s", d["company_code"], ai_err)
 
-            # Watchlist push bildirim
+            # 6. Watchlist push bildirim
             try:
                 sent = await notif_service.notify_kap_watchlist(record)
                 notif_count += sent
@@ -3121,26 +3139,6 @@ async def kap_uzmanpara_quick_job():
         await _process_kap_disclosures(disclosures, "KAP-Uzmanpara")
     except Exception as e:
         logger.error("KAP Uzmanpara quick job hatasi: %s", e)
-
-
-async def kap_all_scrape_job():
-    """Tam KAP tarama — BigPara (ana kume) + Uzmanpara merge, her 2 dakikada bir.
-
-    BigPara ana kaynak (zengin icerik, tam metin, gercek KAP linkleri).
-    Uzmanpara ek kaynak (daha guncel, BigPara'da olmayanlar eklenir).
-    Bloomberg HT son care (ikisi de bossa).
-    """
-    try:
-        from app.scrapers.kap_all_scraper import scrape_all_kap_disclosures
-        disclosures = await scrape_all_kap_disclosures()
-        await _process_kap_disclosures(disclosures, "KAP-BigPara+Uzmanpara")
-    except Exception as e:
-        logger.error("KAP All Scrape job hatasi: %s", e)
-        try:
-            from app.services.admin_telegram import notify_scraper_error
-            await notify_scraper_error("kap_all_scrape", str(e))
-        except Exception:
-            pass
 
 
 async def expire_subscriptions():
@@ -3824,17 +3822,6 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── KAP Tam Tarama (BigPara ana kume + Uzmanpara) — her 2 dk ───
-    scheduler.add_job(
-        kap_all_scrape_job,
-        IntervalTrigger(minutes=2),
-        id="kap_all_scrape",
-        name="KAP Tam Tarama (BigPara + Uzmanpara, her 2 dk)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
     # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───
     scheduler.add_job(
         daily_subscription_report,
@@ -3884,78 +3871,6 @@ def _setup_scheduler_impl():
     # Eksik raporlar günlük 10:00 TR cron ile üretilecek (MAX_PER_CYCLE=2)
     # asyncio.get_event_loop().create_task(_delayed_ai_catchup())
 
-    # Startup: KAP bildirimleri DB bossa ilk 50 haberi seed et (90 sn sonra — DB hazir olsun)
-    async def _seed_kap_if_empty():
-        await asyncio.sleep(90)
-        try:
-            from sqlalchemy import select, func, and_
-            from app.scrapers.kap_all_scraper import seed_initial_disclosures
-            from app.services.kap_all_analyzer import analyze_disclosure
-            from app.models.kap_all_disclosure import KapAllDisclosure
-
-            async with async_session() as db:
-                count_res = await db.execute(
-                    select(func.count()).select_from(KapAllDisclosure)
-                )
-                existing_count = count_res.scalar() or 0
-
-                if existing_count >= 10:
-                    logger.info("KAP seed atlanıyor — DB'de zaten %d haber var", existing_count)
-                    return
-
-                logger.info("KAP seed basliyor — DB'de %d haber, 50 haber cekilecek...", existing_count)
-                disclosures = await seed_initial_disclosures(target=50)
-
-                new_count = 0
-                for d in disclosures:
-                    # Dedup
-                    existing = await db.execute(
-                        select(KapAllDisclosure).where(
-                            and_(
-                                KapAllDisclosure.company_code == d["company_code"],
-                                KapAllDisclosure.title == d["title"],
-                            )
-                        ).limit(1)
-                    )
-                    if existing.scalar_one_or_none():
-                        continue
-
-                    record = KapAllDisclosure(
-                        company_code=d["company_code"],
-                        title=d["title"],
-                        body=d.get("body", ""),
-                        category=d.get("category"),
-                        is_bilanco=d.get("is_bilanco", False),
-                        kap_url=d.get("kap_url"),
-                        source=d.get("source"),
-                        published_at=d.get("published_at"),
-                    )
-                    db.add(record)
-                    await db.flush()
-                    new_count += 1
-
-                    # AI analiz (seed icin de yap)
-                    try:
-                        ai_result = await analyze_disclosure(
-                            company_code=d["company_code"],
-                            title=d["title"],
-                            body=d.get("body", ""),
-                            is_bilanco=d.get("is_bilanco", False),
-                        )
-                        record.ai_sentiment = ai_result.get("sentiment")
-                        record.ai_impact_score = ai_result.get("impact_score")
-                        record.ai_summary = ai_result.get("summary")
-                        record.ai_analyzed_at = datetime.now(timezone.utc)
-                    except Exception as ai_exc:
-                        logger.warning("Seed AI analiz hatasi (%s): %s", d["company_code"], ai_exc)
-
-                await db.commit()
-                logger.info("KAP seed tamamlandi — %d yeni haber eklendi", new_count)
-
-        except Exception as exc:
-            logger.error("KAP seed hatasi: %s", exc)
-
-    asyncio.get_event_loop().create_task(_seed_kap_if_empty())
 
 
 def shutdown_scheduler():
