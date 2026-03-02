@@ -169,51 +169,41 @@ SADECE asagidaki JSON formatinda yanit ver:
     provider_used = None
 
     if gemini_key:
-        try:
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _GEMINI_URL,
-                    headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={**payload, "model": _GEMINI_MODEL},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    ai_text = data["choices"][0]["message"]["content"].strip()
-                    provider_used = "Gemini-Flash"
-                else:
-                    logger.warning(
-                        "KAP Analyzer: Gemini HTTP %s (%s) — %s",
-                        resp.status_code, company_code, resp.text[:200],
+        for model_name, model_label in [(_GEMINI_MODEL, "Flash"), (_GEMINI_PRO_MODEL, "Pro")]:
+            if ai_text:
+                break
+            try:
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _GEMINI_URL,
+                        headers={
+                            "Authorization": f"Bearer {gemini_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={**payload, "model": model_name},
                     )
-        except Exception as e:
-            logger.warning("KAP Analyzer: Gemini hata (%s) — %s", company_code, e)
-
-    # ── Yedek: Gemini 2.5 Pro ──
-    if not ai_text and gemini_key:
-        try:
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _GEMINI_URL,
-                    headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={**payload, "model": _GEMINI_PRO_MODEL},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    ai_text = data["choices"][0]["message"]["content"].strip()
-                    provider_used = "Gemini-Pro"
-                else:
-                    logger.error(
-                        "KAP Analyzer: Gemini-Pro HTTP %s (%s) — %s",
-                        resp.status_code, company_code, resp.text[:200],
-                    )
-        except Exception as e:
-            logger.error("KAP Analyzer: Gemini-Pro hata (%s) — %s", company_code, e)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        # Gemini 2.5 bazen content=null döner (thinking mode)
+                        choice = data.get("choices", [{}])[0]
+                        msg = choice.get("message", {})
+                        content = msg.get("content")
+                        if content and content.strip():
+                            ai_text = content.strip()
+                            provider_used = f"Gemini-{model_label}"
+                        else:
+                            logger.warning(
+                                "KAP Analyzer: Gemini-%s content bos (%s) — response keys: %s",
+                                model_label, company_code,
+                                list(msg.keys()) if msg else "no message",
+                            )
+                    else:
+                        logger.warning(
+                            "KAP Analyzer: Gemini-%s HTTP %s (%s) — %s",
+                            model_label, resp.status_code, company_code, resp.text[:200],
+                        )
+            except Exception as e:
+                logger.warning("KAP Analyzer: Gemini-%s hata (%s) — %s", model_label, company_code, e)
 
     # ── Her ikisi de basarisiz → kural tabanli fallback ──
     if not ai_text:

@@ -10,8 +10,11 @@ Yeni bildirimler kap_all_disclosures tablosuna kaydedilir.
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
+
+_TR_TZ = ZoneInfo("Europe/Istanbul")
 
 import httpx
 from bs4 import BeautifulSoup
@@ -305,7 +308,9 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
             if date_span:
                 date_text = date_span.get_text(" ", strip=True)
                 try:
-                    published_at = datetime.strptime(date_text, "%d.%m.%Y %H:%M:%S")
+                    # BigPara/Uzmanpara Turkey saati gösterir — UTC'ye çevir
+                    naive_dt = datetime.strptime(date_text, "%d.%m.%Y %H:%M:%S")
+                    published_at = naive_dt.replace(tzinfo=_TR_TZ).astimezone(timezone.utc)
                 except ValueError:
                     pass
 
@@ -418,7 +423,7 @@ def _make_item(*, title: str, company_code: str, kap_url: str,
         "category": category,
         "is_bilanco": is_bilanco,
         "source": source,
-        "published_at": datetime.utcnow(),
+        "published_at": datetime.now(timezone.utc),
     }
 
 
