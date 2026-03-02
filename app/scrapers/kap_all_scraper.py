@@ -1,13 +1,11 @@
-"""KAP Haberleri Scraper — Uzmanpara listing + KAP.org.tr AI analizi.
+"""KAP Haberleri Scraper — Uzmanpara (ana) + Mynet Finans (yedek).
 
 Akis:
 1. Uzmanpara listing sayfasindan yeni KAP bildirimlerini alir
-   (ticker, baslik, KAP bildirim ID, published_at)
-2. KAP bildirim ID'den kap.org.tr URL'i olusturur
-3. AI analizi icin kap.org.tr sayfasindan bildirim icerigi cekilir
+2. 2 ard arda Uzmanpara hatasi -> Mynet Finans yedek kaynaga gecer
+3. Yeni bildirim icin detay sayfasindan KAP.org.tr linki + icerik cekilir (AI icin)
 
 Her ~50 saniyede bir calisir (scheduler).
-BigPara ve Bloomberg HT KALDIRILDI — sadece Uzmanpara kaynak.
 """
 
 import logging
@@ -26,7 +24,13 @@ _TR_TZ = ZoneInfo("Europe/Istanbul")
 
 # ─── URL'ler ────────────────────────────────────────────────────────────────
 UZMANPARA_URL = "https://uzmanpara.milliyet.com.tr/kap-haberleri/"
+MYNET_URL = "https://finans.mynet.com/borsa/kaphaberleri/"
+MYNET_DETAIL_BASE = "https://finans.mynet.com/borsa/haberdetay/"
 BIST_INDEX_BASE = "https://bigpara.hurriyet.com.tr/borsa/hisse-fiyatlari/bist-tum-endeksi/"
+
+# ─── Failure tracking — 2 ard arda hata -> yedek kaynaga gec ──────────────
+_uzmanpara_fail_count: int = 0
+_FAILOVER_THRESHOLD = 2  # 2 ard arda hata sonrasi Mynet'e gec
 
 HEADERS = {
     "User-Agent": (
@@ -94,7 +98,6 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
     """Uzmanpara KAP haberleri listing sayfasindan bildirim listesi.
 
     Sadece listing sayfasini tarar — detay sayfasi ACILMAZ.
-    KAP bildirim numarasi Uzmanpara URL'den cikarilir.
 
     HTML yapisi:
       <li>
@@ -106,12 +109,15 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
     Returns:
         [{title, company_code, kap_url, published_at, source, category, is_bilanco}, ...]
     """
+    global _uzmanpara_fail_count
+
     async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
         try:
             r = await client.get(UZMANPARA_URL)
             r.raise_for_status()
         except Exception as exc:
-            logger.warning("Uzmanpara hata: %s", exc)
+            _uzmanpara_fail_count += 1
+            logger.warning("Uzmanpara hata (#%d): %s", _uzmanpara_fail_count, exc)
             return []
 
         soup = BeautifulSoup(r.text, "lxml")
@@ -119,8 +125,12 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
         # Ticker linklerini bul (class="hisse")
         hisse_links = soup.find_all("a", class_="hisse", href=re.compile(r"/kap-haberi/"))
         if not hisse_links:
-            logger.warning("Uzmanpara: haber linki bulunamadi")
+            _uzmanpara_fail_count += 1
+            logger.warning("Uzmanpara: haber linki bulunamadi (#%d)", _uzmanpara_fail_count)
             return []
+
+        # Basarili — counter sifirla
+        _uzmanpara_fail_count = 0
 
         results: list[dict[str, Any]] = []
         seen_keys: set[str] = set()
@@ -195,6 +205,174 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
 
     logger.info("Uzmanpara -> %d haber", len(results))
     return results
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Mynet Finans — yedek kaynak (Uzmanpara 2x ard arda fail ederse)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_TR_MONTHS = {
+    "Oca": 1, "Şub": 2, "Mar": 3, "Nis": 4, "May": 5, "Haz": 6,
+    "Tem": 7, "Ağu": 8, "Eyl": 9, "Eki": 10, "Kas": 11, "Ara": 12,
+}
+
+
+async def _mynet_fetch() -> list[dict[str, Any]]:
+    """Mynet Finans KAP haberleri listing — yedek kaynak.
+
+    HTML yapisi:
+      <li>
+        <a href="https://finans.mynet.com/borsa/haberdetay/HEXID/"
+           data-id="HEXID"
+           title="***TICKER*** SIRKET ADI (Bildirim Basligi)">
+          <em class="title">***TICKER*** SIRKET ADI (Bildirim Basligi)</em>
+          <span class="date">02 Mar 2026 19:32</span>
+        </a>
+      </li>
+    """
+    async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
+        try:
+            r = await client.get(MYNET_URL)
+            r.raise_for_status()
+        except Exception as exc:
+            logger.warning("Mynet Finans hata: %s", exc)
+            return []
+
+        soup = BeautifulSoup(r.text, "lxml")
+
+        # data-action="news-loader" altindaki <li> ogelerini bul
+        news_ul = soup.find("ul", id="new-list-ul")
+        if not news_ul:
+            logger.warning("Mynet: haber listesi bulunamadi")
+            return []
+
+        results: list[dict[str, Any]] = []
+        seen_keys: set[str] = set()
+
+        for li in news_ul.find_all("li", limit=40):
+            a_tag = li.find("a", href=True)
+            if not a_tag:
+                continue
+
+            raw_title = a_tag.get("title", "") or ""
+            if not raw_title:
+                em = a_tag.find("em", class_="title")
+                raw_title = em.get_text(strip=True) if em else ""
+
+            if not raw_title:
+                continue
+
+            # Ticker cikar: ***TICKER*** veya ***T1 ** T2*** formatinda
+            # Ilk ticker kodu yeterli
+            ticker_match = re.search(r"\*{3}(\w{2,10})", raw_title)
+            if not ticker_match:
+                continue
+            company_code = ticker_match.group(1).upper()
+
+            # Baslik cikar: parantez icindeki son kisim (greedy — ic ice parantez destekli)
+            title_match = re.search(r"\((.+)\)\s*$", raw_title)
+            title = title_match.group(1).strip() if title_match else raw_title
+            # Baslik cok uzunsa kisalt
+            if len(title) > 120:
+                title = title[:117] + "..."
+
+            # Detay URL
+            detail_url = a_tag.get("href", "")
+            if not detail_url.startswith("http"):
+                detail_url = f"https://finans.mynet.com{detail_url}"
+
+            # Tarih — "02 Mar 2026 19:32" formatinda
+            date_span = a_tag.find("span", class_="date")
+            published_at = None
+            if date_span:
+                date_text = date_span.get_text(strip=True)
+                published_at = _parse_mynet_date(date_text)
+
+            # Dedup
+            dedup_key = f"{company_code}|{title[:40]}"
+            if dedup_key in seen_keys:
+                continue
+            seen_keys.add(dedup_key)
+
+            category = _infer_category(title)
+            is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
+
+            item = {
+                "title": title,
+                "company_code": company_code,
+                "body": "",
+                "kap_url": detail_url,  # Mynet detay URL — KAP linki yok
+                "category": category,
+                "is_bilanco": is_bilanco,
+                "source": "mynet",
+            }
+            if published_at:
+                item["published_at"] = published_at
+
+            results.append(item)
+
+    logger.info("Mynet Finans -> %d haber (yedek kaynak)", len(results))
+    return results
+
+
+def _parse_mynet_date(text: str) -> datetime | None:
+    """Mynet tarih formatini parse eder: '02 Mar 2026 19:32'."""
+    try:
+        # "02 Mar 2026 19:32"
+        parts = text.strip().split()
+        if len(parts) < 4:
+            return None
+        day = int(parts[0])
+        month = _TR_MONTHS.get(parts[1], 0)
+        if not month:
+            return None
+        year = int(parts[2])
+        time_parts = parts[3].split(":")
+        hour = int(time_parts[0])
+        minute = int(time_parts[1]) if len(time_parts) > 1 else 0
+        naive_dt = datetime(year, month, day, hour, minute)
+        return naive_dt.replace(tzinfo=_TR_TZ)
+    except (ValueError, IndexError):
+        return None
+
+
+async def fetch_mynet_detail_content(detail_url: str) -> str:
+    """Mynet Finans detay sayfasindan bildirim icerigi cekmek (AI icin).
+
+    Mynet detay sayfasinda KAP bildiriminin tam icerigi tablo formatinda var.
+    """
+    if not detail_url or "mynet" not in detail_url:
+        return ""
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=HEADERS) as client:
+            r = await client.get(detail_url)
+            if r.status_code != 200:
+                return ""
+
+            soup = BeautifulSoup(r.text, "lxml")
+
+            # KAP icerik: div.dataText.tblKAP
+            content_div = soup.find("div", class_="tblKAP")
+            if not content_div:
+                content_div = soup.find("div", class_="kap-detail-news-page")
+
+            if not content_div:
+                return ""
+
+            # Script/style kaldir
+            for tag in content_div(["script", "style"]):
+                tag.decompose()
+
+            text = content_div.get_text(" ", strip=True)
+            if text and len(text) > 30:
+                logger.info("Mynet detay icerigi: %d karakter", len(text))
+                return text[:4000]
+
+    except Exception as exc:
+        logger.debug("Mynet detay hatasi: %s", exc)
+
+    return ""
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -387,16 +565,27 @@ def _apply_bist_filter(data: list[dict[str, Any]], bist: set[str]) -> list[dict[
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
-    """Uzmanpara'dan KAP haberlerini ceker.
+    """KAP haberlerini ceker — Uzmanpara (ana) + Mynet Finans (yedek).
 
-    Ana ve tek kaynak — her ~50 saniyede bir cagirilir.
+    Her ~50 saniyede bir cagirilir.
+    Uzmanpara 2 ard arda fail ederse Mynet Finans yedek kaynaga gecer.
     BIST whitelist ile filtrelenir.
 
     Returns:
         list[dict]: Bildirim listesi
     """
     bist = await _refresh_bist_symbols()
+
+    # Ana kaynak: Uzmanpara
     data = await _uzmanpara_fetch()
+
+    # Yedek kaynak: Mynet Finans (2 ard arda hata sonrasi)
+    if not data and _uzmanpara_fail_count >= _FAILOVER_THRESHOLD:
+        logger.warning(
+            "Uzmanpara %d kez basarisiz — Mynet Finans yedek kaynaga geciliyor",
+            _uzmanpara_fail_count,
+        )
+        data = await _mynet_fetch()
 
     if not data:
         return []

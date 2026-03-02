@@ -3035,7 +3035,9 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
     from app.services.kap_all_analyzer import analyze_disclosure
     from app.models.kap_all_disclosure import KapAllDisclosure
     from app.services.notification import NotificationService
-    from app.scrapers.kap_all_scraper import fetch_kap_page_content, resolve_kap_url
+    from app.scrapers.kap_all_scraper import (
+        fetch_kap_page_content, resolve_kap_url, fetch_mynet_detail_content,
+    )
 
     if not disclosures:
         return
@@ -3060,25 +3062,35 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
             if existing.scalar_one_or_none():
                 continue
 
-            # 2a. KAP URL'yi resolve et (Uzmanpara detay -> kap.org.tr)
+            # 2a. KAP URL resolve + icerik cekme
             kap_url = d.get("kap_url", "")
-            if kap_url and "uzmanpara" in kap_url:
-                try:
-                    resolved = await resolve_kap_url(kap_url)
-                    if resolved:
-                        kap_url = resolved
-                except Exception as resolve_err:
-                    logger.debug("KAP URL resolve hatasi (%s): %s", d["company_code"], resolve_err)
-
-            # 2b. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
+            source = d.get("source", "")
             kap_body = ""
-            if kap_url and "kap.org.tr" in kap_url:
-                try:
-                    kap_body = await fetch_kap_page_content(kap_url)
-                except Exception as kap_err:
-                    logger.debug("KAP sayfa fetch hatasi (%s): %s", d["company_code"], kap_err)
 
-            # Body: KAP sayfasi > Uzmanpara body > baslik
+            if source == "mynet" and kap_url and "mynet" in kap_url:
+                # Mynet: detay sayfasindan bildirim icerigi cek (KAP linki yok)
+                try:
+                    kap_body = await fetch_mynet_detail_content(kap_url)
+                except Exception as mynet_err:
+                    logger.debug("Mynet detay hatasi (%s): %s", d["company_code"], mynet_err)
+            else:
+                # Uzmanpara: detay sayfasindan KAP.org.tr URL'si cek
+                if kap_url and "uzmanpara" in kap_url:
+                    try:
+                        resolved = await resolve_kap_url(kap_url)
+                        if resolved:
+                            kap_url = resolved
+                    except Exception as resolve_err:
+                        logger.debug("KAP URL resolve hatasi (%s): %s", d["company_code"], resolve_err)
+
+                # 2b. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
+                if kap_url and "kap.org.tr" in kap_url:
+                    try:
+                        kap_body = await fetch_kap_page_content(kap_url)
+                    except Exception as kap_err:
+                        logger.debug("KAP sayfa fetch hatasi (%s): %s", d["company_code"], kap_err)
+
+            # Body: KAP/Mynet sayfasi > body > baslik
             body = kap_body or d.get("body", "") or d["title"]
 
             # 3. Yeni bildirim — DB'ye kaydet
