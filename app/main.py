@@ -429,6 +429,66 @@ async def toggle_kill_switch(
 
 
 # -------------------------------------------------------
+# Gemini Test — AI Debug
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/test-gemini")
+@limiter.limit("5/minute")
+async def test_gemini(request: Request, payload: dict = Body(...)):
+    """Gemini API bağlantı testi — KAP analyzer ile aynı ayarları kullanır."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=401, detail="Gecersiz admin sifresi")
+
+    settings = get_settings()
+    gemini_key = settings.GEMINI_API_KEY if settings.GEMINI_API_KEY else None
+
+    if not gemini_key:
+        return {"status": "error", "message": "GEMINI_API_KEY env variable yok veya bos", "key_exists": False}
+
+    import httpx
+    url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    test_payload = {
+        "model": "gemini-2.5-flash",
+        "messages": [{"role": "user", "content": "Say 'test ok' in JSON: {\"result\": \"test ok\"}"}],
+        "max_tokens": 50,
+        "temperature": 0,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {gemini_key}", "Content-Type": "application/json"},
+                json=test_payload,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                ai_text = data["choices"][0]["message"]["content"].strip()
+                return {
+                    "status": "ok",
+                    "key_exists": True,
+                    "key_prefix": gemini_key[:8] + "...",
+                    "model": "gemini-2.5-flash",
+                    "response": ai_text[:200],
+                }
+            else:
+                return {
+                    "status": "error",
+                    "key_exists": True,
+                    "key_prefix": gemini_key[:8] + "...",
+                    "http_status": resp.status_code,
+                    "error": resp.text[:300],
+                }
+    except Exception as e:
+        return {
+            "status": "error",
+            "key_exists": True,
+            "key_prefix": gemini_key[:8] + "...",
+            "exception": str(e),
+        }
+
+
+# -------------------------------------------------------
 # Health Check
 # -------------------------------------------------------
 
