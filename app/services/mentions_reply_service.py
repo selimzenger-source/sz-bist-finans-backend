@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 # Sabitler
 # ───────────────────────────────────────────────
 
-_ABACUS_URL   = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL     = "gpt-4.1"
-_AI_TIMEOUT   = 25
-
 # Gemini 2.5 Flash — birincil (OpenAI uyumlu endpoint)
 _GEMINI_URL   = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-flash"
+
+# Gemini 2.5 Pro — yedek
+_GEMINI_PRO_MODEL = "gemini-2.5-pro"
+_AI_TIMEOUT   = 25
 
 _MENTIONS_URL     = "https://api.twitter.com/2/users/{user_id}/mentions"
 _TWEET_LOOKUP_URL = "https://api.twitter.com/2/tweets/{tweet_id}"
@@ -378,10 +378,10 @@ YASAK (is_safe: false):
 
 async def _generate_reply(mention_text: str, our_tweet_text: str | None,
                           author_name: str, author_bio: str | None) -> dict:
-    """Abacus AI ile mention'a yanıt üretir."""
-    api_key = _get_abacus_key()
-    if not api_key:
-        return {"is_safe": False, "reason": "API key yok"}
+    """Gemini Flash + Pro ile mention'a yanıt üretir."""
+    gemini_key = _get_gemini_key()
+    if not gemini_key:
+        return {"is_safe": False, "reason": "Gemini API key yok"}
 
     context_parts = [f"Bize yazan kişi: {author_name}"]
     if author_bio:
@@ -393,7 +393,6 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
     user_msg = "\n".join(context_parts)
 
     payload = {
-        "model": _AI_MODEL,
         "messages": [
             {"role": "system", "content": _MENTIONS_SYSTEM_PROMPT},
             {"role": "user",   "content": user_msg},
@@ -401,43 +400,37 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
         "temperature": 0.85,
         "max_tokens":  400,
     }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
+    gemini_headers = {
+        "Authorization": f"Bearer {gemini_key}",
         "Content-Type":  "application/json",
     }
-    # ── Birincil: Gemini 2.5 Flash ──
+
+    # ── 1. Birincil: Gemini 2.5 Flash ──
     raw = None
-    gemini_key = _get_gemini_key()
 
-    if gemini_key:
-        try:
-            gemini_payload = {**payload, "model": _GEMINI_MODEL}
-            gemini_headers = {
-                "Authorization": f"Bearer {gemini_key}",
-                "Content-Type": "application/json",
-            }
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
-                resp = await c.post(_GEMINI_URL, json=gemini_payload, headers=gemini_headers)
-            if resp.status_code == 200:
-                raw = resp.json()["choices"][0]["message"]["content"].strip()
-                logger.info("Mentions reply [Gemini-Flash] kullanildi")
-            else:
-                logger.warning(f"Mentions Gemini hatası: HTTP {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"Mentions Gemini hata: {e}")
+    try:
+        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
+            resp = await c.post(_GEMINI_URL, json={**payload, "model": _GEMINI_MODEL}, headers=gemini_headers)
+        if resp.status_code == 200:
+            raw = resp.json()["choices"][0]["message"]["content"].strip()
+            logger.info("Mentions reply [Gemini-Flash] kullanildi")
+        else:
+            logger.warning(f"Mentions Gemini-Flash hatası: HTTP {resp.status_code}")
+    except Exception as e:
+        logger.warning(f"Mentions Gemini-Flash hata: {e}")
 
-    # ── Yedek: Abacus AI ──
-    if not raw and api_key:
+    # ── 2. Yedek: Gemini 2.5 Pro ──
+    if not raw:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
-                resp = await c.post(_ABACUS_URL, json=payload, headers=headers)
+                resp = await c.post(_GEMINI_URL, json={**payload, "model": _GEMINI_PRO_MODEL}, headers=gemini_headers)
             if resp.status_code == 200:
                 raw = resp.json()["choices"][0]["message"]["content"].strip()
-                logger.info("Mentions reply [Abacus] kullanildi")
+                logger.info("Mentions reply [Gemini-Pro] kullanildi")
             else:
-                logger.error(f"Mentions Abacus hatası: HTTP {resp.status_code}")
+                logger.error(f"Mentions Gemini-Pro hatası: HTTP {resp.status_code}")
         except Exception as e:
-            logger.error(f"Mentions Abacus hata: {e}")
+            logger.error(f"Mentions Gemini-Pro hata: {e}")
 
     if not raw:
         return {"is_safe": False, "reason": "Tum AI providerlar basarisiz"}

@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 # Abacus AI RouteLLM endpoint — birincil (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
-# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+# Anthropic Claude Sonnet 4 — 2. yedek (direkt API)
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
 
@@ -66,6 +70,16 @@ def _get_api_key() -> str | None:
     try:
         from app.config import get_settings
         key = get_settings().ABACUS_API_KEY
+        return key if key else None
+    except Exception:
+        return None
+
+
+def _get_anthropic_key() -> str | None:
+    """Config'den Anthropic API key'i al."""
+    try:
+        from app.config import get_settings
+        key = getattr(get_settings(), "ANTHROPIC_API_KEY", None)
         return key if key else None
     except Exception:
         return None
@@ -431,9 +445,10 @@ async def score_news(
         Hata durumunda score+summary None olur — akis kirilmaz.
     """
     api_key = _get_api_key()
+    anthropic_key = _get_anthropic_key()
     gemini_key = _get_gemini_key()
-    if not api_key and not gemini_key:
-        logger.error("AI News Scorer: API key yok (ne Abacus ne Gemini) — devre disi! (%s)", ticker)
+    if not api_key and not anthropic_key and not gemini_key:
+        logger.error("AI News Scorer: API key yok (Abacus/Claude/Gemini) — devre disi! (%s)", ticker)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     # TradingView icerigi varsa birincil kaynak, yoksa Telegram metni
@@ -509,7 +524,45 @@ SADECE asagidaki JSON formatinda yanit ver:
         except Exception as e:
             logger.warning("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
 
-    # ── Yedek: Gemini 2.5 Pro ──
+    # ── Yedek: Anthropic Claude Sonnet 4 (direkt API) ──
+    if not text and anthropic_key:
+        try:
+            # Anthropic Messages API formatı (OpenAI'den farklı)
+            system_content = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
+            user_content = messages[-1]["content"] if messages else ""
+
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ANTHROPIC_URL,
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": _CLAUDE_MODEL,
+                        "max_tokens": 600,
+                        "system": system_content,
+                        "messages": [{"role": "user", "content": user_content}],
+                        "temperature": 0.1,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            text = block.get("text", "").strip()
+                            break
+                    provider_used = "Claude-Sonnet"
+                else:
+                    logger.error(
+                        "AI News Scorer: Claude HTTP %s (%s) — %s",
+                        resp.status_code, ticker, resp.text[:200],
+                    )
+        except Exception as e:
+            logger.error("AI News Scorer: Claude hata (%s) — %s", ticker, e)
+
+    # ── 3. Yedek: Gemini 2.5 Pro ──
     if not text and gemini_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:

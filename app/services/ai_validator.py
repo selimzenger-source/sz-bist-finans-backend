@@ -19,25 +19,31 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Abacus AI RouteLLM endpoint — birincil (OpenAI uyumlu)
-_ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_TIMEOUT = 30  # saniye
-
-# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+# Gemini 2.5 Pro — birincil (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
 
+# Abacus AI RouteLLM — 2. yedek (OpenAI uyumlu)
+_ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
-def _get_keys() -> tuple[str | None, str | None]:
-    """Config'den Abacus ve Gemini API key'lerini al."""
+# Anthropic Claude Sonnet 4 — 3. yedek (direkt API)
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+_TIMEOUT = 30  # saniye
+
+
+def _get_keys() -> tuple[str | None, str | None, str | None]:
+    """Config'den Gemini, Abacus ve Anthropic API key'lerini al."""
     try:
         from app.config import get_settings
         s = get_settings()
-        abacus = s.ABACUS_API_KEY if s.ABACUS_API_KEY else None
         gemini = s.GEMINI_API_KEY if s.GEMINI_API_KEY else None
-        return abacus, gemini
+        abacus = s.ABACUS_API_KEY if s.ABACUS_API_KEY else None
+        anthropic = getattr(s, "ANTHROPIC_API_KEY", None) or None
+        return gemini, abacus, anthropic
     except Exception:
-        return None, None
+        return None, None, None
 
 
 async def validate_ipo_dates(
@@ -62,14 +68,15 @@ async def validate_ipo_dates(
             "ai_used": True/False
         }
     """
-    abacus_key, gemini_key = _get_keys()
-    if not abacus_key and not gemini_key:
-        logger.debug("AI Validator: API key yok (ne Abacus ne Gemini), devre disi")
+    gemini_key, abacus_key, anthropic_key = _get_keys()
+    if not gemini_key and not abacus_key and not anthropic_key:
+        logger.debug("AI Validator: API key yok (Gemini/Abacus/Claude), devre disi")
         return {"valid": True, "corrections": {}, "reason": "", "ai_used": False}
 
+    system_msg = "Sen bir veri dogrulama asistanisin. Sadece JSON formatinda yanit ver."
     prompt = _build_validation_prompt(raw_texts, parsed_values, company_name)
     messages = [
-        {"role": "system", "content": "Sen bir veri dogrulama asistanisin. Sadece JSON formatinda yanit ver."},
+        {"role": "system", "content": system_msg},
         {"role": "user", "content": prompt},
     ]
     payload_base = {
@@ -78,10 +85,30 @@ async def validate_ipo_dates(
         "max_tokens": 500,
     }
 
-    # ── Birincil: Abacus AI ──
     content = None
 
-    if abacus_key:
+    # ── 1. Birincil: Gemini 2.5 Pro ──
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    logger.warning("AI Validator: Gemini HTTP %d (%s)", resp.status_code, company_name)
+        except Exception as e:
+            logger.warning("AI Validator: Gemini hata (%s) — %s", company_name, e)
+
+    # ── 2. Yedek: Abacus AI ──
+    if not content and abacus_key:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(
@@ -100,25 +127,35 @@ async def validate_ipo_dates(
         except Exception as e:
             logger.warning("AI Validator: Abacus hata (%s) — %s", company_name, e)
 
-    # ── Yedek: Gemini 2.5 Pro ──
-    if not content and gemini_key:
+    # ── 3. Yedek: Anthropic Claude Sonnet 4 ──
+    if not content and anthropic_key:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(
-                    _GEMINI_URL,
+                    _ANTHROPIC_URL,
                     headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
                     },
-                    json={**payload_base, "model": _GEMINI_MODEL},
+                    json={
+                        "model": _CLAUDE_MODEL,
+                        "max_tokens": 500,
+                        "system": system_msg,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0,
+                    },
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    content = data["choices"][0]["message"]["content"]
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            content = block.get("text", "").strip()
+                            break
                 else:
-                    logger.error("AI Validator: Gemini HTTP %d (%s)", resp.status_code, company_name)
+                    logger.error("AI Validator: Claude HTTP %d (%s)", resp.status_code, company_name)
         except Exception as e:
-            logger.warning("AI Validator: Gemini hata (%s) — %s", company_name, e)
+            logger.warning("AI Validator: Claude hata (%s) — %s", company_name, e)
 
     if not content:
         return {"valid": True, "corrections": {}, "reason": "AI providerlar basarisiz", "ai_used": False}

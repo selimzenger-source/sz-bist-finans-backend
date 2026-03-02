@@ -37,8 +37,10 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _AI_MODEL   = "claude-sonnet-4-6"
 _GEMINI_MODEL = "gemini-2.5-pro"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
 _AI_TIMEOUT = 120   # Derin analiz için daha fazla süre
 
 # PDF çıkarımında max karakter (büyük PDF'ler için kırp)
@@ -1185,14 +1187,19 @@ async def analyze_with_ai(
     company_name: str,
     ipo_price: Optional[str] = None,
 ) -> Optional[dict]:
-    """Çıkarılan PDF metni üzerinde AI analizi yapar."""
+    """Çıkarılan PDF metni üzerinde AI analizi yapar.
+
+    Provider sırası:
+      1. Abacus AI RouteLLM (birincil)
+      2. Anthropic Claude Sonnet 4 direkt API (yedek)
+    """
 
     settings = get_settings()
-    abacus_key = settings.ABACUS_API_KEY
-    gemini_key = settings.GEMINI_API_KEY
+    abacus_key = settings.ABACUS_API_KEY or None
+    anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
 
-    if not abacus_key and not gemini_key:
-        logger.error("AI API key yok (ne Abacus ne Gemini) — izahname analizi yapılamadı")
+    if not abacus_key and not anthropic_key:
+        logger.error("AI API key yok (ne Abacus ne Claude) — izahname analizi yapılamadı")
         return None
 
     # Kullanıcı mesajı: şirket bağlamı + PDF metni
@@ -1210,93 +1217,99 @@ async def analyze_with_ai(
     full_system = get_system_prompt() + "\n\n" + _FEW_SHOT_EXAMPLES
 
     content = ""
+    provider_used = None
     try:
-        # ── Önce Abacus dene ──
-        abacus_failed = False
+        # ── Birincil: Abacus AI RouteLLM ──
+        if abacus_key and not content:
+            try:
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _ABACUS_URL,
+                        headers={
+                            "Authorization": f"Bearer {abacus_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": _AI_MODEL,
+                            "messages": [
+                                {"role": "system", "content": full_system},
+                                {"role": "user",   "content": user_message},
+                            ],
+                            "temperature": 0.15,
+                            "max_tokens": 4096,
+                        },
+                    )
 
-        if abacus_key:
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _ABACUS_URL,
-                    headers={
-                        "Authorization": f"Bearer {abacus_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": _AI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": full_system},
-                            {"role": "user",   "content": user_message},
-                        ],
-                        "temperature": 0.15,
-                        "max_tokens": 3500,
-                    },
-                )
-
-            if resp.status_code == 200:
-                data = resp.json()
-                content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    .strip()
-                )
-                if content:
-                    logger.info("İzahname analizi Abacus ile uretildi: %s", company_name)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                        .strip()
+                    )
+                    if content:
+                        provider_used = "Abacus"
+                        logger.info("İzahname analizi Abacus ile uretildi: %s", company_name)
+                    else:
+                        logger.warning("Abacus 200 OK ama content bos (%s)", company_name)
                 else:
-                    abacus_failed = True
-                    logger.warning("Abacus bos yanit dondu — Gemini'ye geciliyor")
-            else:
-                abacus_failed = True
-                logger.warning(
-                    "Abacus izahname hatasi HTTP %d — Gemini'ye geciliyor. Detay: %s",
-                    resp.status_code, resp.text[:200],
-                )
-        else:
-            abacus_failed = True
+                    logger.warning(
+                        "Abacus izahname hatasi HTTP %d — Claude'a geciliyor. Detay: %s",
+                        resp.status_code, resp.text[:300],
+                    )
+            except Exception as e:
+                logger.warning("Abacus izahname hata (%s) — %s", company_name, e)
 
-        # ── Gemini Fallback ──
-        if abacus_failed and gemini_key:
-            logger.info("Gemini fallback (izahname) baslatiliyor: %s", company_name)
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _GEMINI_URL,
-                    headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": _GEMINI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": full_system},
-                            {"role": "user",   "content": user_message},
-                        ],
-                        "temperature": 0.15,
-                        "max_tokens": 3500,
-                    },
-                )
+        # ── Yedek: Anthropic Claude Sonnet 4 (direkt API) ──
+        if not content and anthropic_key:
+            try:
+                logger.info("Claude Sonnet fallback (izahname) baslatiliyor: %s", company_name)
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _ANTHROPIC_URL,
+                        headers={
+                            "x-api-key": anthropic_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": _CLAUDE_MODEL,
+                            "max_tokens": 4096,
+                            "system": full_system,
+                            "messages": [
+                                {"role": "user", "content": user_message},
+                            ],
+                            "temperature": 0.15,
+                        },
+                    )
 
-            if resp.status_code != 200:
-                logger.error("Gemini izahname analiz hatasi: HTTP %d — %s",
-                             resp.status_code, resp.text[:300])
-                return None
-
-            data = resp.json()
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
-            if content:
-                logger.info("İzahname analizi Gemini ile uretildi: %s", company_name)
-
-        elif abacus_failed and not gemini_key:
-            logger.error("Abacus basarisiz ve Gemini key yok — izahname uretilemedi")
-            return None
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Anthropic format: { content: [{ type: "text", text: "..." }] }
+                    content_blocks = data.get("content", [])
+                    for block in content_blocks:
+                        if block.get("type") == "text":
+                            content = block.get("text", "").strip()
+                            break
+                    if content:
+                        provider_used = "Claude-Sonnet"
+                        logger.info("İzahname analizi Claude Sonnet ile uretildi: %s", company_name)
+                    else:
+                        logger.warning(
+                            "Claude 200 OK ama content bos! stop_reason=%s (%s)",
+                            data.get("stop_reason"), company_name,
+                        )
+                else:
+                    logger.error(
+                        "Claude izahname hatasi HTTP %d — %s",
+                        resp.status_code, resp.text[:300],
+                    )
+            except Exception as e:
+                logger.error("Claude izahname hata (%s) — %s", company_name, e)
 
         if not content:
-            logger.error("AI boş izahname analizi döndü (her iki provider)")
+            logger.error("AI boş izahname analizi döndü (tüm providerlar basarisiz) — %s", company_name)
             return None
 
         # JSON parse

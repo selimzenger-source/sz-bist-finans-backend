@@ -1903,7 +1903,11 @@ BANNER_SPK_BULTEN_ANALIZ = os.path.join(_IMG_DIR, "spk_bulten_analiz.png")
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _BULLETIN_AI_MODEL = "gpt-4.1"
 
-# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+# Anthropic Claude Sonnet 4 — 2. yedek (direkt API)
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+
+# Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
 
@@ -1945,15 +1949,16 @@ FORMAT KURALLARI:
 
 def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:
     """AI ile bulten icerigini analiz eder, tweet metni uretir (senkron).
-    Birincil: Abacus AI, Yedek: Gemini 2.5 Pro."""
+    Sirasi: Abacus AI → Claude Sonnet → Gemini Pro."""
     try:
         from app.config import get_settings
         settings = get_settings()
         api_key = settings.ABACUS_API_KEY
+        anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
         gemini_key = settings.GEMINI_API_KEY if settings.GEMINI_API_KEY else None
 
-        if not api_key and not gemini_key:
-            logger.error("SPK bulten analiz: API key yok (ne Abacus ne Gemini)")
+        if not api_key and not anthropic_key and not gemini_key:
+            logger.error("SPK bulten analiz: API key yok (Abacus/Claude/Gemini)")
             return None
 
         user_message = (
@@ -1974,7 +1979,7 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
 
         content = None
 
-        # ── Birincil: Abacus AI ──
+        # ── 1. Birincil: Abacus AI ──
         if api_key:
             try:
                 resp = httpx.post(
@@ -1996,7 +2001,39 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             except Exception as e:
                 logger.warning("SPK bulten Abacus hata: %s", e)
 
-        # ── Yedek: Gemini 2.5 Pro ──
+        # ── 2. Yedek: Anthropic Claude Sonnet 4 ──
+        if not content and anthropic_key:
+            try:
+                resp = httpx.post(
+                    _ANTHROPIC_URL,
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": _CLAUDE_MODEL,
+                        "max_tokens": 1200,
+                        "system": _BULLETIN_ANALYSIS_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_message}],
+                        "temperature": 0.3,
+                    },
+                    timeout=60.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            content = block.get("text", "").strip()
+                            break
+                    if content:
+                        logger.info("SPK bulten AI [Claude-Sonnet] analiz uretildi: %d karakter", len(content))
+                else:
+                    logger.warning("SPK bulten Claude hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.warning("SPK bulten Claude hata: %s", e)
+
+        # ── 3. Yedek: Gemini 2.5 Pro ──
         if not content and gemini_key:
             try:
                 resp = httpx.post(
@@ -2246,15 +2283,16 @@ _SPK_APP_AI_MODEL = "gpt-4.1"
 
 def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
     """AI ile SPK basvuru sirketini arastirip tweet metni uretir (senkron).
-    Birincil: Abacus AI, Yedek: Gemini 2.5 Pro."""
+    Sirasi: Abacus AI → Claude Sonnet → Gemini Pro."""
     try:
         from app.config import get_settings
         settings = get_settings()
         api_key = settings.ABACUS_API_KEY
+        anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
         gemini_key = settings.GEMINI_API_KEY if settings.GEMINI_API_KEY else None
 
-        if not api_key and not gemini_key:
-            logger.error("SPK basvuru tweet AI: API key yok (ne Abacus ne Gemini)")
+        if not api_key and not anthropic_key and not gemini_key:
+            logger.error("SPK basvuru tweet AI: API key yok (Abacus/Claude/Gemini)")
             return None
 
         user_message = (
@@ -2277,7 +2315,7 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
 
         content = None
 
-        # ── Birincil: Abacus AI ──
+        # ── 1. Birincil: Abacus AI ──
         if api_key:
             try:
                 resp = httpx.post(
@@ -2299,7 +2337,39 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
             except Exception as e:
                 logger.warning("SPK basvuru Abacus hata: %s", e)
 
-        # ── Yedek: Gemini 2.5 Pro ──
+        # ── 2. Yedek: Anthropic Claude Sonnet 4 ──
+        if not content and anthropic_key:
+            try:
+                resp = httpx.post(
+                    _ANTHROPIC_URL,
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": _CLAUDE_MODEL,
+                        "max_tokens": 1000,
+                        "system": _SPK_APP_AI_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": user_message}],
+                        "temperature": 0.4,
+                    },
+                    timeout=45.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            content = block.get("text", "").strip()
+                            break
+                    if content:
+                        logger.info("SPK basvuru AI [Claude-Sonnet]: %d karakter", len(content))
+                else:
+                    logger.warning("SPK basvuru Claude hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.warning("SPK basvuru Claude hata: %s", e)
+
+        # ── 3. Yedek: Gemini 2.5 Pro ──
         if not content and gemini_key:
             try:
                 resp = httpx.post(

@@ -30,9 +30,13 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "gpt-5.2"
 _AI_TIMEOUT = 60  # Daha fazla veri isliyor, daha uzun sure
 
-# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+# Gemini 2.5 Pro — birincil (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
+
+# Anthropic Claude Sonnet 4 — 3. yedek (direkt API)
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # Yahoo Finance ticker'lari
 _MARKET_TICKERS = {
@@ -1070,11 +1074,12 @@ async def _generate_report(
 ) -> str | None:
     """AI ile piyasa raporu uretir — 8 kaynak zengin veri konteksti ile."""
     _settings = get_settings()
-    api_key = _settings.ABACUS_API_KEY
     gemini_key = _settings.GEMINI_API_KEY if _settings.GEMINI_API_KEY else None
+    api_key = _settings.ABACUS_API_KEY
+    anthropic_key = getattr(_settings, "ANTHROPIC_API_KEY", None) or None
 
-    if not api_key and not gemini_key:
-        logger.error("API key yok (ne Abacus ne Gemini) — rapor uretilemedi")
+    if not gemini_key and not api_key and not anthropic_key:
+        logger.error("API key yok (Gemini/Abacus/Claude) — rapor uretilemedi")
         return None
 
     system_prompt = _MORNING_SYSTEM_PROMPT if report_type == "morning" else _EVENING_SYSTEM_PROMPT
@@ -1098,6 +1103,7 @@ async def _generate_report(
         len(econ_calendar.get("tomorrow", [])), len(ipo_events),
     )
 
+    # OpenAI-uyumlu payload (Gemini + Abacus icin)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
@@ -1108,10 +1114,32 @@ async def _generate_report(
         "max_tokens": 1500,
     }
 
-    # ── Birincil: Abacus AI ──
     ai_content = None
 
-    if api_key:
+    # ── 1. Birincil: Gemini 2.5 Pro ──
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ai_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if ai_content:
+                        logger.info("AI %s raporu [Gemini-Pro] uretildi: %d karakter", report_type, len(ai_content))
+                else:
+                    logger.warning("AI rapor Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+        except Exception as e:
+            logger.warning("AI rapor Gemini hata: %s", e)
+
+    # ── 2. Yedek: Abacus AI ──
+    if not ai_content and api_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
                 resp = await client.post(
@@ -1132,27 +1160,37 @@ async def _generate_report(
         except Exception as e:
             logger.warning("AI rapor Abacus hata: %s", e)
 
-    # ── Yedek: Gemini 2.5 Pro ──
-    if not ai_content and gemini_key:
+    # ── 3. Yedek: Anthropic Claude Sonnet 4 ──
+    if not ai_content and anthropic_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
                 resp = await client.post(
-                    _GEMINI_URL,
+                    _ANTHROPIC_URL,
                     headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
                     },
-                    json={**payload_base, "model": _GEMINI_MODEL},
+                    json={
+                        "model": _CLAUDE_MODEL,
+                        "max_tokens": 1500,
+                        "system": system_prompt,
+                        "messages": [{"role": "user", "content": user_message}],
+                        "temperature": 0.2,
+                    },
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    ai_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            ai_content = block.get("text", "").strip()
+                            break
                     if ai_content:
-                        logger.info("AI %s raporu [Gemini-Pro] uretildi: %d karakter", report_type, len(ai_content))
+                        logger.info("AI %s raporu [Claude-Sonnet] uretildi: %d karakter", report_type, len(ai_content))
                 else:
-                    logger.error("AI rapor Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+                    logger.error("AI rapor Claude hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
         except Exception as e:
-            logger.error("AI rapor Gemini hata: %s", e)
+            logger.error("AI rapor Claude hata: %s", e)
 
     if not ai_content:
         logger.error("AI rapor: Tum providerlar basarisiz")

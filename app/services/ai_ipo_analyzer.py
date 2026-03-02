@@ -40,8 +40,10 @@ logger = logging.getLogger(__name__)
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _AI_MODEL = "claude-sonnet-4-6"
 _GEMINI_MODEL = "gemini-2.5-pro"
+_CLAUDE_MODEL = "claude-sonnet-4-20250514"
 _AI_TIMEOUT = 180  # v3: daha detayli analiz → daha uzun zaman
 
 # ── Prompt Override Mekanizması ──
@@ -793,11 +795,11 @@ async def generate_ipo_report(
         JSON dict veya None (basarisiz)
     """
     settings = get_settings()
-    abacus_key = settings.ABACUS_API_KEY
-    gemini_key = settings.GEMINI_API_KEY
+    abacus_key = settings.ABACUS_API_KEY or None
+    anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
 
-    if not abacus_key and not gemini_key:
-        logger.error("AI API key yok (ne Abacus ne Gemini) — IPO rapor uretilemedi")
+    if not abacus_key and not anthropic_key:
+        logger.error("AI API key yok (ne Abacus ne Claude) — IPO rapor uretilemedi")
         return None
 
     context = _build_ipo_context(
@@ -812,30 +814,31 @@ async def generate_ipo_report(
         f"kirmizi bayraklari tespit et, sonra toplam puani 10 uzerinden ver:\n\n{context}"
     )
 
+    system_prompt = get_system_prompt()
     content = ""  # AI yanıtı
+    provider_used = None
 
     try:
-        # ── Önce Abacus dene, başarısız olursa Anthropic'e düş ──
-        abacus_failed = False
-
-        if abacus_key:
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _ABACUS_URL,
-                    headers={
-                        "Authorization": f"Bearer {abacus_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": _AI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": get_system_prompt()},
-                            {"role": "user", "content": user_message},
-                        ],
-                        "temperature": 0.12,
-                        "max_tokens": 6500,
-                    },
-                )
+        # ── Birincil: Abacus AI RouteLLM ──
+        if abacus_key and not content:
+            try:
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _ABACUS_URL,
+                        headers={
+                            "Authorization": f"Bearer {abacus_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": _AI_MODEL,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message},
+                            ],
+                            "temperature": 0.12,
+                            "max_tokens": 6500,
+                        },
+                    )
 
                 if resp.status_code == 200:
                     data = resp.json()
@@ -846,63 +849,67 @@ async def generate_ipo_report(
                         .strip()
                     )
                     if content:
+                        provider_used = "Abacus"
                         logger.info("IPO rapor Abacus ile uretildi: %s", ipo.ticker or ipo.company_name)
                     else:
-                        abacus_failed = True
-                        logger.warning("Abacus bos yanit dondu — Gemini'ye geciliyor")
+                        logger.warning("Abacus 200 OK ama content bos (%s)", ipo.ticker or ipo.company_name)
                 else:
-                    abacus_failed = True
                     logger.warning(
-                        "Abacus hatasi HTTP %d — Gemini'ye geciliyor. Detay: %s",
-                        resp.status_code, resp.text[:200],
-                    )
-        else:
-            abacus_failed = True
-
-        # ── Gemini Fallback (OpenAI-uyumlu endpoint) ──
-        if abacus_failed and gemini_key:
-            logger.info("Gemini fallback baslatiliyor: %s", ipo.ticker or ipo.company_name)
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _GEMINI_URL,
-                    headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": _GEMINI_MODEL,
-                        "messages": [
-                            {"role": "system", "content": get_system_prompt()},
-                            {"role": "user", "content": user_message},
-                        ],
-                        "temperature": 0.12,
-                        "max_tokens": 6500,
-                    },
-                )
-
-                if resp.status_code != 200:
-                    logger.error(
-                        "Gemini IPO rapor hatasi: HTTP %d — %s",
+                        "Abacus IPO rapor hatasi HTTP %d — Claude'a geciliyor. Detay: %s",
                         resp.status_code, resp.text[:300],
                     )
-                    return None
+            except Exception as e:
+                logger.warning("Abacus IPO rapor hata (%s) — %s", ipo.ticker or ipo.company_name, e)
 
-                data = resp.json()
-                content = (
-                    data.get("choices", [{}])[0]
-                    .get("message", {})
-                    .get("content", "")
-                    .strip()
-                )
-                if content:
-                    logger.info("IPO rapor Gemini ile uretildi: %s", ipo.ticker or ipo.company_name)
+        # ── Yedek: Anthropic Claude Sonnet 4 (direkt API) ──
+        if not content and anthropic_key:
+            try:
+                logger.info("Claude Sonnet fallback (IPO rapor) baslatiliyor: %s", ipo.ticker or ipo.company_name)
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _ANTHROPIC_URL,
+                        headers={
+                            "x-api-key": anthropic_key,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json",
+                        },
+                        json={
+                            "model": _CLAUDE_MODEL,
+                            "max_tokens": 6500,
+                            "system": system_prompt,
+                            "messages": [
+                                {"role": "user", "content": user_message},
+                            ],
+                            "temperature": 0.12,
+                        },
+                    )
 
-        elif abacus_failed and not gemini_key:
-            logger.error("Abacus basarisiz ve Gemini key yok — rapor uretilemedi")
-            return None
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Anthropic format: { content: [{ type: "text", text: "..." }] }
+                    content_blocks = data.get("content", [])
+                    for block in content_blocks:
+                        if block.get("type") == "text":
+                            content = block.get("text", "").strip()
+                            break
+                    if content:
+                        provider_used = "Claude-Sonnet"
+                        logger.info("IPO rapor Claude Sonnet ile uretildi: %s", ipo.ticker or ipo.company_name)
+                    else:
+                        logger.warning(
+                            "Claude 200 OK ama content bos! stop_reason=%s (%s)",
+                            data.get("stop_reason"), ipo.ticker or ipo.company_name,
+                        )
+                else:
+                    logger.error(
+                        "Claude IPO rapor hatasi HTTP %d — %s",
+                        resp.status_code, resp.text[:300],
+                    )
+            except Exception as e:
+                logger.error("Claude IPO rapor hata (%s) — %s", ipo.ticker or ipo.company_name, e)
 
         if not content:
-            logger.error("AI bos IPO raporu dondu (her iki provider)")
+            logger.error("AI bos IPO raporu dondu (tum providerlar basarisiz) — %s", ipo.ticker or ipo.company_name)
             return None
 
         # JSON parse — bazen markdown ```json ... ``` ile sarar
