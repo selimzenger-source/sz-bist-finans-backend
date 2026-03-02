@@ -1030,8 +1030,11 @@ async def check_reminders(
                 remaining_minutes = (closing_time - now_tr).total_seconds() / 60
 
                 if remaining_minutes < 0:
-                    logger.info("Hatirlatma: %s suresi dolmus (remaining=%.0f), atlandi", ticker_name, remaining_minutes)
-                    continue  # Bu IPO'nun suresi dolmus
+                    if force_reminder_type:
+                        logger.warning("Hatirlatma FORCE: %s suresi dolmus (remaining=%.0f) ama force mode — devam", ticker_name, remaining_minutes)
+                    else:
+                        logger.info("Hatirlatma: %s suresi dolmus (remaining=%.0f), atlandi", ticker_name, remaining_minutes)
+                        continue  # Bu IPO'nun suresi dolmus
 
                 # force_reminder_type varsa pencere kontrolunu atla
                 if force_reminder_type:

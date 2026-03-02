@@ -120,10 +120,10 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS last_day_notified BOOLEAN DEFAULT FALSE"
             ))
-            # Gecmis + bugunun IPO'lari icin flag'leri set et (deploy sonrasi tekrar atilmasin)
+            # SADECE gecmis IPO'lar icin flag set et (bugunkuler HARIC — onlarin countdown'u henuz calismamis olabilir)
             await db.execute(sa_text(
                 "UPDATE ipos SET last_day_tweeted = TRUE, last_day_notified = TRUE "
-                "WHERE subscription_end <= CURRENT_DATE AND subscription_end IS NOT NULL "
+                "WHERE subscription_end < CURRENT_DATE AND subscription_end IS NOT NULL "
                 "AND last_day_tweeted = FALSE"
             ))
             await db.commit()
