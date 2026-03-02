@@ -88,6 +88,29 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Veritabani init hatasi: %s", e)
 
+    # KAP bildirimleri duplicate korumasi — UNIQUE constraint ekle (yoksa)
+    try:
+        from sqlalchemy import text as sa_text
+        async with async_session() as db:
+            # Mevcut duplicate'lari temizle (en eski kaydi tut)
+            await db.execute(sa_text("""
+                DELETE FROM kap_all_disclosures
+                WHERE id NOT IN (
+                    SELECT MIN(id) FROM kap_all_disclosures
+                    GROUP BY company_code, title
+                )
+            """))
+            await db.commit()
+            # Unique index olustur
+            await db.execute(sa_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_company_title "
+                "ON kap_all_disclosures (company_code, title)"
+            ))
+            await db.commit()
+            logger.info("KAP unique constraint OK")
+    except Exception as e:
+        logger.warning("KAP unique constraint olusturulamadi: %s", e)
+
     # BIST50 cache'ini DB'den yukle
     try:
         from app.database import async_session

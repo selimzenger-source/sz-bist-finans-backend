@@ -2919,9 +2919,11 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
     """Ortak KAP bildirim isleme — DB kayit, AI analiz, push bildirim.
 
     Hem hizli Uzmanpara job'u hem tam BigPara+Uzmanpara job'u bu fonksiyonu kullanir.
+    Cift korumali dedup: 1) SELECT kontrolu, 2) UNIQUE constraint IntegrityError.
     """
     from datetime import datetime, timezone
     from sqlalchemy import select, and_
+    from sqlalchemy.exc import IntegrityError
     from app.services.kap_all_analyzer import analyze_disclosure
     from app.models.kap_all_disclosure import KapAllDisclosure
     from app.services.notification import NotificationService
@@ -2937,7 +2939,7 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
         notif_service = NotificationService(db)
 
         for d in disclosures:
-            # Dedup kontrolu — ayni bildirim zaten var mi?
+            # 1. Dedup kontrolu — ayni bildirim zaten var mi?
             existing = await db.execute(
                 select(KapAllDisclosure).where(
                     and_(
@@ -2961,7 +2963,16 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
                 published_at=d.get("published_at"),
             )
             db.add(record)
-            await db.flush()  # ID al
+
+            # 2. Race condition koruması — UNIQUE constraint ihlali yakala
+            try:
+                await db.flush()
+            except IntegrityError:
+                await db.rollback()
+                logger.debug("%s: Duplicate atlandı (race): %s %s", job_name, d["company_code"], d["title"][:40])
+                # Session'ı yeniden açmamız lazım çünkü rollback yaptık
+                continue
+
             new_count += 1
 
             # AI analiz

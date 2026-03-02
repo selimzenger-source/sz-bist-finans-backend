@@ -5,7 +5,7 @@ Frontend "Tum KAP Haberleri" tab'inda gosterilir.
 """
 
 from datetime import datetime
-from sqlalchemy import String, Text, Float, Boolean, DateTime, Index
+from sqlalchemy import String, Text, Float, Boolean, DateTime, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -81,4 +81,5 @@ class KapAllDisclosure(Base):
         Index("idx_kap_all_company", "company_code"),
         Index("idx_kap_all_sentiment", "ai_sentiment"),
         Index("idx_kap_all_created", "created_at"),
+        UniqueConstraint("company_code", "title", name="uq_kap_company_title"),
     )
