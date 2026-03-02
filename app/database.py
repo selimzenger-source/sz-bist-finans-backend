@@ -510,6 +510,31 @@ async def init_db():
         except Exception:
             pass
 
+        # v43 migration: notification_logs tablosu (Bildirim Merkezi)
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS notification_logs (
+                    id SERIAL PRIMARY KEY,
+                    device_id VARCHAR(100) NOT NULL,
+                    title VARCHAR(500) NOT NULL,
+                    body TEXT,
+                    category VARCHAR(30) NOT NULL DEFAULT 'system',
+                    data_json TEXT,
+                    is_read BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_notiflog_device_created
+                ON notification_logs(device_id, created_at)
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_notiflog_created
+                ON notification_logs(created_at)
+            """))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

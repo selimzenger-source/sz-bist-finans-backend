@@ -8,6 +8,7 @@ Ust uste seri bildirim onlemek icin her bildirim arasi 5 saniye beklenir.
 import asyncio
 import json
 import logging
+import time
 from typing import Optional
 
 from sqlalchemy import select, and_, or_
@@ -17,6 +18,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 NOTIFICATION_DELAY_SECONDS = 2
 
 logger = logging.getLogger(__name__)
+
+# ─── Watchlist Bildirim Spam Korumasi ───
+# Ayni ticker icin ayni kullaniciya belirli sure icinde tekrar bildirim gondermeyi engeller.
+# Key: "device_id:ticker" → Value: son gonderim zamani (epoch)
+_watchlist_notif_cache: dict[str, float] = {}
+_WATCHLIST_NOTIF_COOLDOWN = 300  # 5 dakika — ayni ticker icin minimum bekleme suresi
+_WATCHLIST_CACHE_CLEANUP_INTERVAL = 3600  # 1 saat — cache temizleme araligi
+_watchlist_cache_last_cleanup: float = 0
+
+
+def _cleanup_watchlist_cache():
+    """Eski cache girdilerini temizle (memory leak onleme)."""
+    global _watchlist_cache_last_cleanup
+    now = time.time()
+    if now - _watchlist_cache_last_cleanup < _WATCHLIST_CACHE_CLEANUP_INTERVAL:
+        return
+    _watchlist_cache_last_cleanup = now
+    cutoff = now - _WATCHLIST_NOTIF_COOLDOWN * 2
+    expired_keys = [k for k, v in _watchlist_notif_cache.items() if v < cutoff]
+    for k in expired_keys:
+        del _watchlist_notif_cache[k]
+    if expired_keys:
+        logger.debug("Watchlist notif cache temizlendi: %d eski girdi silindi", len(expired_keys))
 
 # Firebase Admin SDK — lazy init
 _firebase_initialized = False
@@ -247,11 +271,13 @@ class NotificationService:
         data: Optional[dict] = None,
         channel_id: str = "default_v2",
         delay: bool = True,
+        category: str = "system",
     ) -> bool:
         """FCM veya Expo token ile kullaniciya bildirim gonderir.
 
         FCM token varsa Firebase, basarisiz olursa Expo fallback.
         ExponentPushToken varsa Expo Push API kullanilir.
+        Basarili gonderimde NotificationLog tablosuna kayit eklenir.
         """
         # KILL SWITCH — admin panelden tüm bildirimler durduruldu
         try:
@@ -265,6 +291,7 @@ class NotificationService:
         fcm = (user.fcm_token or "").strip()
         expo = (user.expo_push_token or "").strip()
 
+        success = False
         if fcm:
             result = await self.send_to_device(
                 fcm_token=fcm,
@@ -275,20 +302,20 @@ class NotificationService:
                 delay=delay,
             )
             if result:
-                return True
-            # FCM basarisiz — Expo fallback dene
-            logger.info(f"FCM basarisiz, Expo fallback deneniyor: user_id={user.id}")
-            if expo and expo.startswith("ExponentPushToken"):
-                return await self.send_to_expo_device(
-                    expo_token=expo,
-                    title=title,
-                    body=body,
-                    data=data,
-                    delay=delay,
-                )
-            return False
+                success = True
+            else:
+                # FCM basarisiz — Expo fallback dene
+                logger.info(f"FCM basarisiz, Expo fallback deneniyor: user_id={user.id}")
+                if expo and expo.startswith("ExponentPushToken"):
+                    success = await self.send_to_expo_device(
+                        expo_token=expo,
+                        title=title,
+                        body=body,
+                        data=data,
+                        delay=delay,
+                    )
         elif expo and expo.startswith("ExponentPushToken"):
-            return await self.send_to_expo_device(
+            success = await self.send_to_expo_device(
                 expo_token=expo,
                 title=title,
                 body=body,
@@ -298,6 +325,44 @@ class NotificationService:
         else:
             logger.warning(f"Kullanicinin gecerli tokeni yok: user_id={user.id}")
             return False
+
+        # Basarili gonderimde Bildirim Merkezi'ne kaydet
+        if success:
+            try:
+                await self._log_notification(
+                    device_id=user.device_id,
+                    title=title,
+                    body=body,
+                    category=category,
+                    data=data,
+                )
+            except Exception as e:
+                logger.warning("NotificationLog kayit hatasi: %s", e)
+
+        return success
+
+    async def _log_notification(
+        self,
+        device_id: str,
+        title: str,
+        body: str,
+        category: str = "system",
+        data: Optional[dict] = None,
+    ):
+        """Gonderilen bildirimi notification_logs tablosuna kaydeder."""
+        try:
+            from app.models.notification_log import NotificationLog
+            log = NotificationLog(
+                device_id=device_id,
+                title=title,
+                body=body,
+                category=category,
+                data_json=json.dumps(data, ensure_ascii=False) if data else None,
+            )
+            self.db.add(log)
+            await self.db.flush()
+        except Exception as e:
+            logger.debug("NotificationLog insert hatasi: %s", e)
 
     async def _clear_stale_token(self, fcm_token: str):
         """UnregisteredError alan FCM token'i DB'den temizler.
@@ -415,6 +480,7 @@ class NotificationService:
         data: dict,
         log_label: str,
         channel_id: str = "default_v2",
+        category: str = "system",
     ) -> int:
         """Belirli bildirim tercihini kontrol ederek sadece aktif kullanicilara gonderir.
 
@@ -454,6 +520,7 @@ class NotificationService:
                     body=body,
                     data=data,
                     channel_id=channel_id,
+                    category=category,
                 )
                 if success:
                     sent_count += 1
@@ -505,6 +572,7 @@ class NotificationService:
             "notify_new_ipo", title, body, data,
             f"Yeni halka arz: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     async def notify_ipo_subscription_start(self, ipo) -> int:
@@ -524,6 +592,7 @@ class NotificationService:
             "notify_ipo_start", title, body, data,
             f"Basvuru basladi: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     async def notify_ipo_last_day(self, ipo) -> int:
@@ -541,6 +610,7 @@ class NotificationService:
             "notify_ipo_last_day", title, body, data,
             f"Son gun uyarisi: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
@@ -585,6 +655,7 @@ class NotificationService:
             "notify_ipo_result", title, body, data,
             f"Dagitim sonucu: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     async def notify_first_trading_day(self, ipo) -> int:
@@ -604,6 +675,7 @@ class NotificationService:
             "notify_first_trading_day", title, body, data,
             f"Ilk islem gunu: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     async def notify_trading_date_detected(self, ipo) -> int:
@@ -632,6 +704,7 @@ class NotificationService:
             title, body, data,
             f"Islem tarihi tespit: {ipo.ticker or ipo.company_name}",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     # NOTE: notify_ceiling_broken() kaldirildi — kullanilmiyordu.
@@ -678,6 +751,7 @@ class NotificationService:
             "notify_new_ipo", title, body, data,
             f"SPK basvuru bildirimi: {count} sirket",
             channel_id="ipo_alerts_v2",
+            category="ipo",
         )
 
     # -------------------------------------------------------
@@ -788,6 +862,7 @@ class NotificationService:
                     body=body,
                     data=data,
                     channel_id="kap_news_v2",
+                    category="kap_news",
                 )
                 if success:
                     sent_count += 1
@@ -872,6 +947,7 @@ class NotificationService:
                     body=body,
                     data=data,
                     channel_id="kap_news_v2",
+                    category="kap_news",
                 )
                 if success:
                     sent_count += 1
@@ -922,24 +998,18 @@ class NotificationService:
         sentiment = disclosure.ai_sentiment or ""
         score = disclosure.ai_impact_score
 
-        # Sentiment emoji
-        emoji = ""
+        # Sentiment emoji + etiket
         if sentiment == "Olumlu":
             emoji = "📈"
+            sentiment_tag = "Pozitif"
         elif sentiment == "Olumsuz":
             emoji = "📉"
+            sentiment_tag = "Negatif"
         else:
             emoji = "📋"
+            sentiment_tag = "Nötr"
 
-        # Bildirim basligi — kullanici dostu format
-        if sentiment == "Olumlu":
-            sentiment_label = "Olumlu Haber"
-        elif sentiment == "Olumsuz":
-            sentiment_label = "Olumsuz Haber"
-        else:
-            sentiment_label = "Yeni Haber"
-
-        title = f"{emoji} Favori Hisseniz {ticker} — {sentiment_label}"
+        title = f"{emoji} {ticker} — {sentiment_tag} Haber"
 
         # Bildirim govdesi
         body = (disclosure.title or "")[:200]
@@ -948,6 +1018,7 @@ class NotificationService:
             "type": "kap_watchlist",
             "ticker": ticker,
             "disclosure_id": str(disclosure.id),
+            "sentiment": sentiment_tag,
         }
 
         # Takip eden kullanicilari bul — tercihleriyle birlikte
@@ -961,16 +1032,36 @@ class NotificationService:
         if not watchlist_rows:
             return 0
 
-        # Sentiment'e gore filtrele
+        # Sentiment'e gore filtrele + spam korumasi
+        _cleanup_watchlist_cache()
+        now = time.time()
         filtered_device_ids = []
+        skipped_spam = 0
+
         for device_id, pref in watchlist_rows:
-            if pref == "both" or not pref:
+            # Spam korumasi — ayni ticker icin son 5 dk icinde bildirim gittiyse atla
+            cache_key = f"{device_id}:{ticker}"
+            last_sent = _watchlist_notif_cache.get(cache_key, 0)
+            if now - last_sent < _WATCHLIST_NOTIF_COOLDOWN:
+                skipped_spam += 1
+                continue
+
+            # Bildirim tercihi filtresi
+            if pref == "all" or pref == "both" or not pref:
+                # Tum haberler (Olumlu + Notr + Olumsuz)
                 filtered_device_ids.append(device_id)
+            elif pref == "positive_negative":
+                # Hem pozitif hem negatif — notr haric
+                if sentiment in ("Olumlu", "Olumsuz"):
+                    filtered_device_ids.append(device_id)
             elif pref == "positive_only" and sentiment == "Olumlu":
                 filtered_device_ids.append(device_id)
             elif pref == "negative_only" and sentiment == "Olumsuz":
                 filtered_device_ids.append(device_id)
-            # "Notr" → sadece "both" tercih edenler alir (yukarida yakalandi)
+            # "Notr" → sadece "all"/"both" tercih edenler alir (yukarida yakalandi)
+
+        if skipped_spam > 0:
+            logger.info("KAP Watchlist spam korumasi: %s — %d kullanici 5dk cooldown icinde, atlandilar", ticker, skipped_spam)
 
         if not filtered_device_ids:
             return 0
@@ -997,9 +1088,13 @@ class NotificationService:
                     body=body,
                     data=data,
                     channel_id="kap_news_v2",
+                    category="kap_watchlist",
                 )
                 if success:
                     sent_count += 1
+                    # Spam cache guncelle — basarili gonderimde cooldown baslat
+                    cache_key = f"{user.device_id}:{ticker}"
+                    _watchlist_notif_cache[cache_key] = time.time()
             except Exception as e:
                 logger.warning("Watchlist bildirim hatasi (user=%s): %s", user.id, e)
 
@@ -1095,6 +1190,7 @@ class NotificationService:
                     body=body,
                     data=data,
                     channel_id="ipo_alerts_v2",
+                    category="ipo",
                 )
                 if success:
                     sent_count += 1

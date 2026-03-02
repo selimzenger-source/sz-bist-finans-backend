@@ -3434,6 +3434,32 @@ async def daily_subscription_report():
             pass
 
 
+async def cleanup_notification_logs():
+    """Bildirim Merkezi — 24 saatten eski kayitlari temizle.
+
+    Her gece 02:00 TR (UTC 23:00) calisir.
+    notification_logs tablosundan 24 saat ötesindeki kayitlari siler.
+    """
+    try:
+        from sqlalchemy import delete, text as sa_text
+        from app.models.notification_log import NotificationLog
+
+        async with async_session() as db:
+            result = await db.execute(sa_text(
+                "DELETE FROM notification_logs "
+                "WHERE created_at < NOW() - INTERVAL '24 hours'"
+            ))
+            deleted = result.rowcount
+            await db.commit()
+
+            if deleted > 0:
+                logger.info("Bildirim Merkezi temizlik: %d eski kayit silindi", deleted)
+            else:
+                logger.debug("Bildirim Merkezi temizlik: silinecek kayit yok")
+    except Exception as e:
+        logger.error("Bildirim Merkezi temizlik hatasi: %s", e)
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -3873,6 +3899,17 @@ def _setup_scheduler_impl():
         IntervalTrigger(minutes=10),
         id="self_ping_keep_alive",
         name="Render Keep-Alive Ping (10 dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── Bildirim Merkezi Temizlik — her gece 02:00 TR (UTC 23:00) ───
+    scheduler.add_job(
+        cleanup_notification_logs,
+        CronTrigger(hour=23, minute=0),  # UTC 23:00 = TR 02:00
+        id="notification_log_cleanup",
+        name="Bildirim Merkezi Temizlik (02:00 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -5422,7 +5422,7 @@ async def add_to_watchlist(
                 detail="Ucretsiz kullanicilar en fazla 5 hisse takip edebilir. VIP'e yukselin!"
             )
 
-    pref = body.notification_preference if body.notification_preference in ("both", "positive_only", "negative_only") else "both"
+    pref = body.notification_preference if body.notification_preference in ("both", "positive_only", "negative_only", "all", "positive_negative") else "both"
     item = UserWatchlist(device_id=device_id, ticker=ticker, notification_preference=pref)
     db.add(item)
     await db.flush()
@@ -5439,11 +5439,11 @@ async def update_watchlist_preference(
 ):
     """Takip listesindeki hissenin bildirim tercihini guncelle.
 
-    body: {"notification_preference": "both" | "positive_only" | "negative_only"}
+    body: {"notification_preference": "both" | "positive_only" | "negative_only" | "all" | "positive_negative"}
     """
     ticker = ticker.upper().strip()
     pref = body.get("notification_preference", "both")
-    if pref not in ("both", "positive_only", "negative_only"):
+    if pref not in ("both", "positive_only", "negative_only", "all", "positive_negative"):
         raise HTTPException(status_code=400, detail="Gecersiz bildirim tercihi")
 
     result = await db.execute(
@@ -5547,6 +5547,99 @@ async def trim_watchlist(
 
     deleted_count = current_count - FREE_LIMIT
     return {"trimmed": True, "deleted": deleted_count, "remaining": FREE_LIMIT}
+
+
+# ============================================
+# BILDIRIM MERKEZI — Notification Log
+# ============================================
+
+@app.get("/api/v1/users/{device_id}/notifications")
+@limiter.limit("30/minute")
+async def get_notification_log(
+    request: Request,
+    device_id: str,
+    category: Optional[str] = None,
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin son 24 saatlik bildirim gecmisini getir.
+
+    Query params:
+    - category: kap_watchlist, kap_news, ipo, system (opsiyonel — filtre)
+    - limit: max kayit sayisi (varsayilan 50)
+    """
+    from app.models.notification_log import NotificationLog
+    from datetime import datetime, timezone, timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    query = (
+        select(NotificationLog)
+        .where(
+            NotificationLog.device_id == device_id,
+            NotificationLog.created_at >= cutoff,
+        )
+    )
+    if category and category in ("kap_watchlist", "kap_news", "ipo", "system"):
+        query = query.where(NotificationLog.category == category)
+
+    query = query.order_by(NotificationLog.created_at.desc()).limit(min(limit, 100))
+
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return [
+        {
+            "id": log.id,
+            "title": log.title,
+            "body": log.body,
+            "category": log.category,
+            "data": log.data_json,
+            "is_read": log.is_read,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+        }
+        for log in logs
+    ]
+
+
+@app.patch("/api/v1/users/{device_id}/notifications/{notif_id}/read")
+async def mark_notification_read(
+    device_id: str,
+    notif_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bildirimi okundu olarak isaretle."""
+    from app.models.notification_log import NotificationLog
+
+    result = await db.execute(
+        update(NotificationLog)
+        .where(
+            NotificationLog.id == notif_id,
+            NotificationLog.device_id == device_id,
+        )
+        .values(is_read=True)
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Bildirim bulunamadi")
+    return {"success": True}
+
+
+@app.patch("/api/v1/users/{device_id}/notifications/read-all")
+async def mark_all_notifications_read(
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tum bildirimleri okundu olarak isaretle."""
+    from app.models.notification_log import NotificationLog
+
+    await db.execute(
+        update(NotificationLog)
+        .where(
+            NotificationLog.device_id == device_id,
+            NotificationLog.is_read == False,
+        )
+        .values(is_read=True)
+    )
+    return {"success": True}
 
 
 # ============================================
