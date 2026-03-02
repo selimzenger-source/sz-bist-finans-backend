@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _AI_MODEL = "claude-sonnet-4-6"
+_GEMINI_MODEL = "gemini-2.5-flash"
 _AI_TIMEOUT = 180  # v3: daha detayli analiz → daha uzun zaman
 
 # ── Prompt Override Mekanizması ──
@@ -790,9 +792,12 @@ async def generate_ipo_report(
     Returns:
         JSON dict veya None (basarisiz)
     """
-    api_key = get_settings().ABACUS_API_KEY
-    if not api_key:
-        logger.error("Abacus API key yok — IPO rapor uretilemedi")
+    settings = get_settings()
+    abacus_key = settings.ABACUS_API_KEY
+    gemini_key = settings.GEMINI_API_KEY
+
+    if not abacus_key and not gemini_key:
+        logger.error("AI API key yok (ne Abacus ne Gemini) — IPO rapor uretilemedi")
         return None
 
     context = _build_ipo_context(
@@ -807,142 +812,196 @@ async def generate_ipo_report(
         f"kirmizi bayraklari tespit et, sonra toplam puani 10 uzerinden ver:\n\n{context}"
     )
 
+    content = ""  # AI yanıtı
+
     try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": get_system_prompt()},
-                        {"role": "user", "content": user_message},
-                    ],
-                    "temperature": 0.12,  # v3: biraz daha deterministik
-                    "max_tokens": 6500,   # v3: daha detayli rapor
-                },
-            )
+        # ── Önce Abacus dene, başarısız olursa Anthropic'e düş ──
+        abacus_failed = False
 
-            if resp.status_code != 200:
-                logger.error(
-                    "AI IPO rapor hatasi: HTTP %d — %s",
-                    resp.status_code,
-                    resp.text[:300],
-                )
-                return None
-
-            data = resp.json()
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
-
-            if not content:
-                logger.error("AI bos IPO raporu dondu")
-                return None
-
-            # JSON parse — bazen markdown ```json ... ``` ile sarar
-            if content.startswith("```"):
-                content = content.split("\n", 1)[-1]
-                if content.endswith("```"):
-                    content = content[:-3].strip()
-
-            report = json.loads(content)
-
-            # Zorunlu alanlar kontrolu
-            required_keys = [
-                "overall_score", "risk_level", "analysis",
-                "how_to_participate", "lot_estimate_explanation",
-                "sector_comparison", "recommendation",
-            ]
-            missing = [k for k in required_keys if k not in report]
-            if missing:
-                logger.error("AI IPO raporu eksik alanlar: %s", missing)
-                return None
-
-            # scenario_table yoksa bos liste ata (frontend guvenli)
-            if "scenario_table" not in report:
-                report["scenario_table"] = []
-
-            # score_breakdown yoksa bos dict ata
-            if "score_breakdown" not in report:
-                report["score_breakdown"] = {}
-
-            # Skor dogrulama
-            score = float(report["overall_score"])
-            if not (1.0 <= score <= 10.0):
-                logger.warning("AI IPO skor sinir disi: %.1f — clamp ediliyor", score)
-                report["overall_score"] = max(1.0, min(10.0, score))
-
-            # v3: score_breakdown tutarlılık kontrolü
-            breakdown = report.get("score_breakdown", {})
-            if breakdown:
-                ham_puan = breakdown.get("toplam_ham_puan")
-                if ham_puan is not None:
-                    expected_score = max(1.0, min(10.0, ham_puan / 10))
-                    actual_score = report["overall_score"]
-                    if abs(expected_score - actual_score) > 0.5:
-                        logger.warning(
-                            "Score breakdown tutarsizligi: ham=%s → beklenen=%.1f, gelen=%.1f — duzeltiliyor",
-                            ham_puan, expected_score, actual_score
-                        )
-                        report["overall_score"] = round(expected_score, 1)
-
-            # v3: risk_level tutarlılık kontrolü
-            final_score = report["overall_score"]
-            expected_risk = (
-                "dusuk" if final_score >= 7.0
-                else "orta" if final_score >= 5.0
-                else "yuksek" if final_score >= 3.0
-                else "cok_yuksek"
-            )
-            if report["risk_level"] not in ("dusuk", "orta", "yuksek", "cok_yuksek"):
-                report["risk_level"] = expected_risk
-            elif report["risk_level"] != expected_risk:
-                logger.info(
-                    "Risk level uyumsuzlugu: skor=%.1f → beklenen=%s, gelen=%s — AI'in secimi korunuyor",
-                    final_score, expected_risk, report["risk_level"]
+        if abacus_key:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {abacus_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": _AI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": get_system_prompt()},
+                            {"role": "user", "content": user_message},
+                        ],
+                        "temperature": 0.12,
+                        "max_tokens": 6500,
+                    },
                 )
 
-            # v3: Kaynak yasakı kontrolü
-            for field in ["analysis", "how_to_participate", "lot_estimate_explanation",
-                          "sector_comparison", "recommendation"]:
-                text = report.get(field, "")
-                banned_sources = [
-                    "gedik.com", "halkarztakip", "isyatirim", "kap.org",
-                    "bloomberg", "reuters", "investing.com", "bigpara",
-                    "Gedik Yatirim", "Gedik Yatırım"
-                ]
-                for source in banned_sources:
-                    if source.lower() in text.lower():
-                        logger.warning("KAYNAK IHLALI tespit edildi: '%s' — alan: %s", source, field)
-                        # Kaynagi temizle
-                        import re
-                        text = re.sub(
-                            rf'\b{re.escape(source)}\b',
-                            '',
-                            text,
-                            flags=re.IGNORECASE
-                        )
-                        report[field] = text
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = (
+                        data.get("choices", [{}])[0]
+                        .get("message", {})
+                        .get("content", "")
+                        .strip()
+                    )
+                    if content:
+                        logger.info("IPO rapor Abacus ile uretildi: %s", ipo.ticker or ipo.company_name)
+                    else:
+                        abacus_failed = True
+                        logger.warning("Abacus bos yanit dondu — Gemini'ye geciliyor")
+                else:
+                    abacus_failed = True
+                    logger.warning(
+                        "Abacus hatasi HTTP %d — Gemini'ye geciliyor. Detay: %s",
+                        resp.status_code, resp.text[:200],
+                    )
+        else:
+            abacus_failed = True
 
+        # ── Gemini Fallback (OpenAI-uyumlu endpoint) ──
+        if abacus_failed and gemini_key:
+            logger.info("Gemini fallback baslatiliyor: %s", ipo.ticker or ipo.company_name)
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": _GEMINI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": get_system_prompt()},
+                            {"role": "user", "content": user_message},
+                        ],
+                        "temperature": 0.12,
+                        "max_tokens": 6500,
+                    },
+                )
+
+                if resp.status_code != 200:
+                    logger.error(
+                        "Gemini IPO rapor hatasi: HTTP %d — %s",
+                        resp.status_code, resp.text[:300],
+                    )
+                    return None
+
+                data = resp.json()
+                content = (
+                    data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                if content:
+                    logger.info("IPO rapor Gemini ile uretildi: %s", ipo.ticker or ipo.company_name)
+
+        elif abacus_failed and not gemini_key:
+            logger.error("Abacus basarisiz ve Gemini key yok — rapor uretilemedi")
+            return None
+
+        if not content:
+            logger.error("AI bos IPO raporu dondu (her iki provider)")
+            return None
+
+        # JSON parse — bazen markdown ```json ... ``` ile sarar
+        if content.startswith("```"):
+            content = content.split("\n", 1)[-1]
+            if content.endswith("```"):
+                content = content[:-3].strip()
+
+        report = json.loads(content)
+
+        # Zorunlu alanlar kontrolu
+        required_keys = [
+            "overall_score", "risk_level", "analysis",
+            "how_to_participate", "lot_estimate_explanation",
+            "sector_comparison", "recommendation",
+        ]
+        missing = [k for k in required_keys if k not in report]
+        if missing:
+            logger.error("AI IPO raporu eksik alanlar: %s", missing)
+            return None
+
+        # scenario_table yoksa bos liste ata (frontend guvenli)
+        if "scenario_table" not in report:
+            report["scenario_table"] = []
+
+        # score_breakdown yoksa bos dict ata
+        if "score_breakdown" not in report:
+            report["score_breakdown"] = {}
+
+        # Skor dogrulama
+        score = float(report["overall_score"])
+        if not (1.0 <= score <= 10.0):
+            logger.warning("AI IPO skor sinir disi: %.1f — clamp ediliyor", score)
+            report["overall_score"] = max(1.0, min(10.0, score))
+
+        # v3: score_breakdown tutarlılık kontrolü
+        breakdown = report.get("score_breakdown", {})
+        if breakdown:
+            ham_puan = breakdown.get("toplam_ham_puan")
+            if ham_puan is not None:
+                expected_score = max(1.0, min(10.0, ham_puan / 10))
+                actual_score = report["overall_score"]
+                if abs(expected_score - actual_score) > 0.5:
+                    logger.warning(
+                        "Score breakdown tutarsizligi: ham=%s → beklenen=%.1f, gelen=%.1f — duzeltiliyor",
+                        ham_puan, expected_score, actual_score
+                    )
+                    report["overall_score"] = round(expected_score, 1)
+
+        # v3: risk_level tutarlılık kontrolü
+        final_score = report["overall_score"]
+        expected_risk = (
+            "dusuk" if final_score >= 7.0
+            else "orta" if final_score >= 5.0
+            else "yuksek" if final_score >= 3.0
+            else "cok_yuksek"
+        )
+        if report["risk_level"] not in ("dusuk", "orta", "yuksek", "cok_yuksek"):
+            report["risk_level"] = expected_risk
+        elif report["risk_level"] != expected_risk:
             logger.info(
-                "AI IPO raporu v3 uretildi: %s — skor=%.1f, risk=%s, senaryo=%d satir, "
-                "breakdown=%s, kirmizi_bayrak=%s, %d karakter",
-                ipo.ticker or ipo.company_name,
-                report["overall_score"],
-                report["risk_level"],
-                len(report.get("scenario_table", [])),
-                bool(report.get("score_breakdown")),
-                report.get("score_breakdown", {}).get("kirmizi_bayraklar", []),
-                len(content),
+                "Risk level uyumsuzlugu: skor=%.1f → beklenen=%s, gelen=%s — AI'in secimi korunuyor",
+                final_score, expected_risk, report["risk_level"]
             )
-            return report
+
+        # v3: Kaynak yasakı kontrolü
+        for field in ["analysis", "how_to_participate", "lot_estimate_explanation",
+                      "sector_comparison", "recommendation"]:
+            text = report.get(field, "")
+            banned_sources = [
+                "gedik.com", "halkarztakip", "isyatirim", "kap.org",
+                "bloomberg", "reuters", "investing.com", "bigpara",
+                "Gedik Yatirim", "Gedik Yatırım"
+            ]
+            for source in banned_sources:
+                if source.lower() in text.lower():
+                    logger.warning("KAYNAK IHLALI tespit edildi: '%s' — alan: %s", source, field)
+                    # Kaynagi temizle
+                    import re
+                    text = re.sub(
+                        rf'\b{re.escape(source)}\b',
+                        '',
+                        text,
+                        flags=re.IGNORECASE
+                    )
+                    report[field] = text
+
+        logger.info(
+            "AI IPO raporu v3 uretildi: %s — skor=%.1f, risk=%s, senaryo=%d satir, "
+            "breakdown=%s, kirmizi_bayrak=%s, %d karakter",
+            ipo.ticker or ipo.company_name,
+            report["overall_score"],
+            report["risk_level"],
+            len(report.get("scenario_table", [])),
+            bool(report.get("score_breakdown")),
+            report.get("score_breakdown", {}).get("kirmizi_bayraklar", []),
+            len(content),
+        )
+        return report
 
     except json.JSONDecodeError as e:
         logger.error("AI IPO raporu JSON parse hatasi: %s — content: %s", e, content[:200])

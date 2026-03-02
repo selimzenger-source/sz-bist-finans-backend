@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _AI_MODEL   = "claude-sonnet-4-6"
+_GEMINI_MODEL = "gemini-2.5-flash"
 _AI_TIMEOUT = 120   # Derin analiz için daha fazla süre
 
 # PDF çıkarımında max karakter (büyük PDF'ler için kırp)
@@ -625,9 +627,11 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         import httpx as _httpx
 
         from app.config import get_settings
-        api_key = get_settings().ABACUS_API_KEY
-        if not api_key:
-            logger.warning("Vision OCR: Abacus API key yok")
+        _settings = get_settings()
+        api_key = _settings.ABACUS_API_KEY
+        gemini_key_ocr = _settings.GEMINI_API_KEY
+        if not api_key and not gemini_key_ocr:
+            logger.warning("Vision OCR: API key yok (ne Abacus ne Gemini)")
             return []
 
         doc = fitz.open(pdf_path)
@@ -708,37 +712,79 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
                 })
 
             try:
-                with _httpx.Client(timeout=90) as hcl:  # 90s per batch
-                    resp = hcl.post(
-                        _ABACUS_URL,
-                        headers={
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": _AI_MODEL,
-                            "messages": [{"role": "user", "content": content}],
-                            "max_tokens": 4000,
-                            "temperature": 0,
-                        },
-                    )
+                extracted = ""
+                ocr_success = False
 
-                if resp.status_code == 200:
-                    extracted = (
-                        resp.json()
-                        .get("choices", [{}])[0]
-                        .get("message", {})
-                        .get("content", "")
-                    )
+                # Önce Abacus dene
+                if api_key:
+                    with _httpx.Client(timeout=90) as hcl:
+                        resp = hcl.post(
+                            _ABACUS_URL,
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": _AI_MODEL,
+                                "messages": [{"role": "user", "content": content}],
+                                "max_tokens": 4000,
+                                "temperature": 0,
+                            },
+                        )
+                    if resp.status_code == 200:
+                        extracted = (
+                            resp.json()
+                            .get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                        ocr_success = True
+                    else:
+                        logger.warning(
+                            "Vision OCR Abacus HTTP %d — Gemini'ye geciliyor: %s",
+                            resp.status_code, resp.text[:200],
+                        )
+
+                # Abacus başarısızsa Gemini dene
+                if not ocr_success and gemini_key_ocr:
+                    with _httpx.Client(timeout=90) as hcl:
+                        resp = hcl.post(
+                            _GEMINI_URL,
+                            headers={
+                                "Authorization": f"Bearer {gemini_key_ocr}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": _GEMINI_MODEL,
+                                "messages": [{"role": "user", "content": content}],
+                                "max_tokens": 4000,
+                                "temperature": 0,
+                            },
+                        )
+                    if resp.status_code == 200:
+                        extracted = (
+                            resp.json()
+                            .get("choices", [{}])[0]
+                            .get("message", {})
+                            .get("content", "")
+                        )
+                        ocr_success = True
+                    else:
+                        logger.warning(
+                            "Vision OCR Gemini HTTP %d: %s",
+                            resp.status_code, resp.text[:200],
+                        )
+
+                if ocr_success and extracted:
                     all_texts.append((batch_start, extracted))
                     logger.info(
                         "Vision OCR batch s.%d-%d: %d karakter",
                         batch_start + 1, end_page, len(extracted),
                     )
-                else:
+                elif not ocr_success:
                     logger.warning(
-                        "Vision OCR HTTP %d: %s",
-                        resp.status_code, resp.text[:200],
+                        "Vision OCR batch s.%d-%d: her iki provider basarisiz",
+                        batch_start + 1, end_page,
                     )
 
             except Exception as batch_err:
@@ -1141,9 +1187,12 @@ async def analyze_with_ai(
 ) -> Optional[dict]:
     """Çıkarılan PDF metni üzerinde AI analizi yapar."""
 
-    api_key = get_settings().ABACUS_API_KEY
-    if not api_key:
-        logger.error("Abacus API key yok — izahname analizi yapılamadı")
+    settings = get_settings()
+    abacus_key = settings.ABACUS_API_KEY
+    gemini_key = settings.GEMINI_API_KEY
+
+    if not abacus_key and not gemini_key:
+        logger.error("AI API key yok (ne Abacus ne Gemini) — izahname analizi yapılamadı")
         return None
 
     # Kullanıcı mesajı: şirket bağlamı + PDF metni
@@ -1160,39 +1209,94 @@ async def analyze_with_ai(
     # Few-shot örneklerini system prompt'a ekle
     full_system = get_system_prompt() + "\n\n" + _FEW_SHOT_EXAMPLES
 
+    content = ""
     try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": full_system},
-                        {"role": "user",   "content": user_message},
-                    ],
-                    "temperature": 0.15,  # Düşük ama yaratıcı analiz için biraz esneklik
-                    "max_tokens": 3500,  # 7-10 madde hedefi için daha geniş alan
-                },
-            )
+        # ── Önce Abacus dene ──
+        abacus_failed = False
 
-        if resp.status_code != 200:
-            logger.error("AI izahname analiz hatası: HTTP %d — %s",
-                         resp.status_code, resp.text[:300])
+        if abacus_key:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {abacus_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": _AI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": full_system},
+                            {"role": "user",   "content": user_message},
+                        ],
+                        "temperature": 0.15,
+                        "max_tokens": 3500,
+                    },
+                )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                content = (
+                    data.get("choices", [{}])[0]
+                    .get("message", {})
+                    .get("content", "")
+                    .strip()
+                )
+                if content:
+                    logger.info("İzahname analizi Abacus ile uretildi: %s", company_name)
+                else:
+                    abacus_failed = True
+                    logger.warning("Abacus bos yanit dondu — Gemini'ye geciliyor")
+            else:
+                abacus_failed = True
+                logger.warning(
+                    "Abacus izahname hatasi HTTP %d — Gemini'ye geciliyor. Detay: %s",
+                    resp.status_code, resp.text[:200],
+                )
+        else:
+            abacus_failed = True
+
+        # ── Gemini Fallback ──
+        if abacus_failed and gemini_key:
+            logger.info("Gemini fallback (izahname) baslatiliyor: %s", company_name)
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": _GEMINI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": full_system},
+                            {"role": "user",   "content": user_message},
+                        ],
+                        "temperature": 0.15,
+                        "max_tokens": 3500,
+                    },
+                )
+
+            if resp.status_code != 200:
+                logger.error("Gemini izahname analiz hatasi: HTTP %d — %s",
+                             resp.status_code, resp.text[:300])
+                return None
+
+            data = resp.json()
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            if content:
+                logger.info("İzahname analizi Gemini ile uretildi: %s", company_name)
+
+        elif abacus_failed and not gemini_key:
+            logger.error("Abacus basarisiz ve Gemini key yok — izahname uretilemedi")
             return None
 
-        data    = resp.json()
-        content = (
-            data.get("choices", [{}])[0]
-            .get("message", {})
-            .get("content", "")
-            .strip()
-        )
         if not content:
-            logger.error("AI boş izahname analizi döndü")
+            logger.error("AI boş izahname analizi döndü (her iki provider)")
             return None
 
         # JSON parse

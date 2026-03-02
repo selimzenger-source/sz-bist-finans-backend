@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Abacus AI (RouteLLM) — scraper veri dogrulama + haber puanlama
     ABACUS_API_KEY: str = "s2_7dd1a20a70d14d01ae4f2838ce862da8"
 
+    # Google Gemini API (yedek) — Abacus kredi bitince otomatik devreye girer
+    # Ücretsiz: https://aistudio.google.com → Get API Key
+    GEMINI_API_KEY: str = ""
+
     # Scraping intervals (saniye)
     KAP_SCRAPE_INTERVAL_SECONDS: int = 1800   # 30 dakika — halka arz
     NEWS_SCRAPE_INTERVAL_SECONDS: int = 30     # 30 saniye — KAP haberler
