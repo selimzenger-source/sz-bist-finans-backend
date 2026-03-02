@@ -76,7 +76,7 @@ _RSS_SOURCES = [
 
 # Gorsel dosya yollari
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_ACILIS_IMAGE = os.path.join(_BASE_DIR, "static", "img", "acilis_raporu_banner.png")
+_ACILIS_IMAGE = os.path.join(_BASE_DIR, "static", "img", "acilis_analizi_banner.png")
 _KAPANIS_IMAGE = os.path.join(_BASE_DIR, "static", "img", "kapanis_raporu_banner.png")
 
 # Turkce gun adlari
@@ -724,7 +724,7 @@ Halka arz bolumunde DAIMA bu tarzda yaz:
 - ASLA sadece "dun tavan yapti" deme — BUGUN ne olacak anlat
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
-📊 AÇILIŞ RAPORU — [gun_adi], [tarih]
+📊 AÇILIŞ ANALİZİ — [gun_adi], [tarih]
 
 🇹🇷 BIST 100 (XU100)
 [onceki kapanis, degisim, analiz]
@@ -1196,11 +1196,28 @@ async def _generate_report(
         logger.error("AI rapor: Tum providerlar basarisiz")
         return None
 
-    # Tweet karakter limiti (gorsel ile 4000)
-    if len(ai_content) > 3900:
-        ai_content = ai_content[:3897] + "..."
+    # Halka arz ticker hashtag'leri ekle — cok ilgi cekiyor
+    ipo_hashtags = ""
+    if ipos:
+        tags = []
+        for ipo in ipos:
+            ticker = ipo.get("ticker") if isinstance(ipo, dict) else getattr(ipo, "ticker", None)
+            if ticker and ticker.strip():
+                tag = f"#{ticker.strip().upper()}"
+                if tag not in tags:
+                    tags.append(tag)
+        if tags:
+            ipo_hashtags = " " + " ".join(tags[:10])  # max 10 ticker
 
-    return ai_content.strip()
+    # Tweet karakter limiti (gorsel ile 4000)
+    content_with_tags = ai_content.strip() + ipo_hashtags
+    if len(content_with_tags) > 3900:
+        # Hashtag'lerle sigmazsa hashtag'siz dene
+        if len(ai_content) > 3900:
+            ai_content = ai_content[:3897] + "..."
+        return ai_content.strip()
+
+    return content_with_tags
 
 
 # ────────────────────────────────────────────

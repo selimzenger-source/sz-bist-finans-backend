@@ -957,7 +957,9 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         banner_h = 0
         banner_img = None
         _img_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
-        banner_path = os.path.join(_img_dir, "acilis_raporu_banner.png")
+        banner_path = os.path.join(_img_dir, "acilis_analizi_banner.png")
+        if not os.path.exists(banner_path):
+            banner_path = os.path.join(_img_dir, "acilis_raporu_banner.png")
         if not os.path.exists(banner_path):
             banner_path = os.path.join(_img_dir, "acilis_bilgileri_banner.jpg")
 
