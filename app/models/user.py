@@ -42,8 +42,8 @@ class User(Base):
     notify_kap_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, comment="KAP takip listesi bildirimleri")
 
     # Hatirlatma zamanlari (son gun icin)
-    reminder_30min: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 30 dk kala")
-    reminder_1h: Mapped[bool] = mapped_column(Boolean, default=True, comment="Son gune 1 saat kala")
+    reminder_30min: Mapped[bool] = mapped_column(Boolean, default=True, comment="Son gune 30 dk kala")
+    reminder_1h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 1 saat kala")
     reminder_2h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 2 saat kala")
     reminder_4h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 4 saat kala")
 

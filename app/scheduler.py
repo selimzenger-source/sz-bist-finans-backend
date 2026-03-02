@@ -1080,7 +1080,7 @@ async def check_reminders(
                 push_fail = 0
                 for user in users:
                     try:
-                        await notif_service._send_to_user(
+                        success = await notif_service._send_to_user(
                             user=user,
                             title="Son Gün Hatırlatması",
                             body=f"{ticker_name} için başvuru son gün! Saat {close_time_str}'a {time_label} kaldı.",
@@ -1091,12 +1091,44 @@ async def check_reminders(
                             },
                             channel_id="ipo_alerts_v2",
                         )
-                        push_sent += 1
+                        if success:
+                            push_sent += 1
+                        else:
+                            push_fail += 1
                     except Exception as pu_err:
                         push_fail += 1
                         logger.warning("Hatirlatma push hatasi (user=%s): %s", getattr(user, 'device_id', '?'), pu_err)
 
                 logger.info("Hatirlatma push: %s icin %d gonderildi, %d basarisiz", ticker_name, push_sent, push_fail)
+
+                # Telegram admin raporu — push bildirim sonucu (0 kullanici bile olsa raporla)
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    user_count = len(users)
+                    if push_sent > 0 or push_fail > 0:
+                        emoji = "📲" if push_fail == 0 else "⚠️"
+                        report = (
+                            f"{emoji} <b>Hatırlatma Push</b>\n"
+                            f"Hisse: {ticker_name}\n"
+                            f"Tip: {reminder_check} ({time_label} kala)\n"
+                            f"Kapanış: {close_time_str}\n"
+                            f"Sorgu: {user_count} kullanıcı\n"
+                            f"Gönderilen: {push_sent}\n"
+                        )
+                        if push_fail > 0:
+                            report += f"Başarısız: {push_fail}\n"
+                    else:
+                        report = (
+                            f"⚠️ <b>Hatırlatma Push — 0 Kullanıcı</b>\n"
+                            f"Hisse: {ticker_name}\n"
+                            f"Tip: {reminder_check} ({time_label} kala)\n"
+                            f"Kapanış: {close_time_str}\n"
+                            f"Sorgu sonucu: 0 kullanıcı (push gönderilmedi)\n"
+                            f"Kontrol: notifications_enabled, {reminder_check}=True, token var mı?"
+                        )
+                    await send_admin_message(report)
+                except Exception:
+                    pass
 
                 _timing_mark_sent(ipo.id, reminder_check)
 
@@ -2524,6 +2556,33 @@ async def daily_ceiling_update():
                                 )
                     except Exception as tweet_err:
                         logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
+
+                    # Push bildirim — IPO bildirim abonelerine gunluk takip bildirimi
+                    try:
+                        if days_data:
+                            from app.services.notification import NotificationService
+                            notif_svc = NotificationService(db)
+                            _current_day = len(days_data)
+                            _last_day = days_data[-1]
+                            _last_close = float(_last_day["close"])
+                            if len(days_data) > 1:
+                                _prev_c = float(days_data[-2]["close"])
+                            else:
+                                _prev_c = float(ipo.ipo_price) if ipo.ipo_price else 0
+                            _daily_pct = (
+                                ((_last_close - _prev_c) / _prev_c) * 100
+                                if _prev_c > 0 else 0
+                            )
+                            _last_durum = (tracks[-1].durum or "not_kapatti") if tracks else "not_kapatti"
+                            await notif_svc.notify_daily_tracking(
+                                ipo=ipo,
+                                current_day=_current_day,
+                                daily_pct=_daily_pct,
+                                durum=_last_durum,
+                            )
+                    except Exception as push_err:
+                        logger.error("Gunluk takip push hatasi (%s): %s", ipo.ticker, push_err)
+
                 except Exception as ticker_err:
                     logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
                     fail_count += 1

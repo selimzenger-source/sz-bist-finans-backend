@@ -1010,3 +1010,116 @@ class NotificationService:
             )
 
         return sent_count
+
+    # -------------------------------------------------------
+    # Gunluk Takip (Daily Tracking) Bildirimleri
+    # -------------------------------------------------------
+
+    async def notify_daily_tracking(
+        self,
+        ipo,
+        current_day: int,
+        daily_pct: float,
+        durum: str,
+    ) -> int:
+        """Gunluk takip bildirimi — IPO icin bildirim abonesi olan kullanicilara.
+
+        StockNotificationSubscription uzerinden ipo_id eslesen,
+        aktif aboneligi olan kullanicilara push bildirim gonderir.
+
+        Args:
+            ipo: IPO modeli (id, ticker, ipo_price vb.)
+            current_day: Kacinci islem gunu (1-25)
+            daily_pct: Gunluk yuzdesel degisim
+            durum: Son durum (tavan, taban, not_kapatti vb.)
+        """
+        from app.models.user import User, StockNotificationSubscription
+
+        ticker = ipo.ticker or ""
+        if not ticker:
+            return 0
+
+        # Durum etiketi
+        durum_labels = {
+            "tavan": "Tavan",
+            "taban": "Taban",
+            "not_kapatti": "Normal",
+        }
+        durum_label = durum_labels.get(durum, durum)
+
+        title = f"📊 {ticker} Günlük Takip"
+        body = f"Gün: {current_day}/25 | %{daily_pct:+.2f} | {durum_label}"
+
+        data = {
+            "type": "daily_tracking",
+            "ipo_id": str(ipo.id),
+            "ticker": ticker,
+            "day": str(current_day),
+        }
+
+        # StockNotificationSubscription uzerinden bu IPO'yu takip eden kullanicilari bul
+        sub_result = await self.db.execute(
+            select(User)
+            .join(
+                StockNotificationSubscription,
+                StockNotificationSubscription.user_id == User.id,
+            )
+            .where(
+                and_(
+                    StockNotificationSubscription.ipo_id == ipo.id,
+                    StockNotificationSubscription.is_active == True,
+                    StockNotificationSubscription.muted == False,
+                    User.notifications_enabled == True,
+                    User.deleted == False,
+                    or_(
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
+                    ),
+                )
+            )
+        )
+        # Dedup — ayni kullanici birden fazla bildirim tipi almis olabilir
+        users = list({u.id: u for u in sub_result.scalars().all()}.values())
+
+        if not users:
+            logger.info("Gunluk takip: %s — bildirim abonesi yok", ticker)
+            return 0
+
+        sent_count = 0
+        failed_count = 0
+        for user in users:
+            try:
+                success = await self._send_to_user(
+                    user=user,
+                    title=title,
+                    body=body,
+                    data=data,
+                    channel_id="ipo_alerts_v2",
+                )
+                if success:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning("Gunluk takip bildirim hatasi (user=%s): %s", user.id, e)
+
+        logger.info(
+            "Gunluk takip bildirim: %s — %d kullaniciya gonderildi, %d basarisiz",
+            ticker, sent_count, failed_count,
+        )
+
+        # Telegram admin raporu
+        try:
+            from app.services.admin_telegram import notify_push_sent
+            await notify_push_sent(
+                notification_type=f"gunluk_takip: {ticker}",
+                title=title,
+                sent_count=sent_count,
+                failed_count=failed_count,
+                detail=f"Gün: {current_day}/25 | Abone: {len(users)}",
+            )
+        except Exception:
+            pass
+
+        return sent_count
