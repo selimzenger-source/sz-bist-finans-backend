@@ -30,6 +30,10 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "gpt-5.2"
 _AI_TIMEOUT = 60  # Daha fazla veri isliyor, daha uzun sure
 
+# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-pro"
+
 # Yahoo Finance ticker'lari
 _MARKET_TICKERS = {
     "XU100": "XU100.IS",
@@ -1065,9 +1069,12 @@ async def _generate_report(
     report_type: str,
 ) -> str | None:
     """AI ile piyasa raporu uretir — 8 kaynak zengin veri konteksti ile."""
-    api_key = get_settings().ABACUS_API_KEY
-    if not api_key:
-        logger.error("Abacus API key yok — rapor uretilemedi")
+    _settings = get_settings()
+    api_key = _settings.ABACUS_API_KEY
+    gemini_key = _settings.GEMINI_API_KEY if _settings.GEMINI_API_KEY else None
+
+    if not api_key and not gemini_key:
+        logger.error("API key yok (ne Abacus ne Gemini) — rapor uretilemedi")
         return None
 
     system_prompt = _MORNING_SYSTEM_PROMPT if report_type == "morning" else _EVENING_SYSTEM_PROMPT
@@ -1091,45 +1098,71 @@ async def _generate_report(
         len(econ_calendar.get("tomorrow", [])), len(ipo_events),
     )
 
-    try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_message},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 1500,
-                },
-            )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+    payload_base = {
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 1500,
+    }
 
-            if resp.status_code != 200:
-                logger.error("AI rapor hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
-                return None
+    # ── Birincil: Abacus AI ──
+    ai_content = None
 
-            data = resp.json()
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    if api_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _AI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ai_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if ai_content:
+                        logger.info("AI %s raporu [Abacus] uretildi: %d karakter", report_type, len(ai_content))
+                else:
+                    logger.warning("AI rapor Abacus hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+        except Exception as e:
+            logger.warning("AI rapor Abacus hata: %s", e)
 
-            if not content:
-                logger.error("AI bos rapor dondu")
-                return None
+    # ── Yedek: Gemini 2.5 Pro ──
+    if not ai_content and gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ai_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if ai_content:
+                        logger.info("AI %s raporu [Gemini-Pro] uretildi: %d karakter", report_type, len(ai_content))
+                else:
+                    logger.error("AI rapor Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+        except Exception as e:
+            logger.error("AI rapor Gemini hata: %s", e)
 
-            # Tweet karakter limiti (gorsel ile 4000)
-            if len(content) > 3900:
-                content = content[:3897] + "..."
+    if not ai_content:
+        logger.error("AI rapor: Tum providerlar basarisiz")
+        return None
 
-            logger.info("AI %s raporu uretildi: %d karakter", report_type, len(content))
-            return content.strip()
+    # Tweet karakter limiti (gorsel ile 4000)
+    if len(ai_content) > 3900:
+        ai_content = ai_content[:3897] + "..."
 
-    except Exception as e:
-        logger.error("AI rapor uretme hatasi: %s", e)
+    return ai_content.strip()
         return None
 
 

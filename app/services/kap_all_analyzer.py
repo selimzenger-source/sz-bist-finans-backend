@@ -1,10 +1,11 @@
-"""Abacus AI (RouteLLM) — Tum KAP Bildirimleri Sentiment Analizi.
+"""Tum KAP Bildirimleri Sentiment Analizi.
 
 Akis:
 1. kap_all_scraper'dan gelen bildirim alınır
 2. is_bilanco=True → AI atla (bilanco analizi henuz yok)
-3. Abacus AI (Claude Sonnet) ile sentiment + impact_score + ozet uret
-4. Fallback: Kural tabanli basit analiz
+3. Gemini 2.5 Flash (birincil) ile sentiment + impact_score + ozet uret
+4. Fallback 1: Abacus AI (RouteLLM)
+5. Fallback 2: Kural tabanli basit analiz
 
 Sonuc: {"sentiment": str, "impact_score": float, "summary": str}
 """
@@ -16,20 +17,27 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Abacus AI RouteLLM endpoint (OpenAI uyumlu)
+# Gemini 2.5 Flash — birincil (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-flash"
+
+# Abacus AI RouteLLM — yedek
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
-_AI_MODEL = "claude-sonnet-4-5"
+_ABACUS_MODEL = "claude-sonnet-4-5"
+
 _AI_TIMEOUT = 25
 
 
-def _get_api_key() -> str | None:
-    """Config'den Abacus API key'i al."""
+def _get_keys() -> tuple[str | None, str | None]:
+    """Config'den Gemini ve Abacus API key'lerini al."""
     try:
         from app.config import get_settings
-        key = get_settings().ABACUS_API_KEY
-        return key if key else None
+        s = get_settings()
+        gemini = s.GEMINI_API_KEY if s.GEMINI_API_KEY else None
+        abacus = s.ABACUS_API_KEY if s.ABACUS_API_KEY else None
+        return gemini, abacus
     except Exception:
-        return None
+        return None, None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -99,9 +107,9 @@ async def analyze_disclosure(
         logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
         return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
 
-    api_key = _get_api_key()
-    if not api_key:
-        logger.error("KAP Analyzer: ABACUS_API_KEY bos — fallback kullaniliyor (%s)", company_code)
+    gemini_key, abacus_key = _get_keys()
+    if not gemini_key and not abacus_key:
+        logger.error("KAP Analyzer: API key yok (ne Gemini ne Abacus) — fallback (%s)", company_code)
         return _rule_based_analyze(title, body)
 
     content = f"{title}\n\n{body}".strip()[:4000]
@@ -140,45 +148,82 @@ OZET:
 SADECE asagidaki JSON formatinda yanit ver:
 {{"sentiment": "Olumlu", "impact_score": 7.3, "summary": "2-3 cumle Turkce ozet."}}"""
 
-    try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Sen deneyimli bir Borsa Istanbul kurumsal yatirimci analistisin. "
-                                "KAP bildirimlerini objektif analiz eder, sentiment ve etki puani verirsin. "
-                                "Sadece JSON formatinda yanit ver."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 400,
-                },
-            )
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Sen deneyimli bir Borsa Istanbul kurumsal yatirimci analistisin. "
+                "KAP bildirimlerini objektif analiz eder, sentiment ve etki puani verirsin. "
+                "Sadece JSON formatinda yanit ver."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+    payload = {
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 400,
+    }
 
-            if resp.status_code != 200:
-                logger.error(
-                    "KAP Analyzer: Abacus HTTP %s (%s) — %s",
-                    resp.status_code, company_code, resp.text[:200],
+    # ── Birincil: Gemini 2.5 Flash ──
+    ai_text = None
+    provider_used = None
+
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload, "model": _GEMINI_MODEL},
                 )
-                return _rule_based_analyze(title, body)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ai_text = data["choices"][0]["message"]["content"].strip()
+                    provider_used = "Gemini-Flash"
+                else:
+                    logger.warning(
+                        "KAP Analyzer: Gemini HTTP %s (%s) — %s",
+                        resp.status_code, company_code, resp.text[:200],
+                    )
+        except Exception as e:
+            logger.warning("KAP Analyzer: Gemini hata (%s) — %s", company_code, e)
 
-            data = resp.json()
+    # ── Yedek: Abacus AI ──
+    if not ai_text and abacus_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {abacus_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload, "model": _ABACUS_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    ai_text = data["choices"][0]["message"]["content"].strip()
+                    provider_used = "Abacus"
+                else:
+                    logger.error(
+                        "KAP Analyzer: Abacus HTTP %s (%s) — %s",
+                        resp.status_code, company_code, resp.text[:200],
+                    )
+        except Exception as e:
+            logger.error("KAP Analyzer: Abacus hata (%s) — %s", company_code, e)
 
-        # OpenAI format: choices[0].message.content
-        text = data["choices"][0]["message"]["content"].strip()
+    # ── Her ikisi de basarisiz → kural tabanli fallback ──
+    if not ai_text:
+        logger.error("KAP Analyzer: AI basarisiz (Gemini+Abacus) — kural fallback (%s)", company_code)
+        return _rule_based_analyze(title, body)
 
+    try:
         # JSON blogu temizle
+        text = ai_text
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
@@ -201,16 +246,13 @@ SADECE asagidaki JSON formatinda yanit ver:
             summary = None
 
         logger.info(
-            "KAP Analyzer: %s — sentiment=%s, score=%s, ozet=%s",
-            company_code, sentiment, impact_score,
+            "KAP Analyzer [%s]: %s — sentiment=%s, score=%s, ozet=%s",
+            provider_used, company_code, sentiment, impact_score,
             (summary[:60] + "...") if summary and len(summary) > 60 else summary,
         )
 
         return {"sentiment": sentiment, "impact_score": impact_score, "summary": summary}
 
-    except httpx.TimeoutException:
-        logger.error("KAP Analyzer: Abacus zaman asimi (%s)", company_code)
-        return _rule_based_analyze(title, body)
     except json.JSONDecodeError as e:
         logger.error("KAP Analyzer: JSON parse hatasi (%s) — %s", company_code, e)
         return _rule_based_analyze(title, body)

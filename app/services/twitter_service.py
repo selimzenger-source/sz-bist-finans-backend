@@ -1903,6 +1903,10 @@ BANNER_SPK_BULTEN_ANALIZ = os.path.join(_IMG_DIR, "spk_bulten_analiz.png")
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _BULLETIN_AI_MODEL = "gpt-4.1"
 
+# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-pro"
+
 _BULLETIN_ANALYSIS_SYSTEM_PROMPT = """Sen deneyimli bir SPK bülten analistisin. Verilen SPK bülteni içeriğini analiz edip, yatırımcıları ilgilendiren önemli kararları özetleyeceksin.
 
 TWEET FORMATI:
@@ -1940,14 +1944,16 @@ FORMAT KURALLARI:
 
 
 def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:
-    """Abacus AI ile bulten icerigini analiz eder, tweet metni uretir (senkron)."""
+    """AI ile bulten icerigini analiz eder, tweet metni uretir (senkron).
+    Birincil: Abacus AI, Yedek: Gemini 2.5 Pro."""
     try:
         from app.config import get_settings
         settings = get_settings()
         api_key = settings.ABACUS_API_KEY
+        gemini_key = settings.GEMINI_API_KEY if settings.GEMINI_API_KEY else None
 
-        if not api_key:
-            logger.error("SPK bulten analiz: Abacus API key yok")
+        if not api_key and not gemini_key:
+            logger.error("SPK bulten analiz: API key yok (ne Abacus ne Gemini)")
             return None
 
         user_message = (
@@ -1956,41 +1962,70 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             f"--- BULTEN ICERIGI ---\n{bulletin_text}"
         )
 
-        # Senkron httpx cagirisi (twitter_service sync context'te calisiyor)
-        resp = httpx.post(
-            _ABACUS_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _BULLETIN_AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": _BULLETIN_ANALYSIS_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1200,
-            },
-            timeout=60.0,
-        )
+        messages = [
+            {"role": "system", "content": _BULLETIN_ANALYSIS_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ]
+        payload_base = {
+            "messages": messages,
+            "temperature": 0.3,
+            "max_tokens": 1200,
+        }
 
-        if resp.status_code != 200:
-            logger.error("SPK bulten AI hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
-            return None
+        content = None
 
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        # ── Birincil: Abacus AI ──
+        if api_key:
+            try:
+                resp = httpx.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _BULLETIN_AI_MODEL},
+                    timeout=60.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if content:
+                        logger.info("SPK bulten AI [Abacus] analiz uretildi: %d karakter", len(content))
+                else:
+                    logger.warning("SPK bulten Abacus hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.warning("SPK bulten Abacus hata: %s", e)
+
+        # ── Yedek: Gemini 2.5 Pro ──
+        if not content and gemini_key:
+            try:
+                resp = httpx.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                    timeout=60.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if content:
+                        logger.info("SPK bulten AI [Gemini-Pro] analiz uretildi: %d karakter", len(content))
+                else:
+                    logger.error("SPK bulten Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.error("SPK bulten Gemini hata: %s", e)
 
         if not content:
-            logger.error("SPK bulten AI bos rapor dondu")
+            logger.error("SPK bulten AI: Tum providerlar basarisiz")
             return None
 
         # Max 3500 karakter (link + hashtag icin bosluk birak)
         if len(content) > 3500:
             content = content[:3497] + "..."
 
-        logger.info("SPK bulten AI analiz uretildi: %d karakter", len(content))
         return content.strip()
 
     except Exception as e:
@@ -2210,14 +2245,16 @@ _SPK_APP_AI_MODEL = "gpt-4.1"
 
 
 def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
-    """Abacus AI ile SPK basvuru sirketini arastirip tweet metni uretir (senkron)."""
+    """AI ile SPK basvuru sirketini arastirip tweet metni uretir (senkron).
+    Birincil: Abacus AI, Yedek: Gemini 2.5 Pro."""
     try:
         from app.config import get_settings
         settings = get_settings()
         api_key = settings.ABACUS_API_KEY
+        gemini_key = settings.GEMINI_API_KEY if settings.GEMINI_API_KEY else None
 
-        if not api_key:
-            logger.error("SPK basvuru tweet AI: Abacus API key yok")
+        if not api_key and not gemini_key:
+            logger.error("SPK basvuru tweet AI: API key yok (ne Abacus ne Gemini)")
             return None
 
         user_message = (
@@ -2228,33 +2265,64 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
             f"SADECE tweet metnini yaz — açıklama veya not ekleme."
         )
 
-        resp = httpx.post(
-            _ABACUS_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": _SPK_APP_AI_MODEL,
-                "messages": [
-                    {"role": "system", "content": _SPK_APP_AI_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message},
-                ],
-                "temperature": 0.4,
-                "max_tokens": 1000,
-            },
-            timeout=45.0,
-        )
+        messages = [
+            {"role": "system", "content": _SPK_APP_AI_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ]
+        payload_base = {
+            "messages": messages,
+            "temperature": 0.4,
+            "max_tokens": 1000,
+        }
 
-        if resp.status_code != 200:
-            logger.error("SPK basvuru AI hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
-            return None
+        content = None
 
-        data = resp.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+        # ── Birincil: Abacus AI ──
+        if api_key:
+            try:
+                resp = httpx.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _SPK_APP_AI_MODEL},
+                    timeout=45.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    if content:
+                        logger.info("SPK basvuru AI [Abacus]: %d karakter", len(content))
+                else:
+                    logger.warning("SPK basvuru Abacus hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.warning("SPK basvuru Abacus hata: %s", e)
+
+        # ── Yedek: Gemini 2.5 Pro ──
+        if not content and gemini_key:
+            try:
+                resp = httpx.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                    timeout=45.0,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    if content:
+                        logger.info("SPK basvuru AI [Gemini-Pro]: %d karakter", len(content))
+                else:
+                    logger.error("SPK basvuru Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.error("SPK basvuru Gemini hata: %s", e)
 
         if not content or len(content) < 50:
-            logger.error("SPK basvuru AI bos/kisa metin dondu: %d char", len(content) if content else 0)
+            logger.error("SPK basvuru AI: Tum providerlar basarisiz veya kisa metin")
             return None
 
         # Temizle — AI bazen tirnak isareti veya extra bosluk ekliyor

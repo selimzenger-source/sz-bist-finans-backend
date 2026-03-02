@@ -19,19 +19,25 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Abacus AI RouteLLM endpoint (OpenAI uyumlu)
+# Abacus AI RouteLLM endpoint — birincil (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _TIMEOUT = 30  # saniye
 
+# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-pro"
 
-def _get_api_key() -> str | None:
-    """Config'den Abacus API key'i al."""
+
+def _get_keys() -> tuple[str | None, str | None]:
+    """Config'den Abacus ve Gemini API key'lerini al."""
     try:
         from app.config import get_settings
-        key = get_settings().ABACUS_API_KEY
-        return key if key else None
+        s = get_settings()
+        abacus = s.ABACUS_API_KEY if s.ABACUS_API_KEY else None
+        gemini = s.GEMINI_API_KEY if s.GEMINI_API_KEY else None
+        return abacus, gemini
     except Exception:
-        return None
+        return None, None
 
 
 async def validate_ipo_dates(
@@ -56,42 +62,68 @@ async def validate_ipo_dates(
             "ai_used": True/False
         }
     """
-    api_key = _get_api_key()
-    if not api_key:
-        logger.debug("AI Validator: ABACUS_API_KEY bos, devre disi")
+    abacus_key, gemini_key = _get_keys()
+    if not abacus_key and not gemini_key:
+        logger.debug("AI Validator: API key yok (ne Abacus ne Gemini), devre disi")
         return {"valid": True, "corrections": {}, "reason": "", "ai_used": False}
 
-    try:
-        prompt = _build_validation_prompt(raw_texts, parsed_values, company_name)
+    prompt = _build_validation_prompt(raw_texts, parsed_values, company_name)
+    messages = [
+        {"role": "system", "content": "Sen bir veri dogrulama asistanisin. Sadece JSON formatinda yanit ver."},
+        {"role": "user", "content": prompt},
+    ]
+    payload_base = {
+        "messages": messages,
+        "temperature": 0,
+        "max_tokens": 500,
+    }
 
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {"role": "system", "content": "Sen bir veri dogrulama asistanisin. Sadece JSON formatinda yanit ver."},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0,
-                    "max_tokens": 500,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+    # ── Birincil: Abacus AI ──
+    content = None
 
-        # OpenAI format: choices[0].message.content
-        content = data["choices"][0]["message"]["content"]
-        return _parse_ai_response(content)
+    if abacus_key:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {abacus_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": "gpt-4o-mini"},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    logger.warning("AI Validator: Abacus HTTP %d (%s)", resp.status_code, company_name)
+        except Exception as e:
+            logger.warning("AI Validator: Abacus hata (%s) — %s", company_name, e)
 
-    except Exception as e:
-        logger.warning(f"AI Validator: Abacus hatasi ({company_name}) — {e}")
-        # AI hatasi durumunda veriyi kabul et (bloklamamak icin)
-        return {"valid": True, "corrections": {}, "reason": f"AI hatasi: {e}", "ai_used": False}
+    # ── Yedek: Gemini 2.5 Pro ──
+    if not content and gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    content = data["choices"][0]["message"]["content"]
+                else:
+                    logger.error("AI Validator: Gemini HTTP %d (%s)", resp.status_code, company_name)
+        except Exception as e:
+            logger.warning("AI Validator: Gemini hata (%s) — %s", company_name, e)
+
+    if not content:
+        return {"valid": True, "corrections": {}, "reason": "AI providerlar basarisiz", "ai_used": False}
+
+    return _parse_ai_response(content)
 
 
 def _build_validation_prompt(raw_texts: dict, parsed_values: dict, company_name: str) -> str:

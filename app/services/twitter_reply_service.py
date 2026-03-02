@@ -23,10 +23,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Abacus AI RouteLLM endpoint (OpenAI compat)
+# Abacus AI RouteLLM endpoint — birincil (OpenAI compat)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL = "gpt-4.1"
 _AI_TIMEOUT = 25
+
+# Gemini 2.5 Flash — birincil (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-flash"
 
 # Twitter API v2
 _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
@@ -75,6 +79,16 @@ def _get_api_key() -> str | None:
     try:
         from app.config import get_settings
         key = get_settings().ABACUS_API_KEY
+        return key if key else None
+    except Exception:
+        return None
+
+
+def _get_gemini_key() -> str | None:
+    """Gemini API key'i al."""
+    try:
+        from app.config import get_settings
+        key = get_settings().GEMINI_API_KEY
         return key if key else None
     except Exception:
         return None
@@ -435,20 +449,51 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
         "Content-Type": "application/json",
     }
 
+    # ── AI çağrısı: Gemini Flash birincil, Abacus yedek ──
+    content = None
+    gemini_key = _get_gemini_key()
+
+    # ── Birincil: Gemini 2.5 Flash ──
+    if gemini_key:
+        try:
+            gemini_payload = {**payload, "model": _GEMINI_MODEL}
+            gemini_headers = {
+                "Authorization": f"Bearer {gemini_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                response = await client.post(_GEMINI_URL, json=gemini_payload, headers=gemini_headers)
+
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info("AI reply [Gemini-Flash] kullanildi")
+            else:
+                logger.warning(f"AI reply Gemini hatası: HTTP {response.status_code} — {response.text[:200]}")
+        except Exception as e:
+            logger.warning(f"AI reply Gemini hata: {e}")
+
+    # ── Yedek: Abacus AI ──
+    if not content and api_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                response = await client.post(_ABACUS_URL, json=payload, headers=headers)
+
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info("AI reply [Abacus] kullanildi")
+            else:
+                logger.error(f"AI reply Abacus hatası: HTTP {response.status_code} — {response.text[:200]}")
+        except Exception as e:
+            logger.error(f"AI reply Abacus hata: {e}")
+
+    if not content:
+        return {"success": False, "error": "AI tum providerlar basarisiz."}
+
     try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            response = await client.post(_ABACUS_URL, json=payload, headers=headers)
-
-        if response.status_code != 200:
-            logger.error(f"AI reply hatası: HTTP {response.status_code} — {response.text[:200]}")
-            return {"success": False, "error": f"AI servisi hatası (HTTP {response.status_code})"}
-
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        if not content:
-            return {"success": False, "error": "AI boş yanıt döndü."}
-
         # JSON parse — ```json ... ``` bloğunu da destekle
         json_text = content.strip()
         if json_text.startswith("```"):
@@ -804,8 +849,9 @@ async def generate_quote_analysis(tweet_text: str, author_username: str) -> dict
         {"success": False, "error": str}
     """
     api_key = _get_api_key()
-    if not api_key:
-        return {"success": False, "error": "Abacus AI API key yapılandırılmamış."}
+    gemini_key = _get_gemini_key()
+    if not api_key and not gemini_key:
+        return {"success": False, "error": "AI API key yok (ne Abacus ne Gemini)."}
 
     user_message = f"Tweet (@{author_username}):\n\n{tweet_text}"
 
@@ -824,20 +870,49 @@ async def generate_quote_analysis(tweet_text: str, author_username: str) -> dict
         "Content-Type": "application/json",
     }
 
+    # ── Birincil: Gemini 2.5 Flash ──
+    content = None
+
+    if gemini_key:
+        try:
+            gemini_payload = {**payload, "model": _GEMINI_MODEL}
+            gemini_headers = {
+                "Authorization": f"Bearer {gemini_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                response = await client.post(_GEMINI_URL, json=gemini_payload, headers=gemini_headers)
+
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info("AI quote [Gemini-Flash] kullanildi")
+            else:
+                logger.warning(f"AI quote Gemini hatası: HTTP {response.status_code} — {response.text[:200]}")
+        except Exception as e:
+            logger.warning(f"AI quote Gemini hata: {e}")
+
+    # ── Yedek: Abacus AI ──
+    if not content and api_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                response = await client.post(_ABACUS_URL, json=payload, headers=headers)
+
+            if response.status_code == 200:
+                data = response.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    logger.info("AI quote [Abacus] kullanildi")
+            else:
+                logger.error(f"AI quote Abacus hatası: HTTP {response.status_code} — {response.text[:200]}")
+        except Exception as e:
+            logger.error(f"AI quote Abacus hata: {e}")
+
+    if not content:
+        return {"success": False, "error": "AI tum providerlar basarisiz."}
+
     try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            response = await client.post(_ABACUS_URL, json=payload, headers=headers)
-
-        if response.status_code != 200:
-            logger.error(f"AI quote analiz hatası: HTTP {response.status_code} — {response.text[:200]}")
-            return {"success": False, "error": f"AI servisi hatası (HTTP {response.status_code})"}
-
-        data = response.json()
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-        if not content:
-            return {"success": False, "error": "AI boş yanıt döndü."}
-
         # JSON parse — ```json ... ``` bloğunu da destekle
         json_text = content.strip()
         if json_text.startswith("```"):

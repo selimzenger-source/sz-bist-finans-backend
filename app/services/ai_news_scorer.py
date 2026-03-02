@@ -33,8 +33,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Abacus AI RouteLLM endpoint (OpenAI uyumlu)
+# Abacus AI RouteLLM endpoint — birincil (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
+
+# Gemini 2.5 Pro — yedek (OpenAI uyumlu endpoint)
+_GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-pro"
 
 # Versiyon — deploy dogrulama icin
 _SCORER_VERSION = "v5-research"
@@ -62,6 +66,16 @@ def _get_api_key() -> str | None:
     try:
         from app.config import get_settings
         key = get_settings().ABACUS_API_KEY
+        return key if key else None
+    except Exception:
+        return None
+
+
+def _get_gemini_key() -> str | None:
+    """Config'den Gemini API key'i al."""
+    try:
+        from app.config import get_settings
+        key = get_settings().GEMINI_API_KEY
         return key if key else None
     except Exception:
         return None
@@ -417,8 +431,9 @@ async def score_news(
         Hata durumunda score+summary None olur — akis kirilmaz.
     """
     api_key = _get_api_key()
-    if not api_key:
-        logger.error("AI News Scorer: ABACUS_API_KEY bos — AI puanlama devre disi! (%s)", ticker)
+    gemini_key = _get_gemini_key()
+    if not api_key and not gemini_key:
+        logger.error("AI News Scorer: API key yok (ne Abacus ne Gemini) — devre disi! (%s)", ticker)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
     # TradingView icerigi varsa birincil kaynak, yoksa Telegram metni
@@ -457,35 +472,72 @@ HASHTAG KURALLARI:
 SADECE asagidaki JSON formatinda yanit ver:
 {{"score": 7.3, "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
 
-    try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-            resp = await client.post(
-                _ABACUS_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": _AI_MODEL,
-                    "messages": [
-                        {"role": "system", "content": get_system_prompt()},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.1,
-                    "max_tokens": 600,
-                },
-            )
-            if resp.status_code != 200:
-                logger.error(
-                    "AI News Scorer: Abacus API HTTP %s (%s) — %s",
-                    resp.status_code, ticker, resp.text[:200],
+    messages = [
+        {"role": "system", "content": get_system_prompt()},
+        {"role": "user", "content": prompt},
+    ]
+    payload_base = {
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 600,
+    }
+
+    # ── Birincil: Abacus AI ──
+    text = None
+    provider_used = None
+
+    if api_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _ABACUS_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _AI_MODEL},
                 )
-                return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
-            data = resp.json()
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data["choices"][0]["message"]["content"].strip()
+                    provider_used = "Abacus"
+                else:
+                    logger.warning(
+                        "AI News Scorer: Abacus HTTP %s (%s) — %s",
+                        resp.status_code, ticker, resp.text[:200],
+                    )
+        except Exception as e:
+            logger.warning("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
 
-        # OpenAI format: choices[0].message.content
-        text = data["choices"][0]["message"]["content"].strip()
+    # ── Yedek: Gemini 2.5 Pro ──
+    if not text and gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={**payload_base, "model": _GEMINI_MODEL},
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data["choices"][0]["message"]["content"].strip()
+                    provider_used = "Gemini-Pro"
+                else:
+                    logger.error(
+                        "AI News Scorer: Gemini HTTP %s (%s) — %s",
+                        resp.status_code, ticker, resp.text[:200],
+                    )
+        except Exception as e:
+            logger.error("AI News Scorer: Gemini hata (%s) — %s", ticker, e)
 
+    if not text:
+        logger.error("AI News Scorer: Tum AI providerlar basarisiz (%s)", ticker)
+        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+
+    try:
         # JSON blogu temizle
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
@@ -534,8 +586,8 @@ SADECE asagidaki JSON formatinda yanit ver:
             score = _validate_score_against_content(score, content, ticker)
 
         logger.info(
-            "AI News Scorer: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
-            ticker, score,
+            "AI News Scorer [%s]: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
+            provider_used, ticker, score,
             "TradingView" if has_tv else "Telegram",
             hashtags,
             (summary[:60] + "...") if summary and len(summary) > 60 else summary,
@@ -543,9 +595,6 @@ SADECE asagidaki JSON formatinda yanit ver:
 
         return {"score": score, "summary": summary, "kap_url": kap_url, "hashtags": hashtags}
 
-    except httpx.TimeoutException:
-        logger.error("AI News Scorer: Abacus API zaman asimi (%s) — %s sn", ticker, _AI_TIMEOUT)
-        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
     except json.JSONDecodeError as e:
         logger.error("AI News Scorer: JSON parse hatasi (%s) — %s", ticker, e)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}

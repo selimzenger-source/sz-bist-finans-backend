@@ -40,6 +40,10 @@ _ABACUS_URL   = "https://routellm.abacus.ai/v1/chat/completions"
 _AI_MODEL     = "gpt-4.1"
 _AI_TIMEOUT   = 25
 
+# Gemini 2.5 Flash — birincil (OpenAI uyumlu endpoint)
+_GEMINI_URL   = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+_GEMINI_MODEL = "gemini-2.5-flash"
+
 _MENTIONS_URL     = "https://api.twitter.com/2/users/{user_id}/mentions"
 _TWEET_LOOKUP_URL = "https://api.twitter.com/2/tweets/{tweet_id}"
 _TWEET_POST_URL   = "https://api.twitter.com/2/tweets"
@@ -81,6 +85,15 @@ def _get_abacus_key() -> str | None:
     try:
         from app.config import get_settings
         k = get_settings().ABACUS_API_KEY
+        return k if k else None
+    except Exception:
+        return None
+
+
+def _get_gemini_key() -> str | None:
+    try:
+        from app.config import get_settings
+        k = get_settings().GEMINI_API_KEY
         return k if k else None
     except Exception:
         return None
@@ -392,14 +405,44 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
         "Authorization": f"Bearer {api_key}",
         "Content-Type":  "application/json",
     }
-    try:
-        async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
-            resp = await c.post(_ABACUS_URL, json=payload, headers=headers)
-        if resp.status_code != 200:
-            logger.error(f"AI yanıt üretilemedi: HTTP {resp.status_code}")
-            return {"is_safe": False, "reason": f"AI HTTP {resp.status_code}"}
+    # ── Birincil: Gemini 2.5 Flash ──
+    raw = None
+    gemini_key = _get_gemini_key()
 
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
+    if gemini_key:
+        try:
+            gemini_payload = {**payload, "model": _GEMINI_MODEL}
+            gemini_headers = {
+                "Authorization": f"Bearer {gemini_key}",
+                "Content-Type": "application/json",
+            }
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
+                resp = await c.post(_GEMINI_URL, json=gemini_payload, headers=gemini_headers)
+            if resp.status_code == 200:
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                logger.info("Mentions reply [Gemini-Flash] kullanildi")
+            else:
+                logger.warning(f"Mentions Gemini hatası: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"Mentions Gemini hata: {e}")
+
+    # ── Yedek: Abacus AI ──
+    if not raw and api_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as c:
+                resp = await c.post(_ABACUS_URL, json=payload, headers=headers)
+            if resp.status_code == 200:
+                raw = resp.json()["choices"][0]["message"]["content"].strip()
+                logger.info("Mentions reply [Abacus] kullanildi")
+            else:
+                logger.error(f"Mentions Abacus hatası: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"Mentions Abacus hata: {e}")
+
+    if not raw:
+        return {"is_safe": False, "reason": "Tum AI providerlar basarisiz"}
+
+    try:
         # JSON bloğu varsa çıkar
         m = re.search(r"\{[\s\S]*\}", raw)
         if m:
