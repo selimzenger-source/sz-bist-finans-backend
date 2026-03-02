@@ -462,13 +462,48 @@ def _infer_category(title: str) -> str:
 # Public API
 # ═════════════════════════════════════════════════════════════════════════════
 
-async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
-    """Tum KAP bildirimlerini ceker (BigPara + Uzmanpara merge, Bloomberg fallback).
+def _extract_kap_id(kap_url: str) -> str:
+    """KAP URL'den bildirim numarasini cikarir (dedup icin)."""
+    m = re.search(r"Bildirim/(\d+)", kap_url)
+    return m.group(1) if m else ""
 
-    BigPara ve Uzmanpara birlikte taranir, KAP bildirim numarasina gore dedup yapilir.
-    Her iki kaynak da detay sayfasindan gercek KAP linki + tam metin cekmektedir.
-    Bloomberg HT her ikisi de bossa son care olarak kullanilir.
-    BIST whitelist ile filtrelenir. Max 20 haber doner.
+
+def _apply_bist_filter(data: list[dict[str, Any]], bist: set[str]) -> list[dict[str, Any]]:
+    """BIST whitelist filtresi uygular."""
+    if not bist:
+        return data
+    filtered = [d for d in data if d.get("company_code", "").strip() in bist]
+    logger.info("BIST filtre: %d -> %d haber", len(data), len(filtered))
+    return filtered
+
+
+async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
+    """Sadece Uzmanpara'dan KAP haberlerini ceker (hizli, 50 sn aralik).
+
+    Uzmanpara en guncel kaynak — yeni bildirimler dakikalar icinde yayinlanir.
+    BigPara'yi ATLAR, sadece Uzmanpara listing + detay sayfalarini tarar.
+    BIST whitelist ile filtrelenir.
+
+    Returns:
+        list[dict]: Bildirim listesi
+    """
+    bist = await _refresh_bist_symbols()
+    data = await _uzmanpara_fetch()
+
+    if not data:
+        return []
+
+    data = _apply_bist_filter(data, bist)
+    return data[:30]
+
+
+async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
+    """Tum KAP bildirimlerini ceker (Uzmanpara + BigPara merge, Bloomberg fallback).
+
+    BigPara dahil tam tarama — 2 dakikada bir calisir.
+    Uzmanpara oncelikli (daha hizli guncellenir).
+    KAP bildirim numarasina gore dedup yapilir, Bloomberg HT son care.
+    BIST whitelist ile filtrelenir. Max 50 haber doner.
 
     Returns:
         list[dict]: Bildirim listesi (title, company_code, body, kap_url, category, is_bilanco, source, published_at)
@@ -482,17 +517,12 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
     # 2. Uzmanpara (tam metin + gercek KAP linki — hafta sonu dahil guncel)
     uzmanpara_data = await _uzmanpara_fetch()
 
-    # 3. Merge — KAP bildirim numarasina gore dedup (cift haber onlenir)
+    # 3. Merge — Uzmanpara ONCE (daha guncel)
     seen_kap_ids: set[str] = set()
     data: list[dict[str, Any]] = []
 
-    def _extract_kap_id(kap_url: str) -> str:
-        """KAP URL'den bildirim numarasini cikarir (dedup icin)."""
-        m = re.search(r"Bildirim/(\d+)", kap_url)
-        return m.group(1) if m else ""
-
-    # Once BigPara (zengin icerik, daha eski haber arsivi)
-    for d in bigpara_data:
+    # Once Uzmanpara (daha guncel, hafta sonu dahil hizli guncellenir)
+    for d in uzmanpara_data:
         kap_id = _extract_kap_id(d.get("kap_url", ""))
         if kap_id:
             if kap_id in seen_kap_ids:
@@ -500,19 +530,22 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
             seen_kap_ids.add(kap_id)
         data.append(d)
 
-    # Sonra Uzmanpara — ayni KAP bildirim numarasi yoksa ekle
-    added_from_uzmanpara = 0
-    for d in uzmanpara_data:
+    if uzmanpara_data:
+        logger.info("Uzmanpara'dan %d haber eklendi (oncelikli)", len(data))
+
+    # Sonra BigPara — ayni KAP bildirim numarasi yoksa ekle
+    added_from_bigpara = 0
+    for d in bigpara_data:
         kap_id = _extract_kap_id(d.get("kap_url", ""))
         if kap_id and kap_id in seen_kap_ids:
-            continue  # BigPara'da zaten var — cift haber onlendi
+            continue  # Uzmanpara'da zaten var — cift haber onlendi
         if kap_id:
             seen_kap_ids.add(kap_id)
         data.append(d)
-        added_from_uzmanpara += 1
+        added_from_bigpara += 1
 
-    if added_from_uzmanpara > 0:
-        logger.info("Uzmanpara'dan %d ek haber eklendi (BigPara'da yok)", added_from_uzmanpara)
+    if added_from_bigpara > 0:
+        logger.info("BigPara'dan %d ek haber eklendi (Uzmanpara'da yok)", added_from_bigpara)
 
     # 4. Ikisi de bossa Bloomberg HT dene
     if not data:
@@ -523,13 +556,8 @@ async def scrape_all_kap_disclosures() -> list[dict[str, Any]]:
         logger.warning("Tum kaynaklar bos — 0 KAP haberi")
         return []
 
-    # BIST whitelist filtresi
-    if bist:
-        filtered = [d for d in data if d.get("company_code", "").strip() in bist]
-        logger.info("BIST filtre: %d -> %d haber", len(data), len(filtered))
-        data = filtered
-
-    return data[:20]
+    data = _apply_bist_filter(data, bist)
+    return data[:50]
 
 
 async def seed_initial_disclosures(target: int = 50) -> list[dict[str, Any]]:

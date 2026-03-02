@@ -58,7 +58,7 @@ from pathlib import Path
 # ============================================
 
 API_URL = os.getenv("BIST_API_URL", "https://sz-bist-finans-api.onrender.com")
-ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "SzBist2026Admin!")
+ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "zenger7245175")
 
 # Varsayilan Excel dosya yolu — masaustunde
 DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "halka arz TAVAN TABAN.xlsm")

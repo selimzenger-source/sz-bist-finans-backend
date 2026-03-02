@@ -2915,93 +2915,112 @@ async def update_bist50_index_job():
             pass
 
 
-async def kap_all_scrape_job():
-    """Tum KAP bildirimlerini BigPara'dan scrape et, AI analiz yap, DB'ye kaydet.
+async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
+    """Ortak KAP bildirim isleme — DB kayit, AI analiz, push bildirim.
 
-    Her 5 dakikada bir calisir. Yeni bildirimler:
-    1. kap_all_disclosures tablosuna kaydedilir
-    2. Abacus AI ile sentiment analiz yapilir
-    3. Takip listesindeki kullanicilara push bildirim gonderilir
+    Hem hizli Uzmanpara job'u hem tam BigPara+Uzmanpara job'u bu fonksiyonu kullanir.
     """
     from datetime import datetime, timezone
     from sqlalchemy import select, and_
+    from app.services.kap_all_analyzer import analyze_disclosure
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.notification import NotificationService
 
-    try:
-        from app.scrapers.kap_all_scraper import scrape_all_kap_disclosures
-        from app.services.kap_all_analyzer import analyze_disclosure
-        from app.models.kap_all_disclosure import KapAllDisclosure
-        from app.services.notification import NotificationService
+    if not disclosures:
+        return
 
-        disclosures = await scrape_all_kap_disclosures()
-        if not disclosures:
-            return
+    new_count = 0
+    ai_count = 0
+    notif_count = 0
 
-        new_count = 0
-        ai_count = 0
-        notif_count = 0
+    async with async_session() as db:
+        notif_service = NotificationService(db)
 
-        async with async_session() as db:
-            notif_service = NotificationService(db)
+        for d in disclosures:
+            # Dedup kontrolu — ayni bildirim zaten var mi?
+            existing = await db.execute(
+                select(KapAllDisclosure).where(
+                    and_(
+                        KapAllDisclosure.company_code == d["company_code"],
+                        KapAllDisclosure.title == d["title"],
+                    )
+                ).limit(1)
+            )
+            if existing.scalar_one_or_none():
+                continue
 
-            for d in disclosures:
-                # Dedup kontrolu — ayni bildirim zaten var mi?
-                existing = await db.execute(
-                    select(KapAllDisclosure).where(
-                        and_(
-                            KapAllDisclosure.company_code == d["company_code"],
-                            KapAllDisclosure.title == d["title"],
-                        )
-                    ).limit(1)
-                )
-                if existing.scalar_one_or_none():
-                    continue
+            # Yeni bildirim — DB'ye kaydet
+            record = KapAllDisclosure(
+                company_code=d["company_code"],
+                title=d["title"],
+                body=d.get("body", ""),
+                category=d.get("category"),
+                is_bilanco=d.get("is_bilanco", False),
+                kap_url=d.get("kap_url"),
+                source=d.get("source"),
+                published_at=d.get("published_at"),
+            )
+            db.add(record)
+            await db.flush()  # ID al
+            new_count += 1
 
-                # Yeni bildirim — DB'ye kaydet
-                record = KapAllDisclosure(
+            # AI analiz
+            try:
+                ai_result = await analyze_disclosure(
                     company_code=d["company_code"],
                     title=d["title"],
-                    body=d.get("body", ""),
-                    category=d.get("category"),
+                    body=d.get("body", d["title"]),
                     is_bilanco=d.get("is_bilanco", False),
-                    kap_url=d.get("kap_url"),
-                    source=d.get("source"),
-                    published_at=d.get("published_at"),
                 )
-                db.add(record)
-                await db.flush()  # ID al
-                new_count += 1
+                record.ai_sentiment = ai_result.get("sentiment")
+                record.ai_impact_score = ai_result.get("impact_score")
+                record.ai_summary = ai_result.get("summary")
+                record.ai_analyzed_at = datetime.now(timezone.utc)
+                ai_count += 1
+            except Exception as ai_err:
+                logger.warning("KAP AI analiz hatasi (%s): %s", d["company_code"], ai_err)
 
-                # AI analiz
-                try:
-                    ai_result = await analyze_disclosure(
-                        company_code=d["company_code"],
-                        title=d["title"],
-                        body=d.get("body", d["title"]),
-                        is_bilanco=d.get("is_bilanco", False),
-                    )
-                    record.ai_sentiment = ai_result.get("sentiment")
-                    record.ai_impact_score = ai_result.get("impact_score")
-                    record.ai_summary = ai_result.get("summary")
-                    record.ai_analyzed_at = datetime.now(timezone.utc)
-                    ai_count += 1
-                except Exception as ai_err:
-                    logger.warning("KAP AI analiz hatasi (%s): %s", d["company_code"], ai_err)
+            # Watchlist push bildirim
+            try:
+                sent = await notif_service.notify_kap_watchlist(record)
+                notif_count += sent
+            except Exception as notif_err:
+                logger.warning("KAP watchlist bildirim hatasi (%s): %s", d["company_code"], notif_err)
 
-                # Watchlist push bildirim
-                try:
-                    sent = await notif_service.notify_kap_watchlist(record)
-                    notif_count += sent
-                except Exception as notif_err:
-                    logger.warning("KAP watchlist bildirim hatasi (%s): %s", d["company_code"], notif_err)
+        await db.commit()
 
-            await db.commit()
+    if new_count > 0:
+        logger.info(
+            "%s: %d yeni bildirim, %d AI analiz, %d push bildirim",
+            job_name, new_count, ai_count, notif_count,
+        )
 
-        if new_count > 0:
-            logger.info(
-                "KAP All Scrape: %d yeni bildirim, %d AI analiz, %d push bildirim",
-                new_count, ai_count, notif_count,
-            )
 
+async def kap_uzmanpara_quick_job():
+    """Uzmanpara hizli tarama — her 50 saniyede bir.
+
+    Sadece Uzmanpara'yi tarar (en guncel kaynak).
+    Yeni bildirimler aninda DB'ye kaydedilir + AI analiz + push bildirim.
+    """
+    try:
+        from app.scrapers.kap_all_scraper import scrape_uzmanpara_only
+        disclosures = await scrape_uzmanpara_only()
+        await _process_kap_disclosures(disclosures, "KAP-Uzmanpara")
+    except Exception as e:
+        logger.error("KAP Uzmanpara quick job hatasi: %s", e)
+
+
+async def kap_all_scrape_job():
+    """Tam KAP tarama — BigPara (ana kume) + Uzmanpara merge, her 2 dakikada bir.
+
+    BigPara ana kaynak (zengin icerik, tam metin, gercek KAP linkleri).
+    Uzmanpara ek kaynak (daha guncel, BigPara'da olmayanlar eklenir).
+    Bloomberg HT son care (ikisi de bossa).
+    """
+    try:
+        from app.scrapers.kap_all_scraper import scrape_all_kap_disclosures
+        disclosures = await scrape_all_kap_disclosures()
+        await _process_kap_disclosures(disclosures, "KAP-BigPara+Uzmanpara")
     except Exception as e:
         logger.error("KAP All Scrape job hatasi: %s", e)
         try:
@@ -3691,12 +3710,23 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Tum KAP Bildirimleri Scrape + AI Analiz — her 5 dk (borsa saatleri) ───
+    # ─── KAP Uzmanpara Hizli Tarama — her 50 sn ───
+    scheduler.add_job(
+        kap_uzmanpara_quick_job,
+        IntervalTrigger(seconds=50),
+        id="kap_uzmanpara_quick",
+        name="KAP Uzmanpara Hizli Tarama (her 50 sn)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── KAP Tam Tarama (BigPara ana kume + Uzmanpara) — her 2 dk ───
     scheduler.add_job(
         kap_all_scrape_job,
-        IntervalTrigger(minutes=5),
+        IntervalTrigger(minutes=2),
         id="kap_all_scrape",
-        name="Tum KAP Bildirimleri (BigPara + AI Analiz, her 5 dk)",
+        name="KAP Tam Tarama (BigPara + Uzmanpara, her 2 dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
