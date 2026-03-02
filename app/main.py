@@ -88,10 +88,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Veritabani init hatasi: %s", e)
 
-    # KAP bildirimleri duplicate korumasi — UNIQUE constraint ekle (yoksa)
+    # KAP bildirimleri — UNIQUE constraint + eski hatalı verileri temizle
     try:
         from sqlalchemy import text as sa_text
         async with async_session() as db:
+            # Eski seed verileri temizle (hatalı timestamp'li, deploy oncesi)
+            # Bu migration sadece 1 kez calisir, sonra silinecek
+            cleanup_res = await db.execute(sa_text(
+                "DELETE FROM kap_all_disclosures WHERE id <= 243"
+            ))
+            if cleanup_res.rowcount > 0:
+                logger.info("Eski KAP seed verileri temizlendi: %d kayit", cleanup_res.rowcount)
+            await db.commit()
+
             # Mevcut duplicate'lari temizle (en eski kaydi tut)
             await db.execute(sa_text("""
                 DELETE FROM kap_all_disclosures
@@ -5311,14 +5320,14 @@ async def list_kap_all_disclosures(
     - hours: Son kac saat (1, 24, 168, 720)
     - limit/offset: Sayfalama
     """
-    query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.published_at))
+    query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.created_at))
 
     if ticker:
         query = query.where(KapAllDisclosure.company_code == ticker.upper())
 
     if hours:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        query = query.where(KapAllDisclosure.published_at >= since)
+        query = query.where(KapAllDisclosure.created_at >= since)
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)

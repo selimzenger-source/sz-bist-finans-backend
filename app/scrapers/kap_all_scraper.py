@@ -150,21 +150,12 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
             if not title:
                 continue
 
-            # KAP bildirim ID'yi Uzmanpara URL'den cikar
-            # Ornek: /kap-haberi/atagy-finansal-rapor-1564240/ -> 1564240
-            kap_id = ""
-            kap_url = ""
-            id_match = re.search(r"-(\d{6,})/?$", detail_href)
-            if id_match:
-                kap_id = id_match.group(1)
-                kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_id}"
-
-            if not kap_url:
-                # Fallback: Uzmanpara URL'yi kullan
-                kap_url = (
-                    f"https://uzmanpara.milliyet.com.tr{detail_href}"
-                    if detail_href.startswith("/") else detail_href
-                )
+            # Uzmanpara detay URL'si (KAP bildirim ID sonra cekilecek)
+            uzmanpara_detail_url = (
+                f"https://uzmanpara.milliyet.com.tr{detail_href}"
+                if detail_href.startswith("/") else detail_href
+            )
+            kap_url = uzmanpara_detail_url
 
             # Tarih — Uzmanpara Turkey saati gosterir
             date_span = li.find("span", class_="date")
@@ -204,6 +195,43 @@ async def _uzmanpara_fetch() -> list[dict[str, Any]]:
 
     logger.info("Uzmanpara -> %d haber", len(results))
     return results
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Uzmanpara detay sayfasindan KAP bildirim ID cikartma
+# ═════════════════════════════════════════════════════════════════════════════
+
+async def resolve_kap_url(uzmanpara_url: str) -> str:
+    """Uzmanpara detay sayfasindan KAP.org.tr bildirim linkini cikarir.
+
+    Uzmanpara URL format degisikligi (2026): hex MongoDB ID kullaniliyor.
+    Detay sayfasinda 'kap.org.tr/Bildirim/XXXXXXX' linki mevcut.
+
+    Args:
+        uzmanpara_url: https://uzmanpara.milliyet.com.tr/kap-haberi/.../HEXID/
+
+    Returns:
+        https://www.kap.org.tr/tr/Bildirim/1564332 veya bos string
+    """
+    if not uzmanpara_url or "uzmanpara" not in uzmanpara_url:
+        return ""
+
+    try:
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True, headers=HEADERS) as client:
+            r = await client.get(uzmanpara_url)
+            if r.status_code != 200:
+                return ""
+
+            # kap.org.tr/Bildirim/1564332 veya kap.org.tr/tr/Bildirim/1564332
+            match = re.search(r"kap\.org\.tr/(?:tr/)?Bildirim/(\d+)", r.text)
+            if match:
+                kap_id = match.group(1)
+                return f"https://www.kap.org.tr/tr/Bildirim/{kap_id}"
+
+    except Exception as exc:
+        logger.debug("Uzmanpara detay KAP ID hatasi: %s", exc)
+
+    return ""
 
 
 # ═════════════════════════════════════════════════════════════════════════════

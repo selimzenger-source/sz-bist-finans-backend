@@ -3035,7 +3035,7 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
     from app.services.kap_all_analyzer import analyze_disclosure
     from app.models.kap_all_disclosure import KapAllDisclosure
     from app.services.notification import NotificationService
-    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content, resolve_kap_url
 
     if not disclosures:
         return
@@ -3060,8 +3060,17 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
             if existing.scalar_one_or_none():
                 continue
 
-            # 2. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
+            # 2a. KAP URL'yi resolve et (Uzmanpara detay -> kap.org.tr)
             kap_url = d.get("kap_url", "")
+            if kap_url and "uzmanpara" in kap_url:
+                try:
+                    resolved = await resolve_kap_url(kap_url)
+                    if resolved:
+                        kap_url = resolved
+                except Exception as resolve_err:
+                    logger.debug("KAP URL resolve hatasi (%s): %s", d["company_code"], resolve_err)
+
+            # 2b. KAP.org.tr sayfasindan bildirim icerigi cek (AI icin)
             kap_body = ""
             if kap_url and "kap.org.tr" in kap_url:
                 try:
