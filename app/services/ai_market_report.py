@@ -1201,7 +1201,6 @@ async def _generate_report(
         ai_content = ai_content[:3897] + "..."
 
     return ai_content.strip()
-        return None
 
 
 # ────────────────────────────────────────────
