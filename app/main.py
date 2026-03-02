@@ -5622,3 +5622,94 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
     except Exception as e:
         import traceback
         return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+
+
+# -------------------------------------------------------
+# Admin: KAP AI Re-Analyze (NULL summary kayitlari)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/kap-reanalyze")
+@limiter.limit("3/minute")
+async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
+    """Admin: ai_summary NULL olan KAP kayitlarini yeniden AI ile analiz et.
+
+    Body:
+        admin_password: str
+        hours: int (kac saatlik kayitlar, default 48)
+        limit: int (max kac kayit, default 50)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    hours = min(int(payload.get("hours", 48)), 168)  # max 7 gun
+    max_records = min(int(payload.get("limit", 50)), 100)  # max 100
+
+    try:
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import select, and_
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from app.services.kap_all_analyzer import analyze_disclosure
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        reanalyzed = 0
+        failed = 0
+        results = []
+
+        async with async_session() as db:
+            # ai_summary NULL ve bilanco olmayan, son X saatteki kayitlar
+            stmt = (
+                select(KapAllDisclosure)
+                .where(
+                    and_(
+                        KapAllDisclosure.ai_summary.is_(None),
+                        KapAllDisclosure.is_bilanco == False,
+                        KapAllDisclosure.created_at >= cutoff,
+                    )
+                )
+                .order_by(KapAllDisclosure.created_at.desc())
+                .limit(max_records)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+
+            for record in rows:
+                try:
+                    ai_result = await analyze_disclosure(
+                        company_code=record.company_code,
+                        title=record.title,
+                        body=record.body or record.title,
+                        is_bilanco=record.is_bilanco,
+                    )
+                    summary = ai_result.get("summary")
+                    if summary:
+                        record.ai_sentiment = ai_result.get("sentiment", record.ai_sentiment)
+                        record.ai_impact_score = ai_result.get("impact_score", record.ai_impact_score)
+                        record.ai_summary = summary
+                        record.ai_analyzed_at = datetime.now(timezone.utc)
+                        reanalyzed += 1
+                        results.append({
+                            "id": record.id,
+                            "company_code": record.company_code,
+                            "title": record.title[:60],
+                            "sentiment": ai_result.get("sentiment"),
+                            "score": ai_result.get("impact_score"),
+                            "summary": summary[:100] if summary else None,
+                        })
+                    else:
+                        failed += 1
+                except Exception as e:
+                    failed += 1
+                    logger.warning("KAP re-analyze hatasi (id=%d): %s", record.id, e)
+
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "total_found": len(rows),
+            "reanalyzed": reanalyzed,
+            "failed": failed,
+            "results": results,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
