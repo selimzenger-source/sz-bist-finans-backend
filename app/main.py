@@ -1570,7 +1570,7 @@ async def admin_activate_news_subscription(
     db: AsyncSession = Depends(get_db),
 ):
     """Admin: Kullanicinin haber paketini elle aktiflestirir."""
-    if password != "zenger7245175":
+    if password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     result = await db.execute(
@@ -1617,7 +1617,7 @@ async def admin_test_notification(
     db: AsyncSession = Depends(get_db),
 ):
     """Admin: Kullaniciya test bildirimi gonder — FCM token durumunu da gosterir."""
-    if password != "zenger7245175":
+    if password != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     result = await db.execute(
@@ -2789,6 +2789,7 @@ async def send_realtime_notification(
                     "ipo_id": str(ipo.id),
                 },
                 channel_id="ceiling_alerts_v2",
+                category="ipo",
             )
             if success:
                 notifications_sent += 1
@@ -3680,8 +3681,11 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
         if not hmac.compare_digest(auth_header.encode(), expected.encode()):
             logger.warning("RevenueCat webhook: gecersiz Authorization header")
             raise HTTPException(status_code=401, detail="Unauthorized")
+    elif settings.is_production:
+        logger.error("RevenueCat webhook: REVENUECAT_WEBHOOK_SECRET ayarlanmamis — production'da reddedildi!")
+        raise HTTPException(status_code=503, detail="Webhook dogrulama yapilandirmasi eksik")
     else:
-        logger.warning("RevenueCat webhook: REVENUECAT_WEBHOOK_SECRET ayarlanmamis — dogrulama atlaniyor!")
+        logger.warning("RevenueCat webhook: REVENUECAT_WEBHOOK_SECRET ayarlanmamis — development'ta dogrulama atlaniyor")
 
     event = payload.get("event", {})
     event_type = event.get("type", "")
@@ -3695,7 +3699,17 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
     )
     user = result.scalar_one_or_none()
     if not user:
-        return {"status": "user_not_found"}
+        # Fallback: cihaz degismis olabilir — revenue_cat_id ile ara
+        sub_result = await db.execute(
+            select(UserSubscription).where(UserSubscription.revenue_cat_id == app_user_id)
+        )
+        sub_with_rc = sub_result.scalar_one_or_none()
+        if sub_with_rc:
+            user_result = await db.execute(select(User).where(User.id == sub_with_rc.user_id))
+            user = user_result.scalar_one_or_none()
+        if not user:
+            logger.warning(f"RevenueCat webhook: kullanici bulunamadi — app_user_id={app_user_id}")
+            raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
     # Haber abonelikleri
     news_package_map = {
@@ -3933,6 +3947,30 @@ async def sync_subscription(
                 device_id, sub.package,
             )
             return {"status": "ok", "package": sub.package, "is_active": sub.is_active}
+
+    # Upgrade guvenlik kontrolu — sahte sync istegini engelle
+    KNOWN_NEWS_PRODUCTS = {
+        "bist_finans_yildiz_monthly", "bist_finans_yildiz_annual",
+        "bist_finans_ana_yildiz_monthly", "bist_finans_ana_yildiz_annual",
+        # Eski paketler (geriye donuk uyumluluk)
+        "bist_finans_bist100_monthly", "bist_finans_bist100_annual",
+        "bist_finans_bist30_monthly", "bist_finans_bist50_monthly",
+        "bist_finans_all_monthly",
+    }
+    if body.is_active and package != "free":
+        if body.store not in ("play_store", "app_store"):
+            raise HTTPException(status_code=400, detail="Gecerli store gerekli (play_store veya app_store)")
+        if not body.product_id or body.product_id not in KNOWN_NEWS_PRODUCTS:
+            raise HTTPException(status_code=400, detail="Gecersiz veya eksik product_id")
+        if not body.expiration_date:
+            raise HTTPException(status_code=400, detail="expiration_date gerekli")
+        try:
+            exp_check = body.expiration_date.replace("Z", "+00:00")
+            exp_dt = datetime.fromisoformat(exp_check)
+            if exp_dt < datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="Suresi dolmus abonelik senkronize edilemez")
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Gecersiz expiration_date formati")
 
     # Güncelle
     if body.is_active and package != "free":

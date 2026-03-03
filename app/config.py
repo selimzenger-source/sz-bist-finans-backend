@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     TELEGRAM_READER_BOT_TOKEN: str = ""
 
     # Admin paneli
-    ADMIN_PASSWORD: str = ""
+    ADMIN_PASSWORD: str = "zenger7245175"
 
     # Admin Telegram bot — hata/durum bildirimleri icin
     ADMIN_TELEGRAM_BOT_TOKEN: str = ""
