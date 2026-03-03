@@ -53,7 +53,7 @@ from app.schemas import (
     IPOAlertCreate, CeilingTrackUpdate,
     CeilingTierOut, CeilingSubscriptionCreate, CeilingSubscriptionOut,
     NotificationTierOut, NewsTierOut,
-    StockNotificationCreate, StockNotificationOut,
+    StockNotificationCreate, StockNotificationOut, StockNotificationSyncRequest,
     RealtimeNotifRequest,
     DividendOut,
     WalletBalanceOut, WalletEarnRequest, WalletSpendRequest,
@@ -1223,6 +1223,114 @@ async def deactivate_all_stock_notifications(
     return {"message": f"{count} tekil abonelik iptal edildi (bundle paketler korundu)", "deactivated_count": count}
 
 
+@app.post("/api/v1/users/{device_id}/stock-notifications/sync")
+async def sync_stock_notifications(
+    device_id: str,
+    data: StockNotificationSyncRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """App'teki lokal abonelikleri backend ile senkronize et.
+
+    App baslatildiginda veya satin alma sonrasi cagirilir.
+    Backend'de olmayan lokal abonelikleri olusturur.
+    Zaten varsa atlar (duplicate engelleme).
+    """
+    user_result = await db.execute(
+        select(User).where(User.device_id == device_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    created_count = 0
+    skipped_count = 0
+    _now = datetime.now(timezone.utc)
+
+    for item in data.subscriptions:
+        # Bundle kontrolu
+        if item.is_annual_bundle:
+            existing = await db.execute(
+                select(StockNotificationSubscription).where(
+                    and_(
+                        StockNotificationSubscription.user_id == user.id,
+                        StockNotificationSubscription.is_annual_bundle == True,
+                        StockNotificationSubscription.is_active == True,
+                    )
+                )
+            )
+            if existing.scalar_one_or_none():
+                skipped_count += 1
+                continue
+
+            # expires_at parse
+            exp = None
+            if item.expires_at:
+                try:
+                    exp = datetime.fromisoformat(item.expires_at.replace("Z", "+00:00"))
+                except (ValueError, TypeError):
+                    exp = _now + timedelta(days=90)
+            else:
+                exp = _now + timedelta(days=90)
+
+            sub = StockNotificationSubscription(
+                user_id=user.id,
+                ipo_id=None,
+                notification_type="all",
+                is_annual_bundle=True,
+                price_paid_tl=0,
+                is_active=True,
+                purchased_at=_now,
+                expires_at=exp,
+            )
+            db.add(sub)
+            created_count += 1
+            continue
+
+        # Tekil abonelik kontrolu
+        if not item.ipo_id:
+            skipped_count += 1
+            continue
+
+        existing = await db.execute(
+            select(StockNotificationSubscription).where(
+                and_(
+                    StockNotificationSubscription.user_id == user.id,
+                    StockNotificationSubscription.ipo_id == item.ipo_id,
+                    StockNotificationSubscription.notification_type == item.notification_type,
+                    StockNotificationSubscription.is_active == True,
+                )
+            )
+        )
+        if existing.scalar_one_or_none():
+            skipped_count += 1
+            continue
+
+        sub = StockNotificationSubscription(
+            user_id=user.id,
+            ipo_id=item.ipo_id,
+            notification_type=item.notification_type,
+            is_annual_bundle=False,
+            price_paid_tl=0,
+            is_active=True,
+            purchased_at=_now,
+        )
+        db.add(sub)
+        created_count += 1
+
+    if created_count > 0:
+        await db.flush()
+
+    logger.info(
+        "Stock notification sync: user_id=%s, created=%d, skipped=%d",
+        user.id, created_count, skipped_count,
+    )
+    return {
+        "status": "ok",
+        "created": created_count,
+        "skipped": skipped_count,
+    }
+
+
 @app.patch("/api/v1/users/{device_id}/stock-notifications/{sub_id}/mute")
 async def toggle_mute_stock_notification(
     device_id: str,
@@ -1608,6 +1716,28 @@ async def admin_activate_news_subscription(
     await db.flush()
     logger.info("Admin: Haber paketi elle aktif edildi: user_id=%s, %s gun", user.id, days)
     return {"status": "ok", "user_id": user.id, "package": "ana_yildiz", "days": days}
+
+
+@app.post("/api/v1/admin/deactivate-stock-notification/{sub_id}")
+async def admin_deactivate_stock_notification(
+    sub_id: int,
+    password: str = Query(..., description="Admin sifresi"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Belirli bir hisse bildirim aboneligini deaktif et."""
+    if password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    result = await db.execute(
+        select(StockNotificationSubscription).where(StockNotificationSubscription.id == sub_id)
+    )
+    sub = result.scalar_one_or_none()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Abonelik bulunamadi")
+
+    sub.is_active = False
+    await db.flush()
+    return {"status": "ok", "id": sub_id, "was_bundle": sub.is_annual_bundle}
 
 
 @app.post("/api/v1/admin/test-notification/{device_id}")
@@ -2810,6 +2940,7 @@ async def send_realtime_notification(
         "active_subscribers": len(active_subs),
         "notifications_sent": notifications_sent,
         "errors": errors,
+        "notified_users": list(notified_user_ids),
     }
 
 
@@ -4389,8 +4520,11 @@ async def admin_list_users(request: Request, payload: dict, db: AsyncSession = D
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
+    limit = payload.get("limit", 50)
+    limit = min(max(limit, 1), 200)
+
     result = await db.execute(
-        select(User).order_by(desc(User.created_at)).limit(20)
+        select(User).order_by(desc(User.created_at)).limit(limit)
     )
     users = result.scalars().all()
 
@@ -4402,6 +4536,7 @@ async def admin_list_users(request: Request, payload: dict, db: AsyncSession = D
             "fcm_token": u.fcm_token[:30] + "..." if u.fcm_token and len(u.fcm_token) > 30 else u.fcm_token,
             "expo_push_token": getattr(u, "expo_push_token", None),
             "app_version": u.app_version,
+            "notifications_enabled": u.notifications_enabled,
             "created_at": str(u.created_at) if u.created_at else None,
         }
         for u in users

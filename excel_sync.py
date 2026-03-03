@@ -403,7 +403,7 @@ def _send_realtime_notification(ticker, notif_type, title, body, sub_event=None)
         )
         if resp.status_code == 200:
             data = resp.json()
-            log(f"  📢 Bildirim: {ticker} {notif_type} → {data.get('sent', 0)} kisi")
+            log(f"  📢 Bildirim: {ticker} {notif_type} → gönderildi={data.get('notifications_sent', 0)} abone={data.get('active_subscribers', 0)} hata={data.get('errors', 0)}")
         else:
             log(f"  ⚠ Bildirim hatasi: {ticker} {notif_type} → HTTP {resp.status_code}")
     except Exception as e:

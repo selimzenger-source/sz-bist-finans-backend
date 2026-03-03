@@ -488,6 +488,21 @@ class StockNotificationCreate(BaseModel):
     store: Optional[str] = None  # play_store, app_store, wallet
     product_id: Optional[str] = None  # Store product ID veya wallet_spend_ipo
 
+    model_config = ConfigDict(extra="ignore")  # is_combo gibi bilinmeyen alanlar sessizce atlanir
+
+
+class StockNotificationSyncItem(BaseModel):
+    """App tarafindan gonderilen lokal abonelik bilgisi — sync icin."""
+    ipo_id: Optional[int] = None
+    notification_type: str
+    is_annual_bundle: bool = False
+    expires_at: Optional[str] = None  # ISO8601 tarih
+
+
+class StockNotificationSyncRequest(BaseModel):
+    """Lokal abonelikleri backend ile senkronize etme istegi."""
+    subscriptions: list[StockNotificationSyncItem]
+
 
 class StockNotificationOut(BaseModel):
     """Hisse bildirim abonelik bilgisi."""
