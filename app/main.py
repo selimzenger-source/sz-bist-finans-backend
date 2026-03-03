@@ -1110,7 +1110,8 @@ async def create_stock_notification(
             expires_at=_now + timedelta(days=bundle_days),
         )
         db.add(sub)
-        await db.flush()
+        await db.commit()
+        await db.refresh(sub)
         logger.info(
             "Bundle olusturuldu: user_id=%s, days=%d, expires=%s",
             user.id, bundle_days, sub.expires_at.isoformat(),
@@ -1159,7 +1160,8 @@ async def create_stock_notification(
         is_active=True,
     )
     db.add(sub)
-    await db.flush()
+    await db.commit()
+    await db.refresh(sub)
     return sub
 
 
