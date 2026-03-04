@@ -22,7 +22,7 @@ _TR_TZ = ZoneInfo("Europe/Istanbul")
 
 async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
     """Uzmanpara'dan tavan/taban hisseleri ceker."""
-    url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-dusenler/"
+    url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-azalanlar/"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Accept": "text/html"
@@ -37,7 +37,7 @@ async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
                 return []
                 
             soup = BeautifulSoup(res.text, "html.parser")
-            table_id = "tbl_artanlar" if is_ceiling else "tbl_dusenler"
+            table_id = "tbl_artanlar" if is_ceiling else "tbl_azalanlar"
             table = soup.find("table", {"id": table_id})
             if not table:
                 table = soup.select_one("table")
