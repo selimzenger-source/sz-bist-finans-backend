@@ -105,6 +105,51 @@ async def analyze_disclosure(
         logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
         return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
 
+    # ── Telegram Eşleşmesi (Sonnet skorlarını senkronize et) ──
+    try:
+        from app.database import async_session
+        from app.models.telegram_news import TelegramNews
+        from sqlalchemy import select, desc
+        from datetime import datetime, timezone, timedelta
+
+        async with async_session() as session:
+            twelve_hours_ago = datetime.now(timezone.utc) - timedelta(hours=12)
+            query = (
+                select(TelegramNews)
+                .where(
+                    TelegramNews.ticker == company_code,
+                    TelegramNews.ai_score.isnot(None),
+                    TelegramNews.message_date >= twelve_hours_ago
+                )
+                .order_by(desc(TelegramNews.message_date))
+                .limit(1)
+            )
+            result = await session.execute(query)
+            recent_news = result.scalar_one_or_none()
+
+            if recent_news and recent_news.ai_score is not None:
+                logger.info(
+                    "KAP Analyzer: TelegramNews (Sonnet) analizi kullaniliyor (%s), skor: %s",
+                    company_code, recent_news.ai_score,
+                )
+                impact_score = recent_news.ai_score
+
+                # Sentiment cikarimi
+                if impact_score >= 6.0:
+                    sentiment = "Olumlu"
+                elif impact_score < 4.5:
+                    sentiment = "Olumsuz"
+                else:
+                    sentiment = "Notr"
+
+                return {
+                    "sentiment": sentiment,
+                    "impact_score": impact_score,
+                    "summary": recent_news.ai_summary
+                }
+    except Exception as e:
+        logger.warning("KAP Analyzer: TelegramNews senkronizasyon hatasi (%s): %s", company_code, e)
+
     (gemini_key,) = _get_keys()
     if not gemini_key:
         logger.error("KAP Analyzer: Gemini API key yok — fallback (%s)", company_code)
@@ -169,7 +214,7 @@ SADECE asagidaki JSON formatinda yanit ver:
     provider_used = None
 
     if gemini_key:
-        for model_name, model_label in [(_GEMINI_MODEL, "Flash"), (_GEMINI_PRO_MODEL, "Pro")]:
+        for model_name, model_label in [(_GEMINI_PRO_MODEL, "Pro"), (_GEMINI_MODEL, "Flash")]:
             if ai_text:
                 break
             try:

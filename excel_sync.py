@@ -399,13 +399,33 @@ def _send_realtime_notification(ticker, notif_type, title, body, sub_event=None)
         resp = requests.post(
             f"{API_URL}/api/v1/realtime-notification",
             json=payload,
-            timeout=30,
+            timeout=60,  # Render cold start icin 60sn (eskiden 30sn)
         )
         if resp.status_code == 200:
             data = resp.json()
-            log(f"  📢 Bildirim: {ticker} {notif_type} → gönderildi={data.get('notifications_sent', 0)} abone={data.get('active_subscribers', 0)} hata={data.get('errors', 0)}")
+            sent = data.get('notifications_sent', 0)
+            subs = data.get('active_subscribers', 0)
+            errs = data.get('errors', 0)
+            status = data.get('status', 'ok')
+            skip = data.get('skip_reasons', {})
+
+            if status == "skipped":
+                reason = data.get('reason', '?')
+                log(f"  ⏭ Bildirim SKIP: {ticker} {notif_type} → reason={reason}")
+            elif sent > 0:
+                log(f"  📢 Bildirim OK: {ticker} {notif_type} → gönderildi={sent} abone={subs}")
+            else:
+                # 0 gönderildi — detaylı nedenleri göster
+                skip_str = ", ".join(f"{k}={v}" for k, v in skip.items() if v > 0) if skip else "bilinmiyor"
+                log(f"  ⚠ Bildirim 0: {ticker} {notif_type} → abone={subs} hata={errs} | {skip_str}")
         else:
-            log(f"  ⚠ Bildirim hatasi: {ticker} {notif_type} → HTTP {resp.status_code}")
+            log(f"  ⚠ Bildirim HTTP hatasi: {ticker} {notif_type} → HTTP {resp.status_code}")
+            try:
+                log(f"    Detay: {resp.text[:200]}")
+            except Exception:
+                pass
+    except requests.exceptions.Timeout:
+        log(f"  ⚠ Bildirim TIMEOUT: {ticker} {notif_type} → 60sn icinde cevap gelmedi (Render uyuyor olabilir)")
     except Exception as e:
         log(f"  ⚠ Bildirim gonderilemedi: {ticker} {notif_type} → {e}")
 

@@ -172,6 +172,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Startup ceiling düzeltici hatası: %s", e)
 
+    # StockNotificationSubscription — NULL muted/is_active düzeltici
+    # Sonradan eklenen muted kolonu eski kayıtlarda NULL olabilir → bildirim sorgusunu bozar
+    try:
+        from sqlalchemy import update
+        from app.models.user import StockNotificationSubscription as _SNS
+        async with async_session() as db:
+            # muted=NULL → muted=False
+            r1 = await db.execute(
+                update(_SNS).where(_SNS.muted.is_(None)).values(muted=False)
+            )
+            # muted_types=NULL zaten OK, dokunma
+            if r1.rowcount > 0:
+                await db.commit()
+                logger.info(
+                    "Startup düzeltici: %d StockNotificationSubscription muted=NULL → False yapıldı",
+                    r1.rowcount,
+                )
+    except Exception as e:
+        logger.warning("Startup muted düzeltici hatası: %s", e)
+
     # 26+ gün verisi temizleyici — hiçbir IPO'da trading_day > 25 olmamalı
     try:
         from sqlalchemy import delete
@@ -2783,7 +2803,7 @@ async def send_realtime_notification(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Gercek zamanli bildirim gonder — halka_arz_sync.py'den cagirilir.
+    Gercek zamanli bildirim gonder — excel_sync.py'den cagirilir.
 
     4 bildirim tipi:
       - tavan_bozulma:          Tavan acilinca/kitlenince
@@ -2794,7 +2814,7 @@ async def send_realtime_notification(
 
     Bildirim mesajlarinda fiyat bilgisi YOKTUR.
     """
-    import os
+    import json as _json
     from app.services.ipo_service import IPOService
     from app.services.notification import NotificationService
 
@@ -2815,13 +2835,23 @@ async def send_realtime_notification(
     ipo_service = IPOService(db)
     ipo = await ipo_service.get_ipo_by_ticker(data.ticker)
     if not ipo:
+        logging.warning(
+            "[REALTIME-NOTIF] IPO bulunamadi: %s (tip=%s)",
+            data.ticker, data.notification_type,
+        )
         raise HTTPException(status_code=404, detail=f"IPO bulunamadi: {data.ticker}")
 
     # Arşivlenmiş veya takibi kapalı IPO'lara bildirim gönderme
     if ipo.archived or not ipo.ceiling_tracking_active:
+        reason = "archived" if ipo.archived else "ceiling_tracking_inactive"
+        logging.warning(
+            "[REALTIME-NOTIF] SKIP: %s %s — reason=%s (ipo_id=%s, archived=%s, tracking=%s)",
+            data.ticker, data.notification_type, reason,
+            ipo.id, ipo.archived, ipo.ceiling_tracking_active,
+        )
         return {
             "status": "skipped",
-            "reason": "archived" if ipo.archived else "ceiling_tracking_inactive",
+            "reason": reason,
             "ticker": data.ticker,
             "notifications_sent": 0,
         }
@@ -2829,6 +2859,8 @@ async def send_realtime_notification(
     notif_service = NotificationService(db)
 
     # Bu IPO + bildirim tipi icin aktif aboneleri bul
+    # NOT: muted.isnot(True) kullan — NULL degerler False gibi davransin
+    #       (muted kolonu sonradan eklendiyse eski kayitlarda NULL olabilir)
     stock_notif_result = await db.execute(
         select(StockNotificationSubscription).where(
             and_(
@@ -2838,46 +2870,69 @@ async def send_realtime_notification(
                         StockNotificationSubscription.ipo_id == ipo.id,
                         StockNotificationSubscription.notification_type == data.notification_type,
                     ),
-                    # Paket aboneleri (tum halka arzlar icin)
+                    # Paket aboneleri — bundle (3 aylik/yillik) tum halka arzlar icin
                     StockNotificationSubscription.is_annual_bundle == True,
                 ),
                 StockNotificationSubscription.is_active == True,
-                StockNotificationSubscription.muted == False,
+                # muted=NULL veya muted=False olanlari al (True olanlari atla)
+                or_(
+                    StockNotificationSubscription.muted == False,
+                    StockNotificationSubscription.muted.is_(None),
+                ),
             )
         )
     )
     active_subs = list(stock_notif_result.scalars().all())
 
+    logging.info(
+        "[REALTIME-NOTIF] %s %s — %d abone bulundu (ipo_id=%s)",
+        data.ticker, data.notification_type, len(active_subs), ipo.id,
+    )
+
     notifications_sent = 0
     errors = 0
+    skip_reasons = {
+        "expired": 0,
+        "muted_type": 0,
+        "dedup": 0,
+        "no_user": 0,
+        "no_token": 0,
+        "master_off": 0,
+        "toggle_off": 0,
+        "send_fail": 0,
+    }
 
     # Dedup — ayni kullaniciya 2 kere gonderme
     notified_user_ids: set = set()
-
-    import json as _json
 
     _now_utc = datetime.now(timezone.utc)
 
     for sub in active_subs:
         # Suresi dolmus mu? (scheduler saatte 1 temizliyor ama arada kacabilir)
-        if sub.expires_at and sub.expires_at < _now_utc:
-            sub.is_active = False
-            continue
-
-        # Paket aboneleri icin: "all" tipinde kayitli, her bildirim tipini alir
-        if sub.is_annual_bundle and sub.notification_type != "all":
-            pass
+        if sub.expires_at:
+            # expires_at timezone-aware mi kontrol et
+            sub_expires = sub.expires_at
+            if sub_expires.tzinfo is None:
+                # Naive datetime — UTC olarak yorumla
+                from datetime import timezone as _tz
+                sub_expires = sub_expires.replace(tzinfo=_tz.utc)
+            if sub_expires < _now_utc:
+                sub.is_active = False
+                skip_reasons["expired"] += 1
+                continue
 
         # Bundle aboneliklerde tip bazli mute kontrolu
         if sub.muted_types:
             try:
                 muted_list = _json.loads(sub.muted_types)
                 if data.notification_type in muted_list:
+                    skip_reasons["muted_type"] += 1
                     continue  # Bu tip mute edilmis, atla
             except (ValueError, TypeError):
                 pass
 
         if sub.user_id in notified_user_ids:
+            skip_reasons["dedup"] += 1
             continue
 
         notif_title = data.title
@@ -2888,14 +2943,17 @@ async def send_realtime_notification(
         )
         user = user_result.scalar_one_or_none()
         if not user:
+            skip_reasons["no_user"] += 1
             continue
         # Token kontrolu — FCM veya Expo token olmali
         fcm = (user.fcm_token or "").strip()
         expo = (user.expo_push_token or "").strip()
         if not fcm and not expo:
+            skip_reasons["no_token"] += 1
             continue
         # Master switch kontrolu — tum bildirimler kapaliysa atla
         if not user.notifications_enabled:
+            skip_reasons["master_off"] += 1
             continue
 
         # Kullanici bazli bildirim tipi toggle kontrolu
@@ -2907,6 +2965,7 @@ async def send_realtime_notification(
         }
         _toggle_field = _type_toggle_map.get(data.notification_type)
         if _toggle_field and not getattr(user, _toggle_field, True):
+            skip_reasons["toggle_off"] += 1
             continue  # Kullanici bu bildirim tipini kapatmis
 
         try:
@@ -2928,12 +2987,37 @@ async def send_realtime_notification(
                 notified_user_ids.add(sub.user_id)
             else:
                 errors += 1
+                skip_reasons["send_fail"] += 1
             sub.notified_count = (sub.notified_count or 0) + 1
         except Exception as e:
             errors += 1
+            skip_reasons["send_fail"] += 1
             logging.warning(f"Bildirim gonderilemedi (user={user.id}): {e}")
 
     await db.flush()
+
+    # Detayli log — debug icin
+    skip_summary = ", ".join(f"{k}={v}" for k, v in skip_reasons.items() if v > 0)
+    logging.info(
+        "[REALTIME-NOTIF] SONUC: %s %s — sent=%d, errors=%d, subs=%d%s",
+        data.ticker, data.notification_type,
+        notifications_sent, errors, len(active_subs),
+        f" | skip: {skip_summary}" if skip_summary else "",
+    )
+
+    # Admin Telegram bildirimi — onemli durumlarda (basarili veya hata)
+    if notifications_sent > 0 or errors > 0 or len(active_subs) == 0:
+        try:
+            from app.services.admin_telegram import send_admin_message
+            status_emoji = "✅" if notifications_sent > 0 else ("⚠️" if errors > 0 else "📭")
+            await send_admin_message(
+                f"{status_emoji} <b>Realtime Bildirim</b>\n"
+                f"Ticker: {data.ticker} | Tip: {data.notification_type}\n"
+                f"Abone: {len(active_subs)} | Gönderildi: {notifications_sent} | Hata: {errors}\n"
+                + (f"Skip: {skip_summary}" if skip_summary else "")
+            )
+        except Exception:
+            pass  # Telegram hatasi akisi bozmasin
 
     return {
         "status": "ok",
@@ -2943,6 +3027,7 @@ async def send_realtime_notification(
         "notifications_sent": notifications_sent,
         "errors": errors,
         "notified_users": list(notified_user_ids),
+        "skip_reasons": skip_reasons,
     }
 
 
