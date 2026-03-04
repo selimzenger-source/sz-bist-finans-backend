@@ -11,6 +11,7 @@ from sqlalchemy import select, desc, func
 
 from app.database import async_session
 from app.models.daily_stock_market_stat import DailyStockMarketStat
+from app.models.kap_all_disclosure import KapAllDisclosure
 from app.config import get_settings
 
 # Gemini for summarization
@@ -68,14 +69,33 @@ async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
     return results
 
 async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool) -> str:
-    """Tavily ile haberi bulur, Gemini ile ozetler."""
-    tavily_key = "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"
+    """Internal KAP + Tavily ile haberi bulur, Gemini ile ozetler."""
     settings = get_settings()
+    tavily_key = "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"
     
+    # 1. Dahili KAP veritabanindan son 48 saatteki haberleri cek
+    internal_news = []
+    try:
+        async with async_session() as session:
+            since = datetime.now(timezone.utc) - timedelta(hours=48)
+            stmt = select(KapAllDisclosure).where(
+                KapAllDisclosure.company_code == ticker,
+                KapAllDisclosure.created_at >= since
+            ).order_by(desc(KapAllDisclosure.created_at)).limit(3)
+            res = await session.execute(stmt)
+            news_items = res.scalars().all()
+            for n in news_items:
+                text = f"Başlık: {n.title}"
+                if n.ai_summary: text += f" (Özet: {n.ai_summary})"
+                internal_news.append(text)
+    except Exception as e:
+        logger.warning(f"Internal KAP news error for {ticker}: {e}")
+
+    # 2. Tavily ile dis arama yap
     query_action = "neden yükseldi tavan oldu" if is_ceiling else "neden düştü taban oldu"
     query = f"Borsa İstanbul {ticker} hissesi bugün {query_action} site:borsaningundemi.com OR KAP haber"
     
-    search_context = ""
+    external_search = ""
     try:
         async with httpx.AsyncClient() as client:
             res = await client.post(
@@ -85,28 +105,38 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool) -> str:
             if res.status_code == 200:
                 data = res.json()
                 results = data.get("results", [])
-                search_context = "\n".join([r.get("content", "") for r in results])
+                external_search = "\n".join([r.get("content", "") for r in results])
     except Exception as e:
         logger.warning(f"Tavily search error for {ticker}: {e}")
 
-    if not search_context:
-        return "Pozitif piyasa algısı ve alıcı baskısı." if is_ceiling else "Negatif piyasa algısı ve satıcı baskısı."
+    # Eger ikisi de bossa spesifik bir sey yok demektir
+    combined_context = "\n".join(internal_news) + "\n" + external_search
+    if not combined_context.strip():
+        return ""
 
     # Gemini ile özetle
     try:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         model = genai.GenerativeModel("gemini-2.5-pro")
-        prompt = (f"Bir hisse senedi ({ticker}) bugün {'tavan' if is_ceiling else 'taban'} yaptı.\n"
-                  f"İnternetten gelen güncel haber içerikleri şunlar:\n{search_context}\n\n"
-                  "Bu metinlerden çıkararak hissenin neden bu hareketi yaptığını "
-                  "TEK BİR CÜMLE halinde ve MAKSİMUM 8 KELİME ile açıkla. (Örn: Şirket yeni iş sözleşmesi imzaladığını duyurdu.)")
+        prompt = (f"Hisse: {ticker} ({'Tavan' if is_ceiling else 'Taban'})\n"
+                  f"KAP Bildirimleri & Haberler:\n{combined_context}\n\n"
+                  "Talimat: Yukarıdaki haberlerden yola çıkarak bu hareketin nedenini MAKSİMUM 5-6 kelime ile profesyonel bir not olarak yaz. "
+                  "Örnek: 'Yeni iş sözleşmesi imzalandı', 'Bedelsiz sermaye artırımı kararı', 'Bilanço beklentisi', 'İhale kazanıldı'. "
+                  "ÖNEMLİ: Eğer haberlerde net/spesifik bir neden (KAP, ihale, rapor vb.) yoksa sadece boş bırak (hiçbir şey yazma). "
+                  "Özellikle 'Küçük yatırımcı talebi', 'Alıcı baskısı' gibi her hisseye uyacak genel kopyala-yapıştır cevaplar ASLA verme.")
         
         response = model.generate_content(prompt)
         text = response.text.strip().replace('"', '').replace('\n', '')
-        return text if len(text) > 0 else ("Pozitif piyasa algısı." if is_ceiling else "Kâr satışı ve negatif beklenti.")
+        
+        # Yasakli kelime kontrolu (Copypasta onlemi)
+        forbidden = ["yatırımcı talebi", "alıcı baskısı", "satıcı baskısı", "piyasa algısı", "beklenti satın alındı"]
+        if any(f in text.lower() for f in forbidden):
+            return ""
+            
+        return text if len(text) > 2 else ""
     except Exception as e:
         logger.error(f"Gemini error for {ticker}: {e}")
-        return "Pozitif beklenti satın alındı." if is_ceiling else "Hisseye yönelik satış baskısı arttı."
+        return ""
 
 async def scrape_and_analyze_market_close():
     """18:35'te calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder."""
@@ -125,12 +155,28 @@ async def scrape_and_analyze_market_close():
     today = datetime.now(_TR_TZ).date()
     
     async with async_session() as session:
-        # Piyasalarin o gun acik olup olmadigini gormek icin dunu kontrol edelim mi?
-        # En temeli: Eger tablo bossa tatildir dedik (uzmanpara listesi guncellenmiyorsa).
+        # Piyasalarin o gun acik olup olmadigini gormek icin son kayitla karsilastir
+        # Herhangi bir tavan/tabanın fiyatı değişmiş mi diye bakabiliriz ama daha garantisi
+        # Veri tabanındaki 'today' kaydı var mı diye bakmak (mükerrer çalışmayı da önler).
+        check_stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.date == today).limit(1)
+        existing = (await session.execute(check_stmt)).scalar()
+        if existing:
+            logger.info(f"{today} için zaten analiz yapılmış. Atlanıyor.")
+            return
+
+        # Tatil kontrolü (Opsiyonel: Eğer Uzmanpara verisi dünküyle tam aynıysa tatildir)
+        # Ama Genelde tavan/taban listesi boşsa veya bugün işlem yoksa scrape zaten boş döner.
+        
+        # FIFO Mantığı: 30 günden eski kayıtları temizle (isteğe göre)
+        cleanup_date = today - timedelta(days=32)
+        from sqlalchemy import delete
+        await session.execute(delete(DailyStockMarketStat).where(DailyStockMarketStat.date < cleanup_date))
+
         # Tavanlari isleyelim
         for stock in ceilings:
             ticker = stock["ticker"]
             price = Decimal(str(stock["price"]))
+            pct_val = Decimal(str(stock["change"]))
             reason = await _analyze_reason_with_ai(ticker, is_ceiling=True)
             
             # Gecmis 30 gun icinde rekorlari var mi? Statlari hesapla.
@@ -139,15 +185,18 @@ async def scrape_and_analyze_market_close():
             past_records = res.scalars().all()
             
             consec_ceil = 1
-            for r in past_records:
-                if r.is_ceiling: consec_ceil += 1
-                else: break
+            if past_records and past_records[0].is_ceiling:
+                # Dün tavan mıydı? (Tarih kontrolü eklenebilir ama borsa günleri ardışık olmayabilir)
+                # Sadece son kayıta bakıyoruz
+                consec_ceil = past_records[0].consecutive_ceiling_count + 1
+            
             monthly_ceil = sum(1 for r in past_records if r.is_ceiling and (today - r.date).days <= 30) + 1
             
             new_stat = DailyStockMarketStat(
                 ticker=ticker,
                 date=today,
                 close_price=price,
+                percent_change=pct_val,
                 is_ceiling=True,
                 consecutive_ceiling_count=consec_ceil,
                 monthly_ceiling_count=monthly_ceil,
@@ -159,6 +208,7 @@ async def scrape_and_analyze_market_close():
         for stock in floors:
             ticker = stock["ticker"]
             price = Decimal(str(stock["price"]))
+            pct_val = Decimal(str(stock["change"]))
             reason = await _analyze_reason_with_ai(ticker, is_ceiling=False)
             
             stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.ticker == ticker).order_by(desc(DailyStockMarketStat.date))
@@ -166,15 +216,16 @@ async def scrape_and_analyze_market_close():
             past_records = res.scalars().all()
             
             consec_flr = 1
-            for r in past_records:
-                if r.is_floor: consec_flr += 1
-                else: break
+            if past_records and past_records[0].is_floor:
+                consec_flr = past_records[0].consecutive_floor_count + 1
+
             monthly_flr = sum(1 for r in past_records if r.is_floor and (today - r.date).days <= 30) + 1
             
             new_stat = DailyStockMarketStat(
                 ticker=ticker,
                 date=today,
                 close_price=price,
+                percent_change=pct_val,
                 is_floor=True,
                 consecutive_floor_count=consec_flr,
                 monthly_floor_count=monthly_flr,

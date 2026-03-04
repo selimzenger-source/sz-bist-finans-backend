@@ -25,6 +25,9 @@ class DailyStockMarketStat(Base):
     close_price: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, comment="Gun sonu kapanis fiyati"
     )
+    percent_change: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, server_default="0.00", comment="Gunluk yuzde degisim"
+    )
 
     is_ceiling: Mapped[bool] = mapped_column(
         Boolean, default=False, comment="Tavan (>= 9.75%) kapatti mi?"

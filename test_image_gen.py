@@ -13,13 +13,16 @@ from app.services.market_close_analyzer import scrape_uzmanpara, _analyze_reason
 from app.services.chart_image_generator import generate_ceiling_floor_images
 
 class MockStat:
-    def __init__(self, ticker, price, is_ceiling, reason):
+    def __init__(self, ticker, price, change, is_ceiling, reason):
         self.ticker = ticker
         self.close_price = price
+        self.percent_change = change
         self.is_ceiling = is_ceiling
         self.is_floor = not is_ceiling
         self.consecutive_ceiling_count = 1
         self.consecutive_floor_count = 1
+        self.monthly_ceiling_count = 3
+        self.monthly_floor_count = 2
         self.reason = reason
 
 async def main():
@@ -29,40 +32,37 @@ async def main():
     
     print(f"Bulunan Tavan: {len(ceilings)}, Taban: {len(floors)}")
     
-    limit = 10
+    limit = 5
     
     c_stats = []
-    print("\nTavan hisseleri analiz ediliyor...")
+    print("\nTavan hisseleri analiz ediliyor (Filtrelenmiş)...")
     for c in ceilings[:limit]:
         print(f" - {c['ticker']} analizi...")
         reason = await _analyze_reason_with_ai(c['ticker'], True)
-        if hasattr(reason, "replace"):
-            reason = reason.replace("\n", " ")
-        c_stats.append(MockStat(c['ticker'], c['price'], True, reason))
+        c_stats.append(MockStat(c['ticker'], c['price'], c['change'], True, reason))
         
     f_stats = []
-    print("\nTaban hisseleri analiz ediliyor...")
+    print("\nTaban hisseleri analiz ediliyor (Filtrelenmiş)...")
     for f in floors[:limit]:
         print(f" - {f['ticker']} analizi...")
         reason = await _analyze_reason_with_ai(f['ticker'], False)
-        if hasattr(reason, "replace"):
-            reason = reason.replace("\n", " ")
-        f_stats.append(MockStat(f['ticker'], f['price'], False, reason))
+        f_stats.append(MockStat(f['ticker'], f['price'], f['change'], False, reason))
 
     print("\nGorseller uretiliyor...")
+    # Sadece tavanlari yapalim hizli olsun
     if c_stats:
         paths = generate_ceiling_floor_images(c_stats, True)
-        for i, p in enumerate(paths):
-            dest = f"C:\\Users\\PC\\Desktop\\Ornek_Tavan_{i+1}.png"
-            shutil.copy(p, dest)
-            print("Tavan gorseli masaustune kaydedildi:", dest)
+        if paths:
+            dest = "C:\\Users\\PC\\Desktop\\Guncel_Tavan_Ornegi.png"
+            shutil.copy(paths[0], dest)
+            print("✅ Tavan gorseli guncellendi:", dest)
             
     if f_stats:
         paths = generate_ceiling_floor_images(f_stats, False)
-        for i, p in enumerate(paths):
-            dest = f"C:\\Users\\PC\\Desktop\\Ornek_Taban_{i+1}.png"
-            shutil.copy(p, dest)
-            print("Taban gorseli masaustune kaydedildi:", dest)
+        if paths:
+            dest = "C:\\Users\\PC\\Desktop\\Guncel_Taban_Ornegi.png"
+            shutil.copy(paths[0], dest)
+            print("✅ Taban gorseli guncellendi:", dest)
 
 if __name__ == "__main__":
     asyncio.run(main())
