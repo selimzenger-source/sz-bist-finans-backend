@@ -351,6 +351,117 @@ def generate_25day_image(
 
 
 # ================================================================
+# TAVAN / TABAN YAPAY ZEKA GORSELI
+# ================================================================
+import textwrap
+
+def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
+    """Tavan veya taban yapan hisseler icin listeyi gorsele aktarir (sayfali)."""
+    if not stats:
+        return []
+
+    banner_name = "tavan_banner.png" if is_ceiling else "taban_banner.png"
+    banner_path = os.path.join(_IMG_DIR, banner_name)
+    banner_img = None
+    banner_h = 0
+    width = 1200
+
+    if os.path.exists(banner_path):
+        try:
+            raw_banner = Image.open(banner_path).convert("RGB")
+            scale = width / raw_banner.width
+            banner_h = int(raw_banner.height * scale)
+            banner_img = raw_banner.resize((width, banner_h), Image.LANCZOS)
+        except Exception as e:
+            logger.warning(f"Banner error: {e}")
+
+    max_per_page = 15
+    pages = [stats[i:i + max_per_page] for i in range(0, len(stats), max_per_page)]
+    image_paths = []
+
+    font_title = _load_font(36, bold=True)
+    font_row = _load_font(28)
+    font_symbol = _load_font(32, bold=True)
+    font_reason = _load_font(24, bold=False)
+    font_col = _load_font(24, bold=True)
+
+    CYAN = (34, 211, 238)
+
+    for page_idx, page_stats in enumerate(pages):
+        row_h = 90
+        header_h = 80
+        table_h = len(page_stats) * row_h
+        padding = 40
+        footer_h = 60
+        total_h = banner_h + padding + header_h + table_h + footer_h
+
+        img = Image.new("RGB", (width, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        if banner_img:
+            img.paste(banner_img, (0, 0))
+
+        _draw_bg_watermark(img, width, total_h)
+
+        y = banner_h + padding
+
+        page_text = f" (Sayfa {page_idx+1}/{len(pages)})" if len(pages) > 1 else ""
+        title = f"Günün {'Tavan' if is_ceiling else 'Taban'} Yapan Hisseleri{page_text}"
+        draw.text((padding, y), title, fill=GOLD, font=font_title)
+        y += 50
+
+        draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
+        y += 15
+
+        col_x = [padding, 240, 420, 580]
+        draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
+        draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
+        draw.text((col_x[2], y), "Seri", fill=GRAY, font=font_col)
+        draw.text((col_x[3], y), "Yükseliş / Düşüş Sebebi (AI)", fill=CYAN, font=font_col)
+        y += 40
+
+        for idx, stat in enumerate(page_stats):
+            row_y = y + (idx * row_h)
+            row_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
+            draw.rectangle([(0, row_y), (width, row_y + row_h)], fill=row_bg)
+
+            text_y = row_y + 25
+
+            # Ticker
+            draw.text((col_x[0], text_y), f"#{stat.ticker}", fill=WHITE, font=font_symbol)
+
+            # Price
+            color = GREEN if is_ceiling else RED
+            draw.text((col_x[1], text_y), f"{stat.close_price:.2f} ₺", fill=color, font=font_row)
+
+            # Seri
+            consec = stat.consecutive_ceiling_count if is_ceiling else stat.consecutive_floor_count
+            seri_yazi = f"{consec}. Gün {'Tavan' if is_ceiling else 'Taban'}"
+            draw.text((col_x[2], text_y), seri_yazi, fill=WHITE, font=font_reason)
+
+            # Neden (Multi-line)
+            reason_text = stat.reason if stat.reason else "Belirgin bir haber bulunamadı."
+            wrapped = textwrap.wrap(reason_text, width=45)
+            r_y = text_y - 10 if len(wrapped) > 1 else text_y
+            for line in wrapped[:2]:
+                draw.text((col_x[3], r_y), line, fill=GRAY, font=font_reason)
+                r_y += 30
+
+        footer_y = total_h - footer_h + 10
+        draw.line([(padding, footer_y - 10), (width - padding, footer_y - 10)], fill=DIVIDER, width=2)
+        draw.text((padding, footer_y), "szalgo.net.tr", fill=ORANGE, font=font_col)
+        draw.text((padding + 200, footer_y), "AI Algoritması Tarafından Üretilmiştir (Sonnet/Gemini)", fill=GRAY, font=font_reason)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{'tavan' if is_ceiling else 'taban'}_sf{page_idx+1}_{ts}.png"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        image_paths.append(filepath)
+
+    return image_paths
+
+
+# ================================================================
 # GUNLUK TAKIP GORSELI (6-24. gun)
 # ================================================================
 

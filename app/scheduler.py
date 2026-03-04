@@ -3869,6 +3869,19 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Gun Sonu En Cok Artanlar/Azalanlar (Tavan/Taban) ───
+    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+    scheduler.add_job(
+        scrape_and_analyze_market_close,
+        CronTrigger(hour=15, minute=35, day_of_week="mon-fri"), # UTC 15:35 = TR 18:35
+        id="market_close_analyzer_tavan_taban",
+        name="Market Close Analyzer (Tavan/Taban) - 18:35 TR",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600, # 1 saat grace
+    )
+
     # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───
     scheduler.add_job(
         daily_subscription_report,

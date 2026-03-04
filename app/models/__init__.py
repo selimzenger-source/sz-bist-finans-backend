@@ -19,6 +19,7 @@ from app.models.pending_tweet import PendingTweet
 from app.models.app_setting import AppSetting
 from app.models.kap_all_disclosure import KapAllDisclosure
 from app.models.user_watchlist import UserWatchlist
+from app.models.daily_stock_market_stat import DailyStockMarketStat
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -40,4 +41,5 @@ __all__ = [
     "KapAllDisclosure",
     "UserWatchlist",
     "FeatureInterest",
+    "DailyStockMarketStat",
 ]
