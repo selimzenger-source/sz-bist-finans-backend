@@ -290,30 +290,17 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         context_parts.append(ipo_info)
     context_str = "\n".join(context_parts) if context_parts else "- Belirgin haber veya veri bulunamadı."
 
-    prompt = f"""#{ticker} hissesi bugün {"tavan" if is_ceiling else "taban"} yaptı (%{f_pct}). Sebebini 8-10 kelimelik TEK bir cümle ile açıkla.
+    prompt = f"""#{ticker} bugün {"tavan" if is_ceiling else "taban"} yaptı. Sebebini SADECE 4-6 kelime ile yaz.
 
 VERİLER:
 {context_str}
 {ipo_rule}
-{trend_rule}
 
-KRİTİK KURALLAR:
-1. SADECE yukarıdaki VERİLER'de somut bir haber/bilgi VARSA yaz. Örn: bilanço, sermaye artırımı, halka arz, ihale, sözleşme, SPK kararı, ortaklık.
-2. Verilerde somut haber YOKSA, SADECE "EMPTY" yaz. Başka hiçbir şey yazma.
-3. ASLA jenerik yorum üretme. "Düşük işlem hacmi", "yatay seyir", "konsolide", "volatilite", "sessiz yükseliş", "istikrarlı seyir", "kurumsal kalite", "sınırlı hareket", "rutin işlem" gibi dolgu ifadeler YASAK.
-4. Tırnak işareti kullanma, sadece düz cümle yaz.
-
-DOĞRU ÖRNEKLER:
-- "Bedelsiz sermaye artırımı onayı sonrası yoğun talep"
-- "Güçlü 3. çeyrek bilançosu açıklandı"
-- "Halka arz sonrası yoğun talep"
-- "Zarardan kâra geçiş açıklaması"
-- "EMPTY" (somut haber yoksa)
-
-YANLIŞ ÖRNEKLER (BUNLARI ASLA YAZMA):
-- "Düşük işlem hacmiyle sessiz seansında konsolide oluyor" ← YASAK
-- "Halka arz sonrası istikrarlı seyirle yatırımcı güvenini pekiştiriyor" ← YASAK
-- "Elektronik sektörü potansiyeli ile yükselişini sürdürüyor" ← YASAK
+KURALLAR:
+1. Verilerde somut haber varsa (bilanço, sermaye artırımı, halka arz, ihale, sözleşme) SADECE onu yaz.
+2. Somut haber yoksa SADECE "EMPTY" yaz. Uydurma, jenerik yorum YASAK.
+3. Kısa ol: "Güçlü 3. çeyrek bilançosu açıklandı." gibi.
+4. YASAK ifadeler: düşük işlem hacmi, yatay seyir, konsolide, volatilite, sessiz, istikrarlı, sınırlı, rutin, potansiyel, kurumsal kalite, güven pekiştir.
 """
 
     # Ortak filtre — jenerik/dolgu yanıtları yakala
