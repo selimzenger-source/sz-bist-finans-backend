@@ -57,9 +57,15 @@ class Settings(BaseSettings):
     # Ücretsiz: https://aistudio.google.com → Get API Key
     GEMINI_API_KEY: str = ""
 
+    # OpenAI API — tavan/taban AI analizi (birincil)
+    OPENAI_API_KEY: str = ""
+
     # Anthropic Claude API (direkt) — izahname + AI rapor analizi
     # https://console.anthropic.com → API Keys
     ANTHROPIC_API_KEY: str = ""
+
+    # Tavily API — web arama (tavan/taban sebep analizi)
+    TAVILY_API_KEY: str = ""
 
     # Scraping intervals (saniye)
     KAP_SCRAPE_INTERVAL_SECONDS: int = 1800   # 30 dakika — halka arz
