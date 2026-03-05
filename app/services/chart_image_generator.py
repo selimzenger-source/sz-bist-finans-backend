@@ -389,7 +389,16 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         supp_to_show = supplementary[:need]
 
     max_per_page = 15
-    pages = [stats[i:i + max_per_page] for i in range(0, len(stats), max_per_page)]
+    import math
+    num_pages = math.ceil(len(stats) / max_per_page)
+    if num_pages > 1:
+        # Eşit dağıt: 21 hisse → 11+10 (eskisi: 15+6)
+        per_page = math.ceil(len(stats) / num_pages)
+        pages = [stats[i:i + per_page] for i in range(0, len(stats), per_page)]
+    else:
+        pages = [stats]
+    # Tüm sayfalar aynı yükseklikte olsun — en kalabalık sayfanın satır sayısını baz al
+    max_rows_in_any_page = max(len(p) for p in pages)
     image_paths = []
 
     font_title = _load_font(36, bold=True)
@@ -411,7 +420,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         row_h = 90
         supp_row_h = 68  # Ek hisseler icin daha kucuk satir
         header_h = 80
-        table_h = len(page_stats) * row_h
+        # Tüm sayfalar aynı yükseklik — en kalabalık sayfanın satır sayısını kullan
+        table_h = max_rows_in_any_page * row_h
         padding = 40
         footer_h = 80  # 2 satir footer icin daha yuksek
         
