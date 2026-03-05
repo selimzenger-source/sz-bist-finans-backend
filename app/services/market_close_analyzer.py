@@ -313,7 +313,38 @@ KURALLAR:
 """
 
     # FALLBACK SİSTEMİ
-    # ── 1. OPENAI (GPT-4o) ──
+    # ── 1. ANTHROPIC (Claude — birincil) ──
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=25) as client:
+                res = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 80,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2
+                    }
+                )
+                if res.status_code == 200:
+                    text = res.json()["content"][0]["text"].strip().replace('"', '').replace("'", "")
+                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+                    if any(x in text.lower() for x in bad):
+                        logger.info(f"Anthropic generic filtered for {ticker}: {text}")
+                    else:
+                        logger.info(f"Anthropic result for {ticker}: {text}")
+                        return text
+                else:
+                    logger.warning(f"Anthropic HTTP {res.status_code} for {ticker}: {res.text[:150]}")
+        except Exception as e:
+            logger.warning(f"Anthropic error for {ticker}: {e}")
+
+    # ── 2. OPENAI (GPT-4o) ──
     if settings.OPENAI_API_KEY:
         try:
             async with httpx.AsyncClient(timeout=20) as client:
@@ -324,42 +355,16 @@ KURALLAR:
                 )
                 if res.status_code == 200:
                     text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
-                    # Generic filtre
                     bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
                     if any(x in text.lower() for x in bad):
-                        return ""
-                    logger.info(f"OpenAI result for {ticker}: {text}")
-                    return text
+                        logger.info(f"OpenAI generic filtered for {ticker}: {text}")
+                    else:
+                        logger.info(f"OpenAI result for {ticker}: {text}")
+                        return text
+                else:
+                    logger.warning(f"OpenAI HTTP {res.status_code} for {ticker}: {res.text[:150]}")
         except Exception as e:
             logger.warning(f"OpenAI error for {ticker}: {e}")
-
-    # ── 2. ANTHROPIC (Claude 3.5 Sonnet) ──
-    if settings.ANTHROPIC_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                res = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": settings.ANTHROPIC_API_KEY,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    },
-                    json={
-                        "model": "claude-3-5-sonnet-20240620",
-                        "max_tokens": 50,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2
-                    }
-                )
-                if res.status_code == 200:
-                    text = res.json()["content"][0]["text"].strip().replace('"', '').replace("'", "")
-                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-                    if any(x in text.lower() for x in bad):
-                        return ""
-                    logger.info(f"Anthropic result for {ticker}: {text}")
-                    return text
-        except Exception as e:
-            logger.warning(f"Anthropic error for {ticker}: {e}")
 
     # ── 3. ABACUS (Sonnet) ──
     if settings.ABACUS_API_KEY:
