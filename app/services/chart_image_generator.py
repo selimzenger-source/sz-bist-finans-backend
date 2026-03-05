@@ -404,7 +404,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
     font_title = _load_font(36, bold=True)
     font_row = _load_font(28)
     font_symbol = _load_font(32, bold=True)
-    font_reason = _load_font(18, bold=False)
+    font_reason = _load_font(16, bold=False)   # 18→16: biraz küçük, daha çok sığsın
     font_col = _load_font(24, bold=True)
     font_seri_bold = _load_font(22, bold=True)
     font_footer_brand = _load_font(16, bold=True)
@@ -454,7 +454,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         y += 15
 
         # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        col_x = [padding, 200, 360, 500, 620, 750]
+        # Fiyat/Değişim/Seri/Son30G sıkıştırıldı → Neden sütununa +50px alan açıldı
+        col_x = [padding, 195, 345, 475, 580, 700]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
@@ -496,14 +497,17 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             m_font = font_seri_bold if m_count >= 2 else font_reason
             draw.text((col_x[4], text_y), m_yazi, fill=m_color, font=m_font)
 
-            # Neden (Multi-line)
+            # Neden (Multi-line) — 16px font, ~9.6px/char, 480px alan → max 48 char/satır
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
-                wrapped = textwrap.wrap(reason_text, width=50)
-                r_y = text_y - 10 if len(wrapped) > 1 else text_y
+                wrapped = textwrap.wrap(reason_text, width=48)
+                if len(wrapped) > 1:
+                    r_y = text_y - 8
+                else:
+                    r_y = text_y
                 for line in wrapped[:2]:
                     draw.text((col_x[5], r_y), line, fill=GRAY, font=font_reason)
-                    r_y += 24
+                    r_y += 22
 
         # === EK HİSSELER BÖLÜMÜ (3 kolon grid) ===
         if show_supplementary and is_last_page and supp_to_show:
