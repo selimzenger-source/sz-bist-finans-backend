@@ -373,12 +373,29 @@ async def scrape_and_analyze_market_close():
     
     logger.info(f"Market Close: {len(ceilings)} ceilings, {len(floors)} floors found.")
     
-    # Eger hic sonuc yoksa (haftasonu, tatil) atla
+    # Eger hic sonuc yoksa atla
     if not ceilings and not floors:
         logger.info("No ceiling or floor stocks found. It might be a weekend or holiday.")
         return
-        
+    
+    # Uzmanpara güncelleme tarihini kontrol et — hafta sonu/tatil tespiti
     today = datetime.now(_TR_TZ).date()
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get("https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/",
+                                   headers={"User-Agent": "Mozilla/5.0"})
+            if res.status_code == 200:
+                import re
+                # "Son güncelleme tarihi: 04.03.2026" formatı
+                m = re.search(r"Son\s+g[üu]ncelleme\s+tarihi[:\s]*(\d{2})\.(\d{2})\.(\d{4})", res.text)
+                if m:
+                    update_date = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                    if update_date != today:
+                        logger.info(f"Uzmanpara son güncelleme: {update_date}, bugün: {today}. Piyasa kapalı, atlanıyor.")
+                        return
+                    logger.info(f"Uzmanpara güncelleme tarihi bugün ({update_date}) — piyasa açık ✅")
+    except Exception as e:
+        logger.warning(f"Güncelleme tarihi kontrol hatası: {e} — devam ediliyor")
     
     async with async_session() as session:
         # Bugün zaten kaydedilmiş mi? (mükerrer önleme — hafta sonu/tatil koruması)
