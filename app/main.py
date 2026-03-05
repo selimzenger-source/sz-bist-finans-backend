@@ -3236,9 +3236,10 @@ async def trigger_market_close_tweet(
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     from app.services.market_close_analyzer import scrape_and_analyze_market_close, scrape_uzmanpara
+    force = payload.get("force", False)
     try:
-        await scrape_and_analyze_market_close()
-        return {"status": "ok", "message": "Tavan/Taban market close tweet tetiklendi"}
+        await scrape_and_analyze_market_close(force=force)
+        return {"status": "ok", "message": f"Tavan/Taban market close tweet tetiklendi (force={force})"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
