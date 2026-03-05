@@ -1240,8 +1240,10 @@ async def scrape_halkarz():
                             len(allocation_groups),
                         )
 
-                        # DB'ye flush — tweet ve bildirim icin guncel veri lazim
-                        await db.flush()
+                        # DB'ye hemen commit — duplicate tweet koruması için kritik!
+                        # Flush yetmez: commit edilmezse başka bir scraper job aynı anda
+                        # allocation_announced=False görür ve ikinci tweet atar.
+                        await db.commit()
 
                         # Tweet #3: Dagitim sonuclari tweeti
                         try:

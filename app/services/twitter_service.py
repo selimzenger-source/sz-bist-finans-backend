@@ -844,7 +844,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
         # Bireysel yatırımcı sonucu
         bireysel_text = ""
         if bireysel_avg_lot:
-            bireysel_text = f"\n\n👤 Bireysel yatırımcıya düşen: ~{int(float(bireysel_avg_lot))} lot/kişi"
+            bireysel_text = f"\n\n👤 Bireysel yatırımcıya düşen: ~{round(float(bireysel_avg_lot))} lot/kişi"
 
         # Toplam başvuran
         applicant_text = ""
@@ -1166,7 +1166,7 @@ def tweet_25_day_performance(
         # Lot kazanc hesabi
         lot_text = ""
         if avg_lot and ipo_price > 0:
-            lot_count = int(avg_lot)
+            lot_count = round(float(avg_lot))
             total_profit = (close_price_25 - ipo_price) * lot_count  # lot = adet
             if total_profit >= 0:
                 lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})"
@@ -1190,7 +1190,7 @@ def tweet_25_day_performance(
             f"Halka Arz: {ipo_price:.2f} TL"
         )
         if avg_lot:
-            text += f"\nKi\u015fi Ba\u015f\u0131 Ort Lot: {int(avg_lot)}"
+            text += f"\nKi\u015fi Ba\u015f\u0131 Ort Lot: {round(float(avg_lot))}"
         text += lot_text
         text += (
             f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
