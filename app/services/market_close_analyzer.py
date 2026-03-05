@@ -597,7 +597,7 @@ async def scrape_and_analyze_market_close(force: bool = False):
             tweet_error_msg = ""
             try:
                 from app.services.chart_image_generator import generate_ceiling_floor_images
-                from app.services.twitter_service import _safe_tweet
+                from app.services.twitter_service import _safe_tweet_with_media
 
                 if c_stats:
                     tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
@@ -610,7 +610,7 @@ async def scrape_and_analyze_market_close(force: bool = False):
                     for idx, path in enumerate(tavan_images):
                         page_info = f" (Sayfa {idx+1}/{len(tavan_images)})" if len(tavan_images) > 1 else ""
                         tweet_text = f"{base_t_text}{page_info}"
-                        _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
+                        _safe_tweet_with_media(text=tweet_text, image_path=path, source="market_close_analyzer")
 
                 # Tavan ve taban tweetleri arası 5 dakika bekle
                 if c_stats and fl_stats:
@@ -628,7 +628,7 @@ async def scrape_and_analyze_market_close(force: bool = False):
                     for idx, path in enumerate(taban_images):
                         page_info = f" (Sayfa {idx+1}/{len(taban_images)})" if len(taban_images) > 1 else ""
                         tweet_text = f"{base_f_text}{page_info}"
-                        _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
+                        _safe_tweet_with_media(text=tweet_text, image_path=path, source="market_close_analyzer")
             except Exception as tweet_err:
                 tweet_ok = False
                 tweet_error_msg = str(tweet_err)[:200]
