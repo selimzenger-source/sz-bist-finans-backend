@@ -7,7 +7,7 @@ import json
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, text
 
 from app.database import async_session
 from app.models.daily_stock_market_stat import DailyStockMarketStat
@@ -127,11 +127,11 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     internal_news = []
     try:
         async with async_session() as session:
-            since = datetime.now(timezone.utc) - timedelta(hours=48)
+            since = datetime.now(timezone.utc) - timedelta(days=15)
             stmt = select(KapAllDisclosure).where(
                 KapAllDisclosure.company_code == ticker,
                 KapAllDisclosure.created_at >= since
-            ).order_by(desc(KapAllDisclosure.created_at)).limit(5)
+            ).order_by(desc(KapAllDisclosure.created_at)).limit(10)
             res = await session.execute(stmt)
             news_items = res.scalars().all()
             for n in news_items:
@@ -192,18 +192,19 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     trend_statement = ""  # Programatik hesaplanmış trend
     try:
         prices = []
-        # Önce DB dene
+        # Önce DB dene — raw SQL ile "date" quoting
         async with async_session() as session:
             since = date.today() - timedelta(days=15)
-            stmt = select(DailyStockMarketStat).where(
-                DailyStockMarketStat.ticker == ticker,
-                DailyStockMarketStat.date >= since
-            ).order_by(DailyStockMarketStat.date.desc()).limit(10)
-            res = await session.execute(stmt)
-            history = res.scalars().all()
-            if history and len(history) >= 3:
-                for h in reversed(history):
-                    prices.append(float(h.close_price))
+            raw = text("""
+                SELECT close_price FROM daily_stock_market_stats
+                WHERE ticker = :ticker AND "date" >= :since
+                ORDER BY "date" DESC LIMIT 10
+            """)
+            res = await session.execute(raw, {"ticker": ticker, "since": since})
+            rows = res.fetchall()
+            if rows and len(rows) >= 3:
+                for row in reversed(rows):
+                    prices.append(float(row[0]))
         
         # DB'de yoksa web'den çek (1. uzmanpara, 2. bigpara)
         if len(prices) < 3:
@@ -282,15 +283,18 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     
     prompt = (f"Hisse: {ticker}, Fiyat: {f_price} TL, Değişim: %{f_pct}\n"
               f"Son KAP/Haberler:\n{combined_context}{ipo_info}{price_history}\n\n"
-              f"GÖREV: Bu hissenin bugün neden {'tavana' if is_ceiling else 'tabana'} ulaştığını açıkla. MAX 5-6 kelime.\n\n"
-              "KURALLAR:\n"
-              "1. Somut bir sebep varsa yaz: bilanço, ihale, sözleşme, temettü, geri alım, bedelsiz sermaye artırımı vs.\n"
-              f"{ipo_rule}"
-              f"{trend_rule}\n"
-              "3. ASLA 'tavan serisi devam', 'X. gün tavan serisi', 'taban serisi devam' YAZMA. Bu bilgi zaten tabloda var.\n"
-              "4. Somut bir sebep BULAMIYORSAN, boş string dön: ''\n"
-              "5. ASLA uydurma. ASLA 'trend direnci kırıldı', 'momentum', 'alıcı baskısı', 'piyasa beklentisi' gibi genel laflar yazma.\n"
-              "6. Sadece somut, doğrulanabilir sebepler yaz veya boş bırak.")
+              f"GÖREV: Bu hissenin bugün neden {'tavana' if is_ceiling else 'tabana'} ulaştığını açıkla. MAX 8-10 kelime.\n"
+              "Örnek iyi cevaplar: 'Bilanço: net kar %225 arttı.', 'MSCI segment yükseltmesini iptal etti.', 'Ali Ercanın serbest bırakılması.', 'SPK onayı sonrası halka arz beklentisi.'\n\n"
+              "ÖNCELİK SIRASI:\n"
+              "1. KAP bildirimi varsa onu yaz: bilanço, MSCI, ihale, sözleşme, temettü, geri alım, bedelsiz sermaye artırımı, SPK onayı vs.\n"
+              "2. Somut haber varsa yaz: şirket haberi, finansal sonuçlar, ortak değişikliği, mahkeme kararı vs.\n"
+              f"{ipo_rule}\n"
+              "YASAKLAR:\n"
+              "- 'tavan serisi devam', 'X. gün tavan serisi', 'taban serisi devam' YAZMA (tabloda zaten var)\n"
+              "- 'derin satış', 'tepki alışı', 'kâr satışı', 'sert yükseliş' gibi trend yorumları YAZMA\n"
+              "- 'momentum', 'alıcı baskısı', 'trend direnci', 'piyasa beklentisi' gibi genel laflar YAZMA\n"
+              "- Somut haber/veri YOKSA boş string dön: ''\n"
+              "- UYDURMA! Sadece yukarıdaki verilerde geçen bilgilere dayan.")
 
     # FALLBACK SİSTEMİ
     # ── 1. OPENAI (GPT-4o) ──
