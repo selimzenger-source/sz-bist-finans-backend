@@ -3213,13 +3213,11 @@ async def trigger_market_close_tweet(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
-    from app.services.market_close_analyzer import scrape_and_analyze_market_close, scrape_uzmanpara
+    import asyncio
+    from app.services.market_close_analyzer import scrape_and_analyze_market_close
     force = payload.get("force", False)
-    try:
-        await scrape_and_analyze_market_close(force=force)
-        return {"status": "ok", "message": f"Tavan/Taban market close tweet tetiklendi (force={force})"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+    asyncio.create_task(scrape_and_analyze_market_close(force=force))
+    return {"status": "ok", "message": f"Tavan/Taban tweet arka planda başlatıldı (force={force}). Sonuç Telegram'dan gelecek."}
 
 
 @app.post("/api/v1/admin/debug-market-close")
