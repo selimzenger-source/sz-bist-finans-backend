@@ -336,7 +336,7 @@ KURALLAR:
                     },
                     json={
                         "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 80,
+                        "max_tokens": 120,
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.2
                     }
@@ -360,7 +360,7 @@ KURALLAR:
                 res = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                    json={"model": "gpt-4o", "max_tokens": 60, "messages": [{"role": "system", "content": "Sen kısa finansal yorum asistanısın. SADECE 4-6 kelime yaz. Uzun cümleler YASAK."}, {"role": "user", "content": prompt}], "temperature": 0.2}
+                    json={"model": "gpt-4o", "max_tokens": 120, "messages": [{"role": "system", "content": "Sen kısa finansal yorum asistanısın. SADECE 4-6 kelime yaz. Uzun cümleler YASAK."}, {"role": "user", "content": prompt}], "temperature": 0.2}
                 )
                 if res.status_code == 200:
                     text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
