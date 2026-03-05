@@ -217,32 +217,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Scheduler baslatilamadi: %s", e)
 
-    # ── Startup: Bugünün tavan/taban market close tweeti atılmamışsa hemen at ──
-    # Render deploy sonrası misfire olan tavan/taban tweetini telafi eder
-    try:
-        from datetime import date as _date_type
-        from sqlalchemy import text as _sa_text
-        _today = _date_type.today()
-        _now_tr = datetime.now(timezone.utc).hour * 100 + datetime.now(timezone.utc).minute
-        # UTC 15:35 = TR 18:35 — sadece 18:35 sonrasında çalışsın (borsa kapandıktan sonra)
-        if _now_tr >= 1535 and _today.weekday() < 5:
-            async with async_session() as _db:
-                _check = await _db.execute(
-                    _sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
-                    {"today": _today}
-                )
-                _count = _check.scalar()
-                if _count == 0:
-                    logger.info("🚀 Startup: Bugünün tavan/taban tweeti atılmamış — şimdi çalıştırılıyor!")
-                    import asyncio
-                    from app.services.market_close_analyzer import scrape_and_analyze_market_close
-                    asyncio.create_task(scrape_and_analyze_market_close())
-                else:
-                    logger.info("Startup: Bugünün tavan/taban tweeti zaten atılmış (%d kayıt). OK.", _count)
-        else:
-            logger.info("Startup: Tavan/taban tweet kontrolü atlandı (saat uygun değil veya hafta sonu)")
-    except Exception as e:
-        logger.warning("Startup tavan/taban tweet kontrolü hatası: %s", e)
+    # ── Startup: Tavan/taban tweet — scheduler'a bırakılıyor ──
+    # Startup'ta ağır AI analiz çalıştırmak Render health check'i bozuyor.
+    # Bunun yerine sadece scheduler (18:35 TR) ve admin trigger endpoint kullanılır.
+    logger.info("Startup: Tavan/taban tweet kontrolü scheduler'a bırakıldı (startup'ta çalıştırılmayacak).")
 
     yield
 
