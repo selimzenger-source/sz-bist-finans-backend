@@ -381,22 +381,21 @@ async def scrape_and_analyze_market_close():
     today = datetime.now(_TR_TZ).date()
     
     async with async_session() as session:
-        # Piyasalarin o gun acik olup olmadigini gormek icin son kayitla karsilastir
-        # Herhangi bir tavan/tabanın fiyatı değişmiş mi diye bakabiliriz ama daha garantisi
-        # Veri tabanındaki 'today' kaydı var mı diye bakmak (mükerrer çalışmayı da önler).
-        check_stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.date == today).limit(1)
-        existing = (await session.execute(check_stmt)).scalar()
-        if existing:
+        # Bugün zaten kaydedilmiş mi? (mükerrer önleme — hafta sonu/tatil koruması)
+        check_res = await session.execute(
+            text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+            {"today": today}
+        )
+        if check_res.scalar() > 0:
             logger.info(f"{today} için zaten analiz yapılmış. Atlanıyor.")
             return
 
-        # Tatil kontrolü (Opsiyonel: Eğer Uzmanpara verisi dünküyle tam aynıysa tatildir)
-        # Ama Genelde tavan/taban listesi boşsa veya bugün işlem yoksa scrape zaten boş döner.
-        
-        # FIFO Mantığı: 30 günden eski kayıtları temizle (isteğe göre)
+        # FIFO: 32 günden eski kayıtları temizle
         cleanup_date = today - timedelta(days=32)
-        from sqlalchemy import delete
-        await session.execute(delete(DailyStockMarketStat).where(DailyStockMarketStat.date < cleanup_date))
+        await session.execute(
+            text('DELETE FROM daily_stock_market_stats WHERE "date" < :cutoff'),
+            {"cutoff": cleanup_date}
+        )
 
         # Tavanlari isleyelim
         for stock in ceilings:
@@ -404,18 +403,23 @@ async def scrape_and_analyze_market_close():
             price_val = Decimal(str(stock["price"]))
             pct_val = Decimal(str(stock["change"]))
             
-            # Gecmis 30 gun icinde rekorlari var mi? Statlari hesapla.
-            stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.ticker == ticker).order_by(desc(DailyStockMarketStat.date))
-            res = await session.execute(stmt)
-            past_records = res.scalars().all()
+            # Gecmis kayitlar — raw SQL
+            past_res = await session.execute(
+                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
+                        consecutive_floor_count, "date"
+                        FROM daily_stock_market_stats 
+                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                {"ticker": ticker}
+            )
+            past_records = past_res.fetchall()
             
             consec_ceil = 1
-            if past_records and past_records[0].is_ceiling:
-                consec_ceil = past_records[0].consecutive_ceiling_count + 1
+            if past_records and past_records[0][0]:  # is_ceiling
+                consec_ceil = past_records[0][2] + 1  # consecutive_ceiling_count + 1
             
-            monthly_ceil = sum(1 for r in past_records if r.is_ceiling and (today - r.date).days <= 30) + 1
+            monthly_ceil = sum(1 for r in past_records if r[0] and (today - r[4]).days <= 30) + 1
             
-            # AI Analizi artik daha fazla veri ile yapiliyor
+            # AI Analizi
             reason = await _analyze_reason_with_ai(
                 ticker=ticker, 
                 is_ceiling=True, 
@@ -443,15 +447,20 @@ async def scrape_and_analyze_market_close():
             price_val = Decimal(str(stock["price"]))
             pct_val = Decimal(str(stock["change"]))
             
-            stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.ticker == ticker).order_by(desc(DailyStockMarketStat.date))
-            res = await session.execute(stmt)
-            past_records = res.scalars().all()
+            past_res = await session.execute(
+                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
+                        consecutive_floor_count, "date"
+                        FROM daily_stock_market_stats 
+                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                {"ticker": ticker}
+            )
+            past_records = past_res.fetchall()
             
             consec_flr = 1
-            if past_records and past_records[0].is_floor:
-                consec_flr = past_records[0].consecutive_floor_count + 1
+            if past_records and past_records[0][1]:  # is_floor
+                consec_flr = past_records[0][3] + 1  # consecutive_floor_count + 1
 
-            monthly_flr = sum(1 for r in past_records if r.is_floor and (today - r.date).days <= 30) + 1
+            monthly_flr = sum(1 for r in past_records if r[1] and (today - r[4]).days <= 30) + 1
             
             reason = await _analyze_reason_with_ai(
                 ticker=ticker, 
@@ -476,14 +485,43 @@ async def scrape_and_analyze_market_close():
             
         await session.commit()
         
-        # Oku (yeni olanlari listele)
-        t_stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.date == today, DailyStockMarketStat.is_ceiling == True).order_by(desc(DailyStockMarketStat.consecutive_ceiling_count))
-        t_res = await session.execute(t_stmt)
-        c_stats = t_res.scalars().all()
+        # Bugünkü verileri oku — raw SQL
+        t_res = await session.execute(
+            text("""SELECT * FROM daily_stock_market_stats 
+                    WHERE "date" = :today AND is_ceiling = true
+                    ORDER BY consecutive_ceiling_count DESC"""),
+            {"today": today}
+        )
+        c_stats_raw = t_res.fetchall()
         
-        f_stmt = select(DailyStockMarketStat).where(DailyStockMarketStat.date == today, DailyStockMarketStat.is_floor == True).order_by(desc(DailyStockMarketStat.consecutive_floor_count))
-        f_res = await session.execute(f_stmt)
-        fl_stats = f_res.scalars().all()
+        f_res = await session.execute(
+            text("""SELECT * FROM daily_stock_market_stats 
+                    WHERE "date" = :today AND is_floor = true
+                    ORDER BY consecutive_floor_count DESC"""),
+            {"today": today}
+        )
+        fl_stats_raw = f_res.fetchall()
+        
+        # ORM objelere dönüştür (image generator uyumu için)
+        c_stats = []
+        for r in c_stats_raw:
+            s = DailyStockMarketStat(
+                ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
+                is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
+                monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
+                monthly_floor_count=r[9], reason=r[10]
+            )
+            c_stats.append(s)
+        
+        fl_stats = []
+        for r in fl_stats_raw:
+            s = DailyStockMarketStat(
+                ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
+                is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
+                monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
+                monthly_floor_count=r[9], reason=r[10]
+            )
+            fl_stats.append(s)
 
     # ==========================
     # GÖRSEL ÜRETİMİ VE TWITTER
