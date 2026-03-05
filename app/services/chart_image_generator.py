@@ -355,8 +355,14 @@ def generate_25day_image(
 # ================================================================
 import textwrap
 
-def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
-    """Tavan veya taban yapan hisseler icin listeyi gorsele aktarir (sayfali)."""
+def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: list = None) -> list[str]:
+    """Tavan veya taban yapan hisseler icin listeyi gorsele aktarir (sayfali).
+    
+    Args:
+        stats: Ana tavan/taban hisse listesi
+        is_ceiling: Tavan mi taban mi
+        supplementary: Ek hisseler (tavan/taban olmayan en çok artanlar/azalanlar) — liste <5 ise kullanılır
+    """
     if not stats:
         return []
 
@@ -375,6 +381,13 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
         except Exception as e:
             logger.warning(f"Banner error: {e}")
 
+    # Ek hisseleri sadece ana liste <5 ise ekle
+    show_supplementary = supplementary and len(stats) < 5
+    supp_to_show = []
+    if show_supplementary:
+        need = 8 - len(stats)
+        supp_to_show = supplementary[:need]
+
     max_per_page = 15
     pages = [stats[i:i + max_per_page] for i in range(0, len(stats), max_per_page)]
     image_paths = []
@@ -382,18 +395,35 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
     font_title = _load_font(36, bold=True)
     font_row = _load_font(28)
     font_symbol = _load_font(32, bold=True)
-    font_reason = _load_font(24, bold=False)
+    font_reason = _load_font(18, bold=False)
     font_col = _load_font(24, bold=True)
+    font_seri_bold = _load_font(22, bold=True)
+    font_footer_brand = _load_font(16, bold=True)
+    font_footer_disclaimer = _load_font(14, bold=False)
+    # Ek hisseler icin %25 daha kucuk fontlar
+    font_supp_symbol = _load_font(24, bold=True)
+    font_supp_row = _load_font(21)
+    font_supp_title = _load_font(28, bold=True)
 
     CYAN = (34, 211, 238)
 
     for page_idx, page_stats in enumerate(pages):
         row_h = 90
+        supp_row_h = 68  # Ek hisseler icin daha kucuk satir
         header_h = 80
         table_h = len(page_stats) * row_h
         padding = 40
-        footer_h = 60
-        total_h = banner_h + padding + header_h + table_h + footer_h
+        footer_h = 80  # 2 satir footer icin daha yuksek
+        
+        # Ek hisseler icin ek alan (sadece son sayfada)
+        supp_section_h = 0
+        is_last_page = page_idx == len(pages) - 1
+        if show_supplementary and is_last_page and supp_to_show:
+            import math
+            supp_grid_rows = math.ceil(len(supp_to_show) / 3)
+            supp_section_h = 65 + supp_grid_rows * supp_row_h + 20  # Baslik + grid satirlari + gap
+        
+        total_h = banner_h + padding + header_h + table_h + supp_section_h + footer_h
 
         img = Image.new("RGB", (width, total_h), BG_COLOR)
         draw = ImageDraw.Draw(img)
@@ -414,13 +444,14 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
         y += 15
 
         # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        col_x = [padding, 200, 360, 520, 680, 840]
+        col_x = [padding, 200, 360, 500, 620, 750]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
         draw.text((col_x[3], y), "Seri", fill=GRAY, font=font_col)
         draw.text((col_x[4], y), "Son 30G", fill=GRAY, font=font_col)
-        draw.text((col_x[5], y), "Günün Notu (AI)", fill=CYAN, font=font_col)
+        neden_header = "Neden Yükseldi (AI)" if is_ceiling else "Neden Düştü (AI)"
+        draw.text((col_x[5], y), neden_header, fill=CYAN, font=font_col)
         y += 40
 
         for idx, stat in enumerate(page_stats):
@@ -441,29 +472,70 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool) -> list[str]:
             pct = getattr(stat, "percent_change", 10.0) # Fallback to 10.0
             draw.text((col_x[2], text_y), f"% {pct:+.2f}", fill=color, font=font_row)
 
-            # Seri
+            # Seri — gold+bold if ≥2
             consec = stat.consecutive_ceiling_count if is_ceiling else stat.consecutive_floor_count
             seri_yazi = f"{consec}. Gün"
-            draw.text((col_x[3], text_y), seri_yazi, fill=WHITE, font=font_reason)
+            seri_color = GOLD if consec >= 2 else WHITE
+            seri_font = font_seri_bold if consec >= 2 else font_reason
+            draw.text((col_x[3], text_y), seri_yazi, fill=seri_color, font=seri_font)
 
-            # Son 1 Ay
+            # Son 1 Ay — gold+bold if ≥2
             m_count = stat.monthly_ceiling_count if is_ceiling else stat.monthly_floor_count
             m_yazi = f"{m_count} Kez"
-            draw.text((col_x[4], text_y), m_yazi, fill=WHITE, font=font_reason)
+            m_color = GOLD if m_count >= 2 else WHITE
+            m_font = font_seri_bold if m_count >= 2 else font_reason
+            draw.text((col_x[4], text_y), m_yazi, fill=m_color, font=m_font)
 
             # Neden (Multi-line)
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
-                wrapped = textwrap.wrap(reason_text, width=35)
+                wrapped = textwrap.wrap(reason_text, width=50)
                 r_y = text_y - 10 if len(wrapped) > 1 else text_y
                 for line in wrapped[:2]:
                     draw.text((col_x[5], r_y), line, fill=GRAY, font=font_reason)
-                    r_y += 30
+                    r_y += 24
 
-        footer_y = total_h - footer_h + 10
-        draw.line([(padding, footer_y - 10), (width - padding, footer_y - 10)], fill=DIVIDER, width=2)
-        draw.text((padding, footer_y), "szalgo.net.tr", fill=ORANGE, font=font_col)
-        draw.text((padding + 200, footer_y), "AI Algoritması Tarafından Üretilmiştir (Sonnet/Gemini)", fill=GRAY, font=font_reason)
+        # === EK HİSSELER BÖLÜMÜ (3 kolon grid) ===
+        if show_supplementary and is_last_page and supp_to_show:
+            supp_start_y = y + len(page_stats) * row_h + 15
+            supp_title = f"Diğer {'Yükselen' if is_ceiling else 'Düşen'} Hisseler"
+            draw.line([(padding, supp_start_y), (width - padding, supp_start_y)], fill=DIVIDER, width=1)
+            supp_start_y += 8
+            draw.text((padding, supp_start_y), supp_title, fill=GRAY, font=font_supp_title)
+            supp_start_y += 40
+
+            # 3 kolon grid layout
+            cols_per_row = 3
+            col_width = (width - 2 * padding) // cols_per_row
+            for s_idx, s_stat in enumerate(supp_to_show):
+                grid_row = s_idx // cols_per_row
+                grid_col = s_idx % cols_per_row
+                s_row_y = supp_start_y + (grid_row * supp_row_h)
+                s_x_base = padding + grid_col * col_width
+                
+                # Alternate row bg
+                if grid_col == 0:
+                    s_row_bg = ROW_EVEN if grid_row % 2 == 0 else ROW_ODD
+                    draw.rectangle([(0, s_row_y), (width, s_row_y + supp_row_h)], fill=s_row_bg)
+                
+                s_text_y = s_row_y + 18
+                s_color = GREEN if is_ceiling else RED
+                # Ticker
+                draw.text((s_x_base, s_text_y), f"#{s_stat.ticker}", fill=(180, 180, 180), font=font_supp_symbol)
+                # Price + %
+                s_pct = getattr(s_stat, "percent_change", 0.0)
+                info_text = f"{s_stat.close_price:.2f}₺ ({s_pct:+.1f}%)"
+                draw.text((s_x_base + 110, s_text_y), info_text, fill=s_color, font=font_footer_disclaimer)
+
+        # === FOOTER ===
+        footer_y = total_h - footer_h
+        draw.line([(padding, footer_y), (width - padding, footer_y)], fill=DIVIDER, width=2)
+        footer_y += 12
+        draw.text((padding, footer_y), "szalgo.net.tr", fill=ORANGE, font=_load_font(18, bold=True))
+        line1 = "SZ Algo Özel Eğitimli Modeller Tarafından Üretilmiştir."
+        line2 = "Yatırım yaparken mutlaka kendi araştırmanızı yapınız."
+        draw.text((padding + 170, footer_y), line1, fill=GRAY, font=_load_font(16, bold=False))
+        draw.text((padding + 170, footer_y + 22), line2, fill=(120, 120, 120), font=_load_font(14, bold=False))
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{'tavan' if is_ceiling else 'taban'}_sf{page_idx+1}_{ts}.png"

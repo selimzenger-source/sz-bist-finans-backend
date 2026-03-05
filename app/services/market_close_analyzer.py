@@ -12,6 +12,7 @@ from sqlalchemy import select, desc, func
 from app.database import async_session
 from app.models.daily_stock_market_stat import DailyStockMarketStat
 from app.models.kap_all_disclosure import KapAllDisclosure
+from app.models.ipo import IPO
 from app.config import get_settings
 
 # Gemini for summarization
@@ -68,13 +69,61 @@ async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
     
     return results
 
+
+async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list[str] = None, limit: int = 8) -> list[dict]:
+    """Tavan/taban olmayan en çok artan/azalan hisseleri getirir (ek liste için)."""
+    url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-azalanlar/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html"
+    }
+    exclude = set(exclude_tickers or [])
+    results = []
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers)
+            if res.status_code != 200:
+                return []
+            soup = BeautifulSoup(res.text, "html.parser")
+            table_id = "tbl_artanlar" if is_ceiling else "tbl_azalanlar"
+            table = soup.find("table", {"id": table_id})
+            if not table:
+                table = soup.select_one("table")
+            if not table:
+                return []
+            for row in table.find_all("tr")[1:]:
+                cols = row.find_all("td")
+                if len(cols) >= 4:
+                    ticker = cols[0].text.strip()
+                    if ticker in exclude:
+                        continue
+                    price_str = cols[1].text.strip().replace(".", "").replace(",", ".")
+                    change_str = cols[3].text.strip().replace(".", "").replace(",", ".")
+                    try:
+                        price = float(price_str)
+                        change = float(change_str)
+                        # Tavan/taban olmayan ama güçlü hareketle olanlar
+                        if is_ceiling and 0 < change < 9.75:
+                            results.append({"ticker": ticker, "price": price, "change": change})
+                        elif not is_ceiling and -9.75 < change < 0:
+                            results.append({"ticker": ticker, "price": price, "change": change})
+                    except ValueError:
+                        continue
+                if len(results) >= limit:
+                    break
+    except Exception as e:
+        logger.error(f"Supplementary scrape hatasi: {e}")
+    return results[:limit]
+
 async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = None, pct: float = None, consec: int = 1, monthly: int = 1) -> str:
-    """Internal KAP + Tavily + Context ile Abacus (Sonnet) üzerinden analiz yapar."""
+    """Internal KAP + Tavily + Context ile Coklu-AI Fallback ile analiz yapar.
+    Sira: OpenAI (GPT-4o) -> Abacus (Sonnet) -> Gemini 2.5 Pro
+    """
     settings = get_settings()
-    abacus_key = settings.ABACUS_API_KEY
     tavily_key = "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"
     
-    # 1. Dahili KAP veritabanindan son 48 saatteki haberleri cek
+    # 1. Dahili KAP + Tavily Context Hazirla
     internal_news = []
     try:
         async with async_session() as session:
@@ -82,20 +131,18 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             stmt = select(KapAllDisclosure).where(
                 KapAllDisclosure.company_code == ticker,
                 KapAllDisclosure.created_at >= since
-            ).order_by(desc(KapAllDisclosure.created_at)).limit(3)
+            ).order_by(desc(KapAllDisclosure.created_at)).limit(5)
             res = await session.execute(stmt)
             news_items = res.scalars().all()
             for n in news_items:
-                t_str = f"Başlık: {n.title}"
-                if n.ai_summary: t_str += f" (Özet: {n.ai_summary})"
+                t_str = f"KAP: {n.title}"
+                if n.ai_summary: t_str += f" ({n.ai_summary})"
                 internal_news.append(t_str)
     except Exception as e:
         logger.warning(f"Internal KAP news error for {ticker}: {e}")
 
-    # 2. Tavily ile dis arama yap
-    query_action = "neden yükseldi tavan oldu" if is_ceiling else "neden düştü taban oldu"
-    query = f"Borsa İstanbul {ticker} hissesi bugün {query_action} site:borsaningundemi.com OR KAP haber"
-    
+    query_action = "neden yükseldi tavan" if is_ceiling else "neden düştü taban"
+    query = f"{ticker} hisse {query_action}"
     external_search = ""
     try:
         async with httpx.AsyncClient() as client:
@@ -110,55 +157,208 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     except Exception as e:
         logger.warning(f"Tavily search error for {ticker}: {e}")
 
-    combined_context = "\n".join(internal_news) + "\n" + external_search
-    
-    # Abacus (Sonnet) ile analiz
+    # 2. IPO kontrolu — gercekten yeni halka arz mi? Detayli bilgi cek.
+    is_recent_ipo = False
+    ipo_info = ""
     try:
-        # Guvenli formatlama
-        f_pct = f"{pct:+.2f}" if pct is not None else "9.75"
-        f_price = f"{price:.2f}" if price is not None else "0.00"
-        
-        stat_ctx = f"Hisse: {ticker}, Fiyat: {f_price}, Değişim: %{f_pct}, Seri: {consec}. Gün, Son 30G: {monthly}"
-        
-        prompt = (f"Market Verisi: {stat_ctx}\n"
-                  f"KAP Bildirimleri & Haberler:\n{combined_context}\n\n"
-                  "GÖREV: Bu hissenin bugünkü hareketini profesyonel bir borsa analisti gibi yorumla. "
-                  "LİMİT: 5-7 kelime.\n"
-                  "ANALİZ REHBERİ:\n"
-                  "1. KAP haberi varsa (bilanço, ihale, sözleşme) MUTLAKA onu belirt. (Örn: 'Güçlü bilanço sonrası tavan serisi')\n"
-                  "2. İlk 10 günündeki bir halka arz ise: 'Halka arz sonrası momentum sürüyor'\n"
-                  "3. Uzun süreli düşüş/taban sonrası ilk tavan ise: 'Derin satış sonrası teknik tepki alışı'\n"
-                  "4. Hiç haber yoksa: Fiyat/Hacim trendine göre mantıklı bir yorum yap. "
-                  "(Örn: 'Kritik trend desteğinden gelen dönüş', 'Rallide hızlanan teknik alım iştahı', 'Trend direncinin hacimli yukarı kırılımı')\n"
-                  "YASAK: 'Küçük yatırımcı talebi', 'Alıcı baskısı', 'Piyasa beklentisi' gibi generic kelimeler kullanma. "
-                  "Analiziniz hisseye ve duruma ÖZEL olsun.")
-        
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://routellm.abacus.ai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {abacus_key}", "Content-Type": "application/json"},
-                json={
-                    "model": "claude-sonnet-4-6", # Abacus'taki model ismi
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3
-                }
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                text = data["choices"][0]["message"]["content"].strip().replace('"', '').replace('\n', '')
-                
-                # Cok generic gelirse temizle
-                forbidden = ["yatırımcı talebi", "alıcı baskısı", "satıcı baskısı", "piyasa algısı"]
-                if any(f in text.lower() for f in forbidden):
-                     return "Teknik trend takibi ve momentum." if is_ceiling else "Teknik satış ve trend değişimi."
-                return text
-            else:
-                logger.error(f"Abacus error: {resp.text}")
-                return "Pozitif teknik trend." if is_ceiling else "Negatif teknik görünüm."
-                
+        async with async_session() as session:
+            cutoff = date.today() - timedelta(days=60)
+            stmt = select(IPO).where(
+                IPO.ticker == ticker,
+                IPO.trading_start != None,
+                IPO.trading_start >= cutoff
+            ).limit(1)
+            res = await session.execute(stmt)
+            ipo = res.scalar_one_or_none()
+            if ipo:
+                is_recent_ipo = True
+                days_since = (date.today() - ipo.trading_start).days
+                parts = [f"\nÖNEMLİ HALKA ARZ BİLGİSİ:"]
+                parts.append(f"- Şirket: {ipo.company_name}")
+                if ipo.sector: parts.append(f"- Sektör: {ipo.sector}")
+                if ipo.ipo_price: parts.append(f"- Halka arz fiyatı: {ipo.ipo_price} TL (Şu anki: {f_price if price else '?'} TL)")
+                parts.append(f"- İşlem görmeye başlayalı {days_since} gün oldu")
+                if ipo.market_segment:
+                    seg_map = {"yildiz_pazar": "Yıldız Pazar", "ana_pazar": "Ana Pazar", "alt_pazar": "Alt Pazar"}
+                    parts.append(f"- Pazar: {seg_map.get(ipo.market_segment, ipo.market_segment)}")
+                if ipo.total_applicants:
+                    parts.append(f"- Toplam başvuran: {ipo.total_applicants:,} kişi")
+                ipo_info = "\n".join(parts)
     except Exception as e:
-        logger.error(f"AI Analiz hatasi ({ticker}): {e}")
-        return "Pozitif teknik trend." if is_ceiling else "Negatif teknik görünüm."
+        logger.warning(f"IPO check error for {ticker}: {e}")
+
+    # 3. Fiyat geçmişi — DB veya BigPara fallback
+    price_history = ""
+    trend_statement = ""  # Programatik hesaplanmış trend
+    try:
+        prices = []
+        # Önce DB dene
+        async with async_session() as session:
+            since = date.today() - timedelta(days=15)
+            stmt = select(DailyStockMarketStat).where(
+                DailyStockMarketStat.ticker == ticker,
+                DailyStockMarketStat.date >= since
+            ).order_by(DailyStockMarketStat.date.desc()).limit(10)
+            res = await session.execute(stmt)
+            history = res.scalars().all()
+            if history and len(history) >= 3:
+                for h in reversed(history):
+                    prices.append(float(h.close_price))
+        
+        # DB'de yoksa web'den çek (1. uzmanpara, 2. bigpara)
+        if len(prices) < 3:
+            for scrape_url in [
+                f"https://uzmanpara.milliyet.com.tr/borsa/hisse-detay/{ticker}/",
+                f"https://bigpara.hurriyet.com.tr/borsa/hisse-fiyatlari/{ticker.lower()}/"
+            ]:
+                try:
+                    async with httpx.AsyncClient(timeout=8) as client:
+                        res = await client.get(scrape_url, headers={"User-Agent": "Mozilla/5.0"})
+                        if res.status_code == 200:
+                            soup = BeautifulSoup(res.text, "html.parser")
+                            for table in soup.find_all("table"):
+                                for row in table.find_all("tr")[1:11]:
+                                    cols = row.find_all("td")
+                                    if len(cols) >= 4:
+                                        for col in cols:
+                                            try:
+                                                txt = col.text.strip().replace(".", "").replace(",", ".")
+                                                val = float(txt)
+                                                if 0.5 < val < 100000:  # Makul fiyat
+                                                    prices.append(val)
+                                                    break
+                                            except: pass
+                            if len(prices) >= 3:
+                                break
+                except Exception as e:
+                    logger.warning(f"Scrape error ({scrape_url}) for {ticker}: {e}")
+        
+        # Programatik trend hesapla
+        if len(prices) >= 3:
+            oldest_price = prices[0]
+            newest_price = prices[-1]
+            if oldest_price > 0:
+                pct_change_period = ((newest_price - oldest_price) / oldest_price) * 100
+                
+                if pct_change_period <= -25:
+                    # Gerçekten derin düşüş var — bu veriyle söyle
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:.0f} düşüş. Bu GERÇEK derin satış."
+                    price_history = trend_statement
+                elif pct_change_period >= 25:
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.0f} yükseliş. Tarihi tepe bölgesi."
+                    price_history = trend_statement
+                else:
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.1f} değişim. Normal seyir."
+                    price_history = trend_statement
+    except Exception as e:
+        logger.warning(f"Price history error for {ticker}: {e}")
+
+    combined_context = "\n".join(internal_news) + "\n" + external_search
+    has_news = bool(internal_news) or len(external_search.strip()) > 20
+    f_pct = f"{pct:+.2f}" if pct is not None else ("+9.95" if is_ceiling else "-9.95")
+    f_price = f"{price:.2f}" if price is not None else "0.00"
+    
+    ipo_rule = ""
+    if is_recent_ipo:
+        days_since = 0
+        try:
+            for line in ipo_info.split("\n"):
+                if "başlayalı" in line:
+                    import re
+                    m = re.search(r"(\d+) gün", line)
+                    if m: days_since = int(m.group(1))
+        except: pass
+        
+        if days_since <= 10:
+            ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası yoğun talep' yaz."
+        else:
+            ipo_rule = ("\n- Bu hisse halka arz oldu ama ilk 10 günü geçti. Artık basit 'halka arz' açıklaması yetmez."
+                       "\n  Somut bir sebep bul veya boş bırak.")
+    else:
+        ipo_rule = "\n- Bu hisse ESKİ bir şirket. ASLA 'halka arz' deme."
+    
+    # Trend kuralı — AI ASLA trend yorumu yapmasın
+    trend_rule = "\n2. ASLA 'derin satış', 'tepki alışı', 'kâr satışı', 'sert yükseliş' gibi trend yorumları YAZMA. Sadece somut haber/veri bazlı sebepler."
+    
+    prompt = (f"Hisse: {ticker}, Fiyat: {f_price} TL, Değişim: %{f_pct}\n"
+              f"Son KAP/Haberler:\n{combined_context}{ipo_info}{price_history}\n\n"
+              f"GÖREV: Bu hissenin bugün neden {'tavana' if is_ceiling else 'tabana'} ulaştığını açıkla. MAX 5-6 kelime.\n\n"
+              "KURALLAR:\n"
+              "1. Somut bir sebep varsa yaz: bilanço, ihale, sözleşme, temettü, geri alım, bedelsiz sermaye artırımı vs.\n"
+              f"{ipo_rule}"
+              f"{trend_rule}\n"
+              "3. ASLA 'tavan serisi devam', 'X. gün tavan serisi', 'taban serisi devam' YAZMA. Bu bilgi zaten tabloda var.\n"
+              "4. Somut bir sebep BULAMIYORSAN, boş string dön: ''\n"
+              "5. ASLA uydurma. ASLA 'trend direnci kırıldı', 'momentum', 'alıcı baskısı', 'piyasa beklentisi' gibi genel laflar yazma.\n"
+              "6. Sadece somut, doğrulanabilir sebepler yaz veya boş bırak.")
+
+    # FALLBACK SİSTEMİ
+    # ── 1. OPENAI (GPT-4o) ──
+    if settings.OPENAI_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                res = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                    json={"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                )
+                if res.status_code == 200:
+                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
+                    # Generic filtre
+                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+                    if any(x in text.lower() for x in bad):
+                        return ""
+                    logger.info(f"OpenAI result for {ticker}: {text}")
+                    return text
+        except Exception as e:
+            logger.warning(f"OpenAI error for {ticker}: {e}")
+
+    # ── 2. ABACUS (Sonnet) ──
+    if settings.ABACUS_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                res = await client.post(
+                    "https://routellm.abacus.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.ABACUS_API_KEY}"},
+                    json={"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                )
+                if res.status_code == 200:
+                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
+                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+                    if any(x in text.lower() for x in bad):
+                        return ""
+                    logger.info(f"Abacus result for {ticker}: {text}")
+                    return text
+        except Exception as e:
+            logger.warning(f"Abacus error for {ticker}: {e}")
+
+    # ── 3. GEMINI 2.5 PRO ──
+    if settings.GEMINI_API_KEY:
+        try:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            model = genai.GenerativeModel("gemini-2.5-pro")
+            res = model.generate_content(prompt)
+            text = res.text.strip().replace('"', '').replace("'", "")
+            bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+            if any(x in text.lower() for x in bad):
+                return ""
+            logger.info(f"Gemini result for {ticker}: {text}")
+            return text
+        except Exception as e:
+            logger.warning(f"Gemini error for {ticker}: {e}")
+
+    # ── 4. PROGRAMATIK TREND FALLBACK ──
+    # Tüm AI provider'lar boş döndüyse ve gerçek trend verisi varsa
+    if "derin satış" in trend_statement.lower():
+        if is_ceiling:
+            return "Derin satış sonrası tepki alışı"
+        else:
+            return "Sert yükseliş sonrası kâr satışı"
+    elif "tepe bölgesi" in trend_statement.lower():
+        if not is_ceiling:
+            return "Sert yükseliş sonrası kâr satışı"
+    
+    return ""
 
 async def scrape_and_analyze_market_close():
     """18:35'te calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder."""
