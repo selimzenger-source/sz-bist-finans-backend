@@ -374,13 +374,41 @@ KURALLAR:
                     text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
                     bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
                     if any(x in text.lower() for x in bad):
-                        return ""
-                    logger.info(f"Abacus result for {ticker}: {text}")
-                    return text
+                        logger.info(f"Abacus generic filtered for {ticker}: {text}")
+                    else:
+                        logger.info(f"Abacus result for {ticker}: {text}")
+                        return text
+                else:
+                    logger.warning(f"Abacus HTTP {res.status_code} for {ticker}: {res.text[:100]}")
         except Exception as e:
             logger.warning(f"Abacus error for {ticker}: {e}")
 
-    # ── 3. PROGRAMATIK TREND FALLBACK ──
+    # ── 4. GEMINI REST API (hafif — SDK değil) ──
+    if settings.GEMINI_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                res = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.GEMINI_API_KEY}",
+                        "Content-Type": "application/json"
+                    },
+                    json={"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                )
+                if res.status_code == 200:
+                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
+                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+                    if any(x in text.lower() for x in bad):
+                        logger.info(f"Gemini generic filtered for {ticker}: {text}")
+                    else:
+                        logger.info(f"Gemini result for {ticker}: {text}")
+                        return text
+                else:
+                    logger.warning(f"Gemini HTTP {res.status_code} for {ticker}: {res.text[:100]}")
+        except Exception as e:
+            logger.warning(f"Gemini error for {ticker}: {e}")
+
+    # ── 5. PROGRAMATIK TREND FALLBACK ──
     # Tüm AI provider'lar boş döndüyse ve gerçek trend verisi varsa
     if "derin satış" in trend_statement.lower():
         if is_ceiling:
