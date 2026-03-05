@@ -597,38 +597,26 @@ async def scrape_and_analyze_market_close(force: bool = False):
             tweet_error_msg = ""
             try:
                 from app.services.chart_image_generator import generate_ceiling_floor_images
-                from app.services.twitter_service import _safe_tweet_with_media
+                from app.services.twitter_service import _safe_tweet_with_multi_media
 
                 if c_stats:
                     tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
                     tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
-                    if len(tickers_str) > 150:
-                        tickers_str = tickers_str[:150] + "..."
 
-                    base_t_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
-
-                    for idx, path in enumerate(tavan_images):
-                        page_info = f" (Sayfa {idx+1}/{len(tavan_images)})" if len(tavan_images) > 1 else ""
-                        tweet_text = f"{base_t_text}{page_info}"
-                        _safe_tweet_with_media(text=tweet_text, image_path=path, source="market_close_analyzer")
+                    tweet_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
+                    _safe_tweet_with_multi_media(text=tweet_text, image_paths=tavan_images, source="market_close_analyzer")
 
                 # Tavan ve taban tweetleri arası 5 dakika bekle
                 if c_stats and fl_stats:
-                    logger.info("Tavan tweetleri atıldı, taban tweetleri için 5 dk bekleniyor...")
+                    logger.info("Tavan tweeti atıldı, taban tweeti için 5 dk bekleniyor...")
                     await asyncio.sleep(300)
 
                 if fl_stats:
                     taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
                     tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
-                    if len(tickers_str) > 150:
-                        tickers_str = tickers_str[:150] + "..."
 
-                    base_f_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
-
-                    for idx, path in enumerate(taban_images):
-                        page_info = f" (Sayfa {idx+1}/{len(taban_images)})" if len(taban_images) > 1 else ""
-                        tweet_text = f"{base_f_text}{page_info}"
-                        _safe_tweet_with_media(text=tweet_text, image_path=path, source="market_close_analyzer")
+                    tweet_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
+                    _safe_tweet_with_multi_media(text=tweet_text, image_paths=taban_images, source="market_close_analyzer")
             except Exception as tweet_err:
                 tweet_ok = False
                 tweet_error_msg = str(tweet_err)[:200]

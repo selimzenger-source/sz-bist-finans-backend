@@ -1787,6 +1787,149 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
         return False
 
 
+def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str = "unknown", force_send: bool = False) -> bool:
+    """Birden fazla gorsel ile tek tweet atar (Twitter max 4 gorsel destekler).
+
+    Her gorseli ayri ayri upload eder, hepsinin media_id'sini tek tweette gonderir.
+    """
+    if not image_paths:
+        return _safe_tweet(text, source=source, force_send=force_send)
+    if len(image_paths) == 1:
+        return _safe_tweet_with_media(text, image_paths[0], source=source, force_send=force_send)
+
+    try:
+        # KILL SWITCH
+        if not force_send and is_tweets_killed():
+            logger.warning("[TWEET KILL SWITCH] Tweet+multi-media durduruldu: %s", text[:60])
+            return False
+
+        # Onay modu — ilk gorselle kuyruğa ekle (multi-media kuyruk desteği yok)
+        if not force_send and not is_auto_send():
+            return _safe_tweet_with_media(text, image_paths[0], source=source, force_send=False)
+
+        # Duplicate kontrolu
+        if _is_duplicate_tweet(text):
+            return True
+
+        creds = _load_credentials()
+        if not creds:
+            logger.info(f"[TWITTER-DRY-RUN-MULTI] {text[:60]}... (images={len(image_paths)})")
+            return False
+
+        # Rate limit
+        wait = _wait_for_tweet_rate_limit()
+        if wait > 0:
+            time.sleep(wait)
+
+        # Her gorseli upload et
+        media_ids = []
+        for img_path in image_paths[:4]:  # Twitter max 4
+            if not os.path.exists(img_path):
+                logger.warning(f"Multi-media: gorsel bulunamadi, atlaniyor: {img_path}")
+                continue
+
+            upload_url = "https://upload.twitter.com/1.1/media/upload.json"
+            oauth_params = {
+                "oauth_consumer_key": creds["api_key"],
+                "oauth_nonce": uuid.uuid4().hex,
+                "oauth_signature_method": "HMAC-SHA1",
+                "oauth_timestamp": str(int(time.time())),
+                "oauth_token": creds["access_token"],
+                "oauth_version": "1.0",
+            }
+            signature = _generate_oauth_signature(
+                "POST", upload_url, oauth_params,
+                creds["api_secret"], creds["access_token_secret"],
+            )
+            oauth_params["oauth_signature"] = signature
+            header_parts = ", ".join(
+                f'{k}="{urllib.parse.quote(v, safe="")}"'
+                for k, v in sorted(oauth_params.items())
+            )
+            auth_header = f"OAuth {header_parts}"
+
+            # Buyuk dosya compress
+            _upload_path = img_path
+            try:
+                file_size = os.path.getsize(img_path)
+                if file_size > 4_800_000:
+                    from PIL import Image as PILImage
+                    import io
+                    with PILImage.open(img_path) as img:
+                        if img.mode in ("RGBA", "P"):
+                            img = img.convert("RGB")
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", quality=85, optimize=True)
+                        buf.seek(0)
+                        _upload_path = img_path + ".compressed.jpg"
+                        with open(_upload_path, "wb") as cf:
+                            cf.write(buf.getvalue())
+            except Exception:
+                _upload_path = img_path
+
+            with open(_upload_path, "rb") as f:
+                mime_type = "image/jpeg" if _upload_path.endswith(".jpg") else "image/png"
+                fname = "image.jpg" if _upload_path.endswith(".jpg") else "image.png"
+                files = {"media": (fname, f, mime_type)}
+                upload_resp = httpx.post(upload_url, files=files, headers={"Authorization": auth_header}, timeout=30.0)
+
+            # Gecici compress dosyasini temizle
+            if _upload_path != img_path and os.path.exists(_upload_path):
+                try:
+                    os.remove(_upload_path)
+                except OSError:
+                    pass
+
+            if upload_resp.status_code in (200, 201):
+                mid = upload_resp.json().get("media_id_string")
+                if mid:
+                    media_ids.append(mid)
+                    logger.info(f"Multi-media upload basarili: media_id={mid} ({img_path})")
+            else:
+                logger.warning(f"Multi-media upload hatasi ({upload_resp.status_code}): {upload_resp.text[:150]}")
+
+        if not media_ids:
+            logger.warning("Hic gorsel yuklenemedi, sadece metin tweet atiliyor")
+            return _safe_tweet(text, source=source, force_send=force_send)
+
+        # Tweet at — tum media_ids ile
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+
+        tweet_auth = _build_oauth_header(creds)
+        tweet_resp = httpx.post(
+            _TWITTER_TWEET_URL,
+            json={
+                "text": text,
+                "media": {"media_ids": media_ids},
+            },
+            headers={
+                "Authorization": tweet_auth,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+
+        if tweet_resp.status_code in (200, 201):
+            tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
+            logger.info(f"Multi-media tweet basarili (id={tweet_id}, {len(media_ids)} gorsel): {text[:60]}...")
+            _mark_tweet_sent(text)
+            _record_tweet_sent()
+            global _last_tweet_id
+            _last_tweet_id = tweet_id
+            return True
+        else:
+            error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
+            logger.error(f"Multi-media tweet hatasi: {error_msg}")
+            _notify_tweet_failure(text, f"[MULTI-MEDIA] {error_msg}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Multi-media tweet hatasi: {e}")
+        _notify_tweet_failure(text, f"[MULTI-MEDIA] {str(e)}")
+        return False
+
+
 # ================================================================
 # YARDIMCI FONKSIYONLAR
 # ================================================================
