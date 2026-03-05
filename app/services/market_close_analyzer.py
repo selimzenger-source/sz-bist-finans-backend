@@ -360,7 +360,7 @@ KURALLAR:
                 res = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                    json={"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                    json={"model": "gpt-4o", "max_tokens": 60, "messages": [{"role": "system", "content": "Sen kısa finansal yorum asistanısın. SADECE 4-6 kelime yaz. Uzun cümleler YASAK."}, {"role": "user", "content": prompt}], "temperature": 0.2}
                 )
                 if res.status_code == 200:
                     text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
@@ -619,55 +619,65 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 fl_stats_raw = f_res.fetchall()
                 
                 # ORM objelere dönüştür (image generator uyumu için)
+                # DB sütun sırası: id(0), ticker(1), date(2), close_price(3), percent_change(4),
+                #   is_ceiling(5), is_floor(6), consec_ceil(7), monthly_ceil(8),
+                #   consec_floor(9), monthly_floor(10), reason(11), created_at(12)
                 c_stats = []
                 for r in c_stats_raw:
                     s = DailyStockMarketStat(
-                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
-                        is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
-                        monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
-                        monthly_floor_count=r[9], reason=r[10]
+                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[4],
+                        is_ceiling=r[5], is_floor=r[6], consecutive_ceiling_count=r[7],
+                        monthly_ceiling_count=r[8], consecutive_floor_count=r[9],
+                        monthly_floor_count=r[10], reason=r[11]
                     )
                     c_stats.append(s)
-                
+
                 fl_stats = []
                 for r in fl_stats_raw:
                     s = DailyStockMarketStat(
-                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
-                        is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
-                        monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
-                        monthly_floor_count=r[9], reason=r[10]
+                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[4],
+                        is_ceiling=r[5], is_floor=r[6], consecutive_ceiling_count=r[7],
+                        monthly_ceiling_count=r[8], consecutive_floor_count=r[9],
+                        monthly_floor_count=r[10], reason=r[11]
                     )
                     fl_stats.append(s)
 
             # GÖRSEL ÜRETİMİ VE TWITTER
             tweet_ok = True
             tweet_error_msg = ""
-            try:
-                from app.services.chart_image_generator import generate_ceiling_floor_images
-                from app.services.twitter_service import _safe_tweet_with_multi_media
+            from app.services.chart_image_generator import generate_ceiling_floor_images
+            from app.services.twitter_service import _safe_tweet_with_multi_media
 
-                if c_stats:
+            # ── TAVAN TWEET ──
+            if c_stats:
+                try:
                     tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
                     tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
-
                     tweet_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
                     _safe_tweet_with_multi_media(text=tweet_text, image_paths=tavan_images, source="market_close_analyzer")
+                    logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
+                except Exception as e:
+                    tweet_ok = False
+                    tweet_error_msg += f"Tavan tweet hata: {e} | "
+                    logger.error(f"TAVAN tweet hatası: {e}")
 
-                # Tavan ve taban tweetleri arası 5 dakika bekle
-                if c_stats and fl_stats:
-                    logger.info("Tavan tweeti atıldı, taban tweeti için 5 dk bekleniyor...")
-                    await asyncio.sleep(300)
+            # Tavan ve taban tweetleri arası 60 saniye bekle
+            if c_stats and fl_stats:
+                logger.info("Tavan tweeti atıldı, taban tweeti için 60s bekleniyor...")
+                await asyncio.sleep(60)
 
-                if fl_stats:
+            # ── TABAN TWEET ──
+            if fl_stats:
+                try:
                     taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
                     tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
-
                     tweet_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
                     _safe_tweet_with_multi_media(text=tweet_text, image_paths=taban_images, source="market_close_analyzer")
-            except Exception as tweet_err:
-                tweet_ok = False
-                tweet_error_msg = str(tweet_err)[:200]
-                logger.error(f"Tweet/görsel üretim hatası: {tweet_err}")
+                    logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
+                except Exception as e:
+                    tweet_ok = False
+                    tweet_error_msg += f"Taban tweet hata: {e}"
+                    logger.error(f"TABAN tweet hatası: {e}")
 
             # Admin Telegram — her durumda gönder
             try:
