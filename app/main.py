@@ -3235,12 +3235,81 @@ async def trigger_market_close_tweet(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
-    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+    from app.services.market_close_analyzer import scrape_and_analyze_market_close, scrape_uzmanpara
     try:
         await scrape_and_analyze_market_close()
         return {"status": "ok", "message": "Tavan/Taban market close tweet tetiklendi"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/v1/admin/debug-market-close")
+@limiter.limit("5/minute")
+async def debug_market_close(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Market close analyzer debug — neden çalışmadığını teşhis eder."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.market_close_analyzer import scrape_uzmanpara
+    from datetime import date as _d
+    from zoneinfo import ZoneInfo
+    import httpx, re
+
+    debug_info = {}
+
+    # 1. Bugünün tarihi
+    tr_tz = ZoneInfo("Europe/Istanbul")
+    today_tr = datetime.now(tr_tz).date()
+    debug_info["today_tr"] = str(today_tr)
+    debug_info["weekday"] = today_tr.weekday()  # 0=Mon, 4=Fri
+
+    # 2. DB'de bugün kaydı var mı?
+    try:
+        check = await db.execute(
+            text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+            {"today": today_tr}
+        )
+        db_count = check.scalar()
+        debug_info["db_today_count"] = db_count
+    except Exception as e:
+        debug_info["db_error"] = str(e)
+
+    # 3. Uzmanpara güncelleme tarihini kontrol
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.get(
+                "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            )
+            debug_info["uzmanpara_status"] = res.status_code
+            m = re.search(r"Son\s+g[üu]ncelleme\s+tarihi[:\s]*(\d{2})\.(\d{2})\.(\d{4})", res.text)
+            if m:
+                update_date = _d(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                debug_info["uzmanpara_update_date"] = str(update_date)
+                debug_info["date_match"] = update_date == today_tr
+            else:
+                debug_info["uzmanpara_update_date"] = "REGEX_FAIL"
+    except Exception as e:
+        debug_info["uzmanpara_error"] = str(e)
+
+    # 4. Tavan/taban scrape test
+    try:
+        ceilings = await scrape_uzmanpara(is_ceiling=True)
+        floors = await scrape_uzmanpara(is_ceiling=False)
+        debug_info["ceiling_count"] = len(ceilings)
+        debug_info["floor_count"] = len(floors)
+        if ceilings:
+            debug_info["ceiling_sample"] = ceilings[:3]
+        if floors:
+            debug_info["floor_sample"] = floors[:3]
+    except Exception as e:
+        debug_info["scrape_error"] = str(e)
+
+    return debug_info
 
 
 # -------------------------------------------------------
