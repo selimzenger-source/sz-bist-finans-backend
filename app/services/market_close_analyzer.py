@@ -144,9 +144,11 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     query_action = "neden yükseldi tavan" if is_ceiling else "neden düştü taban"
     query = f"{ticker} hisse {query_action} son haberler"
     external_search = ""
+    bilanco_search = ""
     if tavily_key:
         try:
             async with httpx.AsyncClient() as client:
+                # 1a. Genel haber araması
                 res = await client.post(
                     "https://api.tavily.com/search",
                     json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 3}
@@ -155,6 +157,17 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                     data = res.json()
                     results = data.get("results", [])
                     external_search = "\n".join([r.get("content", "") for r in results])
+
+                # 1b. Bilanço / finansal sonuç araması
+                bilanco_query = f"{ticker} bilanço finansal sonuçlar kâr gelir 2025 2026"
+                res2 = await client.post(
+                    "https://api.tavily.com/search",
+                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 2}
+                )
+                if res2.status_code == 200:
+                    data2 = res2.json()
+                    results2 = data2.get("results", [])
+                    bilanco_search = "\n".join([r.get("content", "") for r in results2])
         except Exception as e:
             logger.warning(f"Tavily search error for {ticker}: {e}")
 
@@ -256,7 +269,9 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         logger.warning(f"Price history error for {ticker}: {e}")
 
     combined_context = "\n".join(internal_news) + "\n" + external_search
-    has_news = bool(internal_news) or len(external_search.strip()) > 20
+    if bilanco_search and len(bilanco_search.strip()) > 20:
+        combined_context += "\n\nBİLANÇO / FİNANSAL SONUÇLAR:\n" + bilanco_search
+    has_news = bool(internal_news) or len(external_search.strip()) > 20 or len(bilanco_search.strip()) > 20
     f_pct = f"{pct:+.2f}" if pct is not None else ("+9.95" if is_ceiling else "-9.95")
     f_price = f"{price:.2f}" if price is not None else "0.00"
     
@@ -307,6 +322,7 @@ KRİTİK DOĞRULUK KURALLARI:
 6. İPTAL/VAZGEÇİLEN KARARLAR: Eğer verilerde bir kurumsal karar (sermaye artırımı, ortaklık, proje vb.) varsa AMA sonradan iptal edildiği, vazgeçildiği veya geri çekildiği de belirtiliyorsa, o haberi sebep olarak KULLANMA. "EMPTY" yaz. İptal edilmiş kararları güncel sebep olarak sunmak YASAKTIR.
 7. HEDEFLİ FİYAT RAPORLARI: Bir aracı kurum hedef fiyat raporu yayınladıysa, spesifik rakam VERME. Bunun yerine "Yüksek hedef fiyat raporu yayınlandı." veya "Düşük hedef fiyat raporu yayınlandı." şeklinde yaz. Rakam vermek yatırım tavsiyesi olur.
 8. Haber İLGİLİLİK kontrolü: Haber en fazla son 7 gün içinde olmalı. Haftalarca/aylarca önceki haberler bugünün tavan/taban sebebi OLAMAZ.
+9. BİLANÇO VE FİNANSAL SONUÇLAR: Eğer verilerde şirketin bilanço açıklaması, kâr/zarar, gelir artışı/düşüşü gibi finansal sonuçlar varsa, bunu sebep olarak yaz. Örnek: "Güçlü bilanço, kâr %40 arttı." veya "Zarar açıklandı, gelir düştü." Spesifik kâr/zarar rakamı VERME, sadece yüzde veya yön belirt.
 """
 
     # Ortak filtre — jenerik/dolgu yanıtları yakala
@@ -641,8 +657,16 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 try:
                     tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
                     tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
-                    tweet_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
-                    _safe_tweet_with_multi_media(text=tweet_text, image_paths=tavan_images, source="market_close_analyzer")
+                    tweet_text = (
+                        f"📈 Günün TAVAN Yapan Hisseleri ve Sebepleri!\n\n"
+                        f"Hangi şirketler neden uçuşa geçti? Yapay zeka modelimizin "
+                        f"derlediği haber analizleri görsellerde! 🚀👇\n\n"
+                        f"{tickers_str}"
+                    )
+                    _safe_tweet_with_multi_media(
+                        text=tweet_text, image_paths=tavan_images,
+                        source="market_close_analyzer"
+                    )
                     logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
                 except Exception as e:
                     tweet_ok = False
@@ -659,8 +683,16 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 try:
                     taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
                     tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
-                    tweet_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
-                    _safe_tweet_with_multi_media(text=tweet_text, image_paths=taban_images, source="market_close_analyzer")
+                    tweet_text = (
+                        f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
+                        f"Şirketler neden kan kaybetti? Yapay zeka modelimizin "
+                        f"derlediği haber analizleri görsellerde! 📊👇\n\n"
+                        f"{tickers_str}"
+                    )
+                    _safe_tweet_with_multi_media(
+                        text=tweet_text, image_paths=taban_images,
+                        source="market_close_analyzer"
+                    )
                     logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
                 except Exception as e:
                     tweet_ok = False
