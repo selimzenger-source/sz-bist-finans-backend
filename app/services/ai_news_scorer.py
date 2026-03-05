@@ -542,6 +542,17 @@ BİRLEŞME / DEVRALMA (M&A):
 YÖNETİM DEĞİŞİKLİĞİ:
   CEO/GM degisikligi → 4.5-5.5 (baglama gore) | Yonetim kurulu → 4.5-5.0 | Rutin atama → 5.0
 
+DEVRE KESİCİ BİLDİRİMİ (Pay Bazında Devre Kesici):
+  Borsa Istanbul'un standart piyasa mekanizmasidir — sirketin temel faaliyetleriyle ILGISIZDIR.
+  Asiri fiyat hareketi nedeniyle otomatik tetiklenir, pozitif veya negatif DEGILDIR.
+  Her zaman NOTR puanla → 5.0 (tek fiyat emir toplama seansinin sonucu)
+  NOT: Devre kesici ≠ olumsuz. Tavan yapan hissede de taban yapan hissede de tetiklenebilir.
+
+KATILIM ENDEKSİ / ENDEKS DEĞİŞİKLİĞİ:
+  Endekse dahil olma → 6.5-7.5 (olumlu — fonlardan alimlari arttirir)
+  Endeksten cikarilma → 3.5-4.5 (olumsuz — fonlar zorunlu satabilir)
+  Endeks periyodik gozden gecirme (degisiklik yok) → 5.0
+
 ═══ KRİTİK KURALLAR ═══
 
 • ANTI-NÖTR KÜMELENMESİ: Puanlarin cogunu 4.5-5.5 arasina sikistirma! Her haberin FARKLI etkisi var.
@@ -845,8 +856,25 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
 
     Kritik negatif haberler icin skoru tavan sinirlar,
     guclu pozitif haberler icin taban garantisi uygular.
+    Notr bildirimler (devre kesici vb.) icin 5.0'a ceker.
     """
     content_lower = content.lower()
+
+    # ── Nötr bildirimler — skor 5.0 olmali ──
+    _NEUTRAL_PATTERNS = [
+        r"devre\s*kesici",
+        r"pay\s*baz[ıi]nda\s*devre\s*kesici",
+        r"tek\s*fiyat\s*emir\s*toplama",
+    ]
+    for pattern in _NEUTRAL_PATTERNS:
+        if re.search(pattern, content_lower):
+            if score < 4.5 or score > 5.5:
+                logger.info(
+                    "Skor dogrulama (notr): %s skor %.1f → 5.0 (devre kesici)",
+                    ticker, score,
+                )
+                return 5.0
+            return score
 
     # Kritik negatif bildirimler — skor asla tavanin uzerine cikmamali
     for pattern, max_score in _CRITICAL_NEGATIVE_PATTERNS:

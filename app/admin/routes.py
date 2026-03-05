@@ -1537,7 +1537,10 @@ async def trigger_opening_push_from_admin(
                             StockNotificationSubscription.is_annual_bundle == True,
                         ),
                         StockNotificationSubscription.is_active == True,
-                        StockNotificationSubscription.muted == False,
+                        or_(
+                            StockNotificationSubscription.muted == False,
+                            StockNotificationSubscription.muted.is_(None),
+                        ),
                     )
                 )
             )

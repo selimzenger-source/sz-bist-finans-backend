@@ -1163,7 +1163,10 @@ class NotificationService:
                 and_(
                     StockNotificationSubscription.ipo_id == ipo.id,
                     StockNotificationSubscription.is_active == True,
-                    StockNotificationSubscription.muted == False,
+                    or_(
+                        StockNotificationSubscription.muted == False,
+                        StockNotificationSubscription.muted.is_(None),
+                    ),
                     User.notifications_enabled == True,
                     User.deleted == False,
                     or_(
