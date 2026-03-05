@@ -381,7 +381,7 @@ async def scrape_and_analyze_market_close():
     # Uzmanpara güncelleme tarihini kontrol et — hafta sonu/tatil tespiti
     today = datetime.now(_TR_TZ).date()
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=8) as client:
             res = await client.get("https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/",
                                    headers={"User-Agent": "Mozilla/5.0"})
             if res.status_code == 200:
