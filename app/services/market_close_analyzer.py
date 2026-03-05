@@ -577,46 +577,21 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 else:
                     await _save_market_close_data(session, today, ceilings, floors)
                 
-                # Bugünkü verileri oku — raw SQL
-                t_res = await session.execute(
-                    text("""SELECT * FROM daily_stock_market_stats 
-                            WHERE "date" = :today AND is_ceiling = true
-                            ORDER BY consecutive_ceiling_count DESC"""),
-                    {"today": today}
-                )
-                c_stats_raw = t_res.fetchall()
-                
-                f_res = await session.execute(
-                    text("""SELECT * FROM daily_stock_market_stats 
-                            WHERE "date" = :today AND is_floor = true
-                            ORDER BY consecutive_floor_count DESC"""),
-                    {"today": today}
-                )
-                fl_stats_raw = f_res.fetchall()
-                
-                # ORM objelere dönüştür (image generator uyumu için)
-                # DB sütun sırası: id(0), ticker(1), date(2), close_price(3), percent_change(4),
-                #   is_ceiling(5), is_floor(6), consec_ceil(7), monthly_ceil(8),
-                #   consec_floor(9), monthly_floor(10), reason(11), created_at(12)
-                c_stats = []
-                for r in c_stats_raw:
-                    s = DailyStockMarketStat(
-                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[4],
-                        is_ceiling=r[5], is_floor=r[6], consecutive_ceiling_count=r[7],
-                        monthly_ceiling_count=r[8], consecutive_floor_count=r[9],
-                        monthly_floor_count=r[10], reason=r[11]
-                    )
-                    c_stats.append(s)
+                # Bugünkü verileri oku — ORM query (sütun sırası sorunu yok)
+                from sqlalchemy import select
+                c_stats = (await session.execute(
+                    select(DailyStockMarketStat).where(
+                        DailyStockMarketStat.date == today,
+                        DailyStockMarketStat.is_ceiling == True
+                    ).order_by(DailyStockMarketStat.consecutive_ceiling_count.desc())
+                )).scalars().all()
 
-                fl_stats = []
-                for r in fl_stats_raw:
-                    s = DailyStockMarketStat(
-                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[4],
-                        is_ceiling=r[5], is_floor=r[6], consecutive_ceiling_count=r[7],
-                        monthly_ceiling_count=r[8], consecutive_floor_count=r[9],
-                        monthly_floor_count=r[10], reason=r[11]
-                    )
-                    fl_stats.append(s)
+                fl_stats = (await session.execute(
+                    select(DailyStockMarketStat).where(
+                        DailyStockMarketStat.date == today,
+                        DailyStockMarketStat.is_floor == True
+                    ).order_by(DailyStockMarketStat.consecutive_floor_count.desc())
+                )).scalars().all()
 
             # GÖRSEL ÜRETİMİ VE TWITTER
             tweet_ok = True
