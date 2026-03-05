@@ -15,8 +15,7 @@ from app.models.kap_all_disclosure import KapAllDisclosure
 from app.models.ipo import IPO
 from app.config import get_settings
 
-# Gemini for summarization
-import google.generativeai as genai
+# Gemini SDK kaldırıldı — diğer servisler REST API kullanıyor, bu dosyada artık gerek yok
 
 logger = logging.getLogger(__name__)
 
@@ -381,22 +380,7 @@ KURALLAR:
         except Exception as e:
             logger.warning(f"Abacus error for {ticker}: {e}")
 
-    # ── 3. GEMINI 2.5 PRO ──
-    if settings.GEMINI_API_KEY:
-        try:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-pro")
-            res = model.generate_content(prompt)
-            text = res.text.strip().replace('"', '').replace("'", "")
-            bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-            if any(x in text.lower() for x in bad):
-                return ""
-            logger.info(f"Gemini result for {ticker}: {text}")
-            return text
-        except Exception as e:
-            logger.warning(f"Gemini error for {ticker}: {e}")
-
-    # ── 4. PROGRAMATIK TREND FALLBACK ──
+    # ── 3. PROGRAMATIK TREND FALLBACK ──
     # Tüm AI provider'lar boş döndüyse ve gerçek trend verisi varsa
     if "derin satış" in trend_statement.lower():
         if is_ceiling:

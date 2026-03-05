@@ -23,4 +23,3 @@ PyMuPDF==1.25.3
 Pillow==11.1.0
 pytesseract==0.3.13
 anthropic==0.45.2
-google-generativeai==0.8.4
