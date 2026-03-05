@@ -431,6 +431,18 @@ async def _save_market_close_data(session, today, ceilings, floors):
     )
 
     # ── FAZ 1: DB'den geçmiş verileri çek (hızlı) ──
+    # Yardımcı: önceki kaydın ardışık olup olmadığını kontrol et
+    def _is_consecutive_day(prev_date, today_date):
+        """Önceki kayıt 'dünkü işlem gününden' mi? Hafta sonu/tatil toleransı ile."""
+        gap = (today_date - prev_date).days
+        if gap == 1:
+            return True  # Düz ardışık (Pzt→Sal, Sal→Çar, ...)
+        if gap <= 3 and today_date.weekday() == 0:
+            return True  # Cuma→Pazartesi (hafta sonu köprüsü)
+        if gap == 2 and today_date.weekday() in (0, 1):
+            return True  # Tatil köprüsü (Perş→Pzt veya Cum→Sal)
+        return False
+
     prepared = []
     for stock in ceilings:
         try:
@@ -443,7 +455,11 @@ async def _save_market_close_data(session, today, ceilings, floors):
                 {"ticker": ticker}
             )
             past = past_res.fetchall()
-            consec = (past[0][2] + 1) if past and past[0][0] else 1
+            # Seri kontrolü: önceki kayıt TAVAN + ARDIŞIK GÜN olmalı
+            if past and past[0][0] and _is_consecutive_day(past[0][4], today):
+                consec = past[0][2] + 1
+            else:
+                consec = 1
             monthly = sum(1 for r in past if r[0] and (today - r[4]).days <= 30) + 1
             prepared.append({"ticker": ticker, "price": Decimal(str(stock["price"])),
                            "pct": Decimal(str(stock["change"])), "is_ceiling": True,
@@ -462,7 +478,11 @@ async def _save_market_close_data(session, today, ceilings, floors):
                 {"ticker": ticker}
             )
             past = past_res.fetchall()
-            consec = (past[0][3] + 1) if past and past[0][1] else 1
+            # Seri kontrolü: önceki kayıt TABAN + ARDIŞIK GÜN olmalı
+            if past and past[0][1] and _is_consecutive_day(past[0][4], today):
+                consec = past[0][3] + 1
+            else:
+                consec = 1
             monthly = sum(1 for r in past if r[1] and (today - r[4]).days <= 30) + 1
             prepared.append({"ticker": ticker, "price": Decimal(str(stock["price"])),
                            "pct": Decimal(str(stock["change"])), "is_ceiling": False,
