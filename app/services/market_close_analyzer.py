@@ -317,7 +317,35 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         except Exception as e:
             logger.warning(f"OpenAI error for {ticker}: {e}")
 
-    # ── 2. ABACUS (Sonnet) ──
+    # ── 2. ANTHROPIC (Claude 3.5 Sonnet) ──
+    if settings.ANTHROPIC_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                res = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": settings.ANTHROPIC_API_KEY,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-3-5-sonnet-20240620",
+                        "max_tokens": 50,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2
+                    }
+                )
+                if res.status_code == 200:
+                    text = res.json()["content"][0]["text"].strip().replace('"', '').replace("'", "")
+                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
+                    if any(x in text.lower() for x in bad):
+                        return ""
+                    logger.info(f"Anthropic result for {ticker}: {text}")
+                    return text
+        except Exception as e:
+            logger.warning(f"Anthropic error for {ticker}: {e}")
+
+    # ── 3. ABACUS (Sonnet) ──
     if settings.ABACUS_API_KEY:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -365,212 +393,227 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     return ""
 
 async def scrape_and_analyze_market_close():
-    """18:35'te calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder."""
-    logger.info("Market close analysis started...")
-    
-    ceilings = await scrape_uzmanpara(is_ceiling=True)
-    floors = await scrape_uzmanpara(is_ceiling=False)
-    
-    logger.info(f"Market Close: {len(ceilings)} ceilings, {len(floors)} floors found.")
-    
-    # Eger hic sonuc yoksa atla
-    if not ceilings and not floors:
-        logger.info("No ceiling or floor stocks found. It might be a weekend or holiday.")
-        return
-    
-    # Uzmanpara güncelleme tarihini kontrol et — hafta sonu/tatil tespiti
-    today = datetime.now(_TR_TZ).date()
-    try:
-        async with httpx.AsyncClient(timeout=8) as client:
-            res = await client.get("https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/",
-                                   headers={"User-Agent": "Mozilla/5.0"})
-            if res.status_code == 200:
-                import re
-                # "Son güncelleme tarihi: 04.03.2026" formatı
-                m = re.search(r"Son\s+g[üu]ncelleme\s+tarihi[:\s]*(\d{2})\.(\d{2})\.(\d{4})", res.text)
-                if m:
-                    update_date = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-                    if update_date != today:
-                        logger.info(f"Uzmanpara son güncelleme: {update_date}, bugün: {today}. Piyasa kapalı, atlanıyor.")
-                        return
-                    logger.info(f"Uzmanpara güncelleme tarihi bugün ({update_date}) — piyasa açık ✅")
-    except Exception as e:
-        logger.warning(f"Güncelleme tarihi kontrol hatası: {e} — devam ediliyor")
-    
-    async with async_session() as session:
-        # Bugün zaten kaydedilmiş mi? (mükerrer önleme — hafta sonu/tatil koruması)
-        check_res = await session.execute(
-            text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
-            {"today": today}
-        )
-        if check_res.scalar() > 0:
-            logger.info(f"{today} için zaten analiz yapılmış. Atlanıyor.")
-            return
+    """18:35'te calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder.
+    Eksik veri veya hata durumunda 1 dk arayla 3 kez daha dener (toplam 4 deneme).
+    """
+    for attempt in range(4):
+        try:
+            logger.info(f"Market close analysis attempt {attempt + 1}/4 started...")
+            
+            # 1. Verileri cek
+            ceilings = await scrape_uzmanpara(is_ceiling=True)
+            floors = await scrape_uzmanpara(is_ceiling=False)
+            
+            # 2. Uzmanpara güncelleme tarihini kontrol et — hafta sonu/tatil tespiti
+            today = datetime.now(_TR_TZ).date()
+            market_is_open = False
+            try:
+                async with httpx.AsyncClient(timeout=8) as client:
+                    res = await client.get("https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/",
+                                           headers={"User-Agent": "Mozilla/5.0"})
+                    if res.status_code == 200:
+                        import re
+                        # "Son güncelleme tarihi: 04.03.2026" formatı
+                        m = re.search(r"Son\s+g[üu]ncelleme\s+tarihi[:\s]*(\d{2})\.(\d{2})\.(\d{4})", res.text)
+                        if m:
+                            update_date = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+                            if update_date != today:
+                                logger.info(f"Uzmanpara son güncelleme: {update_date}, bugün: {today}. Piyasa kapalı, atlanıyor.")
+                                return # Graceful exit: Hafta sonu/tatil
+                            market_is_open = True
+                            logger.info(f"Uzmanpara güncelleme tarihi bugün ({update_date}) — piyasa açık ✅")
+            except Exception as e:
+                logger.warning(f"Güncelleme tarihi kontrol hatası (Deneme {attempt + 1}): {e}")
 
-        # FIFO: 32 günden eski kayıtları temizle
-        cleanup_date = today - timedelta(days=32)
-        await session.execute(
-            text('DELETE FROM daily_stock_market_stats WHERE "date" < :cutoff'),
-            {"cutoff": cleanup_date}
-        )
+            # Eger piyasa aciksa ama veri gelmemisse veya hata olmussa retry et
+            if market_is_open and not ceilings and not floors:
+                raise ValueError("Piyasa açık görünüyor ama tavan/taban verisi alınamadı.")
 
-        # Tavanlari isleyelim
-        for stock in ceilings:
-            ticker = stock["ticker"]
-            price_val = Decimal(str(stock["price"]))
-            pct_val = Decimal(str(stock["change"]))
-            
-            # Gecmis kayitlar — raw SQL
-            past_res = await session.execute(
-                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
-                        consecutive_floor_count, "date"
-                        FROM daily_stock_market_stats 
-                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
-                {"ticker": ticker}
-            )
-            past_records = past_res.fetchall()
-            
-            consec_ceil = 1
-            if past_records and past_records[0][0]:  # is_ceiling
-                consec_ceil = past_records[0][2] + 1  # consecutive_ceiling_count + 1
-            
-            monthly_ceil = sum(1 for r in past_records if r[0] and (today - r[4]).days <= 30) + 1
-            
-            # AI Analizi
-            reason = await _analyze_reason_with_ai(
-                ticker=ticker, 
-                is_ceiling=True, 
-                price=float(price_val), 
-                pct=float(pct_val),
-                consec=consec_ceil,
-                monthly=monthly_ceil
-            )
-            
-            new_stat = DailyStockMarketStat(
-                ticker=ticker,
-                date=today,
-                close_price=price_val,
-                percent_change=pct_val,
-                is_ceiling=True,
-                consecutive_ceiling_count=consec_ceil,
-                monthly_ceiling_count=monthly_ceil,
-                reason=reason[:100]
-            )
-            session.add(new_stat)
-            
-        # Tabanlari isleyelim
-        for stock in floors:
-            ticker = stock["ticker"]
-            price_val = Decimal(str(stock["price"]))
-            pct_val = Decimal(str(stock["change"]))
-            
-            past_res = await session.execute(
-                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
-                        consecutive_floor_count, "date"
-                        FROM daily_stock_market_stats 
-                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
-                {"ticker": ticker}
-            )
-            past_records = past_res.fetchall()
-            
-            consec_flr = 1
-            if past_records and past_records[0][1]:  # is_floor
-                consec_flr = past_records[0][3] + 1  # consecutive_floor_count + 1
+            if not ceilings and not floors:
+                logger.info("Hiçbir tavan/taban hissesi bulunamadı. Hafta sonu veya tatil olabilir.")
+                return # Graceful exit
 
-            monthly_flr = sum(1 for r in past_records if r[1] and (today - r[4]).days <= 30) + 1
-            
-            reason = await _analyze_reason_with_ai(
-                ticker=ticker, 
-                is_ceiling=False, 
-                price=float(price_val), 
-                pct=float(pct_val),
-                consec=consec_flr,
-                monthly=monthly_flr
-            )
-            
-            new_stat = DailyStockMarketStat(
-                ticker=ticker,
-                date=today,
-                close_price=price_val,
-                percent_change=pct_val,
-                is_floor=True,
-                consecutive_floor_count=consec_flr,
-                monthly_floor_count=monthly_flr,
-                reason=reason[:100]
-            )
-            session.add(new_stat)
-            
-        await session.commit()
-        
-        # Bugünkü verileri oku — raw SQL
-        t_res = await session.execute(
-            text("""SELECT * FROM daily_stock_market_stats 
-                    WHERE "date" = :today AND is_ceiling = true
-                    ORDER BY consecutive_ceiling_count DESC"""),
-            {"today": today}
-        )
-        c_stats_raw = t_res.fetchall()
-        
-        f_res = await session.execute(
-            text("""SELECT * FROM daily_stock_market_stats 
-                    WHERE "date" = :today AND is_floor = true
-                    ORDER BY consecutive_floor_count DESC"""),
-            {"today": today}
-        )
-        fl_stats_raw = f_res.fetchall()
-        
-        # ORM objelere dönüştür (image generator uyumu için)
-        c_stats = []
-        for r in c_stats_raw:
-            s = DailyStockMarketStat(
-                ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
-                is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
-                monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
-                monthly_floor_count=r[9], reason=r[10]
-            )
-            c_stats.append(s)
-        
-        fl_stats = []
-        for r in fl_stats_raw:
-            s = DailyStockMarketStat(
-                ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
-                is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
-                monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
-                monthly_floor_count=r[9], reason=r[10]
-            )
-            fl_stats.append(s)
+            async with async_session() as session:
+                # Bugün zaten kaydedilmiş mi? (mükerrer önleme)
+                check_res = await session.execute(
+                    text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+                    {"today": today}
+                )
+                if check_res.scalar() > 0:
+                    logger.info(f"{today} için zaten analiz yapılmış. Atlanıyor.")
+                    return # Graceful exit
 
-    # ==========================
-    # GÖRSEL ÜRETİMİ VE TWITTER
-    # ==========================
-    from app.services.chart_image_generator import generate_ceiling_floor_images
-    from app.services.twitter_service import _safe_tweet
+                # FIFO: 32 günden eski kayıtları temizle
+                cleanup_date = today - timedelta(days=32)
+                await session.execute(
+                    text('DELETE FROM daily_stock_market_stats WHERE "date" < :cutoff'),
+                    {"cutoff": cleanup_date}
+                )
 
-    if c_stats:
-        tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
-        tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
-        if len(tickers_str) > 150:
-            tickers_str = tickers_str[:150] + "..." # Limit hashtags if too many
+                # Tavanlari isleyelim
+                for stock in ceilings:
+                    ticker = stock["ticker"]
+                    price_val = Decimal(str(stock["price"]))
+                    pct_val = Decimal(str(stock["change"]))
+                    
+                    # Gecmis kayitlar — raw SQL
+                    past_res = await session.execute(
+                        text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
+                                consecutive_floor_count, "date"
+                                FROM daily_stock_market_stats 
+                                WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                        {"ticker": ticker}
+                    )
+                    past_records = past_res.fetchall()
+                    
+                    consec_ceil = 1
+                    if past_records and past_records[0][0]:  # is_ceiling
+                        consec_ceil = past_records[0][2] + 1  # consecutive_ceiling_count + 1
+                    
+                    monthly_ceil = sum(1 for r in past_records if r[0] and (today - r[4]).days <= 30) + 1
+                    
+                    # AI Analizi
+                    reason = await _analyze_reason_with_ai(
+                        ticker=ticker, 
+                        is_ceiling=True, 
+                        price=float(price_val), 
+                        pct=float(pct_val),
+                        consec=consec_ceil,
+                        monthly=monthly_ceil
+                    )
+                    
+                    new_stat = DailyStockMarketStat(
+                        ticker=ticker,
+                        date=today,
+                        close_price=price_val,
+                        percent_change=pct_val,
+                        is_ceiling=True,
+                        consecutive_ceiling_count=consec_ceil,
+                        monthly_ceiling_count=monthly_ceil,
+                        reason=reason[:100]
+                    )
+                    session.add(new_stat)
+                    
+                # Tabanlari isleyelim
+                for stock in floors:
+                    ticker = stock["ticker"]
+                    price_val = Decimal(str(stock["price"]))
+                    pct_val = Decimal(str(stock["change"]))
+                    
+                    past_res = await session.execute(
+                        text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count, 
+                                consecutive_floor_count, "date"
+                                FROM daily_stock_market_stats 
+                                WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                        {"ticker": ticker}
+                    )
+                    past_records = past_res.fetchall()
+                    
+                    consec_flr = 1
+                    if past_records and past_records[0][1]:  # is_floor
+                        consec_flr = past_records[0][3] + 1  # consecutive_floor_count + 1
+
+                    monthly_flr = sum(1 for r in past_records if r[1] and (today - r[4]).days <= 30) + 1
+                    
+                    reason = await _analyze_reason_with_ai(
+                        ticker=ticker, 
+                        is_ceiling=False, 
+                        price=float(price_val), 
+                        pct=float(pct_val),
+                        consec=consec_flr,
+                        monthly=monthly_flr
+                    )
+                    
+                    new_stat = DailyStockMarketStat(
+                        ticker=ticker,
+                        date=today,
+                        close_price=price_val,
+                        percent_change=pct_val,
+                        is_floor=True,
+                        consecutive_floor_count=consec_flr,
+                        monthly_floor_count=monthly_flr,
+                        reason=reason[:100]
+                    )
+                    session.add(new_stat)
+                    
+                await session.commit()
+                
+                # Bugünkü verileri oku — raw SQL
+                t_res = await session.execute(
+                    text("""SELECT * FROM daily_stock_market_stats 
+                            WHERE "date" = :today AND is_ceiling = true
+                            ORDER BY consecutive_ceiling_count DESC"""),
+                    {"today": today}
+                )
+                c_stats_raw = t_res.fetchall()
+                
+                f_res = await session.execute(
+                    text("""SELECT * FROM daily_stock_market_stats 
+                            WHERE "date" = :today AND is_floor = true
+                            ORDER BY consecutive_floor_count DESC"""),
+                    {"today": today}
+                )
+                fl_stats_raw = f_res.fetchall()
+                
+                # ORM objelere dönüştür (image generator uyumu için)
+                c_stats = []
+                for r in c_stats_raw:
+                    s = DailyStockMarketStat(
+                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
+                        is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
+                        monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
+                        monthly_floor_count=r[9], reason=r[10]
+                    )
+                    c_stats.append(s)
+                
+                fl_stats = []
+                for r in fl_stats_raw:
+                    s = DailyStockMarketStat(
+                        ticker=r[1], date=r[2], close_price=r[3], percent_change=r[12] if len(r) > 12 else 0,
+                        is_ceiling=r[4], is_floor=r[5], consecutive_ceiling_count=r[6],
+                        monthly_ceiling_count=r[7], consecutive_floor_count=r[8],
+                        monthly_floor_count=r[9], reason=r[10]
+                    )
+                    fl_stats.append(s)
+
+            # GÖRSEL ÜRETİMİ VE TWITTER
+            from app.services.chart_image_generator import generate_ceiling_floor_images
+            from app.services.twitter_service import _safe_tweet
+
+            if c_stats:
+                tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
+                tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
+                if len(tickers_str) > 150:
+                    tickers_str = tickers_str[:150] + "..."
+                    
+                base_t_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
+                
+                for idx, path in enumerate(tavan_images):
+                    page_info = f" (Sayfa {idx+1}/{len(tavan_images)})" if len(tavan_images) > 1 else ""
+                    tweet_text = f"{base_t_text}{page_info}"
+                    _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
+                    
+            if fl_stats:
+                taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
+                tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
+                if len(tickers_str) > 150:
+                    tickers_str = tickers_str[:150] + "..."
+                    
+                base_f_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
+                
+                for idx, path in enumerate(taban_images):
+                    page_info = f" (Sayfa {idx+1}/{len(taban_images)})" if len(taban_images) > 1 else ""
+                    tweet_text = f"{base_f_text}{page_info}"
+                    _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
             
-        base_t_text = f"🚨 Günün TAVAN Yapan Hisseleri ve Sebepleri\n\n🎯 Hangi şirketler neden zirveyi gördü? Yapay zeka yatırımcı özetleri görsellerde!\n\n{tickers_str}"
-        
-        for idx, path in enumerate(tavan_images):
-            page_info = f" (Sayfa {idx+1}/{len(tavan_images)})" if len(tavan_images) > 1 else ""
-            tweet_text = f"{base_t_text}{page_info}"
-            _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
-            
-    if fl_stats:
-        taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
-        tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
-        if len(tickers_str) > 150:
-            tickers_str = tickers_str[:150] + "..."
-            
-        base_f_text = f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri\n\n📌 Şirketler neden kan kaybetti? Yapay zeka analizleri görsellerde!\n\n{tickers_str}"
-        
-        for idx, path in enumerate(taban_images):
-            page_info = f" (Sayfa {idx+1}/{len(taban_images)})" if len(taban_images) > 1 else ""
-            tweet_text = f"{base_f_text}{page_info}"
-            _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
-    
-    logger.info("Market close analysis & Twitter generation completed.")
+            logger.info("Market close analysis & Twitter generation completed successfully.")
+            return # Başarılı completion
+
+        except Exception as e:
+            if attempt < 3:
+                logger.warning(f"Market close analysis attempt {attempt + 1} failed: {e}. Retrying in 60s...")
+                await asyncio.sleep(60)
+            else:
+                logger.error(f"All 4 attempts for market close analysis failed. Final error: {e}")
+
 
