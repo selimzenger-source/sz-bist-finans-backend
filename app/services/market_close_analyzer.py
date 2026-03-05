@@ -290,27 +290,50 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         context_parts.append(ipo_info)
     context_str = "\n".join(context_parts) if context_parts else "- Belirgin haber veya veri bulunamadı."
 
-    prompt = f"""Sen uzman bir borsa analistisin. 
-Aşağıdaki verileri kullanarak #{ticker} hissesinin bugünkü hareketinin nedenini 8-10 kelimelik, yatırımcıya hitap eden, kaliteli ve SPESİFİK bir cümle ile açıkla.
+    prompt = f"""#{ticker} hissesi bugün {"tavan" if is_ceiling else "taban"} yaptı (%{f_pct}). Sebebini 8-10 kelimelik TEK bir cümle ile açıkla.
 
 VERİLER:
-- Hisse: {ticker}
-- Durum: {trend_statement}
-- Son 30 gündeki toplam tavan/taban sayısı: {monthly}
 {context_str}
+{ipo_rule}
+{trend_rule}
 
-KURALLAR:
-1. Kesinlikle " momentum, alıcı baskısı, satıcı baskısı, trend direnci, hacimli kırılım, piyasa beklentisi, yatırımcı talebi, teknik trend, fiyatlama, tavan serisi, taban serisi, serisi devam, derin satış, tepki alışı, kâr satışı, sert yükseliş, kar satışı, tepki yükselişi" gibi jenerik ve boş ifadeler KULLANMA.
-2. Eğer net bir haber varsa (KAP veya Web) ONA ODAKLAN. (Örn: "Yeni iş ilişkisi ve güçlü bilanço beklentisiyle tavan oldu")
-3. Eğer net bir haber yoksa ve yeni halka arz ise, halka arz heyecanına veya tavan serisine vurgu yap ama jenerik olma.
-4. Cümle profesyonel, etkileyici ve doyurucu olmalı. Tekerleme gibi olma.
-5. Sadece cümleyi dön, tırnak işareti kullanma.
+KRİTİK KURALLAR:
+1. SADECE yukarıdaki VERİLER'de somut bir haber/bilgi VARSA yaz. Örn: bilanço, sermaye artırımı, halka arz, ihale, sözleşme, SPK kararı, ortaklık.
+2. Verilerde somut haber YOKSA, SADECE "EMPTY" yaz. Başka hiçbir şey yazma.
+3. ASLA jenerik yorum üretme. "Düşük işlem hacmi", "yatay seyir", "konsolide", "volatilite", "sessiz yükseliş", "istikrarlı seyir", "kurumsal kalite", "sınırlı hareket", "rutin işlem" gibi dolgu ifadeler YASAK.
+4. Tırnak işareti kullanma, sadece düz cümle yaz.
 
-İYİ ÖRNEKLER: 
-- "Bedelsiz sermaye artırımı onayı sonrası yatırımcı ilgisiyle zirve tazeledi"
-- "Yüksek gelen çeyrek kârı sonrası güçlü fon alımlarıyla tavan"
-- "Halka arz sonrası tavan serisini bozmadan yatırımcı güvenini koruyor"
+DOĞRU ÖRNEKLER:
+- "Bedelsiz sermaye artırımı onayı sonrası yoğun talep"
+- "Güçlü 3. çeyrek bilançosu açıklandı"
+- "Halka arz sonrası yoğun talep"
+- "Zarardan kâra geçiş açıklaması"
+- "EMPTY" (somut haber yoksa)
+
+YANLIŞ ÖRNEKLER (BUNLARI ASLA YAZMA):
+- "Düşük işlem hacmiyle sessiz seansında konsolide oluyor" ← YASAK
+- "Halka arz sonrası istikrarlı seyirle yatırımcı güvenini pekiştiriyor" ← YASAK
+- "Elektronik sektörü potansiyeli ile yükselişini sürdürüyor" ← YASAK
 """
+
+    # Ortak filtre — jenerik/dolgu yanıtları yakala
+    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım",
+           "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi",
+           "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı",
+           "sert yükseliş", "kar satışı", "tepki yükselişi", "düşük işlem hacmi",
+           "yatay seyir", "konsolide", "volatilite", "sessiz yükseliş", "istikrarlı seyir",
+           "kurumsal kalite", "sınırlı hareket", "rutin işlem", "sessiz seans",
+           "potansiyeli ile", "sektörü potansiyeli", "güvenini pekiştir", "seyir izliyor",
+           "seyirde", "katalizör eksikliği"]
+
+    def _clean_ai_text(raw: str) -> str:
+        """AI yanıtını temizle — EMPTY veya jenerik ise boş dön."""
+        t = raw.strip().replace('"', '').replace("'", "")
+        if not t or t.upper() == "EMPTY" or len(t) < 5:
+            return ""
+        if any(x in t.lower() for x in bad):
+            return ""
+        return t
 
     # FALLBACK SİSTEMİ
     # ── 1. ANTHROPIC (Claude — birincil) ──
@@ -332,13 +355,12 @@ KURALLAR:
                     }
                 )
                 if res.status_code == 200:
-                    text = res.json()["content"][0]["text"].strip().replace('"', '').replace("'", "")
-                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-                    if any(x in text.lower() for x in bad):
-                        logger.info(f"Anthropic generic filtered for {ticker}: {text}")
-                    else:
+                    text = _clean_ai_text(res.json()["content"][0]["text"])
+                    if text:
                         logger.info(f"Anthropic result for {ticker}: {text}")
                         return text
+                    else:
+                        logger.info(f"Anthropic empty/filtered for {ticker}")
                 else:
                     logger.warning(f"Anthropic HTTP {res.status_code} for {ticker}: {res.text[:150]}")
         except Exception as e:
@@ -354,13 +376,12 @@ KURALLAR:
                     json={"model": "gpt-4o", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
                 )
                 if res.status_code == 200:
-                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
-                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-                    if any(x in text.lower() for x in bad):
-                        logger.info(f"OpenAI generic filtered for {ticker}: {text}")
-                    else:
+                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if text:
                         logger.info(f"OpenAI result for {ticker}: {text}")
                         return text
+                    else:
+                        logger.info(f"OpenAI empty/filtered for {ticker}")
                 else:
                     logger.warning(f"OpenAI HTTP {res.status_code} for {ticker}: {res.text[:150]}")
         except Exception as e:
@@ -376,19 +397,18 @@ KURALLAR:
                     json={"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
                 )
                 if res.status_code == 200:
-                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
-                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-                    if any(x in text.lower() for x in bad):
-                        logger.info(f"Abacus generic filtered for {ticker}: {text}")
-                    else:
+                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if text:
                         logger.info(f"Abacus result for {ticker}: {text}")
                         return text
+                    else:
+                        logger.info(f"Abacus empty/filtered for {ticker}")
                 else:
                     logger.warning(f"Abacus HTTP {res.status_code} for {ticker}: {res.text[:100]}")
         except Exception as e:
             logger.warning(f"Abacus error for {ticker}: {e}")
 
-    # ── 4. GEMINI REST API (hafif — SDK değil) ──
+    # ── 4. GEMINI REST API ──
     if settings.GEMINI_API_KEY:
         try:
             async with httpx.AsyncClient(timeout=20) as client:
@@ -401,29 +421,17 @@ KURALLAR:
                     json={"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
                 )
                 if res.status_code == 200:
-                    text = res.json()["choices"][0]["message"]["content"].strip().replace('"', '').replace("'", "")
-                    bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım", "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi", "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı", "sert yükseliş", "kar satışı", "tepki yükselişi"]
-                    if any(x in text.lower() for x in bad):
-                        logger.info(f"Gemini generic filtered for {ticker}: {text}")
-                    else:
+                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if text:
                         logger.info(f"Gemini result for {ticker}: {text}")
                         return text
+                    else:
+                        logger.info(f"Gemini empty/filtered for {ticker}")
                 else:
                     logger.warning(f"Gemini HTTP {res.status_code} for {ticker}: {res.text[:100]}")
         except Exception as e:
             logger.warning(f"Gemini error for {ticker}: {e}")
 
-    # ── 5. PROGRAMATIK TREND FALLBACK ──
-    # Tüm AI provider'lar boş döndüyse ve gerçek trend verisi varsa
-    if "derin satış" in trend_statement.lower():
-        if is_ceiling:
-            return "Derin satış sonrası tepki alışı"
-        else:
-            return "Sert yükseliş sonrası kâr satışı"
-    elif "tepe bölgesi" in trend_statement.lower():
-        if not is_ceiling:
-            return "Sert yükseliş sonrası kâr satışı"
-    
     return ""
 
 async def _save_market_close_data(session, today, ceilings, floors):
