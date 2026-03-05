@@ -297,10 +297,16 @@ VERİLER:
 {ipo_rule}
 
 KURALLAR:
-1. Verilerde somut haber varsa (bilanço, sermaye artırımı, halka arz, ihale, sözleşme) SADECE onu yaz.
+1. Verilerde somut haber varsa (bilanço, sermaye artırımı, halka arz, ihale, sözleşme, hedef fiyat, tutukluluk, mahkeme kararı vb.) SADECE onu yaz.
 2. Somut haber yoksa SADECE "EMPTY" yaz. Uydurma, jenerik yorum YASAK.
 3. Kısa ol: "Güçlü 3. çeyrek bilançosu açıklandı." gibi.
 4. YASAK ifadeler: düşük işlem hacmi, yatay seyir, konsolide, volatilite, sessiz, istikrarlı, sınırlı, rutin, potansiyel, kurumsal kalite, güven pekiştir.
+
+KRİTİK DOĞRULUK KURALLARI:
+5. TICKER DOĞRULAMASI: Haberin SADECE #{ticker} hissesine ait olduğundan EMİN ol. Benzer isimli/kodlu farklı şirketlerin haberlerini ASLA bu hisseye atfetme. Örnek: SMART (Smartiks Yazılım) ≠ SMRTG (Smart Güneş Enerjisi). Haber hangi şirkete aitse SADECE ona yaz.
+6. İPTAL/VAZGEÇİLEN KARARLAR: Eğer verilerde bir kurumsal karar (sermaye artırımı, ortaklık, proje vb.) varsa AMA sonradan iptal edildiği, vazgeçildiği veya geri çekildiği de belirtiliyorsa, o haberi sebep olarak KULLANMA. "EMPTY" yaz. İptal edilmiş kararları güncel sebep olarak sunmak YASAKTIR.
+7. HEDEFLİ FİYAT RAPORLARI: Bir aracı kurum hedef fiyat raporu yayınladıysa, spesifik rakam VERME. Bunun yerine "Yüksek hedef fiyat raporu yayınlandı." veya "Düşük hedef fiyat raporu yayınlandı." şeklinde yaz. Rakam vermek yatırım tavsiyesi olur.
+8. Haber İLGİLİLİK kontrolü: Haber en fazla son 7 gün içinde olmalı. Haftalarca/aylarca önceki haberler bugünün tavan/taban sebebi OLAMAZ.
 """
 
     # Ortak filtre — jenerik/dolgu yanıtları yakala
@@ -314,11 +320,22 @@ KURALLAR:
            "seyirde", "katalizör eksikliği"]
 
     def _clean_ai_text(raw: str) -> str:
-        """AI yanıtını temizle — EMPTY veya jenerik ise boş dön."""
+        """AI yanıtını temizle — EMPTY veya jenerik ise boş dön, hedef fiyat rakamlarını sil."""
+        import re
         t = raw.strip().replace('"', '').replace("'", "")
         if not t or t.upper() == "EMPTY" or len(t) < 5:
             return ""
         if any(x in t.lower() for x in bad):
+            return ""
+        # Hedef fiyat rakamlarını temizle — "68,36 TL" → kaldır (yatırım tavsiyesi riski)
+        t = re.sub(r'\d+[.,]\d+\s*TL', '', t).strip()
+        t = re.sub(r'hedef\s*(?:fiyat[ıi]?\s*)?\d+[.,]?\d*', 'hedef fiyat', t, flags=re.IGNORECASE).strip()
+        # Çift boşlukları temizle
+        t = re.sub(r'\s{2,}', ' ', t).strip()
+        # Sonundaki noktalama düzelt
+        if t and t[-1] not in '.!':
+            t += '.'
+        if len(t) < 5:
             return ""
         return t
 
