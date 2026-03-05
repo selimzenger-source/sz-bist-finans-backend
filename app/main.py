@@ -3257,6 +3257,7 @@ async def debug_market_close(
     from app.services.market_close_analyzer import scrape_uzmanpara
     from datetime import date as _d
     from zoneinfo import ZoneInfo
+    from sqlalchemy import text as sa_text
     import httpx, re
 
     debug_info = {}
@@ -3270,11 +3271,27 @@ async def debug_market_close(
     # 2. DB'de bugün kaydı var mı?
     try:
         check = await db.execute(
-            text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+            sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
             {"today": today_tr}
         )
         db_count = check.scalar()
         debug_info["db_today_count"] = db_count
+
+        # Bugünkü kayıtları göster
+        if db_count > 0:
+            rows = await db.execute(
+                sa_text('SELECT ticker, is_ceiling, is_floor, reason FROM daily_stock_market_stats WHERE "date" = :today LIMIT 5'),
+                {"today": today_tr}
+            )
+            debug_info["db_today_sample"] = [{"ticker": r[0], "is_ceiling": r[1], "is_floor": r[2], "reason": r[3]} for r in rows.fetchall()]
+
+        # Son kayıt tarihi
+        last = await db.execute(sa_text('SELECT MAX("date") FROM daily_stock_market_stats'))
+        debug_info["db_last_date"] = str(last.scalar())
+
+        # Toplam kayıt sayısı
+        total = await db.execute(sa_text('SELECT COUNT(*) FROM daily_stock_market_stats'))
+        debug_info["db_total_count"] = total.scalar()
     except Exception as e:
         debug_info["db_error"] = str(e)
 
