@@ -417,7 +417,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
     CYAN = (34, 211, 238)
 
     for page_idx, page_stats in enumerate(pages):
-        row_h = 90
+        row_h = 106
         supp_row_h = 68  # Ek hisseler icin daha kucuk satir
         header_h = 80
         # Tüm sayfalar aynı yükseklik — en kalabalık sayfanın satır sayısını kullan
@@ -470,7 +470,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             row_bg = ROW_EVEN if idx % 2 == 0 else ROW_ODD
             draw.rectangle([(0, row_y), (width, row_y + row_h)], fill=row_bg)
 
-            text_y = row_y + 25
+            text_y = row_y + 33
 
             # Ticker
             draw.text((col_x[0], text_y), f"#{stat.ticker}", fill=WHITE, font=font_symbol)

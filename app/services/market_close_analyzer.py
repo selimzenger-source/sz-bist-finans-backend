@@ -201,26 +201,60 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     except Exception as e:
         logger.warning(f"IPO check error for {ticker}: {e}")
 
-    # 3. Fiyat geçmişi — DB veya BigPara fallback
+    # 3. Fiyat geçmişi — DB → IsYatirim → uzmanpara → bigpara fallback
     price_history = ""
-    trend_statement = ""  # Programatik hesaplanmış trend
+    trend_statement = ""
+    programmatic_reason = ""  # Kâr satışı / tepki alışı — AI boş kalırsa kullanılır
     try:
         prices = []
-        # Önce DB dene — raw SQL ile "date" quoting
+        # 3a. Önce DB dene — raw SQL ile "date" quoting
         async with async_session() as session:
-            since = date.today() - timedelta(days=15)
+            since = date.today() - timedelta(days=20)
             raw = text("""
                 SELECT close_price FROM daily_stock_market_stats
                 WHERE ticker = :ticker AND "date" >= :since
-                ORDER BY "date" DESC LIMIT 10
+                ORDER BY "date" DESC LIMIT 15
             """)
             res = await session.execute(raw, {"ticker": ticker, "since": since})
             rows = res.fetchall()
             if rows and len(rows) >= 3:
                 for row in reversed(rows):
                     prices.append(float(row[0]))
-        
-        # DB'de yoksa web'den çek (1. uzmanpara, 2. bigpara)
+
+        # 3b. DB yetersizse IsYatirim dene
+        if len(prices) < 5:
+            try:
+                from_dt = (date.today() - timedelta(days=22)).strftime("%d.%m.%Y")
+                to_dt = date.today().strftime("%d.%m.%Y")
+                isy_url = (
+                    "https://www.isyatirim.com.tr/_layouts/15/IsYatirim.Website/Common/"
+                    f"Data.aspx/HisseSenetleriFiyatBilgileri"
+                    f"?hisse={ticker}&startdate={from_dt}&enddate={to_dt}&exportFlag=1"
+                )
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.get(isy_url, headers={"User-Agent": "Mozilla/5.0"})
+                    if resp.status_code == 200:
+                        isy_prices = []
+                        soup = BeautifulSoup(resp.text, "html.parser")
+                        for tbl in soup.find_all("table"):
+                            for row in tbl.find_all("tr")[1:20]:
+                                cols = row.find_all("td")
+                                for col in cols:
+                                    try:
+                                        txt = col.text.strip().replace(".", "").replace(",", ".")
+                                        val = float(txt)
+                                        if 0.5 < val < 500000:
+                                            isy_prices.append(val)
+                                            break
+                                    except:
+                                        pass
+                        if len(isy_prices) >= 5:
+                            prices = isy_prices[:15]
+                            logger.info(f"IsYatirim fiyat: {ticker} — {len(prices)} gün")
+            except Exception as ie:
+                logger.warning(f"IsYatirim scrape error for {ticker}: {ie}")
+
+        # 3c. Hâlâ yetersizse uzmanpara / bigpara
         if len(prices) < 3:
             for scrape_url in [
                 f"https://uzmanpara.milliyet.com.tr/borsa/hisse-detay/{ticker}/",
@@ -239,31 +273,55 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                                             try:
                                                 txt = col.text.strip().replace(".", "").replace(",", ".")
                                                 val = float(txt)
-                                                if 0.5 < val < 100000:  # Makul fiyat
+                                                if 0.5 < val < 100000:
                                                     prices.append(val)
                                                     break
-                                            except: pass
+                                            except:
+                                                pass
                             if len(prices) >= 3:
                                 break
                 except Exception as e:
                     logger.warning(f"Scrape error ({scrape_url}) for {ticker}: {e}")
-        
-        # Programatik trend hesapla
+
+        # 3d. Programatik kâr satışı / tepki alışı tespiti
+        # Sadece AI boş kalırsa devreye girer — prompt verisi her zaman öncelikli
+        if len(prices) >= 5:
+            # prices[-1] = bugün (taban/tavan), prices[-2] = dün, prices[0] = en eski
+            ref_end = prices[-2]   # Dünkü kapanış (bugünün etkisi hariç)
+            ref_start = prices[0]  # ~15 gün önceki kapanış
+            prev_day_chg = (
+                ((prices[-2] - prices[-3]) / prices[-3]) * 100
+                if len(prices) >= 3 and prices[-3] > 0 else 0
+            )
+            if ref_start > 0:
+                gain_15d = ((ref_end - ref_start) / ref_start) * 100
+                # TABAN senaryosu: 15 günde %30+ yükseliş, dün %5+ artış, bugün taban → kâr satışı
+                if not is_ceiling and gain_15d >= 30 and prev_day_chg >= 5:
+                    programmatic_reason = "Sert yükseliş sonrası kâr satışı."
+                    logger.info(
+                        f"[PROG] {ticker} kâr satışı tespit: 15g={gain_15d:.0f}%, dün={prev_day_chg:.1f}%"
+                    )
+                # TAVAN senaryosu: 15 günde %30+ düşüş, dün %5+ düşüş, bugün tavan → tepki alışı
+                elif is_ceiling and gain_15d <= -30 and prev_day_chg <= -5:
+                    programmatic_reason = "Derin düşüş sonrası tepki alışı."
+                    logger.info(
+                        f"[PROG] {ticker} tepki alışı tespit: 15g={gain_15d:.0f}%, dün={prev_day_chg:.1f}%"
+                    )
+
+        # 3e. Genel trend özeti (AI'a context olarak verilir)
         if len(prices) >= 3:
             oldest_price = prices[0]
             newest_price = prices[-1]
             if oldest_price > 0:
                 pct_change_period = ((newest_price - oldest_price) / oldest_price) * 100
-                
                 if pct_change_period <= -25:
-                    # Gerçekten derin düşüş var — bu veriyle söyle
-                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:.0f} düşüş. Bu GERÇEK derin satış."
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:.0f} düşüş."
                     price_history = trend_statement
                 elif pct_change_period >= 25:
-                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.0f} yükseliş. Tarihi tepe bölgesi."
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.0f} yükseliş."
                     price_history = trend_statement
                 else:
-                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.1f} değişim. Normal seyir."
+                    trend_statement = f"\nTREND VERİSİ: Son {len(prices)} günde %{pct_change_period:+.1f} değişim."
                     price_history = trend_statement
     except Exception as e:
         logger.warning(f"Price history error for {ticker}: {e}")
@@ -305,24 +363,47 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         context_parts.append(ipo_info)
     context_str = "\n".join(context_parts) if context_parts else "- Belirgin haber veya veri bulunamadı."
 
-    prompt = f"""#{ticker} bugün {"tavan" if is_ceiling else "taban"} yaptı. Sebebini SADECE 4-6 kelime ile yaz.
+    hareket = "TAVAN (+%9.95 civarı yükseliş)" if is_ceiling else "TABAN (-%9.95 civarı düşüş)"
+    prompt = f"""Sen Türkiye borsası (BIST) uzmanısın. #{ticker} hissesi bugün {hareket} yaptı.
+Görevin: Bu fiyat hareketinin GERÇEK sebebini bulmak ve SADECE 4-6 kelime ile yazmak.
 
-VERİLER:
+━━━ ADIM 1 — VERİLERİ DİKKATLİCE İNCELE ━━━
 {context_str}
 {ipo_rule}
 
-KURALLAR:
-1. Verilerde somut haber varsa (bilanço, sermaye artırımı, halka arz, ihale, sözleşme, hedef fiyat, tutukluluk, mahkeme kararı vb.) SADECE onu yaz.
-2. Somut haber yoksa SADECE "EMPTY" yaz. Uydurma, jenerik yorum YASAK.
-3. Kısa ol: "Güçlü 3. çeyrek bilançosu açıklandı." gibi.
-4. YASAK ifadeler: düşük işlem hacmi, yatay seyir, konsolide, volatilite, sessiz, istikrarlı, sınırlı, rutin, potansiyel, kurumsal kalite, güven pekiştir.
+━━━ ADIM 2 — SIRAYLA KONTROL ET ━━━
+A) BİLANÇO / FİNANSAL SONUÇ: Şirket son 7 günde finansal tablo, kâr/zarar, gelir açıklaması yaptı mı?
+   → Evet ise: "Güçlü bilanço açıklandı." / "Beklenti altı bilanço açıklandı." gibi yaz. Spesifik rakam YAZMA.
 
-KRİTİK DOĞRULUK KURALLARI:
-5. TICKER DOĞRULAMASI: Haberin SADECE #{ticker} hissesine ait olduğundan EMİN ol. Benzer isimli/kodlu farklı şirketlerin haberlerini ASLA bu hisseye atfetme. Örnek: SMART (Smartiks Yazılım) ≠ SMRTG (Smart Güneş Enerjisi). Haber hangi şirkete aitse SADECE ona yaz.
-6. İPTAL/VAZGEÇİLEN KARARLAR: Eğer verilerde bir kurumsal karar (sermaye artırımı, ortaklık, proje vb.) varsa AMA sonradan iptal edildiği, vazgeçildiği veya geri çekildiği de belirtiliyorsa, o haberi sebep olarak KULLANMA. "EMPTY" yaz. İptal edilmiş kararları güncel sebep olarak sunmak YASAKTIR.
-7. HEDEFLİ FİYAT RAPORLARI: Bir aracı kurum hedef fiyat raporu yayınladıysa, spesifik rakam VERME. Bunun yerine "Yüksek hedef fiyat raporu yayınlandı." veya "Düşük hedef fiyat raporu yayınlandı." şeklinde yaz. Rakam vermek yatırım tavsiyesi olur.
-8. Haber İLGİLİLİK kontrolü: Haber en fazla son 7 gün içinde olmalı. Haftalarca/aylarca önceki haberler bugünün tavan/taban sebebi OLAMAZ.
-9. BİLANÇO VE FİNANSAL SONUÇLAR: Eğer verilerde şirketin bilanço açıklaması, kâr/zarar, gelir artışı/düşüşü gibi finansal sonuçlar varsa, bunu sebep olarak yaz. Örnek: "Güçlü bilanço, kâr %40 arttı." veya "Zarar açıklandı, gelir düştü." Spesifik kâr/zarar rakamı VERME, sadece yüzde veya yön belirt.
+B) SERMAYE HAREKETLERİ: Bedelsiz/bedelli sermaye artırımı, temettü, hisse geri alımı var mı?
+   → İPTAL EDİLMİŞ veya GERİ ÇEKİLMİŞ kararları ASLA yazma.
+
+C) KURUMSAL OLAY: İhale kazanma/kaybetme, önemli sözleşme, ortaklık, proje ihalesi, lisans var mı?
+
+D) HUKUKİ/YÖNETİM: Tutukluluk kararı, beraat, mahkeme kararı, yönetim değişikliği var mı?
+
+E) HEDEFLİ FİYAT / ANALIST RAPORU: Aracı kurum raporu var mı?
+   → Spesifik TL rakamı ASLA yazma. "Yüksek hedef fiyat raporu." / "Düşük hedef fiyat raporu." yaz.
+
+F) HALKA ARZ: Yeni halka arz mı? (IPO bilgisi kontrol et)
+
+G) SEKTÖR/MAKRO: Sektörü doğrudan etkileyen düzenleme, kota, yasal karar var mı?
+
+━━━ ADIM 3 — TICKER DOĞRULA ━━━
+Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
+Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → O zaman EMPTY yaz.
+Haber 7 günden eski mi? → EMPTY yaz.
+Karar iptal mi edilmiş? → EMPTY yaz.
+
+━━━ ADIM 4 — ÇIKTI ━━━
+Yukarıda A-G'den birinde somut bulgu varsa → 4-6 kelime ile Türkçe yaz.
+Somut bulgu yoksa → sadece "EMPTY" yaz.
+
+❌ YASAK: trend yorumu, "momentum", "alıcı/satıcı baskısı", "hacimli", "volatilite",
+   "piyasa beklentisi", "yatırımcı talebi", "konsolide", "istikrarlı", "potansiyel",
+   rakam içeren hedef fiyat, rakam içeren kâr/zarar tutarı.
+✅ İSTENEN FORMAT: "Bedelsiz sermaye artırımı kararı alındı." / "Güçlü 3Ç bilançosu açıklandı." /
+   "Yüksek hedef fiyat raporu yayınlandı." / "Önemli ihale sözleşmesi imzalandı."
 """
 
     # Ortak filtre — jenerik/dolgu yanıtları yakala
@@ -355,6 +436,18 @@ KRİTİK DOĞRULUK KURALLARI:
             return ""
         return t
 
+    # Tüm modeller için ortak sistem kişiliği (Sıfır Halüsinasyon prensibi)
+    _SYSTEM_PERSONA = (
+        "Sen Borsa İstanbul (BIST) verileri, şirket haber akışları (KAP) ve piyasa analizi "
+        "konusunda uzman, son derece titiz ve araştırmacı Kıdemli bir Finansal Analistsin. "
+        "En büyük kuralın 'Sıfır Halüsinasyon' ve 'Kesin Doğruluk'tur. "
+        "Verileri incelerken bir dedektif gibi şüpheci yaklaşır, her hisse kodunu, şirket "
+        "unvanını ve haberin güncel geçerliliğini iki kez kontrol edersin. "
+        "Asla ezberden konuşmaz veya tahminde bulunmazsın; sadece teyit edilmiş, net ve "
+        "güncel gerçekleri raporlarsın. Çıktın SADECE 4-6 kelimeli tek bir Türkçe cümle "
+        "ya da 'EMPTY' olacak — başka hiçbir şey yazma."
+    )
+
     # FALLBACK SİSTEMİ
     # ── 1. ANTHROPIC (Claude — birincil) ──
     if settings.ANTHROPIC_API_KEY:
@@ -369,9 +462,10 @@ KRİTİK DOĞRULUK KURALLARI:
                     },
                     json={
                         "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 120,
+                        "max_tokens": 150,
+                        "system": _SYSTEM_PERSONA,
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2
+                        "temperature": 0.1
                     }
                 )
                 if res.status_code == 200:
@@ -393,7 +487,15 @@ KRİTİK DOĞRULUK KURALLARI:
                 res = await client.post(
                     "https://api.openai.com/v1/chat/completions",
                     headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                    json={"model": "gpt-4o", "max_tokens": 120, "messages": [{"role": "system", "content": "Sen kısa finansal yorum asistanısın. SADECE 4-6 kelime yaz. Uzun cümleler YASAK."}, {"role": "user", "content": prompt}], "temperature": 0.2}
+                    json={
+                        "model": "gpt-4o",
+                        "max_tokens": 150,
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PERSONA},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1
+                    }
                 )
                 if res.status_code == 200:
                     text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
@@ -414,7 +516,14 @@ KRİTİK DOĞRULUK KURALLARI:
                 res = await client.post(
                     "https://routellm.abacus.ai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {settings.ABACUS_API_KEY}"},
-                    json={"model": "claude-sonnet-4-6", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                    json={
+                        "model": "claude-sonnet-4-6",
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PERSONA},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1
+                    }
                 )
                 if res.status_code == 200:
                     text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
@@ -436,9 +545,16 @@ KRİTİK DOĞRULUK KURALLARI:
                     "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
                     headers={
                         "Authorization": f"Bearer {settings.GEMINI_API_KEY}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
-                    json={"model": "gemini-2.5-pro", "messages": [{"role": "user", "content": prompt}], "temperature": 0.2}
+                    json={
+                        "model": "gemini-2.5-pro",
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PERSONA},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1
+                    }
                 )
                 if res.status_code == 200:
                     text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
@@ -452,6 +568,10 @@ KRİTİK DOĞRULUK KURALLARI:
         except Exception as e:
             logger.warning(f"Gemini error for {ticker}: {e}")
 
+    # Tüm AI modelleri boş / başarısız — programatik fallback
+    if programmatic_reason:
+        logger.info(f"[PROG FALLBACK] {ticker}: {programmatic_reason}")
+        return programmatic_reason
     return ""
 
 async def _save_market_close_data(session, today, ceilings, floors):
@@ -650,7 +770,17 @@ async def scrape_and_analyze_market_close(force: bool = False):
             tweet_ok = True
             tweet_error_msg = ""
             from app.services.chart_image_generator import generate_ceiling_floor_images
-            from app.services.twitter_service import _safe_tweet_with_multi_media
+            import app.services.twitter_service as _tw_svc
+
+            # Disclaimer flood tweet — her ana tweetin reply'ı olarak gönderilir
+            ai_disclaimer = (
+                "📌 Dipnot / Uyarı: Görsellerdeki veriler, haber akışlarını tarayan "
+                "özel eğitimli yapay zeka modelleri tarafından oluşturulmuştur. Modelimiz "
+                "yüksek doğrulukla çalışsa da nadiren güncel olmayan haberleri veya isim/kod "
+                "benzerliklerini rapora yansıtabilir. Lütfen işlem yapmadan önce mutlaka "
+                "kendi araştırmanızı yapın ve teyit edin. Bu veriler yatırım tavsiyesi "
+                "(YTD) niteliği taşımaz."
+            )
 
             # ── TAVAN TWEET ──
             if c_stats:
@@ -663,11 +793,19 @@ async def scrape_and_analyze_market_close(force: bool = False):
                         f"derlediği haber analizleri görsellerde! 🚀👇\n\n"
                         f"{tickers_str}"
                     )
-                    _safe_tweet_with_multi_media(
+                    _tw_svc._safe_tweet_with_multi_media(
                         text=tweet_text, image_paths=tavan_images,
                         source="market_close_analyzer"
                     )
                     logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
+                    # Disclaimer flood reply — 5 saniye bekle sonra at
+                    await asyncio.sleep(5)
+                    tavan_tweet_id = _tw_svc._last_tweet_id
+                    if tavan_tweet_id and tavan_tweet_id != "?":
+                        _tw_svc._safe_reply_tweet(ai_disclaimer, tavan_tweet_id)
+                        logger.info(f"✅ TAVAN disclaimer reply gönderildi (reply_to={tavan_tweet_id})")
+                    else:
+                        logger.warning("TAVAN disclaimer reply: tweet ID alınamadı, atlanıyor")
                 except Exception as e:
                     tweet_ok = False
                     tweet_error_msg += f"Tavan tweet hata: {e} | "
@@ -689,11 +827,19 @@ async def scrape_and_analyze_market_close(force: bool = False):
                         f"derlediği haber analizleri görsellerde! 📊👇\n\n"
                         f"{tickers_str}"
                     )
-                    _safe_tweet_with_multi_media(
+                    _tw_svc._safe_tweet_with_multi_media(
                         text=tweet_text, image_paths=taban_images,
                         source="market_close_analyzer"
                     )
                     logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
+                    # Disclaimer flood reply — 5 saniye bekle sonra at
+                    await asyncio.sleep(5)
+                    taban_tweet_id = _tw_svc._last_tweet_id
+                    if taban_tweet_id and taban_tweet_id != "?":
+                        _tw_svc._safe_reply_tweet(ai_disclaimer, taban_tweet_id)
+                        logger.info(f"✅ TABAN disclaimer reply gönderildi (reply_to={taban_tweet_id})")
+                    else:
+                        logger.warning("TABAN disclaimer reply: tweet ID alınamadı, atlanıyor")
                 except Exception as e:
                     tweet_ok = False
                     tweet_error_msg += f"Taban tweet hata: {e}"
