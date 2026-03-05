@@ -435,92 +435,111 @@ async def _save_market_close_data(session, today, ceilings, floors):
         {"cutoff": cleanup_date}
     )
 
+    saved_count = 0
+    ai_ok_count = 0
+
     # Tavanları işle
-    for stock in ceilings:
-        ticker = stock["ticker"]
-        price_val = Decimal(str(stock["price"]))
-        pct_val = Decimal(str(stock["change"]))
+    for i, stock in enumerate(ceilings):
+        try:
+            ticker = stock["ticker"]
+            price_val = Decimal(str(stock["price"]))
+            pct_val = Decimal(str(stock["change"]))
 
-        past_res = await session.execute(
-            text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count,
-                    consecutive_floor_count, "date"
-                    FROM daily_stock_market_stats
-                    WHERE ticker = :ticker ORDER BY "date" DESC"""),
-            {"ticker": ticker}
-        )
-        past_records = past_res.fetchall()
+            past_res = await session.execute(
+                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count,
+                        consecutive_floor_count, "date"
+                        FROM daily_stock_market_stats
+                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                {"ticker": ticker}
+            )
+            past_records = past_res.fetchall()
 
-        consec_ceil = 1
-        if past_records and past_records[0][0]:
-            consec_ceil = past_records[0][2] + 1
+            consec_ceil = 1
+            if past_records and past_records[0][0]:
+                consec_ceil = past_records[0][2] + 1
 
-        monthly_ceil = sum(1 for r in past_records if r[0] and (today - r[4]).days <= 30) + 1
+            monthly_ceil = sum(1 for r in past_records if r[0] and (today - r[4]).days <= 30) + 1
 
-        reason = await _analyze_reason_with_ai(
-            ticker=ticker,
-            is_ceiling=True,
-            price=float(price_val),
-            pct=float(pct_val),
-            consec=consec_ceil,
-            monthly=monthly_ceil
-        )
+            reason = await _analyze_reason_with_ai(
+                ticker=ticker,
+                is_ceiling=True,
+                price=float(price_val),
+                pct=float(pct_val),
+                consec=consec_ceil,
+                monthly=monthly_ceil
+            )
+            if reason:
+                ai_ok_count += 1
 
-        new_stat = DailyStockMarketStat(
-            ticker=ticker,
-            date=today,
-            close_price=price_val,
-            percent_change=pct_val,
-            is_ceiling=True,
-            consecutive_ceiling_count=consec_ceil,
-            monthly_ceiling_count=monthly_ceil,
-            reason=reason[:100]
-        )
-        session.add(new_stat)
+            logger.info(f"[TAVAN {i+1}/{len(ceilings)}] {ticker}: reason={'✅' if reason else '❌'} | {reason[:50] if reason else 'boş'}")
+
+            new_stat = DailyStockMarketStat(
+                ticker=ticker,
+                date=today,
+                close_price=price_val,
+                percent_change=pct_val,
+                is_ceiling=True,
+                consecutive_ceiling_count=consec_ceil,
+                monthly_ceiling_count=monthly_ceil,
+                reason=(reason or "")[:100]
+            )
+            session.add(new_stat)
+            saved_count += 1
+        except Exception as e:
+            logger.error(f"[TAVAN] {stock.get('ticker', '?')} kayıt hatası: {e}")
 
     # Tabanları işle
-    for stock in floors:
-        ticker = stock["ticker"]
-        price_val = Decimal(str(stock["price"]))
-        pct_val = Decimal(str(stock["change"]))
+    for i, stock in enumerate(floors):
+        try:
+            ticker = stock["ticker"]
+            price_val = Decimal(str(stock["price"]))
+            pct_val = Decimal(str(stock["change"]))
 
-        past_res = await session.execute(
-            text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count,
-                    consecutive_floor_count, "date"
-                    FROM daily_stock_market_stats
-                    WHERE ticker = :ticker ORDER BY "date" DESC"""),
-            {"ticker": ticker}
-        )
-        past_records = past_res.fetchall()
+            past_res = await session.execute(
+                text("""SELECT is_ceiling, is_floor, consecutive_ceiling_count,
+                        consecutive_floor_count, "date"
+                        FROM daily_stock_market_stats
+                        WHERE ticker = :ticker ORDER BY "date" DESC"""),
+                {"ticker": ticker}
+            )
+            past_records = past_res.fetchall()
 
-        consec_flr = 1
-        if past_records and past_records[0][1]:
-            consec_flr = past_records[0][3] + 1
+            consec_flr = 1
+            if past_records and past_records[0][1]:
+                consec_flr = past_records[0][3] + 1
 
-        monthly_flr = sum(1 for r in past_records if r[1] and (today - r[4]).days <= 30) + 1
+            monthly_flr = sum(1 for r in past_records if r[1] and (today - r[4]).days <= 30) + 1
 
-        reason = await _analyze_reason_with_ai(
-            ticker=ticker,
-            is_ceiling=False,
-            price=float(price_val),
-            pct=float(pct_val),
-            consec=consec_flr,
-            monthly=monthly_flr
-        )
+            reason = await _analyze_reason_with_ai(
+                ticker=ticker,
+                is_ceiling=False,
+                price=float(price_val),
+                pct=float(pct_val),
+                consec=consec_flr,
+                monthly=monthly_flr
+            )
+            if reason:
+                ai_ok_count += 1
 
-        new_stat = DailyStockMarketStat(
-            ticker=ticker,
-            date=today,
-            close_price=price_val,
-            percent_change=pct_val,
-            is_floor=True,
-            consecutive_floor_count=consec_flr,
-            monthly_floor_count=monthly_flr,
-            reason=reason[:100]
-        )
-        session.add(new_stat)
+            logger.info(f"[TABAN {i+1}/{len(floors)}] {ticker}: reason={'✅' if reason else '❌'} | {reason[:50] if reason else 'boş'}")
+
+            new_stat = DailyStockMarketStat(
+                ticker=ticker,
+                date=today,
+                close_price=price_val,
+                percent_change=pct_val,
+                is_floor=True,
+                consecutive_floor_count=consec_flr,
+                monthly_floor_count=monthly_flr,
+                reason=(reason or "")[:100]
+            )
+            session.add(new_stat)
+            saved_count += 1
+        except Exception as e:
+            logger.error(f"[TABAN] {stock.get('ticker', '?')} kayıt hatası: {e}")
 
     await session.commit()
-    logger.info(f"DB'ye kaydedildi: {len(ceilings)} tavan, {len(floors)} taban.")
+    logger.info(f"DB'ye kaydedildi: {saved_count}/{len(ceilings)+len(floors)} kayıt, AI analiz: {ai_ok_count} başarılı.")
 
 
 async def scrape_and_analyze_market_close(force: bool = False):
