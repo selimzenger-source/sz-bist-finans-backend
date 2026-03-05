@@ -476,6 +476,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         sentiment="positive",
                         news_type=news_type,
                         pct_change=pct_change if message_type == "seans_ici_pozitif" else None,
+                        ai_score=ai_score,
                     )
                     logger.info("Push bildirim gonderildi: %s — skor=%s — %s", ticker, ai_score, title)
                 except Exception as notif_err:

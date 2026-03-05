@@ -472,6 +472,9 @@ def live_sync(filepath, interval=15):
     prev_hit_floor = {}    # {ticker: bool}
     prev_lots = {}         # {ticker: (alis_lot, satis_lot)} — lot degisimi takibi
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
+    ceiling_cooldown = {}  # {ticker: float(timestamp)} — son tavan bildirimi zamani (5dk cooldown)
+    floor_cooldown = {}    # {ticker: float(timestamp)} — son taban bildirimi zamani (5dk cooldown)
+    COOLDOWN_SECONDS = 300  # 5 dakika — tavan/taban bildirimleri arasi bekleme
     opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
@@ -519,6 +522,8 @@ def live_sync(filepath, interval=15):
                 prev_hit_floor.clear()
                 prev_lots.clear()
                 pct_alerts_sent.clear()
+                ceiling_cooldown.clear()
+                floor_cooldown.clear()
                 opening_notif_sent = False
                 closing_notif_sent = False
                 try:
@@ -623,56 +628,100 @@ def live_sync(filepath, interval=15):
                 pct_str = f" %{float(daily_pct):+.1f}" if daily_pct else ""
                 log(f"  {ticker}: {son} TL {status}{pct_str}")
 
-                # ── Anlik bildirim tespiti ──
+                # ── Anlik bildirim tespiti (Tavan/Taban + 5dk Cooldown) ──
 
-                # 1. Tavan Çözüldü: önceki döngü tavandaydı, şimdi değil
                 was_ceiling = prev_hit_ceiling.get(ticker, False)
-                if was_ceiling and not hit_ceiling:
-                    pct_val = float(daily_pct) if daily_pct is not None else 0.0
-                    fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
-                    log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker}")
-                    _send_realtime_notification(
-                        ticker, "tavan_bozulma",
-                        f"🔓 {ticker} Tavan Çözüldü!",
-                        f"Anlık Fark: {fark_str}",
-                    )
-
-                # 2. Taban Kalktı: önceki döngü tabandaydı, şimdi değil
                 was_floor = prev_hit_floor.get(ticker, False)
-                if was_floor and not hit_floor:
-                    pct_val = float(daily_pct) if daily_pct is not None else 0.0
-                    fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
-                    log(f"  🔔 TABAN KALKTI: {ticker}")
-                    _send_realtime_notification(
-                        ticker, "taban_acilma",
-                        f"📈 {ticker} Taban Kalktı!",
-                        f"Anlık Fark: {fark_str}",
-                    )
+                pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
+                son_str = f"{float(son):.2f}" if son else ""
 
-                # 3. Yüzde düşüş: %4 ve %7 eşik (gün içi 1 kere)
-                if daily_pct is not None:
-                    pct_val = float(daily_pct)
+                # 1a. Tavana Kitledi: önceki döngü tavanda değildi, şimdi tavanda
+                if not was_ceiling and hit_ceiling:
+                    last_t = ceiling_cooldown.get(ticker, 0)
+                    if time.time() - last_t >= COOLDOWN_SECONDS:
+                        log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "tavan_bozulma",
+                            f"🔒 {ticker} Tavana Kitledi!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                        ceiling_cooldown[ticker] = time.time()
+                    else:
+                        remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                        log(f"  ⏳ TAVANA KİTLEDİ ama cooldown: {ticker} ({remaining:.0f}sn kaldı)")
+
+                # 1b. Tavan Çözüldü: önceki döngü tavandaydı, şimdi değil
+                elif was_ceiling and not hit_ceiling:
+                    last_t = ceiling_cooldown.get(ticker, 0)
+                    if time.time() - last_t >= COOLDOWN_SECONDS:
+                        log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "tavan_bozulma",
+                            f"🔓 {ticker} Tavan Çözüldü!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                        ceiling_cooldown[ticker] = time.time()
+                    else:
+                        remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                        log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama cooldown: {ticker} ({remaining:.0f}sn kaldı)")
+
+                # 2a. Tabana Kitledi: önceki döngü tabanda değildi, şimdi tabanda
+                if not was_floor and hit_floor:
+                    last_t = floor_cooldown.get(ticker, 0)
+                    if time.time() - last_t >= COOLDOWN_SECONDS:
+                        log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "taban_acilma",
+                            f"🔒 {ticker} Tabana Kitledi!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                        floor_cooldown[ticker] = time.time()
+                    else:
+                        remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                        log(f"  ⏳ TABANA KİTLEDİ ama cooldown: {ticker} ({remaining:.0f}sn kaldı)")
+
+                # 2b. Taban Kalktı: önceki döngü tabandaydı, şimdi değil
+                elif was_floor and not hit_floor:
+                    last_t = floor_cooldown.get(ticker, 0)
+                    if time.time() - last_t >= COOLDOWN_SECONDS:
+                        log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "taban_acilma",
+                            f"📈 {ticker} Taban Kalktı!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                        floor_cooldown[ticker] = time.time()
+                    else:
+                        remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                        log(f"  ⏳ TABAN KALKTI ama cooldown: {ticker} ({remaining:.0f}sn kaldı)")
+
+                # 3. Yüzde düşüş: Günün en yükseğinden %4 ve %7 eşik (gün içi 1 kere)
+                gun_ey = row.get("gun_en_yuksek")
+                if gun_ey and float(gun_ey) > 0 and son and float(son) > 0:
+                    drop_from_high = ((float(son) - float(gun_ey)) / float(gun_ey)) * 100
                     sent = pct_alerts_sent.get(ticker, set())
-                    fark_str = f"%-{abs(pct_val):.1f}"
+                    ey_str = f"{float(gun_ey):.2f}"
+                    son_str = f"{float(son):.2f}"
 
-                    if pct_val <= -7.0 and "pct7" not in sent:
-                        log(f"  🔔 %7 DÜŞÜŞ: {ticker} %{pct_val:.1f}")
+                    if drop_from_high <= -7.0 and "pct7" not in sent:
+                        log(f"  🔔 %7 DÜŞÜŞ (G.En Yüksek {ey_str}'den): {ticker} %{drop_from_high:.1f}")
                         _send_realtime_notification(
                             ticker, "yuzde_dusus",
-                            f"🔻 {ticker} Günlük %7 Düştü!",
-                            f"Anlık Fark: {fark_str}",
+                            f"🔻 {ticker} G.En Yüksek {ey_str} TL'den %7 Düştü!",
+                            f"G.En Yüksek: {ey_str} TL → Şu an: {son_str} TL (%-{abs(drop_from_high):.1f})",
                             sub_event="pct7",
                         )
                         sent.add("pct7")
                         sent.add("pct4")
                         pct_alerts_sent[ticker] = sent
 
-                    elif pct_val <= -4.0 and "pct4" not in sent:
-                        log(f"  🔔 %4 DÜŞÜŞ: {ticker} %{pct_val:.1f}")
+                    elif drop_from_high <= -4.0 and "pct4" not in sent:
+                        log(f"  🔔 %4 DÜŞÜŞ (G.En Yüksek {ey_str}'den): {ticker} %{drop_from_high:.1f}")
                         _send_realtime_notification(
                             ticker, "yuzde_dusus",
-                            f"⚠️ {ticker} Günlük %4 Düştü!",
-                            f"Anlık Fark: {fark_str}",
+                            f"⚠️ {ticker} G.En Yüksek {ey_str} TL'den %4 Düştü!",
+                            f"G.En Yüksek: {ey_str} TL → Şu an: {son_str} TL (%-{abs(drop_from_high):.1f})",
                             sub_event="pct4",
                         )
                         sent.add("pct4")
@@ -741,9 +790,13 @@ def live_sync(filepath, interval=15):
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     opening_count += 1
+                    # Jitter: Birden fazla hisse takip eden kullanıcıya spam olmaması için
+                    # her hisse arasında 5 sn bekle
+                    if opening_count < len(rows):
+                        time.sleep(5)
                 if opening_count > 0:
                     opening_notif_sent = True
-                    log(f"  Açılış bildirimi: {opening_count} hisse için gönderildi")
+                    log(f"  Açılış bildirimi: {opening_count} hisse için gönderildi (~{opening_count * 5}sn yayılarak)")
                 log(f"  {'='*50}")
 
             # ── Günlük kapanış bildirimi (18:08) ──
@@ -792,9 +845,13 @@ def live_sync(filepath, interval=15):
 
                     _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
                     closing_count += 1
+                    # Jitter: Birden fazla hisse takip eden kullanıcıya spam olmaması için
+                    # her hisse arasında 5 sn bekle
+                    if closing_count < len(rows):
+                        time.sleep(5)
                 if closing_count > 0:
                     closing_notif_sent = True
-                    log(f"  Kapanış bildirimi: {closing_count} hisse için gönderildi")
+                    log(f"  Kapanış bildirimi: {closing_count} hisse için gönderildi (~{closing_count * 5}sn yayılarak)")
                 log(f"  {'='*50}")
 
             time.sleep(interval)

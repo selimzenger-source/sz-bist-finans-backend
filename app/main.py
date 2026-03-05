@@ -217,6 +217,33 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Scheduler baslatilamadi: %s", e)
 
+    # ── Startup: Bugünün tavan/taban market close tweeti atılmamışsa hemen at ──
+    # Render deploy sonrası misfire olan tavan/taban tweetini telafi eder
+    try:
+        from datetime import date as _date_type
+        from sqlalchemy import text as _sa_text
+        _today = _date_type.today()
+        _now_tr = datetime.now(timezone.utc).hour * 100 + datetime.now(timezone.utc).minute
+        # UTC 15:35 = TR 18:35 — sadece 18:35 sonrasında çalışsın (borsa kapandıktan sonra)
+        if _now_tr >= 1535 and _today.weekday() < 5:
+            async with async_session() as _db:
+                _check = await _db.execute(
+                    _sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+                    {"today": _today}
+                )
+                _count = _check.scalar()
+                if _count == 0:
+                    logger.info("🚀 Startup: Bugünün tavan/taban tweeti atılmamış — şimdi çalıştırılıyor!")
+                    import asyncio
+                    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+                    asyncio.create_task(scrape_and_analyze_market_close())
+                else:
+                    logger.info("Startup: Bugünün tavan/taban tweeti zaten atılmış (%d kayıt). OK.", _count)
+        else:
+            logger.info("Startup: Tavan/taban tweet kontrolü atlandı (saat uygun değil veya hafta sonu)")
+    except Exception as e:
+        logger.warning("Startup tavan/taban tweet kontrolü hatası: %s", e)
+
     yield
 
     # Kapanis
@@ -2978,6 +3005,7 @@ async def send_realtime_notification(
                     "notification_type": data.notification_type,
                     "ticker": data.ticker,
                     "ipo_id": str(ipo.id),
+                    "screen": "halka-arz-detay",
                 },
                 channel_id="ceiling_alerts_v2",
                 category="ipo",
@@ -3189,6 +3217,28 @@ async def trigger_closing_tweet(
     try:
         await daily_ceiling_update()
         return {"status": "ok", "message": "Kapanis tweet'leri tetiklendi (daily_ceiling_update)"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/v1/admin/trigger-market-close-tweet")
+@limiter.limit("3/minute")
+async def trigger_market_close_tweet(
+    request: Request,
+    payload: dict,
+):
+    """Günün Tavan/Taban hisseleri tweetini manuel tetikler.
+
+    Uzmanpara'dan veri çeker, AI analiz yapar, görsel üretir, tweet atar.
+    Duplicate koruma: daily_stock_market_stats'te bugün kaydı varsa atlar.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+    try:
+        await scrape_and_analyze_market_close()
+        return {"status": "ok", "message": "Tavan/Taban market close tweet tetiklendi"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

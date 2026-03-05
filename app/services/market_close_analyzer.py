@@ -118,10 +118,11 @@ async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list
 
 async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = None, pct: float = None, consec: int = 1, monthly: int = 1) -> str:
     """Internal KAP + Tavily + Context ile Coklu-AI Fallback ile analiz yapar.
-    Sira: OpenAI (GPT-4o) -> Abacus (Sonnet) -> Gemini 2.5 Pro
+    Sira: OpenAI (GPT-4o) -> Anthropic (Claude 3.5 Sonnet) -> Abacus (Sonnet) -> Gemini 2.5 Pro
     """
     settings = get_settings()
-    tavily_key = "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"
+    tavily_key = settings.TAVILY_API_KEY
+    f_price = float(price) if price else 0
     
     # 1. Dahili KAP + Tavily Context Hazirla
     internal_news = []
@@ -142,20 +143,21 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         logger.warning(f"Internal KAP news error for {ticker}: {e}")
 
     query_action = "neden yükseldi tavan" if is_ceiling else "neden düştü taban"
-    query = f"{ticker} hisse {query_action}"
+    query = f"{ticker} hisse {query_action} son haberler"
     external_search = ""
-    try:
-        async with httpx.AsyncClient() as client:
-            res = await client.post(
-                "https://api.tavily.com/search",
-                json={"api_key": tavily_key, "query": query, "search_depth": "basic", "max_results": 2}
-            )
-            if res.status_code == 200:
-                data = res.json()
-                results = data.get("results", [])
-                external_search = "\n".join([r.get("content", "") for r in results])
-    except Exception as e:
-        logger.warning(f"Tavily search error for {ticker}: {e}")
+    if tavily_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(
+                    "https://api.tavily.com/search",
+                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 3}
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    results = data.get("results", [])
+                    external_search = "\n".join([r.get("content", "") for r in results])
+        except Exception as e:
+            logger.warning(f"Tavily search error for {ticker}: {e}")
 
     # 2. IPO kontrolu — gercekten yeni halka arz mi? Detayli bilgi cek.
     is_recent_ipo = False
@@ -176,7 +178,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 parts = [f"\nÖNEMLİ HALKA ARZ BİLGİSİ:"]
                 parts.append(f"- Şirket: {ipo.company_name}")
                 if ipo.sector: parts.append(f"- Sektör: {ipo.sector}")
-                if ipo.ipo_price: parts.append(f"- Halka arz fiyatı: {ipo.ipo_price} TL (Şu anki: {f_price if price else '?'} TL)")
+                if ipo.ipo_price: parts.append(f"- Halka arz fiyatı: {ipo.ipo_price} TL (Şu anki: {f_price:.2f} TL)")
                 parts.append(f"- İşlem görmeye başlayalı {days_since} gün oldu")
                 if ipo.market_segment:
                     seg_map = {"yildiz_pazar": "Yıldız Pazar", "ana_pazar": "Ana Pazar", "alt_pazar": "Alt Pazar"}
@@ -281,20 +283,27 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     # Trend kuralı — AI ASLA trend yorumu yapmasın
     trend_rule = "\n2. ASLA 'derin satış', 'tepki alışı', 'kâr satışı', 'sert yükseliş' gibi trend yorumları YAZMA. Sadece somut haber/veri bazlı sebepler."
     
-    prompt = (f"Hisse: {ticker}, Fiyat: {f_price} TL, Değişim: %{f_pct}\n"
-              f"Son KAP/Haberler:\n{combined_context}{ipo_info}{price_history}\n\n"
-              f"GÖREV: Bu hissenin bugün neden {'tavana' if is_ceiling else 'tabana'} ulaştığını açıkla. MAX 8-10 kelime.\n"
-              "Örnek iyi cevaplar: 'Bilanço: net kar %225 arttı.', 'MSCI segment yükseltmesini iptal etti.', 'Ali Ercanın serbest bırakılması.', 'SPK onayı sonrası halka arz beklentisi.'\n\n"
-              "ÖNCELİK SIRASI:\n"
-              "1. KAP bildirimi varsa onu yaz: bilanço, MSCI, ihale, sözleşme, temettü, geri alım, bedelsiz sermaye artırımı, SPK onayı vs.\n"
-              "2. Somut haber varsa yaz: şirket haberi, finansal sonuçlar, ortak değişikliği, mahkeme kararı vs.\n"
-              f"{ipo_rule}\n"
-              "YASAKLAR:\n"
-              "- 'tavan serisi devam', 'X. gün tavan serisi', 'taban serisi devam' YAZMA (tabloda zaten var)\n"
-              "- 'derin satış', 'tepki alışı', 'kâr satışı', 'sert yükseliş' gibi trend yorumları YAZMA\n"
-              "- 'momentum', 'alıcı baskısı', 'trend direnci', 'piyasa beklentisi' gibi genel laflar YAZMA\n"
-              "- Somut haber/veri YOKSA boş string dön: ''\n"
-              "- UYDURMA! Sadece yukarıdaki verilerde geçen bilgilere dayan.")
+    prompt = f"""Sen uzman bir borsa analistisin. 
+Aşağıdaki verileri kullanarak #{ticker} hissesinin bugünkü hareketinin nedenini 8-10 kelimelik, yatırımcıya hitap eden, kaliteli ve SPESİFİK bir cümle ile açıkla.
+
+VERİLER:
+- Hisse: {ticker}
+- Durum: {trend_statement}
+- Son 30 gündeki toplam tavan/taban sayısı: {monthly}
+{context_str}
+
+KURALLAR:
+1. Kesinlikle " momentum, alıcı baskısı, satıcı baskısı, trend direnci, hacimli kırılım, piyasa beklentisi, yatırımcı talebi, teknik trend, fiyatlama, tavan serisi, taban serisi, serisi devam, derin satış, tepki alışı, kâr satışı, sert yükseliş, kar satışı, tepki yükselişi" gibi jenerik ve boş ifadeler KULLANMA.
+2. Eğer net bir haber varsa (KAP veya Web) ONA ODAKLAN. (Örn: "Yeni iş ilişkisi ve güçlü bilanço beklentisiyle tavan oldu")
+3. Eğer net bir haber yoksa ve yeni halka arz ise, halka arz heyecanına veya tavan serisine vurgu yap ama jenerik olma.
+4. Cümle profesyonel, etkileyici ve doyurucu olmalı. Tekerleme gibi olma.
+5. Sadece cümleyi dön, tırnak işareti kullanma.
+
+İYİ ÖRNEKLER: 
+- "Bedelsiz sermaye artırımı onayı sonrası yatırımcı ilgisiyle zirve tazeledi"
+- "Yüksek gelen çeyrek kârı sonrası güçlü fon alımlarıyla tavan"
+- "Halka arz sonrası tavan serisini bozmadan yatırımcı güvenini koruyor"
+"""
 
     # FALLBACK SİSTEMİ
     # ── 1. OPENAI (GPT-4o) ──
@@ -592,7 +601,12 @@ async def scrape_and_analyze_market_close():
                     page_info = f" (Sayfa {idx+1}/{len(tavan_images)})" if len(tavan_images) > 1 else ""
                     tweet_text = f"{base_t_text}{page_info}"
                     _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
-                    
+
+            # Tavan ve taban tweetleri arası 5 dakika bekle (spam olmasın)
+            if c_stats and fl_stats:
+                logger.info("Tavan tweetleri atıldı, taban tweetleri için 5 dk bekleniyor...")
+                await asyncio.sleep(300)  # 5 dakika = 300 saniye
+
             if fl_stats:
                 taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
                 tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
@@ -606,6 +620,19 @@ async def scrape_and_analyze_market_close():
                     tweet_text = f"{base_f_text}{page_info}"
                     _safe_tweet(text=tweet_text, image_path=path, source="market_close_analyzer")
             
+            # Admin Telegram — başarılı
+            try:
+                from app.services.admin_telegram import send_admin_message
+                c_count = len(c_stats) if c_stats else 0
+                f_count = len(fl_stats) if fl_stats else 0
+                await send_admin_message(
+                    f"✅ Tavan/Taban Tweet OK\n"
+                    f"Tavan: {c_count} hisse | Taban: {f_count} hisse\n"
+                    f"Deneme: {attempt + 1}/4"
+                )
+            except Exception:
+                pass
+
             logger.info("Market close analysis & Twitter generation completed successfully.")
             return # Başarılı completion
 
@@ -615,5 +642,15 @@ async def scrape_and_analyze_market_close():
                 await asyncio.sleep(60)
             else:
                 logger.error(f"All 4 attempts for market close analysis failed. Final error: {e}")
+                # Admin Telegram — 4 deneme de başarısız
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        f"❌ Tavan/Taban Tweet BAŞARISIZ!\n"
+                        f"4 deneme de hata aldı.\n"
+                        f"Son hata: {str(e)[:200]}"
+                    )
+                except Exception:
+                    pass
 
 

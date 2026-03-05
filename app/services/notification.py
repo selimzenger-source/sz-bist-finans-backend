@@ -566,6 +566,7 @@ class NotificationService:
             "type": "new_ipo",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -586,6 +587,7 @@ class NotificationService:
             "type": "ipo_start",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -604,6 +606,7 @@ class NotificationService:
             "type": "ipo_last_day",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -617,12 +620,30 @@ class NotificationService:
         """Dagitim sonucu bildirimi — notify_ipo_result = True olanlara.
 
         Bildirim icerigi:
-        - Baslik: Dagitim Sonuclari
-        - Govde: Ticker, toplam basvuran, bireysel kisi, dagitilan lot
+        - Baslik: Dagitim Sonuclari + kisi basi
+        - Govde: Ticker, toplam basvuran, bireysel kisi, dagitilan lot, kisi basi TL
         """
-        title = "📊 Dağıtım Sonuçları"
-
         ticker = ipo.ticker or ipo.company_name
+
+        # Kisi basi hesapla (basliga eklemek icin)
+        bireysel_kisi = getattr(ipo, "result_bireysel_kisi", None)
+        bireysel_lot = getattr(ipo, "result_bireysel_lot", None)
+        arz_fiyati = getattr(ipo, "price", None)
+        lot_buyuklugu = getattr(ipo, "lot_size", None) or 100  # default 100 adet
+
+        kisi_basi_lot = None
+        kisi_basi_tl = None
+        if bireysel_kisi and bireysel_lot and bireysel_kisi > 0:
+            kisi_basi_lot = bireysel_lot / bireysel_kisi
+            if arz_fiyati:
+                kisi_basi_tl = kisi_basi_lot * int(lot_buyuklugu) * float(arz_fiyati)
+
+        # Baslik — kisi basi lot bilgisi varsa ekle
+        if kisi_basi_lot is not None:
+            title = f"📊 {ticker} Dağıtım: Kişi Başı ~{kisi_basi_lot:.0f} Lot"
+        else:
+            title = f"📊 {ticker} Dağıtım Sonuçları"
+
         parts = [f"{ticker} dağıtım sonuçları açıklandı!"]
 
         # Toplam basvuran
@@ -631,17 +652,17 @@ class NotificationService:
             parts.append(f"Toplam başvuru: {int(t_applicants):,} kişi")
 
         # Bireysel kisi ve lot
-        bireysel_kisi = getattr(ipo, "result_bireysel_kisi", None)
-        bireysel_lot = getattr(ipo, "result_bireysel_lot", None)
         if bireysel_kisi:
             parts.append(f"Yurt içi bireysel: {int(bireysel_kisi):,} kişi")
         if bireysel_lot:
             parts.append(f"Dağıtılan lot: {int(bireysel_lot):,}")
 
-        # Kisi basi lot
-        if bireysel_kisi and bireysel_lot and bireysel_kisi > 0:
-            avg = bireysel_lot / bireysel_kisi
-            parts.append(f"Kişi başı: ~{avg:.0f} lot")
+        # Kisi basi lot ve TL
+        if kisi_basi_lot is not None:
+            kisi_basi_str = f"Kişi başı: ~{kisi_basi_lot:.0f} lot"
+            if kisi_basi_tl is not None:
+                kisi_basi_str += f" (~{kisi_basi_tl:,.0f} TL)"
+            parts.append(kisi_basi_str)
 
         body = "\n".join(parts)
 
@@ -649,6 +670,7 @@ class NotificationService:
             "type": "ipo_result",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -669,6 +691,7 @@ class NotificationService:
             "type": "first_trading_day",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -697,6 +720,7 @@ class NotificationService:
             "type": "trading_date_detected",
             "ipo_id": str(ipo.id),
             "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
         }
 
         return await self._send_filtered(
@@ -745,6 +769,7 @@ class NotificationService:
         data = {
             "type": "spk_application",
             "count": str(count),
+            "screen": "halka-arz",
         }
 
         return await self._send_filtered(
@@ -767,6 +792,7 @@ class NotificationService:
         sentiment: str,
         news_type: str,
         pct_change: Optional[str] = None,
+        ai_score: Optional[float] = None,
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
@@ -778,12 +804,17 @@ class NotificationService:
         - Seans Disi Pozitif Haber Yakalandi
         - Seans Disi Haber Yakalanan Hisse Acilisi (GAP bilgisi ile)
         """
+        # AI puani varsa basliga ekle
+        score_tag = ""
+        if ai_score is not None:
+            score_tag = f" (AI: {ai_score:.1f}/10)"
+
         if news_type == "seans_ici":
-            title = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}"
+            title = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}{score_tag}"
         elif news_type == "seans_disi_acilis":
-            title = f"📊 Seans Dışı Yakalanan Hisse Açılışı - {ticker}"
+            title = f"📊 Seans Dışı Yakalanan Hisse Açılışı - {ticker}{score_tag}"
         else:
-            title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}"
+            title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
 
         # Fiyat bilgisi gonderilmez (veri ihlali)
         body = f"Sembol: {ticker}\n{matched_keyword}"
@@ -797,7 +828,10 @@ class NotificationService:
             "kap_id": kap_id,
             "sentiment": sentiment,
             "matched_keyword": matched_keyword,
+            "screen": "ai-kap",
         }
+        if ai_score is not None:
+            data["ai_score"] = str(ai_score)
 
         from app.services.news_service import get_bist50_tickers_sync
         BIST50_TICKERS = get_bist50_tickers_sync()
@@ -1019,6 +1053,7 @@ class NotificationService:
             "ticker": ticker,
             "disclosure_id": str(disclosure.id),
             "sentiment": sentiment_tag,
+            "screen": "ai-kap",
         }
 
         # Takip eden kullanicilari bul — tercihleriyle birlikte
@@ -1150,6 +1185,7 @@ class NotificationService:
             "ipo_id": str(ipo.id),
             "ticker": ticker,
             "day": str(current_day),
+            "screen": "halka-arz-detay",
         }
 
         # StockNotificationSubscription uzerinden bu IPO'yu takip eden kullanicilari bul

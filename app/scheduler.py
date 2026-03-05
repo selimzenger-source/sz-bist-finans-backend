@@ -3879,7 +3879,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=3600, # 1 saat grace
+        misfire_grace_time=7200, # 2 saat grace — Render uyku koruması
     )
 
     # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───
