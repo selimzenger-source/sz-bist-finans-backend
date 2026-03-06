@@ -46,8 +46,8 @@ class IPOCeilingTrackOut(BaseModel):
     floor_hit_at: Optional[datetime] = None
     relocked: bool = False
     relocked_at: Optional[datetime] = None
-    # v3: 5 durum + kumulatif % fark
-    durum: str = "alici_kapatti"
+    # v3: 5 durum + kumulatif % fark — veri yoksa None (frontend 'alici_kapatti' defaultundan kaçın)
+    durum: Optional[str] = None
     pct_change: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)

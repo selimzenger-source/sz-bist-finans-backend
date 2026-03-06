@@ -1372,15 +1372,15 @@ def tweet_bist30_news(
             score_emoji = ""
 
         # AI bolumu (varsa)
+        # Blue Tick = 4000 karakter — AI ozeti TAMAM olarak goster (500 char)
         ai_section = ""
         if ai_score is not None:
             ai_section += f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
         if ai_summary:
-            # Blue Tick — ozet siniri arttirildi (200 karakter)
-            summary_text = ai_summary[:200]
-            if len(ai_summary) > 200:
+            summary_text = ai_summary[:500]
+            if len(ai_summary) > 500:
                 summary_text += "..."
-            ai_section += f"💬 {summary_text}\n"
+            ai_section += f"\n💬 {summary_text}\n"
 
         # KAP link bolumu (varsa)
         kap_section = ""
@@ -1393,7 +1393,7 @@ def tweet_bist30_news(
         # AI tarafindan uretilen icerik hashtag'leri (sektor, konu vb.)
         extra_hashtags = ""
         if ai_hashtags:
-            tags = " ".join(f"#{t}" for t in ai_hashtags[:3])
+            tags = " ".join(f"#{t}" for t in ai_hashtags[:5])  # max 5 hashtag
             extra_hashtags = f" {tags}"
 
         text = (
@@ -1408,9 +1408,29 @@ def tweet_bist30_news(
             f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
         )
 
-        # Blue Tick 4000 karakter — 500 ile sinirlayalim (okunabilirlik)
-        if len(text) > 500:
-            # AI ozeti kirp, sadece skor birak
+        # Blue Tick 4000 karakter limiti — AI ozeti ile birlikte sigmazsa kirp
+        if len(text) > 3800:
+            # AI ozeti yariya indir
+            ai_section_mid = ""
+            if ai_score is not None:
+                ai_section_mid = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
+            if ai_summary:
+                short_sum = ai_summary[:250] + ("..." if len(ai_summary) > 250 else "")
+                ai_section_mid += f"\n💬 {short_sum}\n"
+            text = (
+                f"{emoji} #{ticker} — Haber Bildirimi\n\n"
+                f"Anlık Haber Yakalandı {now_str}\n\n"
+                f"İlişkili Kelime : {clean_kw}\n"
+                f"{ai_section_mid}"
+                f"{kap_section}\n"
+                f"{_get_setting('T11_CTA')}\n"
+                f"📲 {KAP_HABER_LINK}\n"
+                f"⚠️YT değildir\n"
+                f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+            )
+
+        # Hala cok uzunsa: sadece skor, ozet yok
+        if len(text) > 3800:
             ai_section_short = ""
             if ai_score is not None:
                 ai_section_short = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
@@ -1424,17 +1444,6 @@ def tweet_bist30_news(
                 f"📲 {KAP_HABER_LINK}\n"
                 f"⚠️YT değildir\n"
                 f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
-            )
-
-        # Hala 500'u asarsa hashtag'leri ve kap linkini kaldir
-        if len(text) > 500:
-            text = (
-                f"{emoji} #{ticker} — Haber\n\n"
-                f"{now_str} | {clean_kw}\n"
-                f"{ai_section_short if ai_score else ''}"
-                f"\n📲 {KAP_HABER_LINK}\n"
-                f"⚠️YT değildir\n"
-                f"#BIST50 #{ticker} #KAP #BorsaIstanbul"
             )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
