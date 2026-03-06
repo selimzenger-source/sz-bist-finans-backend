@@ -143,6 +143,9 @@ async def analyze_disclosure(
         }
 
     # ── Telegram Eşleşmesi (Sonnet skorlarını senkronize et) ──
+    # NOT: Sadece ticker degil, baslik kelime eslesmesi de kontrol edilir.
+    # Ayni ticker icin farkli KAP bildirimleri (orn: Finansal Rapor vs Uyum Raporu)
+    # farkli AI analizleri almalidir.
     try:
         from app.database import async_session
         from app.models.telegram_news import TelegramNews
@@ -159,31 +162,46 @@ async def analyze_disclosure(
                     TelegramNews.message_date >= twelve_hours_ago
                 )
                 .order_by(desc(TelegramNews.message_date))
-                .limit(1)
+                .limit(5)
             )
             result = await session.execute(query)
-            recent_news = result.scalar_one_or_none()
+            recent_news_list = list(result.scalars().all())
 
-            if recent_news and recent_news.ai_score is not None:
-                logger.info(
-                    "KAP Analyzer: TelegramNews (Sonnet) analizi kullaniliyor (%s), skor: %s",
-                    company_code, recent_news.ai_score,
+            # Baslik eslesmesi: KAP bildirim basligindaki anahtar kelimeler
+            # TelegramNews iceriginde de geciyorsa eslesme var demektir
+            title_lower = title.lower()
+            title_words = {w for w in title_lower.split() if len(w) > 3}
+
+            for recent_news in recent_news_list:
+                telegram_text = (recent_news.parsed_title or recent_news.raw_text or "").lower()
+                telegram_words = {w for w in telegram_text.split() if len(w) > 3}
+                common = title_words & telegram_words
+                if len(common) >= 2:
+                    logger.info(
+                        "KAP Analyzer: TelegramNews eslesmesi (%s), skor: %s, ortak: %s",
+                        company_code, recent_news.ai_score, common,
+                    )
+                    impact_score = recent_news.ai_score
+
+                    if impact_score >= 6.0:
+                        sentiment = "Olumlu"
+                    elif impact_score < 4.5:
+                        sentiment = "Olumsuz"
+                    else:
+                        sentiment = "Notr"
+
+                    return {
+                        "sentiment": sentiment,
+                        "impact_score": impact_score,
+                        "summary": recent_news.ai_summary
+                    }
+
+            # Eslesen TelegramNews bulunamadi — AI analiz devam edecek
+            if recent_news_list:
+                logger.debug(
+                    "KAP Analyzer: TelegramNews eslesmesi bulunamadi (%s, baslik: %s), AI analiz yapilacak",
+                    company_code, title[:50],
                 )
-                impact_score = recent_news.ai_score
-
-                # Sentiment cikarimi
-                if impact_score >= 6.0:
-                    sentiment = "Olumlu"
-                elif impact_score < 4.5:
-                    sentiment = "Olumsuz"
-                else:
-                    sentiment = "Notr"
-
-                return {
-                    "sentiment": sentiment,
-                    "impact_score": impact_score,
-                    "summary": recent_news.ai_summary
-                }
     except Exception as e:
         logger.warning("KAP Analyzer: TelegramNews senkronizasyon hatasi (%s): %s", company_code, e)
 

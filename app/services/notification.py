@@ -597,6 +597,31 @@ class NotificationService:
             category="ipo",
         )
 
+    async def notify_ai_report_ready(self, ipo, overall_score: float) -> int:
+        """AI analiz raporu hazir bildirimi — notify_ipo_start = True olanlara."""
+        ticker = ipo.ticker or ipo.company_name
+        title = f"🤖 {ticker} AI Analiz Raporu Hazır"
+        body = (
+            f"{ticker} için AI analiz raporu hazırlandı. "
+            f"Skor: {overall_score:.1f}/10 — "
+            f"Halka arz şirket kartından bakabilirsiniz."
+        )
+
+        data = {
+            "type": "ai_report_ready",
+            "ipo_id": str(ipo.id),
+            "ticker": ipo.ticker or "",
+            "screen": "halka-arz-detay",
+            "score": str(overall_score),
+        }
+
+        return await self._send_filtered(
+            "notify_ipo_start", title, body, data,
+            f"AI rapor hazir: {ticker} (skor={overall_score:.1f})",
+            channel_id="ipo_alerts_v2",
+            category="ipo",
+        )
+
     async def notify_ipo_last_day(self, ipo) -> int:
         """Son gun uyarisi — notify_ipo_last_day = True olanlara."""
         title = "⏰ Son Gün Uyarısı"
@@ -827,8 +852,11 @@ class NotificationService:
         else:
             title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
 
+        # Virgulden onceki ilk kelimeyi al (cok kelimeli keyword'leri kirp)
+        clean_kw = matched_keyword.split(",")[0].strip() if matched_keyword else matched_keyword
+
         # Fiyat bilgisi gonderilmez (veri ihlali)
-        body = f"Sembol: {ticker}\n{matched_keyword}"
+        body = f"Sembol: {ticker}\nYakalanan Kelime: {clean_kw}"
         # Seans ici yuzdesel degisim varsa ekle
         if news_type == "seans_ici" and pct_change:
             body += f"\nDeğişim: {pct_change}"
@@ -911,6 +939,10 @@ class NotificationService:
                 )
                 if success:
                     sent_count += 1
+                    # Watchlist dedup: VIP kullaniciya bu ticker icin
+                    # ayrica watchlist bildirimi gitmesini engelle
+                    cache_key = f"{user.device_id}:{ticker}"
+                    _watchlist_notif_cache[cache_key] = time.time()
                 else:
                     failed_count += 1
             except Exception as e:
