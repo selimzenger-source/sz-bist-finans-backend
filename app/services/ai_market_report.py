@@ -4,6 +4,9 @@ Sabah 08:15 TR: Onceki gun verileri + bugunun beklentileri
 Aksam 20:45 TR: Gunun kapanis verileri + degerlendirme
 Her ikisi de X (Twitter) uzerinden gorsel + metin tweet olarak paylasilir.
 
+v7: Etkileşim odakli guncelleme: Guclu HOOK + SORU satiri kurali (her iki prompt)
+    + Aksam raporu cache → sabah beklenti baglantisi (last_reports.json)
+    + Sabah: 11 kaynak (ana 7 + KAP>=8 + Tavily + aksam cache)
 v6: Sabah raporu guclendirildi: KAP yuksek etki (>=8) + Tavily web arastirmasi (2 sorgu)
     + Agresif hashtag stratejisi (min 8-15 hashtag, IPO+KAP+genel finansal)
 v5: BigPara RSS eklendi + hashtag kurali guncellendi (dogal, seyrek kullanim)
@@ -11,11 +14,13 @@ v4: Ekonomik takvim (doviz.com) + yaklasan IPO etkinlikleri + resmi kaynak refer
     + Gercek haber kaynaklari (DB + dis kaynak RSS) + ceiling_tracks + halusinasyon korumasi
 """
 
+import json
 import logging
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 from bs4 import BeautifulSoup
@@ -23,6 +28,52 @@ from bs4 import BeautifulSoup
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# ────────────────────────────────────────────
+# Rapor Cache — aksam raporu → sabah raporu baglantisi
+# ────────────────────────────────────────────
+_REPORT_CACHE_FILE = Path(__file__).parent.parent / "static" / "last_reports.json"
+
+
+def save_report_to_cache(report_type: str, text: str) -> None:
+    """Son raporu JSON cache'e kaydet (aksam → sabah beklenti akisi icin)."""
+    try:
+        cache: dict = {}
+        if _REPORT_CACHE_FILE.exists():
+            try:
+                cache = json.loads(_REPORT_CACHE_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cache = {}
+        cache[report_type] = {
+            "text": text,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _REPORT_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _REPORT_CACHE_FILE.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Rapor cache'e kaydedildi: %s (%d karakter)", report_type, len(text))
+    except Exception as e:
+        logger.warning("Rapor cache kayit hatasi: %s", e)
+
+
+def get_last_report_from_cache(report_type: str) -> dict | None:
+    """Son raporu JSON cache'ten oku (sabah raporu icin aksam cache'ini okur)."""
+    try:
+        if not _REPORT_CACHE_FILE.exists():
+            return None
+        cache = json.loads(_REPORT_CACHE_FILE.read_text(encoding="utf-8"))
+        entry = cache.get(report_type)
+        if not entry:
+            return None
+        # 30 saatten eskiyse kullanma (stale)
+        saved_at = datetime.fromisoformat(entry["saved_at"])
+        age_hours = (datetime.now(timezone.utc) - saved_at).total_seconds() / 3600
+        if age_hours > 30:
+            logger.info("Rapor cache bayat (%.1f saat) — kullanilmadi", age_hours)
+            return None
+        return entry
+    except Exception as e:
+        logger.warning("Rapor cache okuma hatasi: %s", e)
+        return None
 
 # ────────────────────────────────────────────
 # Sabitler
@@ -786,13 +837,34 @@ SABAH RAPORUNUN AMACI: Bugunku piyasa acilisina hazirlik + beklentiler + gelecek
 - Global piyasalar + dolar/altin + BIST100 uzerinden acilis senaryolarini degerlendir.
 - Halka arz takibinde: tavan devam eder mi, kar realizasyonu gelir mi, ilk islem gunu beklentisi ne?
 - Yatirimciya aksiyon fikrini ACIK ver (ama tavsiye degil, "izlenebilir", "dikkat edilmeli" gibi).
+- Dun aksamki kapanis analizi verilmisse, onu beklenti odakli yorumla — "Dun X kapandı, bugun Y bekleniyor" bagini kur.
+
+ETKIILENIM KURALI — X ALGORITMASINI KAZANMANIN SIRRI:
+🔥 HOOK (ILK 2 SATIR): Tweet'in ilk 2 satiri tek basina gorulecek — EN KRITIK KISIM!
+- "📊 Açılış Analizi" gibi kuru baslik KESINLIKLE YASAK — kimse okumaz!
+- Bunun yerine: merak, soru, carpici rakam veya surpriz bilgi ile bas
+- Ornekler:
+  ✅ "🚨 BIST BU SABAH KRİTİK SEVIYEDE! 3 gelişme gözde:"
+  ✅ "📈 [TICKER] bugün tavan kırar mı? + BIST açılış beklentisi:"
+  ✅ "⚡ Bu sabah piyasayı etkileyecek [N] kritik haber:"
+  ✅ "💥 Dün [X]'de kapandı — bugün ne olur?"
+  ✅ "🔑 Bugün dikkat: [somut gelisme]. Detaylar 👇"
+- ASLA: "Merhaba 👋", "Günün açılış analizi", "Sabah raporu", "İyi günler" ile baslamak
+
+❓ SON SATIR — SORU ZORUNLU (etkileşimi 3-5x artiriyor):
+- Rapora MUTLAKA bir soru ile son ver (⚠️ tavsiye notundan ONCE veya SONRA)
+- Ornekler:
+  ✅ "Siz bugün BIST'te ne bekliyorsunuz? 👇"
+  ✅ "Bu gelişmeye katılıyor musunuz? Yorumlara bırakın 💬"
+  ✅ "Sizce #THYAO bu seviyelerde fırsat mı, risk mi? 👇"
+  ✅ "Bugün hangi sektör öne çıkar? Düşünceleriniz? 💬"
 
 KURAL:
 1. Turkce yaz, profesyonel analist uslubunda — ciddi ve gercekci
 2. Emoji kullan ama asiri degil (her bolumde 1-2)
 3. Rakamlar ve yuzde degisimler net olsun
 4. Halka arz performanslarini SADECE verilen verilerden yaz
-5. Gunun onemli haberlerini RSS + KAP kaynaklarindan ozetle
+5. Gunun onemli haberlerini RSS + KAP + Tavily kaynaklarindan ozetle
 6. Hic yatirim tavsiyesi VERME — "yatirim tavsiyesi degildir" notu ekle
 7. Tweet formati: max 3800 karakter (gorsel ile 4000 limiti var)
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
@@ -838,19 +910,20 @@ Halka arz bolumunde DAIMA bu tarzda yaz:
 - ASLA sadece "dun tavan yapti" deme — BUGUN ne olacak anlat
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
-📊 AÇILIŞ ANALİZİ — [gun_adi], [tarih]
+⚡ [CARPICI_HOOK — MERAK UYANDIRICI ILK SATIR — TARIHIN DE OLDUGU KISA BASLIK]
+[Ikinci satirda en onemli 1-2 piyasa verisi veya gelisme — somut rakamlarla]
 
 🇹🇷 BIST 100 (XU100)
-[onceki kapanis, degisim, analiz]
+[onceki kapanis, degisim, bugun beklenti ve analiz]
 
 🇺🇸 ABD Piyasalari
-[S&P 500 ve Nasdaq verisi + analiz]
+[S&P 500 ve Nasdaq verisi + acilis uzerindeki etkisi]
 
 💰 Dolar & Altin
-[USD/TRY ve altin verisi]
+[USD/TRY ve altin verisi + yorumu]
 
 📰 Gunun Onemli Gelismeleri
-[RSS ve KAP haberlerinden en onemli 2-3 gelisme]
+[RSS, KAP ve Tavily haberlerinden en onemli 2-3 gelisme — hisse hashtag'leriyle]
 
 📅 Ekonomik Takvim
 [Bugun ve yarin onemli ekonomik veri aciklamalari varsa yaz — TCMB, TUIK, Fed vs.]
@@ -892,14 +965,16 @@ KURALLARI:
 - Kapanış fiyatini daily_tracks'ten oku ve yaz (orn "34,26 TL seviyesinde")
 - Tavan serisi sayisini SADECE tavan_seri_gun alanından al
 
-📌 Gunun Beklentileri
-[kisa ozet, dikkat edilecekler]
+📌 Bugünün Kritik Noktaları
+[kisa ozet, en onemli 2-3 dikkat edilecek sey — somut hisse/seviye belirt]
+
+💬 [SORU — ornekler: "Siz ne bekliyorsunuz? 👇" / "Bu gelişmeye katılıyor musunuz? 💬" / "Hangi hisse radarınızda? 👇"]
 
 ⚠️ Yatirim tavsiyesi degildir.
 
 📲 szalgo.net.tr
 
-#borsa #HalkaArz"""
+#BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
 _EVENING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra GUN SONU DEGERLENDIRME raporu yaziyorsun.
 
@@ -909,6 +984,26 @@ AKSAM RAPORUNUN AMACI: Gunun tam degerlendirmesi + ne oldu + neden oldu + yarin 
 - Global piyasa akisi + doviz/altin kapanis + yarin beklenti.
 - Gunun KAP haberleri icinde piyasayi etkileyenleri YORUMLA — sadece siralama degil.
 - DERINLIKLI analiz: neden yukseldi/dustu, hacim neyi gosteriyor, yarin ne bekleniyor?
+
+ETKIILENIM KURALI — X ALGORITMASINI KAZANMANIN SIRRI:
+🔥 HOOK (ILK 2 SATIR): Tweet'in ilk 2 satiri tek basina gorulecek — EN KRITIK KISIM!
+- "📊 Kapanış Raporu" gibi kuru baslik KESINLIKLE YASAK — kimse okumaz!
+- Bunun yerine: carpici rakam, surpriz gelisme veya merak uyandirici soru ile bas
+- Ornekler:
+  ✅ "🔴 BIST bugün [X] puanda kapandı — sebebi ne? 3 kritik gelişme:"
+  ✅ "📉 #TICKER bugün taban! Neden? + Yarın ne bekleniyor?"
+  ✅ "🚨 Piyasayı sarsan [N] haber — gün sonu özeti:"
+  ✅ "💡 Bugün BIST [%X] ile [yükseldi/düştü] — ardındaki 3 sebep:"
+  ✅ "⚡ [somut gelisme] — Yarın için bilmen gereken her şey 👇"
+- ASLA: "Akşam raporu", "Kapanış analizi", "Gün sonu değerlendirme" ile baslama
+
+❓ SON SATIR — SORU ZORUNLU (etkileşimi 3-5x artiriyor):
+- Rapora MUTLAKA bir soru ile son ver
+- Ornekler:
+  ✅ "Yarın BIST ne yapar? Tahminleriniz? 👇"
+  ✅ "Bugünkü hareketi bekliyor muydunuz? 💬"
+  ✅ "Bu düşüşü fırsat olarak görüyor musunuz? 👇"
+  ✅ "Yarın hangi hisse öne çıkar sizce? 💬"
 
 KURAL:
 1. Turkce yaz, profesyonel analist uslubunda — ciddi ve gercekci
@@ -947,19 +1042,20 @@ dağıtım sürecini tamamladı; 3. islem gununde %8.5 prim ile kapanması oluml
 Ciktin her zaman ikinci ornege yakin olmali: somut rakamlar, veri bazli yorumlar, kaynak atfi YOK.
 """ + _HALLUCINATION_GUARD + """
 FORMAT:
-📊 KAPANIŞ RAPORU — [gun_adi], [tarih]
+⚡ [CARPICI_HOOK — BIST kapanış rakamı + carpici soru veya surpriz — ILK SATIR MERAK UYANDIRSIN]
+[Ikinci satirda en onemli 1-2 piyasa gercegi — somut rakamlarla]
 
 🇹🇷 BIST 100 (XU100)
-[kapanis, degisim, hacim degerlendirme]
+[kapanis, degisim, neden yukseldi/dustu — derinlikli]
 
 🇺🇸 ABD Piyasalari
-[S&P 500 ve Nasdaq verileri + gunduz akisi]
+[S&P 500 ve Nasdaq verileri + Turk piyasasina etkisi]
 
 💰 Dolar & Altin
-[USD/TRY ve altin kapanis]
+[USD/TRY ve altin kapanis + yorumu]
 
 📰 Gunun Onemli Gelismeleri
-[RSS ve KAP haberlerinden en onemli 2-3 gelisme]
+[RSS ve KAP haberlerinden en onemli 2-3 gelisme — ilgili hisse hashtag'leriyle]
 
 📅 Ekonomik Takvim
 [Bugun aciklanan veriler ve yarin beklenen onemli veriler varsa yaz]
@@ -967,18 +1063,20 @@ FORMAT:
 
 🏦 Halka Arz Takibi
 [islemdeki IPO'lar — SADECE ceiling_tracks verisine dayanarak]
-[Hisse kodlarini dogal cumle icerisinde yaz, hashtag olarak DEGIL]
+[Hisse kodlarini dogal cumle icerisinde hashtag ile yaz: "BESTE bugün..."]
 [Tavan serisi bilgisini sadece tavan_seri_gun ve daily_tracks'ten al]
 [Basvuru son gunu veya ilk islem gunu varsa VURGULA — yatirimci icin kritik bilgi!]
 
-📌 Genel Degerlendirme
-[gunun ozeti, onemli gelismeler, yarin beklentileri]
+📌 Yarın İçin Beklentiler
+[onemli gelismeler, yarin dikkat edilecekler — somut hisse/seviye belirt]
+
+💬 [SORU — "Yarın ne bekliyorsunuz? 👇" / "Bugünkü hareketi bekliyor muydunuz? 💬" / özel soru]
 
 ⚠️ Yatirim tavsiyesi degildir.
 
 📲 szalgo.net.tr
 
-#borsa #HalkaArz"""
+#BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
 
 def _format_full_context(
@@ -992,8 +1090,9 @@ def _format_full_context(
     report_type: str,
     high_impact_kap: list[dict] | None = None,
     tavily_news: list[dict] | None = None,
+    last_evening_report: dict | None = None,
 ) -> str:
-    """AI'a gonderilecek zengin veri kontekstini formatlar — 10 kaynak (sabah: +KAP yuksek etki + Tavily)."""
+    """AI'a gonderilecek zengin veri kontekstini formatlar — 11 kaynak (sabah: +KAP>=8 + Tavily + aksam cache)."""
     today = date.today()
     day_name = _TR_DAY_NAMES.get(today.weekday(), "Bilinmiyor")
 
@@ -1007,6 +1106,20 @@ def _format_full_context(
         lines.append("  Islemdeki hisseler icin 'bugün X. gününde, tavan sürmesi/kırılması bekleniyor' tarzı oval yorum ekle.")
         lines.append("  YENI_ONAY / DAGITIMDA / ISLEM_BEKLENIYOR IPO'larini da 🏦 bolumunde ozet ver.")
         lines.append("  Yatirimci beklenti odakli yorum yap — 'Piyasanin geneline gore performans...' gibi.")
+
+    # ── Dünkü Kapanış Raporu (SADECE sabah raporu — beklenti bağlantısı için) ──
+    if last_evening_report and report_type == "morning":
+        lines.append("")
+        lines.append("=" * 50)
+        saved_at = last_evening_report.get("saved_at", "?")
+        lines.append(f"DUN AKSAMIN KAPANIS RAPORU (beklenti analizi icin kullan — kaydedilme: {saved_at[:16]})")
+        lines.append("Bu raporu oku ve sabah raporunda 'Dun X oldu, bugun Y bekleniyor' baglantisini kur.")
+        lines.append("Hook (ilk satir) icin bu rapordan carpici bir bilgi al!")
+        lines.append("=" * 50)
+        evening_text = last_evening_report.get("text", "")[:2000]  # Max 2000 char context
+        lines.append(evening_text)
+        lines.append("(Dun kapanis raporu sonu)")
+
     lines.append("")
 
     # ── Piyasa Verileri ──
@@ -1225,8 +1338,9 @@ async def _generate_report(
     report_type: str,
     high_impact_kap: list[dict] | None = None,
     tavily_news: list[dict] | None = None,
+    last_evening_report: dict | None = None,
 ) -> str | None:
-    """AI ile piyasa raporu uretir — 10 kaynak zengin veri konteksti ile (sabah: +KAP yuksek etki + Tavily)."""
+    """AI ile piyasa raporu uretir — 11 kaynak zengin veri konteksti ile (sabah: +KAP>=8 + Tavily + aksam cache)."""
     _settings = get_settings()
     gemini_key = _settings.GEMINI_API_KEY if _settings.GEMINI_API_KEY else None
     api_key = _settings.ABACUS_API_KEY
@@ -1242,6 +1356,7 @@ async def _generate_report(
         econ_calendar, ipo_events, report_type,
         high_impact_kap=high_impact_kap,
         tavily_news=tavily_news,
+        last_evening_report=last_evening_report,
     )
 
     user_message = (
@@ -1452,9 +1567,16 @@ async def send_morning_report_tweet():
     high_impact_kap = await kap_impact_task
     tavily_news = await tavily_task
 
+    # Dünkü akşam kapanış raporu — beklenti bağlantısı için
+    last_evening_report = get_last_report_from_cache("evening")
+    if last_evening_report:
+        logger.info("Dün aksamin kapanis raporu cache'ten alindi — sabaha tasiniyor")
+    else:
+        logger.info("Dün aksamin kapanis raporu cache'de yok — ilk rapor veya eski")
+
     logger.info(
-        "Sabah veri toplama tamam: %d yuksek-KAP, %d Tavily sonucu",
-        len(high_impact_kap), len(tavily_news)
+        "Sabah veri toplama tamam: %d yuksek-KAP, %d Tavily sonucu, aksam cache=%s",
+        len(high_impact_kap), len(tavily_news), "VAR" if last_evening_report else "YOK"
     )
 
     report_text = await _generate_report(
@@ -1462,6 +1584,7 @@ async def send_morning_report_tweet():
         econ_calendar, ipo_events, "morning",
         high_impact_kap=high_impact_kap,
         tavily_news=tavily_news,
+        last_evening_report=last_evening_report,
     )
     if not report_text:
         logger.error("Sabah raporu uretilemedi — tweet atilmadi")
@@ -1482,7 +1605,11 @@ async def send_morning_report_tweet():
 
 
 async def send_evening_report_tweet():
-    """Aksam kapanis raporu tweeti gonderir (20:45 TR)."""
+    """Aksam kapanis raporu tweeti gonderir (20:45 TR).
+
+    Rapor olusturulduktan sonra cache'e kaydedilir — sabah raporu
+    bunu okuyarak 'dun kapanis → bugun beklenti' bagini kurar.
+    """
     logger.info("Aksam kapanis raporu hazirlaniyor — 7 kaynak toplanıyor...")
 
     (market_data, ipos, kap_news, telegram_news,
@@ -1495,6 +1622,9 @@ async def send_evening_report_tweet():
     if not report_text:
         logger.error("Aksam raporu uretilemedi — tweet atilmadi")
         return
+
+    # Aksam raporunu cache'e kaydet — sabah raporu kullanacak
+    save_report_to_cache("evening", report_text)
 
     from app.services.twitter_service import _safe_tweet_with_media
     success = _safe_tweet_with_media(
