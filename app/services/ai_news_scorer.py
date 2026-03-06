@@ -630,6 +630,16 @@ async def score_news(
     if not content.strip():
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
+    # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
+    if re.search(r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama", content.lower()):
+        logger.info("Devre kesici tespit edildi, AI atlaniyor (%s)", ticker)
+        return {
+            "score": 5.0,
+            "summary": f"Borsa Istanbul, {ticker} hissesinde yasanan ani ve yuksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasinin devreye girdigini bildirmistir. Bu bildirim, sirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlik yuksek volatiliteyi kontrol altina almayi amaclayan standart bir borsa mekanizmasidir.",
+            "kap_url": kap_url,
+            "hashtags": ["devrekesici"],
+        }
+
     # Kaynak bilgisini prompt'a ekle
     source_info = "KAP Bildirim Tam Metni (TradingView)" if has_tv else "Telegram Kanal Ozeti (detay erisilemedi)"
 

@@ -133,10 +133,18 @@ def generate_25day_image(
         normal_days = len(days_data) - ceiling_days - floor_days
 
         # Lot bazli kar/zarar
-        lot_count = int(avg_lot) if avg_lot else 0
+        # Lot: aralık formatı (8.5 → "8-9"), kar hesabı floor değerle
+        _lot_val = float(avg_lot) if avg_lot else 0
+        lot_count = int(_lot_val) if _lot_val > 0 else 0
+        if _lot_val > 0 and _lot_val == int(_lot_val):
+            lot_display = str(int(_lot_val))
+        elif _lot_val > 0:
+            lot_display = f"{int(_lot_val)}-{int(_lot_val)+1}"
+        else:
+            lot_display = ""
         lot_profit = 0.0
         if lot_count > 0:
-            lot_profit = (last_close - ipo_price) * lot_count  # lot = adet
+            lot_profit = (last_close - ipo_price) * lot_count  # lot = adet (floor)
 
         # ── Banner tema gorseli yukle ─────────────────
         banner_h = 0
@@ -218,7 +226,7 @@ def generate_25day_image(
 
         # Kisi basi lot
         if lot_count > 0:
-            draw.text((padding, y), f"Kişi Başı Ort Lot: {lot_count}",
+            draw.text((padding, y), f"Kişi Başı Ort Lot: {lot_display}",
                       fill=GRAY, font=font_subtitle)
             y += 40
 
@@ -363,7 +371,11 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         is_ceiling: Tavan mi taban mi
         supplementary: Ek hisseler (tavan/taban olmayan en çok artanlar/azalanlar) — liste <5 ise kullanılır
     """
-    if not stats:
+    # None → boş liste güvenliği
+    if stats is None:
+        stats = []
+    # 0 hisse + supplementary yoksa boş dön; supplementary varsa devam et
+    if not stats and not supplementary:
         return []
 
     banner_name = "tavan_banner.png" if is_ceiling else "taban_banner.png"
@@ -381,24 +393,28 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         except Exception as e:
             logger.warning(f"Banner error: {e}")
 
-    # Ek hisseleri sadece ana liste <5 ise ekle
-    show_supplementary = supplementary and len(stats) < 5
+    # Ek hisseleri: ana liste ≤6 ise ekle (en az 2 ek hisse), 0 ise 8 ek hisse
+    show_supplementary = bool(supplementary) and len(stats) <= 6
     supp_to_show = []
     if show_supplementary:
-        need = 8 - len(stats)
+        need = max(8 - len(stats), 2)
         supp_to_show = supplementary[:need]
 
     max_per_page = 15
     import math
-    num_pages = math.ceil(len(stats) / max_per_page)
-    if num_pages > 1:
-        # Eşit dağıt: 21 hisse → 11+10 (eskisi: 15+6)
+
+    # 0 hisse durumu — boş sayfa + supplementary
+    if len(stats) == 0:
+        pages = [[]]
+        max_rows_in_any_page = 0
+    elif len(stats) <= max_per_page:
+        pages = [stats]
+        max_rows_in_any_page = len(stats)
+    else:
+        num_pages = math.ceil(len(stats) / max_per_page)
         per_page = math.ceil(len(stats) / num_pages)
         pages = [stats[i:i + per_page] for i in range(0, len(stats), per_page)]
-    else:
-        pages = [stats]
-    # Tüm sayfalar aynı yükseklikte olsun — en kalabalık sayfanın satır sayısını baz al
-    max_rows_in_any_page = max(len(p) for p in pages)
+        max_rows_in_any_page = max(len(p) for p in pages)
     image_paths = []
 
     font_title = _load_font(36, bold=True)
@@ -419,19 +435,24 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
     for page_idx, page_stats in enumerate(pages):
         row_h = 106
         supp_row_h = 68  # Ek hisseler icin daha kucuk satir
-        header_h = 80
+        header_h = 105  # title(50) + divider(15) + col_headers(40)
         # Tüm sayfalar aynı yükseklik — en kalabalık sayfanın satır sayısını kullan
         table_h = max_rows_in_any_page * row_h
+        # 0 hisse → "hisse yok" mesajı alanı (80px)
+        if max_rows_in_any_page == 0:
+            table_h = 80
         padding = 40
         footer_h = 80  # 2 satir footer icin daha yuksek
-        
+
         # Ek hisseler icin ek alan (sadece son sayfada)
         supp_section_h = 0
         is_last_page = page_idx == len(pages) - 1
         if show_supplementary and is_last_page and supp_to_show:
             import math
-            supp_grid_rows = math.ceil(len(supp_to_show) / 3)
-            supp_section_h = 65 + supp_grid_rows * supp_row_h + 20  # Baslik + grid satirlari + gap
+            # 0 hisse → 4 kolon, normal → 3 kolon
+            _supp_cols = 4 if max_rows_in_any_page == 0 else 3
+            supp_grid_rows = math.ceil(len(supp_to_show) / _supp_cols)
+            supp_section_h = 15 + 65 + supp_grid_rows * supp_row_h + 20  # gap + baslik + grid + alt bosluk
         
         total_h = banner_h + padding + header_h + table_h + supp_section_h + footer_h
 
@@ -454,8 +475,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         y += 15
 
         # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        # Fiyat/Değişim/Seri/Son30G sıkıştırıldı → Neden sütununa +50px alan açıldı
-        col_x = [padding, 195, 345, 475, 580, 700]
+        # Sütunlar: Hisse(40) Fiyat(170) Değişim(310) Seri(440) Son30G(555) Neden(670)
+        col_x = [padding, 170, 310, 445, 555, 670]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
@@ -464,6 +485,11 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         neden_header = "Neden Yükseldi (AI)" if is_ceiling else "Neden Düştü (AI)"
         draw.text((col_x[5], y), neden_header, fill=CYAN, font=font_col)
         y += 40
+
+        # 0 hisse durumu — bilgi mesajı göster
+        if len(page_stats) == 0:
+            no_stock_msg = f"Bugün {'tavan' if is_ceiling else 'taban'} yapan hisse yok."
+            draw.text((padding + 20, y + 30), no_stock_msg, fill=GRAY, font=font_title)
 
         for idx, stat in enumerate(page_stats):
             row_y = y + (idx * row_h)
@@ -497,29 +523,33 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             m_font = font_seri_bold if m_count >= 2 else font_reason
             draw.text((col_x[4], text_y), m_yazi, fill=m_color, font=m_font)
 
-            # Neden (Multi-line) — 16px font, ~9.6px/char, 480px alan → max 48 char/satır
+            # Neden (Multi-line) — 16px font, ~9.6px/char, 530px alan → max 48 char/satır
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
                 wrapped = textwrap.wrap(reason_text, width=48)
-                if len(wrapped) > 1:
-                    r_y = text_y - 8
+                if len(wrapped) > 2:
+                    r_y = text_y - 16   # 3 satır: row_y+17, +39, +61
+                elif len(wrapped) > 1:
+                    r_y = text_y - 8    # 2 satır: row_y+25, +47
                 else:
-                    r_y = text_y
-                for line in wrapped[:2]:
+                    r_y = text_y        # 1 satır: row_y+33
+                for line in wrapped[:3]:  # max 3 satır göster
                     draw.text((col_x[5], r_y), line, fill=GRAY, font=font_reason)
                     r_y += 22
 
-        # === EK HİSSELER BÖLÜMÜ (3 kolon grid) ===
+        # === EK HİSSELER BÖLÜMÜ ===
         if show_supplementary and is_last_page and supp_to_show:
-            supp_start_y = y + len(page_stats) * row_h + 15
+            # 0 hisse → mesaj yüksekliği (row_h yerine 80px), normal → satır sayısı * row_h
+            main_area_h = 80 if len(page_stats) == 0 else len(page_stats) * row_h
+            supp_start_y = y + main_area_h + 15
             supp_title = f"Diğer {'Yükselen' if is_ceiling else 'Düşen'} Hisseler"
             draw.line([(padding, supp_start_y), (width - padding, supp_start_y)], fill=DIVIDER, width=1)
             supp_start_y += 8
             draw.text((padding, supp_start_y), supp_title, fill=GRAY, font=font_supp_title)
             supp_start_y += 40
 
-            # 3 kolon grid layout
-            cols_per_row = 3
+            # 0 hisse → 4 kolon (2x4=8), normal → 3 kolon
+            cols_per_row = 4 if len(page_stats) == 0 else 3
             col_width = (width - 2 * padding) // cols_per_row
             for s_idx, s_stat in enumerate(supp_to_show):
                 grid_row = s_idx // cols_per_row

@@ -841,10 +841,15 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
 
         table_text = "\n\n".join(table_lines) if table_lines else ""
 
-        # Bireysel yatırımcı sonucu
+        # Bireysel yatırımcı sonucu (aralık formatı: 8-9 lot)
         bireysel_text = ""
         if bireysel_avg_lot:
-            bireysel_text = f"\n\n👤 Bireysel yatırımcıya düşen: ~{round(float(bireysel_avg_lot))} lot/kişi"
+            _bval = float(bireysel_avg_lot)
+            if _bval == int(_bval):
+                _blot = str(int(_bval))
+            else:
+                _blot = f"{int(_bval)}-{int(_bval)+1}"
+            bireysel_text = f"\n\n👤 Bireysel yatırımcıya düşen: ~{_blot} lot/kişi"
 
         # Toplam başvuran
         applicant_text = ""
@@ -1163,10 +1168,12 @@ def tweet_25_day_performance(
         ticker = ipo.ticker or ipo.company_name
         normal_days = 25 - ceiling_days - floor_days
 
-        # Lot kazanc hesabi
+        # Lot kazanc hesabi (aralık formatı: 8-9 lot)
         lot_text = ""
         if avg_lot and ipo_price > 0:
-            lot_count = round(float(avg_lot))
+            _lval = float(avg_lot)
+            # Kar hesabı: floor değer kullan (en düşük ihtimal)
+            lot_count = int(_lval) if _lval != int(_lval) else int(_lval)
             total_profit = (close_price_25 - ipo_price) * lot_count  # lot = adet
             if total_profit >= 0:
                 lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})"
@@ -1190,7 +1197,12 @@ def tweet_25_day_performance(
             f"Halka Arz: {ipo_price:.2f} TL"
         )
         if avg_lot:
-            text += f"\nKi\u015fi Ba\u015f\u0131 Ort Lot: {round(float(avg_lot))}"
+            _aval = float(avg_lot)
+            if _aval == int(_aval):
+                _alot = str(int(_aval))
+            else:
+                _alot = f"{int(_aval)}-{int(_aval)+1}"
+            text += f"\nKişi Başı Ort Lot: {_alot}"
         text += lot_text
         text += (
             f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
@@ -2120,7 +2132,24 @@ _CLAUDE_MODEL = "claude-sonnet-4-20250514"
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
 
-_BULLETIN_ANALYSIS_SYSTEM_PROMPT = """Sen deneyimli bir SPK bülten analistisin. Verilen SPK bülteni içeriğini analiz edip, yatırımcıları ilgilendiren önemli kararları özetleyeceksin.
+# ── SPK Bülten Prompt Yönetimi ──
+_custom_bulletin_prompt: str | None = None
+
+
+def get_bulletin_prompt() -> str:
+    return _custom_bulletin_prompt if _custom_bulletin_prompt is not None else _DEFAULT_BULLETIN_PROMPT
+
+
+def set_bulletin_prompt(new_prompt: str | None) -> None:
+    global _custom_bulletin_prompt
+    _custom_bulletin_prompt = new_prompt
+
+
+def get_default_bulletin_prompt() -> str:
+    return _DEFAULT_BULLETIN_PROMPT
+
+
+_DEFAULT_BULLETIN_PROMPT = """Sen deneyimli bir SPK bülten analistisin. Verilen SPK bülteni içeriğini analiz edip, yatırımcıları ilgilendiren önemli kararları özetleyeceksin.
 
 TWEET FORMATI:
 - Türkçe, sade, akıcı ve bilgilendirici cümleler kur
@@ -2177,7 +2206,7 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
         )
 
         messages = [
-            {"role": "system", "content": _BULLETIN_ANALYSIS_SYSTEM_PROMPT},
+            {"role": "system", "content": get_bulletin_prompt()},
             {"role": "user", "content": user_message},
         ]
         payload_base = {
@@ -2223,7 +2252,7 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
                     json={
                         "model": _CLAUDE_MODEL,
                         "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
-                        "system": _BULLETIN_ANALYSIS_SYSTEM_PROMPT,
+                        "system": get_bulletin_prompt(),
                         "messages": [{"role": "user", "content": user_message}],
                         "temperature": 0.3,
                     },
@@ -2440,7 +2469,24 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
 
 _SPK_APP_BANNER = os.path.join(_IMG_DIR, "spk_basvuru_banner.png")
 
-_SPK_APP_AI_SYSTEM_PROMPT = """Sen Türkiye'deki şirketler, sektörler ve finans piyasası hakkında derin bilgi sahibi bir araştırmacı ve ekonomi editörüsün.
+# ── SPK Başvuru Prompt Yönetimi ──
+_custom_spk_app_prompt: str | None = None
+
+
+def get_spk_app_prompt() -> str:
+    return _custom_spk_app_prompt if _custom_spk_app_prompt is not None else _DEFAULT_SPK_APP_PROMPT
+
+
+def set_spk_app_prompt(new_prompt: str | None) -> None:
+    global _custom_spk_app_prompt
+    _custom_spk_app_prompt = new_prompt
+
+
+def get_default_spk_app_prompt() -> str:
+    return _DEFAULT_SPK_APP_PROMPT
+
+
+_DEFAULT_SPK_APP_PROMPT = """Sen Türkiye'deki şirketler, sektörler ve finans piyasası hakkında derin bilgi sahibi bir araştırmacı ve ekonomi editörüsün.
 
 Görevin: SPK'ya halka arz onay başvurusu yapan bir şirket hakkında DETAYLI ve BİLGİLENDİRİCİ bir yazı hazırlamak.
 
@@ -2513,7 +2559,7 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
         )
 
         messages = [
-            {"role": "system", "content": _SPK_APP_AI_SYSTEM_PROMPT},
+            {"role": "system", "content": get_spk_app_prompt()},
             {"role": "user", "content": user_message},
         ]
         payload_base = {
@@ -2559,7 +2605,7 @@ def _generate_spk_app_tweet_ai(company_name: str) -> str | None:
                     json={
                         "model": _CLAUDE_MODEL,
                         "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
-                        "system": _SPK_APP_AI_SYSTEM_PROMPT,
+                        "system": get_spk_app_prompt(),
                         "messages": [{"role": "user", "content": user_message}],
                         "temperature": 0.4,
                     },

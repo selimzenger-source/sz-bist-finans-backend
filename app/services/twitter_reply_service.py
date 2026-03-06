@@ -309,7 +309,19 @@ async def fetch_tweet_by_url(tweet_url: str) -> dict:
 # 2. AI Reply Önerisi Üretme (Abacus AI)
 # -------------------------------------------------------
 
-_SYSTEM_PROMPT = """Sen Türk borsasını yakından takip eden, piyasa bilgisi güçlü, düşünceli bir yatırımcısın. Twitter'da finans çevresinde aktifsin. Amacın kaliteli, düşündürücü ve konuyla doğrudan ilgili yorumlar yapmak.
+_custom_reply_prompt: str | None = None
+
+def get_reply_prompt() -> str:
+    return _custom_reply_prompt if _custom_reply_prompt is not None else _DEFAULT_REPLY_PROMPT
+
+def set_reply_prompt(new_prompt: str | None) -> None:
+    global _custom_reply_prompt
+    _custom_reply_prompt = new_prompt
+
+def get_default_reply_prompt() -> str:
+    return _DEFAULT_REPLY_PROMPT
+
+_DEFAULT_REPLY_PROMPT = """Sen Türk borsasını yakından takip eden, piyasa bilgisi güçlü, düşünceli bir yatırımcısın. Twitter'da finans çevresinde aktifsin. Amacın kaliteli, düşündürücü ve konuyla doğrudan ilgili yorumlar yapmak.
 
 GÖREV: Tweet'e 3 FARKLI reply önerisi üret. Her biri farklı ton ve uzunlukta olsun.
 
@@ -447,7 +459,7 @@ async def generate_reply_suggestions(tweet_text: str) -> dict:
 
     payload = {
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": get_reply_prompt()},
             {"role": "user", "content": user_message},
         ],
         "temperature": 0.85,
@@ -789,7 +801,19 @@ async def _send_mention_fallback(tweet_id: str, text: str, creds: dict) -> dict:
 # 4. Quote Tweet + Analiz (Bağımsız özellik)
 # -------------------------------------------------------
 
-_QUOTE_ANALYSIS_PROMPT = """Sen BIST ve Türk ekonomisini derinlemesine takip eden, analitik düşünen bir finans yorumcususun. @SZAlgoFinans hesabı adına tweet'leri alıntılayarak özgün, değer katan analizler yapıyorsun.
+_custom_quote_prompt: str | None = None
+
+def get_quote_prompt() -> str:
+    return _custom_quote_prompt if _custom_quote_prompt is not None else _DEFAULT_QUOTE_PROMPT
+
+def set_quote_prompt(new_prompt: str | None) -> None:
+    global _custom_quote_prompt
+    _custom_quote_prompt = new_prompt
+
+def get_default_quote_prompt() -> str:
+    return _DEFAULT_QUOTE_PROMPT
+
+_DEFAULT_QUOTE_PROMPT = """Sen BIST ve Türk ekonomisini derinlemesine takip eden, analitik düşünen bir finans yorumcususun. @SZAlgoFinans hesabı adına tweet'leri alıntılayarak özgün, değer katan analizler yapıyorsun.
 
 GÖREV: Verilen tweet hakkında 2 FARKLI Türkçe alıntı analizi üret.
 

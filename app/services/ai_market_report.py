@@ -830,7 +830,27 @@ KABUL EDILEBILIR ifadeler:
 BU KURALI IHLAL EDEN CIKTI KABUL EDILMEZ.
 """
 
-_MORNING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU ACILIS RAPORU yaziyorsun.
+# ═══════════════════════════════════════════════════════════════════
+# Morning System Prompt Yönetimi
+# ═══════════════════════════════════════════════════════════════════
+
+_custom_morning_prompt: str | None = None
+
+
+def get_morning_prompt() -> str:
+    return _custom_morning_prompt if _custom_morning_prompt is not None else _DEFAULT_MORNING_PROMPT
+
+
+def set_morning_prompt(new_prompt: str | None) -> None:
+    global _custom_morning_prompt
+    _custom_morning_prompt = new_prompt
+
+
+def get_default_morning_prompt() -> str:
+    return _DEFAULT_MORNING_PROMPT
+
+
+_DEFAULT_MORNING_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU ACILIS RAPORU yaziyorsun.
 
 SABAH RAPORUNUN AMACI: Bugunku piyasa acilisina hazirlik + beklentiler + gelecek odakli analiz.
 - Dun ne oldu degil, BUGUN ne olabilir odakli yaz.
@@ -976,7 +996,27 @@ KURALLARI:
 
 #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
-_EVENING_SYSTEM_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra GUN SONU DEGERLENDIRME raporu yaziyorsun.
+# ═══════════════════════════════════════════════════════════════════
+# Evening System Prompt Yönetimi
+# ═══════════════════════════════════════════════════════════════════
+
+_custom_evening_prompt: str | None = None
+
+
+def get_evening_prompt() -> str:
+    return _custom_evening_prompt if _custom_evening_prompt is not None else _DEFAULT_EVENING_PROMPT
+
+
+def set_evening_prompt(new_prompt: str | None) -> None:
+    global _custom_evening_prompt
+    _custom_evening_prompt = new_prompt
+
+
+def get_default_evening_prompt() -> str:
+    return _DEFAULT_EVENING_PROMPT
+
+
+_DEFAULT_EVENING_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra GUN SONU DEGERLENDIRME raporu yaziyorsun.
 
 AKSAM RAPORUNUN AMACI: Gunun tam degerlendirmesi + ne oldu + neden oldu + yarin ne bekleniyor.
 - BIST100 kapanis, hacim, piyasa derinligi yorumla.
@@ -1350,7 +1390,7 @@ async def _generate_report(
         logger.error("API key yok (Gemini/Abacus/Claude) — rapor uretilemedi")
         return None
 
-    system_prompt = _MORNING_SYSTEM_PROMPT if report_type == "morning" else _EVENING_SYSTEM_PROMPT
+    system_prompt = get_morning_prompt() if report_type == "morning" else get_evening_prompt()
     context = _format_full_context(
         market_data, ipos, kap_news, telegram_news, rss_headlines,
         econ_calendar, ipo_events, report_type,

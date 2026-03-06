@@ -17,6 +17,33 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════
+# System Prompt Yönetimi
+# ═══════════════════════════════════════════════════════════════════
+
+_DEFAULT_SYSTEM_PROMPT = (
+    "Sen deneyimli bir Borsa Istanbul kurumsal yatirimci analistisin. "
+    "KAP bildirimlerini objektif analiz eder, sentiment ve etki puani verirsin. "
+    "SADECE JSON formatinda yanit ver. Markdown, aciklama, yorum YAZMA. "
+    "Sadece tek satirlik JSON objesi don."
+)
+
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+
+
+def get_default_system_prompt() -> str:
+    return _DEFAULT_SYSTEM_PROMPT
+
+
 # Gemini 2.5 Flash — birincil (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-flash"
@@ -105,6 +132,16 @@ async def analyze_disclosure(
         logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
         return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
 
+    # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
+    combined_text = f"{title} {body}".lower()
+    if "devre kesici" in combined_text or "tek fiyat emir toplama" in combined_text:
+        logger.info("KAP Analyzer: Devre kesici tespit edildi, AI atla (%s)", company_code)
+        return {
+            "sentiment": "Notr",
+            "impact_score": 5.0,
+            "summary": f"Borsa Istanbul, {company_code} hissesinde yasanan ani ve yuksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasinin devreye girdigini bildirmistir. Bu bildirim, sirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlik yuksek volatiliteyi kontrol altina almayi amaclayan standart bir borsa mekanizmasidir.",
+        }
+
     # ── Telegram Eşleşmesi (Sonnet skorlarını senkronize et) ──
     try:
         from app.database import async_session
@@ -192,15 +229,7 @@ SADECE asagidaki JSON formatinda yanit ver:
 {{"sentiment": "Olumlu", "impact_score": 7.3, "summary": "2-3 cumle Turkce ozet."}}"""
 
     messages = [
-        {
-            "role": "system",
-            "content": (
-                "Sen deneyimli bir Borsa Istanbul kurumsal yatirimci analistisin. "
-                "KAP bildirimlerini objektif analiz eder, sentiment ve etki puani verirsin. "
-                "SADECE JSON formatinda yanit ver. Markdown, aciklama, yorum YAZMA. "
-                "Sadece tek satirlik JSON objesi don."
-            ),
-        },
+        {"role": "system", "content": get_system_prompt()},
         {"role": "user", "content": prompt},
     ]
     payload = {

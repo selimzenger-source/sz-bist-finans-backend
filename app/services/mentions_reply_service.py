@@ -325,7 +325,24 @@ async def _post_reply(tweet_id: str, text: str, creds: dict) -> dict:
 # AI Reply Üretme
 # ───────────────────────────────────────────────
 
-_MENTIONS_SYSTEM_PROMPT = """Sen BIST (Borsa İstanbul) odaklı bir finans bilgi hesabısın: @SZAlgoFinans.
+# ── System Prompt Yönetimi ──
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+
+
+def get_default_system_prompt() -> str:
+    return _DEFAULT_SYSTEM_PROMPT
+
+
+_DEFAULT_SYSTEM_PROMPT = """Sen BIST (Borsa İstanbul) odaklı bir finans bilgi hesabısın: @SZAlgoFinans.
 Birisi sana mention attı ya da paylaştığın tweete yorum yaptı. Bu kişiye kaliteli, kısa ve konuyla ilgili Türkçe cevap yazacaksın.
 
 ═══ KİMLİĞİN ═══
@@ -402,7 +419,7 @@ async def _generate_reply(mention_text: str, our_tweet_text: str | None,
 
     payload = {
         "messages": [
-            {"role": "system", "content": _MENTIONS_SYSTEM_PROMPT},
+            {"role": "system", "content": get_system_prompt()},
             {"role": "user",   "content": user_msg},
         ],
         "temperature": 0.85,

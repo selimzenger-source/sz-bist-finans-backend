@@ -19,6 +19,37 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════
+# System Prompt Yönetimi
+# ═══════════════════════════════════════════════════════════════════
+
+_DEFAULT_SYSTEM_PROMPT = (
+    "Sen Borsa İstanbul (BIST) verileri, şirket haber akışları (KAP) ve piyasa analizi "
+    "konusunda uzman, son derece titiz ve araştırmacı Kıdemli bir Finansal Analistsin. "
+    "En büyük kuralın 'Sıfır Halüsinasyon' ve 'Kesin Doğruluk'tur. "
+    "Verileri incelerken bir dedektif gibi şüpheci yaklaşır, her hisse kodunu, şirket "
+    "unvanını ve haberin güncel geçerliliğini iki kez kontrol edersin. "
+    "Asla ezberden konuşmaz veya tahminde bulunmazsın; sadece teyit edilmiş, net ve "
+    "güncel gerçekleri raporlarsın. Çıktın SADECE 4-6 kelimeli tek bir Türkçe cümle "
+    "ya da 'EMPTY' olacak — başka hiçbir şey yazma."
+)
+
+_custom_system_prompt: str | None = None
+
+
+def get_system_prompt() -> str:
+    return _custom_system_prompt if _custom_system_prompt is not None else _DEFAULT_SYSTEM_PROMPT
+
+
+def set_system_prompt(new_prompt: str | None) -> None:
+    global _custom_system_prompt
+    _custom_system_prompt = new_prompt
+
+
+def get_default_system_prompt() -> str:
+    return _DEFAULT_SYSTEM_PROMPT
+
+
 _TR_TZ = ZoneInfo("Europe/Istanbul")
 
 async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
@@ -127,7 +158,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     internal_news = []
     try:
         async with async_session() as session:
-            since = datetime.now(timezone.utc) - timedelta(days=15)
+            since = datetime.now(timezone.utc) - timedelta(days=14)
             stmt = select(KapAllDisclosure).where(
                 KapAllDisclosure.company_code == ticker,
                 KapAllDisclosure.created_at >= since
@@ -151,7 +182,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 # 1a. Genel haber araması
                 res = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 3}
+                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 3, "days": 14}
                 )
                 if res.status_code == 200:
                     data = res.json()
@@ -159,10 +190,11 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                     external_search = "\n".join([r.get("content", "") for r in results])
 
                 # 1b. Bilanço / finansal sonuç araması
-                bilanco_query = f"{ticker} bilanço finansal sonuçlar kâr gelir 2025 2026"
+                current_year = date.today().year
+                bilanco_query = f"{ticker} bilanço finansal sonuçlar kâr gelir {current_year}"
                 res2 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 2}
+                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 2, "days": 14}
                 )
                 if res2.status_code == 200:
                     data2 = res2.json()
@@ -345,9 +377,17 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         except: pass
         
         if days_since <= 10:
-            ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası yoğun talep' yaz."
+            if is_ceiling:
+                ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası yoğun talep.' yaz."
+            else:
+                ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası kâr satışı.' yaz."
+        elif days_since <= 30:
+            if is_ceiling:
+                ipo_rule = "\n- Bu hisse halka arz olalı {0} gün oldu. Tavan serisi devam ediyorsa 'Halka arz sonrası talep devam ediyor.' yaz, somut haber varsa onu tercih et.".format(days_since)
+            else:
+                ipo_rule = "\n- Bu hisse halka arz olalı {0} gün oldu. Düşüyorsa 'Tavan serisi sonrası kâr realizasyonu.' yaz, somut haber varsa onu tercih et.".format(days_since)
         else:
-            ipo_rule = ("\n- Bu hisse halka arz oldu ama ilk 10 günü geçti. Artık basit 'halka arz' açıklaması yetmez."
+            ipo_rule = ("\n- Bu hisse halka arz oldu ama ilk 30 günü geçti. Artık basit 'halka arz' açıklaması yetmez."
                        "\n  Somut bir sebep bul veya boş bırak.")
     else:
         ipo_rule = "\n- Bu hisse ESKİ bir şirket. ASLA 'halka arz' deme."
@@ -373,7 +413,11 @@ Görevin: Bu fiyat hareketinin GERÇEK sebebini bulmak ve SADECE 4-6 kelime ile 
 
 ━━━ ADIM 2 — SIRAYLA KONTROL ET ━━━
 A) BİLANÇO / FİNANSAL SONUÇ: Şirket son 7 günde finansal tablo, kâr/zarar, gelir açıklaması yaptı mı?
-   → Evet ise: "Güçlü bilanço açıklandı." / "Beklenti altı bilanço açıklandı." gibi yaz. Spesifik rakam YAZMA.
+   → Evet ise: "Güçlü yıllık bilanço açıklandı." / "Beklenti altı bilanço açıklandı." gibi yaz. Spesifik rakam YAZMA.
+   → BİLANÇO DÖNEMİ KURALI: Haberde bilanço dönemi belirtilmediyse mevcut takvime göre belirle:
+     Ocak-Mart arası açıklanan → "yıllık" (12 aylık/4Ç), Nisan-Mayıs → "3 aylık" (1Ç),
+     Temmuz-Ağustos → "6 aylık" (yarıyıl), Ekim-Kasım → "9 aylık" (3Ç).
+     Bugün {date.today().strftime("%d %B")} — buna göre doğru dönemi yaz. ASLA tahmin etme.
 
 B) SERMAYE HAREKETLERİ: Bedelsiz/bedelli sermaye artırımı, temettü, hisse geri alımı var mı?
    → İPTAL EDİLMİŞ veya GERİ ÇEKİLMİŞ kararları ASLA yazma.
@@ -392,7 +436,7 @@ G) SEKTÖR/MAKRO: Sektörü doğrudan etkileyen düzenleme, kota, yasal karar va
 ━━━ ADIM 3 — TICKER DOĞRULA ━━━
 Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
 Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → O zaman EMPTY yaz.
-Haber 7 günden eski mi? → EMPTY yaz.
+Haber 14 günden eski mi? → EMPTY yaz.
 Karar iptal mi edilmiş? → EMPTY yaz.
 
 ━━━ ADIM 4 — ÇIKTI ━━━
@@ -437,16 +481,7 @@ Somut bulgu yoksa → sadece "EMPTY" yaz.
         return t
 
     # Tüm modeller için ortak sistem kişiliği (Sıfır Halüsinasyon prensibi)
-    _SYSTEM_PERSONA = (
-        "Sen Borsa İstanbul (BIST) verileri, şirket haber akışları (KAP) ve piyasa analizi "
-        "konusunda uzman, son derece titiz ve araştırmacı Kıdemli bir Finansal Analistsin. "
-        "En büyük kuralın 'Sıfır Halüsinasyon' ve 'Kesin Doğruluk'tur. "
-        "Verileri incelerken bir dedektif gibi şüpheci yaklaşır, her hisse kodunu, şirket "
-        "unvanını ve haberin güncel geçerliliğini iki kez kontrol edersin. "
-        "Asla ezberden konuşmaz veya tahminde bulunmazsın; sadece teyit edilmiş, net ve "
-        "güncel gerçekleri raporlarsın. Çıktın SADECE 4-6 kelimeli tek bir Türkçe cümle "
-        "ya da 'EMPTY' olacak — başka hiçbir şey yazma."
-    )
+    _SYSTEM_PERSONA = get_system_prompt()
 
     # FALLBACK SİSTEMİ
     # ── 1. ANTHROPIC (Claude — birincil) ──
@@ -782,10 +817,23 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 "(YTD) niteliği taşımaz."
             )
 
-            # ── TAVAN TWEET ──
-            if c_stats:
-                try:
-                    tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True)
+            # ── TAVAN TWEET (0 hisse dahil) ──
+            try:
+                # Ek hisseler — tavan ≤6 ise en çok artanları ekle
+                tavan_supp = []
+                if len(c_stats) <= 6:
+                    try:
+                        tavan_supp_raw = await scrape_uzmanpara_supplementary(
+                            is_ceiling=True,
+                            exclude_tickers=[s.ticker for s in c_stats]
+                        )
+                        # SimpleNamespace'e çevir (generate_ceiling_floor_images uyumu)
+                        from types import SimpleNamespace
+                        tavan_supp = [SimpleNamespace(ticker=s["ticker"], close_price=s["price"], percent_change=s["change"]) for s in tavan_supp_raw]
+                    except Exception as e:
+                        logger.warning(f"Tavan supplementary hata: {e}")
+                tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True, supplementary=tavan_supp)
+                if c_stats:
                     tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
                     tweet_text = (
                         f"📈 Günün TAVAN Yapan Hisseleri ve Sebepleri!\n\n"
@@ -793,33 +841,49 @@ async def scrape_and_analyze_market_close(force: bool = False):
                         f"derlediği haber analizleri görsellerde! 🚀👇\n\n"
                         f"{tickers_str}"
                     )
-                    _tw_svc._safe_tweet_with_multi_media(
-                        text=tweet_text, image_paths=tavan_images,
-                        source="market_close_analyzer"
+                else:
+                    tweet_text = (
+                        f"📈 Bugün TAVAN yapan hisse yok!\n\n"
+                        f"En çok yükselen hisseler görselde! 📊👇"
                     )
-                    logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
-                    # Disclaimer flood reply — 5 saniye bekle sonra at
-                    await asyncio.sleep(5)
-                    tavan_tweet_id = _tw_svc._last_tweet_id
-                    if tavan_tweet_id and tavan_tweet_id != "?":
-                        _tw_svc._safe_reply_tweet(ai_disclaimer, tavan_tweet_id)
-                        logger.info(f"✅ TAVAN disclaimer reply gönderildi (reply_to={tavan_tweet_id})")
-                    else:
-                        logger.warning("TAVAN disclaimer reply: tweet ID alınamadı, atlanıyor")
-                except Exception as e:
-                    tweet_ok = False
-                    tweet_error_msg += f"Tavan tweet hata: {e} | "
-                    logger.error(f"TAVAN tweet hatası: {e}")
+                _tw_svc._safe_tweet_with_multi_media(
+                    text=tweet_text, image_paths=tavan_images,
+                    source="market_close_analyzer"
+                )
+                logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
+                # Disclaimer flood reply — 5 saniye bekle sonra at
+                await asyncio.sleep(5)
+                tavan_tweet_id = _tw_svc._last_tweet_id
+                if tavan_tweet_id and tavan_tweet_id != "?":
+                    _tw_svc._safe_reply_tweet(ai_disclaimer, tavan_tweet_id)
+                    logger.info(f"✅ TAVAN disclaimer reply gönderildi (reply_to={tavan_tweet_id})")
+                else:
+                    logger.warning("TAVAN disclaimer reply: tweet ID alınamadı, atlanıyor")
+            except Exception as e:
+                tweet_ok = False
+                tweet_error_msg += f"Tavan tweet hata: {e} | "
+                logger.error(f"TAVAN tweet hatası: {e}")
 
             # Tavan ve taban tweetleri arası 60 saniye bekle
-            if c_stats and fl_stats:
-                logger.info("Tavan tweeti atıldı, taban tweeti için 60s bekleniyor...")
-                await asyncio.sleep(60)
+            logger.info("Tavan tweeti atıldı, taban tweeti için 60s bekleniyor...")
+            await asyncio.sleep(60)
 
-            # ── TABAN TWEET ──
-            if fl_stats:
-                try:
-                    taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False)
+            # ── TABAN TWEET (0 hisse dahil) ──
+            try:
+                # Ek hisseler — taban ≤6 ise en çok düşenleri ekle
+                taban_supp = []
+                if len(fl_stats) <= 6:
+                    try:
+                        taban_supp_raw = await scrape_uzmanpara_supplementary(
+                            is_ceiling=False,
+                            exclude_tickers=[s.ticker for s in fl_stats]
+                        )
+                        from types import SimpleNamespace
+                        taban_supp = [SimpleNamespace(ticker=s["ticker"], close_price=s["price"], percent_change=s["change"]) for s in taban_supp_raw]
+                    except Exception as e:
+                        logger.warning(f"Taban supplementary hata: {e}")
+                taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False, supplementary=taban_supp)
+                if fl_stats:
                     tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
                     tweet_text = (
                         f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
@@ -827,23 +891,28 @@ async def scrape_and_analyze_market_close(force: bool = False):
                         f"derlediği haber analizleri görsellerde! 📊👇\n\n"
                         f"{tickers_str}"
                     )
-                    _tw_svc._safe_tweet_with_multi_media(
-                        text=tweet_text, image_paths=taban_images,
-                        source="market_close_analyzer"
+                else:
+                    tweet_text = (
+                        f"📉 Bugün TABAN yapan hisse yok!\n\n"
+                        f"En çok düşen hisseler görselde! 📊👇"
                     )
-                    logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
-                    # Disclaimer flood reply — 5 saniye bekle sonra at
-                    await asyncio.sleep(5)
-                    taban_tweet_id = _tw_svc._last_tweet_id
-                    if taban_tweet_id and taban_tweet_id != "?":
-                        _tw_svc._safe_reply_tweet(ai_disclaimer, taban_tweet_id)
-                        logger.info(f"✅ TABAN disclaimer reply gönderildi (reply_to={taban_tweet_id})")
-                    else:
-                        logger.warning("TABAN disclaimer reply: tweet ID alınamadı, atlanıyor")
-                except Exception as e:
-                    tweet_ok = False
-                    tweet_error_msg += f"Taban tweet hata: {e}"
-                    logger.error(f"TABAN tweet hatası: {e}")
+                _tw_svc._safe_tweet_with_multi_media(
+                    text=tweet_text, image_paths=taban_images,
+                    source="market_close_analyzer"
+                )
+                logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
+                # Disclaimer flood reply — 5 saniye bekle sonra at
+                await asyncio.sleep(5)
+                taban_tweet_id = _tw_svc._last_tweet_id
+                if taban_tweet_id and taban_tweet_id != "?":
+                    _tw_svc._safe_reply_tweet(ai_disclaimer, taban_tweet_id)
+                    logger.info(f"✅ TABAN disclaimer reply gönderildi (reply_to={taban_tweet_id})")
+                else:
+                    logger.warning("TABAN disclaimer reply: tweet ID alınamadı, atlanıyor")
+            except Exception as e:
+                tweet_ok = False
+                tweet_error_msg += f"Taban tweet hata: {e}"
+                logger.error(f"TABAN tweet hatası: {e}")
 
             # Admin Telegram — her durumda gönder
             try:

@@ -5034,6 +5034,47 @@ async def admin_update_ai_report(request: Request, ipo_id: int, payload: dict, d
 # Admin: AI Prompt Yönetimi (Okuma/Güncelleme)
 # -------------------------------------------------------
 
+@app.get("/api/v1/admin/ai-prompts")
+@limiter.limit("30/minute")
+async def admin_list_ai_prompts(request: Request):
+    """Tüm AI prompt'larının listesini döndürür."""
+    admin_pw = request.query_params.get("admin_password", "")
+    if not _verify_admin_password(admin_pw):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    prompts = []
+    _PROMPT_REGISTRY = [
+        {"key": "kap-news", "label": "KAP Haber Puanlama", "category": "haber", "module": "app.services.ai_news_scorer", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "kap-analyzer", "label": "KAP Scraper Analiz", "category": "haber", "module": "app.services.kap_all_analyzer", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "market-close", "label": "Tavan/Taban Neden", "category": "haber", "module": "app.services.market_close_analyzer", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "morning-report", "label": "Sabah Raporu", "category": "rapor", "module": "app.services.ai_market_report", "getter": "get_morning_prompt", "default_getter": "get_default_morning_prompt"},
+        {"key": "evening-report", "label": "Akşam Raporu", "category": "rapor", "module": "app.services.ai_market_report", "getter": "get_evening_prompt", "default_getter": "get_default_evening_prompt"},
+        {"key": "ipo-report", "label": "Halka Arz Raporu", "category": "rapor", "module": "app.services.ai_ipo_analyzer", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "prospectus", "label": "İzahname Analiz", "category": "rapor", "module": "app.services.prospectus_analyzer", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "twitter-reply", "label": "Tweet Yanıt", "category": "twitter", "module": "app.services.twitter_reply_service", "getter": "get_reply_prompt", "default_getter": "get_default_reply_prompt"},
+        {"key": "twitter-quote", "label": "Alıntı Analiz", "category": "twitter", "module": "app.services.twitter_reply_service", "getter": "get_quote_prompt", "default_getter": "get_default_quote_prompt"},
+        {"key": "mentions-reply", "label": "Mention Yanıt", "category": "twitter", "module": "app.services.mentions_reply_service", "getter": "get_system_prompt", "default_getter": "get_default_system_prompt"},
+        {"key": "spk-bulletin", "label": "SPK Bülten Analiz", "category": "spk", "module": "app.services.twitter_service", "getter": "get_bulletin_prompt", "default_getter": "get_default_bulletin_prompt"},
+        {"key": "spk-app", "label": "SPK Başvuru Araştırma", "category": "spk", "module": "app.services.twitter_service", "getter": "get_spk_app_prompt", "default_getter": "get_default_spk_app_prompt"},
+    ]
+    import importlib
+    for p in _PROMPT_REGISTRY:
+        try:
+            mod = importlib.import_module(p["module"])
+            current = getattr(mod, p["getter"])()
+            default = getattr(mod, p["default_getter"])()
+            prompts.append({
+                "prompt_type": p["key"],
+                "label": p["label"],
+                "category": p["category"],
+                "is_custom": current != default,
+                "prompt_length": len(current),
+            })
+        except Exception:
+            prompts.append({"prompt_type": p["key"], "label": p["label"], "category": p["category"], "is_custom": False, "prompt_length": 0})
+    return prompts
+
+
 @app.get("/api/v1/admin/ai-prompt/{prompt_type}")
 @limiter.limit("30/minute")
 async def admin_get_ai_prompt(request: Request, prompt_type: str):
@@ -5064,8 +5105,71 @@ async def admin_get_ai_prompt(request: Request, prompt_type: str):
             "current_prompt": get_system_prompt(),
             "is_custom": get_system_prompt() != get_default_system_prompt(),
         }
+    elif prompt_type == "kap-analyzer":
+        from app.services.kap_all_analyzer import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "kap-analyzer",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
+    elif prompt_type == "market-close":
+        from app.services.market_close_analyzer import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "market-close",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
+    elif prompt_type == "morning-report":
+        from app.services.ai_market_report import get_morning_prompt, get_default_morning_prompt
+        return {
+            "prompt_type": "morning-report",
+            "current_prompt": get_morning_prompt(),
+            "is_custom": get_morning_prompt() != get_default_morning_prompt(),
+        }
+    elif prompt_type == "evening-report":
+        from app.services.ai_market_report import get_evening_prompt, get_default_evening_prompt
+        return {
+            "prompt_type": "evening-report",
+            "current_prompt": get_evening_prompt(),
+            "is_custom": get_evening_prompt() != get_default_evening_prompt(),
+        }
+    elif prompt_type == "twitter-reply":
+        from app.services.twitter_reply_service import get_reply_prompt, get_default_reply_prompt
+        return {
+            "prompt_type": "twitter-reply",
+            "current_prompt": get_reply_prompt(),
+            "is_custom": get_reply_prompt() != get_default_reply_prompt(),
+        }
+    elif prompt_type == "twitter-quote":
+        from app.services.twitter_reply_service import get_quote_prompt, get_default_quote_prompt
+        return {
+            "prompt_type": "twitter-quote",
+            "current_prompt": get_quote_prompt(),
+            "is_custom": get_quote_prompt() != get_default_quote_prompt(),
+        }
+    elif prompt_type == "mentions-reply":
+        from app.services.mentions_reply_service import get_system_prompt, get_default_system_prompt
+        return {
+            "prompt_type": "mentions-reply",
+            "current_prompt": get_system_prompt(),
+            "is_custom": get_system_prompt() != get_default_system_prompt(),
+        }
+    elif prompt_type == "spk-bulletin":
+        from app.services.twitter_service import get_bulletin_prompt, get_default_bulletin_prompt
+        return {
+            "prompt_type": "spk-bulletin",
+            "current_prompt": get_bulletin_prompt(),
+            "is_custom": get_bulletin_prompt() != get_default_bulletin_prompt(),
+        }
+    elif prompt_type == "spk-app":
+        from app.services.twitter_service import get_spk_app_prompt, get_default_spk_app_prompt
+        return {
+            "prompt_type": "spk-app",
+            "current_prompt": get_spk_app_prompt(),
+            "is_custom": get_spk_app_prompt() != get_default_spk_app_prompt(),
+        }
     else:
-        raise HTTPException(status_code=400, detail="Geçersiz prompt_type. 'ipo-report', 'prospectus' veya 'kap-news' olmalı.")
+        raise HTTPException(status_code=400, detail="Geçersiz prompt_type.")
 
 
 @app.put("/api/v1/admin/ai-prompt/{prompt_type}")
@@ -5113,6 +5217,42 @@ async def admin_update_ai_prompt(request: Request, prompt_type: str, payload: di
             "message": "KAP Haber promptu güncellendi." if new_prompt else "KAP Haber promptu default'a döndürüldü.",
             "prompt_length": len(get_system_prompt()),
         }
+    elif prompt_type == "kap-analyzer":
+        from app.services.kap_all_analyzer import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {"success": True, "prompt_type": "kap-analyzer", "message": "KAP Analyzer promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_system_prompt())}
+    elif prompt_type == "market-close":
+        from app.services.market_close_analyzer import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {"success": True, "prompt_type": "market-close", "message": "Tavan/Taban promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_system_prompt())}
+    elif prompt_type == "morning-report":
+        from app.services.ai_market_report import set_morning_prompt, get_morning_prompt
+        set_morning_prompt(new_prompt)
+        return {"success": True, "prompt_type": "morning-report", "message": "Sabah Raporu promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_morning_prompt())}
+    elif prompt_type == "evening-report":
+        from app.services.ai_market_report import set_evening_prompt, get_evening_prompt
+        set_evening_prompt(new_prompt)
+        return {"success": True, "prompt_type": "evening-report", "message": "Akşam Raporu promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_evening_prompt())}
+    elif prompt_type == "twitter-reply":
+        from app.services.twitter_reply_service import set_reply_prompt, get_reply_prompt
+        set_reply_prompt(new_prompt)
+        return {"success": True, "prompt_type": "twitter-reply", "message": "Tweet Yanıt promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_reply_prompt())}
+    elif prompt_type == "twitter-quote":
+        from app.services.twitter_reply_service import set_quote_prompt, get_quote_prompt
+        set_quote_prompt(new_prompt)
+        return {"success": True, "prompt_type": "twitter-quote", "message": "Alıntı Analiz promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_quote_prompt())}
+    elif prompt_type == "mentions-reply":
+        from app.services.mentions_reply_service import set_system_prompt, get_system_prompt
+        set_system_prompt(new_prompt)
+        return {"success": True, "prompt_type": "mentions-reply", "message": "Mention Yanıt promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_system_prompt())}
+    elif prompt_type == "spk-bulletin":
+        from app.services.twitter_service import set_bulletin_prompt, get_bulletin_prompt
+        set_bulletin_prompt(new_prompt)
+        return {"success": True, "prompt_type": "spk-bulletin", "message": "SPK Bülten promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_bulletin_prompt())}
+    elif prompt_type == "spk-app":
+        from app.services.twitter_service import set_spk_app_prompt, get_spk_app_prompt
+        set_spk_app_prompt(new_prompt)
+        return {"success": True, "prompt_type": "spk-app", "message": "SPK Başvuru promptu güncellendi." if new_prompt else "Default'a döndürüldü.", "prompt_length": len(get_spk_app_prompt())}
     else:
         raise HTTPException(status_code=400, detail="Geçersiz prompt_type.")
 
@@ -5596,66 +5736,9 @@ async def submit_error_report(
     }
 
 
-# ---------- REVIEW REWARD — mağaza yorum ödülü (1 kerelik 100 puan) ----------
-
-class ReviewRewardRequest(BaseModel):
-    device_id: str
-    platform: str = ""  # "android" veya "ios"
-
-
-@app.post("/api/v1/review-reward")
-@limiter.limit("3/minute")
-async def claim_review_reward(
-    request: Request,
-    body: ReviewRewardRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    """Mağaza yorumu ödülü — cihaz başına 1 kerelik 100 puan."""
-    if not body.device_id:
-        raise HTTPException(status_code=400, detail="device_id gerekli")
-
-    result = await db.execute(
-        select(User).where(User.device_id == body.device_id).with_for_update()
-    )
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
-
-    # Daha önce review ödülü alınmış mı kontrol et — race condition koruması
-    existing_tx = await db.execute(
-        select(WalletTransaction).where(
-            WalletTransaction.user_id == user.id,
-            WalletTransaction.tx_type == "review_reward",
-        ).with_for_update().limit(1)
-    )
-    already_claimed = existing_tx.scalar_one_or_none()
-
-    if already_claimed:
-        return {
-            "success": False,
-            "points_awarded": False,
-            "already_claimed": True,
-            "message": "Bu ödülü daha önce aldınız.",
-        }
-
-    # 100 puan ver
-    user.wallet_balance = (user.wallet_balance or 0.0) + 100.0
-    tx = WalletTransaction(
-        user_id=user.id,
-        amount=100.0,
-        tx_type="review_reward",
-        description=f"Mağaza yorumu ödülü ({body.platform}) — 100 puan",
-        balance_after=user.wallet_balance,
-    )
-    db.add(tx)
-    await db.flush()
-
-    return {
-        "success": True,
-        "points_awarded": True,
-        "already_claimed": False,
-        "message": "100 puan cüzdanınıza eklendi!",
-    }
+# ---------- REVIEW REWARD — KALDIRILDI (Google Play politika ihlali) ----------
+# Mağaza yorumu karşılığında ödül vermek Google Play tarafından yasaklanmıştır.
+# Bu endpoint kaldırılmıştır. Eski review_reward tx kayıtları DB'de kalır.
 
 
 # -------------------------------------------------------

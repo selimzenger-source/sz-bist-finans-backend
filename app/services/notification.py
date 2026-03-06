@@ -616,6 +616,15 @@ class NotificationService:
             category="ipo",
         )
 
+    @staticmethod
+    def _format_lot_range(lot_val: float) -> str:
+        """Lot'u aralık formatına çevir: 8.5 → '8-9', 3.0 → '3', 12.7 → '12-13'"""
+        if lot_val == int(lot_val):
+            return str(int(lot_val))
+        low = int(lot_val)  # floor
+        high = low + 1
+        return f"{low}-{high}"
+
     async def notify_allocation_result(self, ipo, total_applicants: int = 0) -> int:
         """Dagitim sonucu bildirimi — notify_ipo_result = True olanlara.
 
@@ -638,9 +647,10 @@ class NotificationService:
             if arz_fiyati:
                 kisi_basi_tl = kisi_basi_lot * int(lot_buyuklugu) * float(arz_fiyati)
 
-        # Baslik — kisi basi lot bilgisi varsa ekle
+        # Baslik — kisi basi lot bilgisi varsa ekle (aralık formatı: 8-9 lot)
         if kisi_basi_lot is not None:
-            title = f"📊 {ticker} Dağıtım: Kişi Başı ~{kisi_basi_lot:.0f} Lot"
+            lot_str = self._format_lot_range(kisi_basi_lot)
+            title = f"📊 {ticker} Dağıtım: Kişi Başı ~{lot_str} Lot"
         else:
             title = f"📊 {ticker} Dağıtım Sonuçları"
 
@@ -657,9 +667,10 @@ class NotificationService:
         if bireysel_lot:
             parts.append(f"Dağıtılan lot: {int(bireysel_lot):,}")
 
-        # Kisi basi lot ve TL
+        # Kisi basi lot ve TL (aralık formatı: 8-9 lot)
         if kisi_basi_lot is not None:
-            kisi_basi_str = f"Kişi başı: ~{kisi_basi_lot:.0f} lot"
+            lot_range = self._format_lot_range(kisi_basi_lot)
+            kisi_basi_str = f"Kişi başı: ~{lot_range} lot"
             if kisi_basi_tl is not None:
                 kisi_basi_str += f" (~{kisi_basi_tl:,.0f} TL)"
             parts.append(kisi_basi_str)
@@ -711,7 +722,7 @@ class NotificationService:
         pazar = pazar_map.get(ipo.market_segment or "", "")
         pazar_text = f" ({pazar})" if pazar else ""
 
-        title = "📊 İşlem Tarihi Tespit Edildi"
+        title = "📊 İşlem Tarihi Belli Oldu"
         body = f"{ipo.ticker or ipo.company_name}{pazar_text} borsada işlem görmeye başlıyor!"
         if ipo.trading_start:
             body += f" İlk işlem: {ipo.trading_start.strftime('%d.%m.%Y')}"
