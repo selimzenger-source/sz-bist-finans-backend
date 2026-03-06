@@ -6058,21 +6058,20 @@ async def get_notification_log(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
-    """Kullanicinin son 24 saatlik bildirim gecmisini getir.
+    """Kullanicinin bildirim gecmisini getir.
+
+    Kayitlar her cumartesi 23:50'de sifirlanir.
 
     Query params:
     - category: kap_watchlist, kap_news, ipo, system (opsiyonel — filtre)
     - limit: max kayit sayisi (varsayilan 50)
     """
     from app.models.notification_log import NotificationLog
-    from datetime import datetime, timezone, timedelta
 
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     query = (
         select(NotificationLog)
         .where(
             NotificationLog.device_id == device_id,
-            NotificationLog.created_at >= cutoff,
         )
     )
     if category and category in ("kap_watchlist", "kap_news", "ipo", "system"):
@@ -6307,6 +6306,76 @@ async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
             "reanalyzed": reanalyzed,
             "failed": failed,
             "results": results,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+
+
+# -------------------------------------------------------
+# Admin: KAP Disclosure Manuel AI Skor Guncelleme
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/kap-disclosure-reset")
+@limiter.limit("5/minute")
+async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli KAP kayitlarinin AI skorlarini manuel guncelle (AI kredisi harcamadan).
+
+    Body:
+        admin_password: str
+        ids: list[int] — guncellenecek kayit ID'leri
+        sentiment: str (default "Notr") — "Olumlu" | "Olumsuz" | "Notr"
+        impact_score: float (default 5.0) — 1.0-10.0
+        summary: str | None (default None) — AI ozet (null = temizle)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ids = payload.get("ids", [])
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="ids listesi gerekli")
+    if len(ids) > 50:
+        raise HTTPException(status_code=400, detail="Tek seferde max 50 kayit")
+
+    sentiment = payload.get("sentiment", "Notr")
+    if sentiment not in ("Olumlu", "Olumsuz", "Notr"):
+        sentiment = "Notr"
+    impact_score = float(payload.get("impact_score", 5.0))
+    if not (1.0 <= impact_score <= 10.0):
+        impact_score = 5.0
+    summary = payload.get("summary")  # None = temizle
+
+    try:
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+
+        updated = []
+        async with async_session() as db:
+            stmt = select(KapAllDisclosure).where(KapAllDisclosure.id.in_(ids))
+            rows = (await db.execute(stmt)).scalars().all()
+
+            for record in rows:
+                record.ai_sentiment = sentiment
+                record.ai_impact_score = impact_score
+                record.ai_summary = summary
+                record.ai_analyzed_at = datetime.now(timezone.utc)
+                updated.append({
+                    "id": record.id,
+                    "company_code": record.company_code,
+                    "title": record.title[:60] if record.title else "",
+                })
+
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "updated_count": len(updated),
+            "sentiment": sentiment,
+            "impact_score": impact_score,
+            "summary": summary[:100] if summary else None,
+            "records": updated,
         }
     except Exception as e:
         import traceback
