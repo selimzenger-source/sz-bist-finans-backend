@@ -5793,6 +5793,8 @@ async def list_bist_stocks(
 async def list_kap_all_disclosures(
     ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
     hours: Optional[int] = Query(None, ge=1, le=744, description="Son kac saat (1=son 1 saat, 24=son 1 gun)"),
+    min_score: Optional[float] = Query(None, ge=0, le=10, description="Minimum AI etki skoru (pozitif filtre icin 6.0)"),
+    max_score: Optional[float] = Query(None, ge=0, le=10, description="Maksimum AI etki skoru (negatif filtre icin 5.0)"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -5802,6 +5804,8 @@ async def list_kap_all_disclosures(
     Filtreler:
     - ticker: Hisse kodu (orn: THYAO)
     - hours: Son kac saat (1, 24, 168, 720)
+    - min_score: Minimum AI etki skoru (>=)
+    - max_score: Maksimum AI etki skoru (<)
     - limit/offset: Sayfalama
     """
     query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.created_at))
@@ -5812,6 +5816,14 @@ async def list_kap_all_disclosures(
     if hours:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = query.where(KapAllDisclosure.created_at >= since)
+
+    if min_score is not None:
+        query = query.where(KapAllDisclosure.ai_impact_score.isnot(None))
+        query = query.where(KapAllDisclosure.ai_impact_score >= min_score)
+
+    if max_score is not None:
+        query = query.where(KapAllDisclosure.ai_impact_score.isnot(None))
+        query = query.where(KapAllDisclosure.ai_impact_score < max_score)
 
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
