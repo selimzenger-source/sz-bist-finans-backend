@@ -993,7 +993,7 @@ def tweet_trading_date_detected(ipo) -> bool:
             tarih_line = f"\n\U0001F4C5 Ilk islem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
 
         text = (
-            f"\U0001F4CA Islem Tarihi Tespit Edildi\n\n"
+            f"\U0001F4CA Islem Tarihi Belli Oldu!\n\n"
             f"{ipo.company_name}{ticker_text}"
             f"{tarih_line}"
             f"{pazar_line}\n\n"

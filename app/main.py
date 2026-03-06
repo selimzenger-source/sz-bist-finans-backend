@@ -192,6 +192,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Startup muted düzeltici hatası: %s", e)
 
+    # Eski puan abonelikleri temizleyici — expires_at=NULL + 35+ gün geçmiş wallet subs
+    try:
+        from sqlalchemy import and_, update
+        from app.models.user import UserSubscription
+        _stale_cutoff = datetime.now(timezone.utc) - timedelta(days=35)
+        async with async_session() as db:
+            stale_result = await db.execute(
+                update(UserSubscription)
+                .where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.store == "wallet",
+                        UserSubscription.expires_at.is_(None),
+                        UserSubscription.started_at.isnot(None),
+                        UserSubscription.started_at < _stale_cutoff,
+                    )
+                )
+                .values(is_active=False)
+            )
+            if stale_result.rowcount > 0:
+                await db.commit()
+                logger.warning(
+                    "Startup: %d eski puan aboneliği deaktif edildi (expires_at=NULL, 35+ gün)",
+                    stale_result.rowcount,
+                )
+    except Exception as e:
+        logger.warning("Startup eski puan temizleyici hatası: %s", e)
+
     # 26+ gün verisi temizleyici — hiçbir IPO'da trading_day > 25 olmamalı
     try:
         from sqlalchemy import delete

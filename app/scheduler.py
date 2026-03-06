@@ -3170,18 +3170,20 @@ async def expire_subscriptions():
     2. StockNotificationSubscription (bildirim paketi) — wallet/RevenueCat bundle'lar
 
     Sadece expires_at < now VE is_active = True olanlari deaktif eder.
-    expires_at = NULL olanlar dokunulmaz (eski kayitlar, sinirsiz paketler).
+    Ek: wallet (puan) abonelikleri icin expires_at = NULL ama started_at > 35 gun
+    oncesi olanlari da deaktif eder (eski kayitlar, expires_at eklenmeden once olusturulmus).
     """
     _now = datetime.now(timezone.utc)
     expired_news = 0
     expired_notif = 0
+    expired_stale_wallet = 0
 
     try:
         from app.models.user import UserSubscription, StockNotificationSubscription
-        from sqlalchemy import select, and_, update
+        from sqlalchemy import select, and_, or_, update
 
         async with async_session() as db:
-            # 1. Haber abonelikleri (UserSubscription)
+            # 1. Haber abonelikleri (UserSubscription) — expires_at dolmus
             result = await db.execute(
                 update(UserSubscription)
                 .where(
@@ -3194,6 +3196,25 @@ async def expire_subscriptions():
                 .values(is_active=False)
             )
             expired_news = result.rowcount
+
+            # 1b. Wallet (puan) abonelikleri — expires_at NULL ama 35+ gun gecmis
+            # Eski kayitlar: expires_at alani eklenmeden once olusturulmus puan abonelikleri
+            # 30 gunluk paket + 5 gun tolerans = 35 gun
+            stale_cutoff = _now - timedelta(days=35)
+            result_stale = await db.execute(
+                update(UserSubscription)
+                .where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.store == "wallet",
+                        UserSubscription.expires_at.is_(None),
+                        UserSubscription.started_at.isnot(None),
+                        UserSubscription.started_at < stale_cutoff,
+                    )
+                )
+                .values(is_active=False)
+            )
+            expired_stale_wallet = result_stale.rowcount
 
             # 2. Bildirim abonelikleri (StockNotificationSubscription)
             result2 = await db.execute(
@@ -3211,17 +3232,24 @@ async def expire_subscriptions():
 
             await db.commit()
 
-        if expired_news > 0 or expired_notif > 0:
+        total_expired = expired_news + expired_notif + expired_stale_wallet
+        if total_expired > 0:
             logger.warning(
-                "⏰ Abonelik expire: %d haber paketi, %d bildirim paketi deaktif edildi",
-                expired_news, expired_notif,
+                "⏰ Abonelik expire: %d haber, %d bildirim, %d eski-wallet deaktif edildi",
+                expired_news, expired_notif, expired_stale_wallet,
             )
             try:
                 from app.services.admin_telegram import send_admin_telegram
+                parts = []
+                if expired_news > 0:
+                    parts.append(f"Haber: {expired_news}")
+                if expired_notif > 0:
+                    parts.append(f"Bildirim: {expired_notif}")
+                if expired_stale_wallet > 0:
+                    parts.append(f"Eski Puan (NULL expires): {expired_stale_wallet}")
                 await send_admin_telegram(
                     f"⏰ Abonelik Expire\n"
-                    f"Haber: {expired_news} paket\n"
-                    f"Bildirim: {expired_notif} paket\n"
+                    f"{chr(10).join(parts)}\n"
                     f"Zaman: {_now.strftime('%Y-%m-%d %H:%M UTC')}"
                 )
             except Exception:
