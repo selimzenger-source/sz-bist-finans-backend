@@ -66,6 +66,10 @@ DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "halka arz TAVAN TABAN.xlsm")
 # Tavan/taban eslesme toleransi (kurus)
 PRICE_TOLERANCE = Decimal("0.02")
 
+# Restart-safe state dosyasi — script ile ayni dizinde
+# Elektrik gidip PC yeniden acildiginda bildirim state'i buradan yuklenir
+STATE_FILE = str(Path(__file__).parent / "bist_sync_state.json")
+
 
 def log(msg):
     """Zaman damgali log."""
@@ -76,6 +80,50 @@ def log(msg):
         # Windows console charmap sorunu — ASCII'ye donustur
         safe = msg.encode("ascii", errors="replace").decode("ascii")
         print(f"[{ts}] {safe}")
+
+
+def _load_state(today_str: str) -> dict | None:
+    """Restart-safe: onceki session state'ini dosyadan yukle (sadece bugunkunu).
+
+    Elektrik/program kapandiktan sonra yeniden baslarken mevcut tavan/taban
+    durumlarinin 'yeni olay' sayilmamasi icin onceki state yuklenir.
+    Dosya baska gunun state'ini iceriyorsa None doner (yeni gun, temiz basla).
+    """
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        if state.get("date") != today_str:
+            log(f"  State dosyasi baska gun ({state.get('date')}) — yeni gun, temiz basliyor")
+            return None
+        log(f"  Restart state yuklendi: ceiling={list(state.get('prev_hit_ceiling', {}).keys())}"
+            f" | floor={list(state.get('prev_hit_floor', {}).keys())}"
+            f" | pct={state.get('pct_alerts_sent', {})}"
+            f" | opening={state.get('opening_notif_sent')} closing={state.get('closing_notif_sent')}")
+        return state
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        log(f"  State yukle HATA: {e} — temiz basliyor")
+        return None
+
+
+def _save_state(today_str: str, prev_hit_ceiling: dict, prev_hit_floor: dict,
+                pct_alerts_sent: dict, opening_notif_sent: bool, closing_notif_sent: bool):
+    """Mevcut bildirim state'ini dosyaya kaydet — sonraki restart'ta yuklenecek."""
+    try:
+        state = {
+            "date": today_str,
+            "prev_hit_ceiling": prev_hit_ceiling,
+            "prev_hit_floor": prev_hit_floor,
+            # set → list (JSON serializable)
+            "pct_alerts_sent": {k: list(v) for k, v in pct_alerts_sent.items()},
+            "opening_notif_sent": opening_notif_sent,
+            "closing_notif_sent": closing_notif_sent,
+        }
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False)
+    except Exception as e:
+        log(f"  State kaydet HATA: {e}")
 
 
 def parse_price(val):
@@ -480,6 +528,21 @@ def live_sync(filepath, interval=15):
     cycle = 0
     last_session_date = None  # Seans gun degisiminde cache temizle + IPO yenile
 
+    # ── Restart-safe state yukle ──────────────────────────────────────
+    # Elektrik gidip/program kapanip yeniden acilinca mevcut tavan/taban
+    # durumlarinin 'yeni olay' sayilmamasi icin onceki state dosyadan yuklenir.
+    today_str = date.today().isoformat()
+    saved = _load_state(today_str)
+    if saved:
+        prev_hit_ceiling = saved.get("prev_hit_ceiling", {})
+        prev_hit_floor = saved.get("prev_hit_floor", {})
+        pct_alerts_sent = {k: set(v) for k, v in saved.get("pct_alerts_sent", {}).items()}
+        opening_notif_sent = saved.get("opening_notif_sent", False)
+        closing_notif_sent = saved.get("closing_notif_sent", False)
+        log("  ✅ Restart-safe: onceki bildirim state'i yuklendi — duplicate bildirim engellendi")
+    else:
+        log("  ℹ State dosyasi yok/baska gun — temiz basliyor")
+
     try:
         while True:
             cycle += 1
@@ -515,8 +578,9 @@ def live_sync(filepath, interval=15):
 
             # ── Gun degisiminde cache temizle + IPO listesini yenile ──
             today = date.today()
+            today_str = today.isoformat()
             if last_session_date != today:
-                log(f"[{now}] Yeni seans gunu: {today.isoformat()} — cache temizleniyor, IPO listesi yenileniyor...")
+                log(f"[{now}] Yeni seans gunu: {today_str} — cache temizleniyor, IPO listesi yenileniyor...")
                 prev_prices.clear()
                 prev_hit_ceiling.clear()
                 prev_hit_floor.clear()
@@ -526,6 +590,8 @@ def live_sync(filepath, interval=15):
                 floor_cooldown.clear()
                 opening_notif_sent = False
                 closing_notif_sent = False
+                # Yeni gun icin temiz state kaydet
+                _save_state(today_str, {}, {}, {}, False, False)
                 try:
                     fresh = get_active_trading_ipos()
                     if fresh:
@@ -731,6 +797,11 @@ def live_sync(filepath, interval=15):
                 prev_hit_ceiling[ticker] = hit_ceiling
                 prev_hit_floor[ticker] = hit_floor
 
+            # Bildirim state'ini diske kaydet (restart-safe)
+            # Her dongude kaydeder — maliyet dusuk (kucuk JSON dosyasi)
+            _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
+                        pct_alerts_sent, opening_notif_sent, closing_notif_sent)
+
             # Degisen varsa gonder
             if changed_tracks:
                 log(f"[{now}] #{cycle} — {len(changed_tracks)} hisse degisti, gonderiliyor...")
@@ -796,6 +867,8 @@ def live_sync(filepath, interval=15):
                         time.sleep(5)
                 if opening_count > 0:
                     opening_notif_sent = True
+                    _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
+                                pct_alerts_sent, opening_notif_sent, closing_notif_sent)
                     log(f"  Açılış bildirimi: {opening_count} hisse için gönderildi (~{opening_count * 5}sn yayılarak)")
                 log(f"  {'='*50}")
 
@@ -851,6 +924,8 @@ def live_sync(filepath, interval=15):
                         time.sleep(5)
                 if closing_count > 0:
                     closing_notif_sent = True
+                    _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
+                                pct_alerts_sent, opening_notif_sent, closing_notif_sent)
                     log(f"  Kapanış bildirimi: {closing_count} hisse için gönderildi (~{closing_count * 5}sn yayılarak)")
                 log(f"  {'='*50}")
 
