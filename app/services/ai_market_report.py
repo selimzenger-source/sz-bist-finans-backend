@@ -4,6 +4,8 @@ Sabah 08:15 TR: Onceki gun verileri + bugunun beklentileri
 Aksam 20:45 TR: Gunun kapanis verileri + degerlendirme
 Her ikisi de X (Twitter) uzerinden gorsel + metin tweet olarak paylasilir.
 
+v6: Sabah raporu guclendirildi: KAP yuksek etki (>=8) + Tavily web arastirmasi (2 sorgu)
+    + Agresif hashtag stratejisi (min 8-15 hashtag, IPO+KAP+genel finansal)
 v5: BigPara RSS eklendi + hashtag kurali guncellendi (dogal, seyrek kullanim)
 v4: Ekonomik takvim (doviz.com) + yaklasan IPO etkinlikleri + resmi kaynak referanslari
     + Gercek haber kaynaklari (DB + dis kaynak RSS) + ceiling_tracks + halusinasyon korumasi
@@ -280,6 +282,115 @@ async def get_recent_kap_news(hours: int = 24, limit: int = 10) -> list[dict]:
             ]
     except Exception as e:
         logger.error("KAP haber cekme hatasi: %s", e)
+        return []
+
+
+async def get_high_impact_kap_disclosures(min_score: float = 8.0, hours: int = 20, limit: int = 12) -> list[dict]:
+    """Son 20 saatteki yüksek etkili KAP bildirimlerini getirir (ai_impact_score >= 8).
+
+    Sabah raporu için kullanılır — önemli şirket haberlerini öne çıkarır.
+    Akşam raporu / tavan-taban analizinde KULLANILMAZ.
+    """
+    try:
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from sqlalchemy import select, and_, desc
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(KapAllDisclosure)
+                .where(
+                    and_(
+                        KapAllDisclosure.created_at >= cutoff,
+                        KapAllDisclosure.ai_impact_score >= min_score,
+                    )
+                )
+                .order_by(desc(KapAllDisclosure.ai_impact_score), desc(KapAllDisclosure.published_at))
+                .limit(limit)
+            )
+            disclosures = list(result.scalars().all())
+
+            return [
+                {
+                    "ticker": d.company_code,
+                    "title": d.title,
+                    "summary": (d.ai_summary or "")[:250],
+                    "score": d.ai_impact_score,
+                    "sentiment": d.ai_sentiment,
+                    "category": d.category or "",
+                    "published": d.published_at.isoformat() if d.published_at else None,
+                }
+                for d in disclosures
+            ]
+    except Exception as e:
+        logger.error("KAP yüksek etki bildirim çekme hatası: %s", e)
+        return []
+
+
+async def fetch_tavily_morning_news() -> list[dict]:
+    """Tavily ile sabah raporu icin web arastirmasi yapar.
+
+    2 sorgu paralel: genel BIST piyasa haberleri + ekonomi/doviz.
+    Sadece sabah raporu (send_morning_report_tweet) tarafindan kullanilir.
+    Aksam raporu / tavan-taban analizinde KULLANILMAZ.
+    """
+    try:
+        _settings = get_settings()
+        tavily_key = getattr(_settings, "TAVILY_API_KEY", None) or ""
+        if not tavily_key:
+            logger.warning("Tavily API key yok — sabah web arastirmasi atlanıyor")
+            return []
+
+        import asyncio
+
+        _TAVILY_URL = "https://api.tavily.com/search"
+        queries = [
+            "Borsa İstanbul BIST piyasa açılış haber analiz bugün",
+            "Türk ekonomisi kur faiz merkez bankası son gelişmeler",
+        ]
+
+        async def _tavily_query(q: str) -> list[dict]:
+            try:
+                async with httpx.AsyncClient(timeout=15) as client:
+                    resp = await client.post(
+                        _TAVILY_URL,
+                        json={
+                            "api_key": tavily_key,
+                            "query": q,
+                            "search_depth": "basic",
+                            "max_results": 5,
+                            "include_answer": False,
+                        },
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        results = []
+                        for r in data.get("results", []):
+                            results.append({
+                                "title": r.get("title", ""),
+                                "content": (r.get("content", "") or "")[:250],
+                                "url": r.get("url", ""),
+                            })
+                        return results
+                    else:
+                        logger.warning("Tavily sorgu hatasi HTTP %d: %s", resp.status_code, q[:50])
+                        return []
+            except Exception as ex:
+                logger.warning("Tavily sorgu istisna: %s — %s", ex, q[:50])
+                return []
+
+        results_list = await asyncio.gather(*[_tavily_query(q) for q in queries])
+        all_results = []
+        for r in results_list:
+            all_results.extend(r)
+
+        logger.info("Tavily sabah arastirması: %d sonuc bulundu", len(all_results))
+        return all_results[:10]  # max 10 sonuc
+
+    except Exception as e:
+        logger.error("Tavily sabah arastirma genel hata: %s", e)
         return []
 
 
@@ -690,12 +801,15 @@ KURAL:
 11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
-HASHTAG KURALI (COK ONEMLI):
-- Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
-- Her paragrafta EN FAZLA 1 hashtag olabilir — #BIST100, #HalkaArz gibi kritik kaliplar
-- Halka arz hisselerini bahsettiginde cumle icinde dogal yaz: orn "BESTE 7. gunde tavan kirıldı" — #BESTE seklinde DEGIL
-- Sondaki link satirinda max 2-3 genel hashtag olabilir: #borsa #HalkaArz
-- ASLA hashtag yigini yapma — rapor profesyonel analist uslubunda olmali, spam gibi degil
+HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
+- Hashtag'leri AGRESIF kullan! X algoritmasi hashtag'li icerikleri KATKAT daha fazla kisi gosteriyor.
+- Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
+- IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
+- Yuksek etkili KAP haberlerindeki sirket kodlarini hashtag yap
+- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #hisse #yatirim #BorsaIstanbul #HalkaArz #piyasa #finans
+- Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
+- MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
+- Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -810,12 +924,14 @@ KURAL:
 11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
-HASHTAG KURALI (COK ONEMLI):
-- Hashtag'leri sonda yigin halinde toplama! Cumleler icerisinde dogal sekilde kullan.
-- Her paragrafta EN FAZLA 1 hashtag olabilir — #BIST100, #HalkaArz gibi kritik kaliplar
-- Halka arz hisselerini bahsettiginde cumle icinde dogal yaz: orn "BESTE 7. gunde tavan kirıldı" — #BESTE seklinde DEGIL
-- Sondaki link satirinda max 2-3 genel hashtag olabilir: #borsa #HalkaArz
-- ASLA hashtag yigini yapma — rapor profesyonel analist uslubunda olmali, spam gibi degil
+HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
+- Hashtag'leri AGRESIF kullan! X algoritmasi hashtag'li icerikleri KATKAT daha fazla kisi gosteriyor.
+- Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
+- IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
+- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #hisse #yatirim #BorsaIstanbul #HalkaArz #piyasa #finans
+- Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
+- MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
+- Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -874,8 +990,10 @@ def _format_full_context(
     econ_calendar: dict,
     ipo_events: list[dict],
     report_type: str,
+    high_impact_kap: list[dict] | None = None,
+    tavily_news: list[dict] | None = None,
 ) -> str:
-    """AI'a gonderilecek zengin veri kontekstini formatlar — 8 kaynak."""
+    """AI'a gonderilecek zengin veri kontekstini formatlar — 10 kaynak (sabah: +KAP yuksek etki + Tavily)."""
     today = date.today()
     day_name = _TR_DAY_NAMES.get(today.weekday(), "Bilinmiyor")
 
@@ -1059,6 +1177,40 @@ def _format_full_context(
     elif not today_events:
         lines.append("YARIN: Ekonomik takvim verisi alinamadi.")
 
+    # ── Yüksek Etkili KAP Bildirimleri (SADECE sabah raporu) ──
+    if high_impact_kap is not None:
+        lines.append("")
+        lines.append("=" * 50)
+        lines.append("YUKSEK ETKILI KAP BILDIRIMLERI (ai_impact_score >= 8, Son 20 saat)")
+        lines.append("Bunlar en onemli sirket haberleri — mutlaka analiz et ve hashtag'lerle vurgula!")
+        lines.append("=" * 50)
+        if high_impact_kap:
+            for d in high_impact_kap:
+                sentiment_icon = {"Olumlu": "📈", "Olumsuz": "📉", "Notr": "~"}.get(d.get("sentiment", ""), "❓")
+                lines.append(
+                    f"  {sentiment_icon} #{d['ticker']} — {d['title']} "
+                    f"(Skor: {d.get('score', '?'):.1f}/10, {d.get('sentiment', '?')}, {d.get('category', '?')})"
+                )
+                if d.get("summary"):
+                    lines.append(f"      Ozet: {d['summary']}")
+        else:
+            lines.append("  Son 20 saatte yuksek etkili (>=8) KAP bildirimi yok.")
+
+    # ── Tavily Web Araştırması (SADECE sabah raporu) ──
+    if tavily_news is not None:
+        lines.append("")
+        lines.append("=" * 50)
+        lines.append("WEB ARASTIRMASI (Tavily — Guncel Haberler)")
+        lines.append("Bu verileri kullanarak raporu daha guncel ve zengin yap. Kaynak adi YAZMA.")
+        lines.append("=" * 50)
+        if tavily_news:
+            for t in tavily_news:
+                lines.append(f"  • {t['title']}")
+                if t.get("content"):
+                    lines.append(f"      {t['content']}")
+        else:
+            lines.append("  Web arastirmasi sonucu alinmadi.")
+
     return "\n".join(lines)
 
 
@@ -1071,8 +1223,10 @@ async def _generate_report(
     econ_calendar: dict,
     ipo_events: list[dict],
     report_type: str,
+    high_impact_kap: list[dict] | None = None,
+    tavily_news: list[dict] | None = None,
 ) -> str | None:
-    """AI ile piyasa raporu uretir — 8 kaynak zengin veri konteksti ile."""
+    """AI ile piyasa raporu uretir — 10 kaynak zengin veri konteksti ile (sabah: +KAP yuksek etki + Tavily)."""
     _settings = get_settings()
     gemini_key = _settings.GEMINI_API_KEY if _settings.GEMINI_API_KEY else None
     api_key = _settings.ABACUS_API_KEY
@@ -1086,6 +1240,8 @@ async def _generate_report(
     context = _format_full_context(
         market_data, ipos, kap_news, telegram_news, rss_headlines,
         econ_calendar, ipo_events, report_type,
+        high_impact_kap=high_impact_kap,
+        tavily_news=tavily_news,
     )
 
     user_message = (
@@ -1196,23 +1352,49 @@ async def _generate_report(
         logger.error("AI rapor: Tum providerlar basarisiz")
         return None
 
-    # Halka arz ticker hashtag'leri ekle — cok ilgi cekiyor
-    ipo_hashtags = ""
+    # ── Hashtag zenginleştirme: IPO + yüksek etkili KAP + genel finansal ──
+    extra_tags: list[str] = []
+
+    # 1) IPO ticker hashtag'leri
     if ipos:
-        tags = []
         for ipo in ipos:
             ticker = ipo.get("ticker") if isinstance(ipo, dict) else getattr(ipo, "ticker", None)
             if ticker and ticker.strip():
                 tag = f"#{ticker.strip().upper()}"
-                if tag not in tags:
-                    tags.append(tag)
-        if tags:
-            ipo_hashtags = " " + " ".join(tags[:10])  # max 10 ticker
+                if tag not in extra_tags:
+                    extra_tags.append(tag)
+
+    # 2) Yüksek etkili KAP ticker hashtag'leri (sadece sabah raporu)
+    if high_impact_kap:
+        for d in high_impact_kap:
+            ticker = d.get("ticker", "")
+            if ticker and ticker.strip():
+                tag = f"#{ticker.strip().upper()}"
+                if tag not in extra_tags:
+                    extra_tags.append(tag)
+
+    # 3) Genel finansal hashtag'ler — erisimi en cok artiran bunlar
+    general_tags = [
+        "#BIST100", "#borsa", "#hisse", "#yatirim",
+        "#BorsaIstanbul", "#HalkaArz", "#piyasa", "#finans",
+    ]
+    for gt in general_tags:
+        if gt not in extra_tags and gt.lower() not in ai_content.lower():
+            extra_tags.append(gt)
+
+    # Tum ek hashtag'ler — max 20 toplam
+    all_extra = " ".join(extra_tags[:20])
+    hashtag_suffix = ("\n" + all_extra) if all_extra else ""
 
     # Tweet karakter limiti (gorsel ile 4000)
-    content_with_tags = ai_content.strip() + ipo_hashtags
+    content_with_tags = ai_content.strip() + hashtag_suffix
     if len(content_with_tags) > 3900:
-        # Hashtag'lerle sigmazsa hashtag'siz dene
+        # Once genel hashtag'leri kirp, sadece IPO+KAP birak
+        short_tags = " ".join(extra_tags[:10])
+        content_short = ai_content.strip() + ("\n" + short_tags if short_tags else "")
+        if len(content_short) <= 3900:
+            return content_short
+        # Hala sigmazsa yalnizca metin
         if len(ai_content) > 3900:
             ai_content = ai_content[:3897] + "..."
         return ai_content.strip()
@@ -1249,15 +1431,37 @@ async def _collect_all_data() -> tuple:
 
 
 async def send_morning_report_tweet():
-    """Sabah acilis raporu tweeti gonderir (08:15 TR)."""
-    logger.info("Sabah acilis raporu hazirlaniyor — 7 kaynak toplanıyor...")
+    """Sabah acilis raporu tweeti gonderir (08:15 TR).
+
+    Toplanan veri kaynaklari (10 kaynak):
+    1-7) _collect_all_data — market, IPO, KAP, Telegram, RSS, takvim, IPO-events
+    8)   get_high_impact_kap_disclosures — ai_impact_score>=8 onemli KAP haberleri
+    9-10) fetch_tavily_morning_news — Tavily ile web arastirmasi (2 sorgu)
+    """
+    import asyncio
+
+    logger.info("Sabah acilis raporu hazirlaniyor — 10 kaynak toplanıyor...")
+
+    # Ana veri kaynaklari + sabah ozel veri kaynaklari paralel
+    main_task = asyncio.create_task(_collect_all_data())
+    kap_impact_task = asyncio.create_task(get_high_impact_kap_disclosures(min_score=8.0, hours=20, limit=12))
+    tavily_task = asyncio.create_task(fetch_tavily_morning_news())
 
     (market_data, ipos, kap_news, telegram_news,
-     rss_headlines, econ_calendar, ipo_events) = await _collect_all_data()
+     rss_headlines, econ_calendar, ipo_events) = await main_task
+    high_impact_kap = await kap_impact_task
+    tavily_news = await tavily_task
+
+    logger.info(
+        "Sabah veri toplama tamam: %d yuksek-KAP, %d Tavily sonucu",
+        len(high_impact_kap), len(tavily_news)
+    )
 
     report_text = await _generate_report(
         market_data, ipos, kap_news, telegram_news, rss_headlines,
         econ_calendar, ipo_events, "morning",
+        high_impact_kap=high_impact_kap,
+        tavily_news=tavily_news,
     )
     if not report_text:
         logger.error("Sabah raporu uretilemedi — tweet atilmadi")
