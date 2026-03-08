@@ -1974,23 +1974,26 @@ async def trigger_ayin_halka_arzi(
 # ── Claude AI Thread Üretici — Ayın Halka Arzı ──
 
 _THREAD_SYSTEM_PROMPT = """Sen @szalgofinans hesabının profesyonel finans içerik editörüsün.
-X (Twitter) Premium hesap için 4 tweet'lik detaylı thread yazıyorsun.
+X (Twitter) Premium hesap için 4-5 tweet'lik detaylı thread yazıyorsun.
 
 KRİTİK KURALLAR:
-1. Premium hesap — her tweet 500-1500 karakter arası olabilir. KISA YAZMA, detaylı ve bilgilendirici yaz.
-2. Türkçe karakterler ZORUNLU: ö, ü, ş, ç, ğ, ı, İ, Ö, Ü, Ş, Ç, Ğ
-3. Yatırım tavsiyesi içermez — bilgilendirme amaçlıdır.
-4. Tweet 1'de 🧵👇 ile thread olduğunu belirt.
-5. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı + #hashtag'ler olmalı.
-6. Profesyonel ama samimi ton — sohbet havası, sanki takipçilerle sohbet ediyorsun.
-7. Rakamları, yüzdeleri, oranları detaylı kullan — okuyucu rakam görmek istiyor.
-8. Her tweette satır araları bırak, okunabilirlik önemli.
-9. Emoji kullan ama abartma — her bilgi satırının başına uygun emoji koy.
-10. Sadece JSON döndür, başka metin ekleme."""
+1. Premium hesap — her tweet 500-2000 karakter arası olabilir. KISA YAZMA, BİLGİ ŞELALESI olacak şekilde detaylı yaz.
+2. SADECE sana verilen AI rapor verilerini kullan. Raporda olmayan bilgiyi UYDURMA. Hayali rakam, tarih veya detay ekleme.
+3. Türkçe karakterler ZORUNLU: ö, ü, ş, ç, ğ, ı, İ, Ö, Ü, Ş, Ç, Ğ
+4. Yatırım tavsiyesi içermez — bilgilendirme amaçlıdır.
+5. Tweet 1'de 🧵👇 ile thread olduğunu belirt.
+6. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı + #hashtag'ler olmalı.
+7. Profesyonel ama samimi ton — sohbet havası, sanki takipçilerle sohbet ediyorsun.
+8. Rakamları, yüzdeleri, oranları BOL BOL kullan — okuyucu rakam görmek istiyor.
+9. Her tweette satır araları bırak, okunabilirlik ve şıklık önemli.
+10. Emoji kullan ama abartma — her bilgi satırının başına uygun emoji koy.
+11. Sadece JSON döndür, başka metin ekleme.
+12. Raporda yeterli veri varsa 5 tweet, veri az ise 4 tweet yaz — esnek ol."""
 
-_THREAD_USER_PROMPT = """Halka arz AI raporu verisinden 4 tweet'lik DETAYLI profesyonel thread oluştur.
+_THREAD_USER_PROMPT = """Halka arz AI raporu verisinden 4-5 tweet'lik DETAYLI profesyonel BİLGİ ŞELALESI thread oluştur.
 
-ÖNEMLI: Premium hesabız, her tweet 500-1500 karakter olabilir. Kısa yazma, detaylı ve bilgi dolu yaz!
+⚠️ MUTLAK KURAL: SADECE aşağıdaki rapor verisinde bulunan bilgileri kullan. Raporda olmayan bir şeyi ASLA uydurma. Hayali tarih, rakam, oran ekleme!
+🔥 ÖNEMLI: Premium hesabız, her tweet 500-2000 karakter olabilir. TEK CÜMLELİK TWEETLERİ KABUL ETMİYORUZ. Zengin, detaylı, bilgi dolu, şık ve okunaklı tweetler yaz!
 
 VERİ:
 - Şirket: {company}
@@ -1998,39 +2001,52 @@ VERİ:
 - Halka Arz Fiyatı: {price} TL
 - AI Genel Puan: {overall_score}/10
 - AI Değerlendirme: {verdict}
-- Rapor Detayları: {report_summary}
+- Rapor Detayları:
+{report_summary}
 
-THREAD YAPISI (4 tweet, her biri 500-1500 karakter):
+THREAD YAPISI (4 veya 5 tweet — rapordaki veriye göre karar ver, her biri 500-2000 karakter):
 
-Tweet 1 — ANA TWEET (dikkat çekici, merak uyandıran):
+Tweet 1 — GİRİŞ & DİKKAT ÇEKİCİ:
 "📊 AYIN EN DİKKAT ÇEKEN HALKA ARZI" başlığıyla aç.
 Şirket adı, ticker, fiyat, AI puanı ver.
-Şirketin ne yaptığını, hangi sektörde olduğunu kısaca anlat.
+Şirketin ne yaptığını, hangi sektörde olduğunu anlat.
 Neden dikkat çektiğini 2-3 cümle ile açıkla.
 "Detaylı analizimiz 🧵👇" ile kapat.
 
 Tweet 2 — ŞİRKET & HALKA ARZ DETAYLARI:
-📋 Şirketin geçmişi, kuruluş yılı, kaç yıllık deneyim.
+📋 Şirketin geçmişi, kuruluş yılı, deneyim süresi (raporda varsa).
 Sektör, faaliyet alanı, Türkiye'deki konumu.
 Halka arz fiyatı, hangi pazarda işlem göreceği.
-Talep toplama tarihleri (varsa), halka açıklık oranı.
-Toplam halka arz büyüklüğü (varsa).
+Talep toplama tarihleri, halka açıklık oranı, toplam halka arz büyüklüğü (raporda varsa).
+Raporda bu bilgiler yoksa o kısımları atla, başka bilgi uydurma.
 
 Tweet 3 — FİNANSAL ANALİZ & AI PUANLAMA:
-📈 Gelir büyümesi, kâr marjı, F/K oranı ve sektör karşılaştırması.
+📈 Gelir büyümesi, kâr marjı, F/K oranı, sektör karşılaştırması (raporda varsa).
 Borçluluk oranı, özkaynak yapısı.
 🤖 AI puanlama detayı: iş modeli, finansal sağlık, değerleme, büyüme potansiyeli puanları.
-Güçlü yönleri (3-4 madde) ve risk faktörleri (2-3 madde) ayrı ayrı listele.
+Rapordaki güçlü yönleri detaylıca listele.
 
-Tweet 4 — SONUÇ & DEĞERLENDİRME:
+Tweet 4 — RİSK ANALİZİ & DETAYLI DEĞERLENDİRME:
+⚠️ Risk faktörlerini detaylı listele.
+Sektörel riskler, şirket özgü riskler.
+Karşılaştırmalı analiz (sektör ortalamaları vs şirket — raporda varsa).
+AI algoritmasının öne çıkardığı uyarılar.
+
+Tweet 5 — SONUÇ & CTA (isteğe bağlı — raporda yeterli veri varsa yaz):
 ✅ veya ⚠️ Genel değerlendirme özeti (olumlu/nötr/dikkat).
 Bu halka arzı öne çıkaran 2-3 ana faktör.
-"📱 Detaylı rapor ve güncel veriler uygulamamızda → szalgo.net.tr" CTA.
+"📱 Detaylı AI raporu uygulamamızda → szalgo.net.tr" CTA.
 ⚠️ Yatırım tavsiyesi değildir disclaimer.
 İlgili hashtag'ler: #halkaarz #{ticker} #borsa #BIST #yatırım #borsaistanbul
 
-JSON formatında döndür:
-["tweet1 metni", "tweet2 metni", "tweet3 metni", "tweet4 metni"]"""
+ÖNEMLİ:
+- Raporda yeterli veri varsa 5 tweet yaz, veri az ise 4 tweet yaz (son tweette sonuç + CTA + disclaimer birleştir).
+- 4 tweet yazıyorsan sonuç + CTA + disclaimer'ı Tweet 4'e ekle.
+
+JSON formatında döndür (4 ya da 5 eleman):
+["tweet1 metni", "tweet2 metni", "tweet3 metni", "tweet4 metni"]
+veya
+["tweet1 metni", "tweet2 metni", "tweet3 metni", "tweet4 metni", "tweet5 metni"]"""
 
 
 async def _generate_ayin_thread_with_ai(
@@ -2041,10 +2057,10 @@ async def _generate_ayin_thread_with_ai(
     verdict: str,
     report_data: dict,
 ) -> list[str] | None:
-    """Claude AI ile 4 tweet'lik thread içeriği üretir.
+    """Claude AI ile 4-5 tweet'lik thread içeriği üretir.
 
     Returns:
-        4 elemanlı string listesi veya hata durumunda None
+        4-5 elemanlı string listesi veya hata durumunda None
     """
     import json as _json
     import httpx as _hx
@@ -2056,35 +2072,49 @@ async def _generate_ayin_thread_with_ai(
         logger.warning("[THREAD-AI] ANTHROPIC_API_KEY tanımlı değil, thread üretilemedi")
         return None
 
-    # Rapor özetini oluştur (Claude'a gönderilecek)
+    # Rapor özetini oluştur (Claude'a gönderilecek — mümkün olduğunca çok veri)
     report_summary = ""
     try:
         if report_data:
-            # Raporun önemli kısımlarını çıkar
+            # Raporun tüm önemli kısımlarını detaylı çıkar
             parts = []
             if report_data.get("company_overview"):
-                parts.append(f"Şirket: {report_data['company_overview'][:200]}")
+                parts.append(f"Şirket Hakkında: {report_data['company_overview'][:600]}")
             if report_data.get("sector"):
                 parts.append(f"Sektör: {report_data['sector']}")
+            if report_data.get("business_model"):
+                parts.append(f"İş Modeli: {str(report_data['business_model'])[:400]}")
+            if report_data.get("ipo_details"):
+                parts.append(f"Halka Arz Detayları: {str(report_data['ipo_details'])[:400]}")
             if report_data.get("strengths"):
                 s = report_data["strengths"]
                 if isinstance(s, list):
-                    parts.append(f"Güçlü yönler: {', '.join(s[:3])}")
+                    parts.append(f"Güçlü Yönler:\n" + "\n".join(f"  • {x}" for x in s[:8]))
                 elif isinstance(s, str):
-                    parts.append(f"Güçlü yönler: {s[:200]}")
+                    parts.append(f"Güçlü Yönler: {s[:500]}")
             if report_data.get("risks"):
                 r = report_data["risks"]
                 if isinstance(r, list):
-                    parts.append(f"Riskler: {', '.join(r[:3])}")
+                    parts.append(f"Riskler:\n" + "\n".join(f"  • {x}" for x in r[:8]))
                 elif isinstance(r, str):
-                    parts.append(f"Riskler: {r[:200]}")
+                    parts.append(f"Riskler: {r[:500]}")
             if report_data.get("financial_analysis"):
-                parts.append(f"Finansal: {str(report_data['financial_analysis'])[:300]}")
+                parts.append(f"Finansal Analiz: {str(report_data['financial_analysis'])[:600]}")
             if report_data.get("scoring"):
-                parts.append(f"Puanlama: {str(report_data['scoring'])[:200]}")
+                parts.append(f"AI Puanlama Detayları: {str(report_data['scoring'])[:400]}")
+            if report_data.get("valuation"):
+                parts.append(f"Değerleme: {str(report_data['valuation'])[:400]}")
+            if report_data.get("growth_potential"):
+                parts.append(f"Büyüme Potansiyeli: {str(report_data['growth_potential'])[:400]}")
+            if report_data.get("market_position"):
+                parts.append(f"Pazar Konumu: {str(report_data['market_position'])[:300]}")
+            if report_data.get("summary"):
+                parts.append(f"Genel Özet: {str(report_data['summary'])[:500]}")
+            if report_data.get("recommendation"):
+                parts.append(f"Tavsiye: {str(report_data['recommendation'])[:300]}")
             report_summary = "\n".join(parts)
     except Exception:
-        report_summary = str(report_data)[:500] if report_data else ""
+        report_summary = str(report_data)[:2000] if report_data else ""
 
     if not report_summary:
         report_summary = f"Genel değerlendirme: {verdict}" if verdict else "Detay yok"
@@ -2099,7 +2129,7 @@ async def _generate_ayin_thread_with_ai(
     )
 
     try:
-        async with _hx.AsyncClient(timeout=30.0) as client:
+        async with _hx.AsyncClient(timeout=45.0) as client:
             resp = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={
@@ -2109,7 +2139,7 @@ async def _generate_ayin_thread_with_ai(
                 },
                 json={
                     "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 4000,
+                    "max_tokens": 6000,
                     "system": _THREAD_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.4,
@@ -2144,9 +2174,9 @@ async def _generate_ayin_thread_with_ai(
             logger.error("[THREAD-AI] Claude geçersiz format döndü: %s", content_text[:200])
             return None
 
-        # Her tweet'in karakter limitini kontrol et
+        # Her tweet'in karakter limitini kontrol et (4-5 tweet)
         validated = []
-        for i, t in enumerate(tweets[:4]):
+        for i, t in enumerate(tweets[:5]):
             t = str(t).strip()
             if len(t) > 4000:
                 logger.warning("[THREAD-AI] Tweet %d çok uzun (%d kar), kısaltılıyor", i + 1, len(t))
