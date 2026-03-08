@@ -3181,6 +3181,55 @@ async def bulk_ceiling_track(
 
 
 # -------------------------------------------------------
+# VIDEO PIPELINE — Gonderilmis tweetleri listele
+# -------------------------------------------------------
+
+@app.get("/api/v1/admin/sent-tweets")
+@limiter.limit("30/minute")
+async def get_sent_tweets(
+    request: Request,
+    admin_password: str = Query(..., description="Admin sifresi"),
+    after_id: int = Query(0, description="Bu ID'den sonraki tweetleri getir"),
+    limit: int = Query(20, ge=1, le=100, description="Maks sonuc sayisi"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Video pipeline icin gonderilmis tweetleri listeler.
+
+    Pipeline bu endpoint'i poll ederek yeni tweet olup olmadigini kontrol eder.
+    after_id ile sadece belirli bir ID'den sonraki tweetler alinir.
+    """
+    if not _verify_admin_password(admin_password):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.models.pending_tweet import PendingTweet
+
+    query = (
+        select(PendingTweet)
+        .where(
+            PendingTweet.status == "sent",
+            PendingTweet.id > after_id,
+        )
+        .order_by(PendingTweet.id.asc())
+        .limit(limit)
+    )
+
+    result = await db.execute(query)
+    tweets = list(result.scalars().all())
+
+    return [
+        {
+            "id": t.id,
+            "text": t.text,
+            "source": t.source,
+            "image_path": t.image_path,
+            "sent_at": t.sent_at.isoformat() if t.sent_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tweets
+    ]
+
+
+# -------------------------------------------------------
 # T15 — Ogle Arasi Market Snapshot Tweet Trigger
 # -------------------------------------------------------
 
