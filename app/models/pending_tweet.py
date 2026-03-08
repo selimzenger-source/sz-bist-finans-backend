@@ -24,6 +24,12 @@ class PendingTweet(Base):
         String(20), nullable=False, default="pending",
         comment="pending, approved, rejected, sent, failed"
     )
+    # Thread desteği: JSON array — [{"tweet": "...", "order": 1}, ...]
+    # None ise tekli tweet, doluysa thread olarak gönderilir
+    thread_data: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="JSON: thread tweet dizisi. null=tekli tweet"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

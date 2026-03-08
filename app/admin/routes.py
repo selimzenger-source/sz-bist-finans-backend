@@ -91,6 +91,10 @@ def _is_company_in_ipo(spk_name: str, ipo_names_normalized: set[str]) -> bool:
 
 templates = Jinja2Templates(directory="app/templates")
 
+# Jinja2 custom filter: JSON string → Python list/dict
+import json as _json_module
+templates.env.filters["fromjson"] = lambda s: _json_module.loads(s) if s else []
+
 
 # -------------------------------------------------------
 # Yardimci Fonksiyonlar
@@ -1078,6 +1082,18 @@ async def tweets_page(
     from app.services.twitter_service import is_auto_send
     auto_send = is_auto_send()
 
+    # Ayin Halka Arzi icin AI raporlu IPO'lari getir
+    ipos_with_report_result = await db.execute(
+        select(IPO)
+        .where(
+            IPO.ai_report.isnot(None),
+            IPO.archived == False,
+        )
+        .order_by(desc(IPO.id))
+        .limit(20)
+    )
+    ipos_with_report = list(ipos_with_report_result.scalars().all())
+
     return templates.TemplateResponse("admin/tweets.html", {
         "request": request,
         "tweets": tweets,
@@ -1086,6 +1102,7 @@ async def tweets_page(
         "auto_send": auto_send,
         "trigger_message": trigger_msg,
         "trigger_success": trigger_ok == "1",
+        "ipos_with_report": ipos_with_report,
     })
 
 
@@ -1654,10 +1671,30 @@ async def approve_tweet(
         return RedirectResponse(url="/admin/tweets", status_code=303)
 
     # Tweet'i gercekten at — force_send=True ile auto_send kontrolunu atla
-    from app.services.twitter_service import _safe_tweet as real_tweet, _safe_tweet_with_media as real_tweet_media
+    from app.services.twitter_service import (
+        _safe_tweet as real_tweet,
+        _safe_tweet_with_media as real_tweet_media,
+        _safe_tweet_thread as real_tweet_thread,
+    )
 
     try:
-        if tweet.image_path:
+        # Thread tweet mi kontrol et
+        thread_tweets = None
+        if hasattr(tweet, "thread_data") and tweet.thread_data:
+            try:
+                import json as _json
+                thread_tweets = _json.loads(tweet.thread_data)
+            except Exception:
+                thread_tweets = None
+
+        if thread_tweets and isinstance(thread_tweets, list) and len(thread_tweets) >= 2:
+            # Thread olarak gönder (4s aralıklarla)
+            success = real_tweet_thread(
+                thread_tweets,
+                source="admin_approve",
+                force_send=True,
+            )
+        elif tweet.image_path:
             success = real_tweet_media(tweet.text, tweet.image_path, source="admin_approve", force_send=True)
         else:
             success = real_tweet(tweet.text, source="admin_approve", force_send=True)
@@ -1818,6 +1855,299 @@ async def trigger_spk_analysis_from_admin(
             return JSONResponse({"ok": False, "error": str(e)[:200]})
         msg = quote(f"SPK Hata: {str(e)[:150]}")
         return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
+@router.post("/tweets/trigger-ayin-halka-arzi")
+async def trigger_ayin_halka_arzi(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin panelden 'Ayın En Dikkat Çeken Halka Arzı' thread tweetini tetikler.
+
+    Claude AI ile 4 tweet'lik profesyonel thread üretir.
+    Seçilen IPO'nun AI raporunu kullanarak:
+    1. Ana tweet: Genel tanıtım + dikkat çekici başlık
+    2. Şirket & Halka Arz: Detaylar
+    3. Finansal Analiz: Rakamlar + AI puanlama
+    4. Sonuç + CTA: Video + uygulama yönlendirmesi
+
+    Pipeline bu tweeti algılayıp 1.5-2 dk'lık uzun format video üretir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from urllib.parse import quote
+
+    try:
+        form = await request.form()
+        ipo_id = int(form.get("ipo_id", 0))
+
+        if not ipo_id:
+            msg = quote("IPO seçilmedi!")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        # IPO'yu ve AI raporunu getir
+        result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+        ipo = result.scalar_one_or_none()
+
+        if not ipo:
+            msg = quote(f"IPO bulunamadı (id={ipo_id})")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        if not ipo.ai_report:
+            msg = quote(f"{ipo.company_name} için AI rapor yok! Önce rapor üretin.")
+            return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+        # AI rapordan veri çıkar
+        import json as _json
+        try:
+            report_data = _json.loads(ipo.ai_report)
+            overall_score = report_data.get("overall_score", "?")
+            verdict = report_data.get("verdict", "")
+        except Exception:
+            report_data = {}
+            overall_score = "?"
+            verdict = ""
+
+        ticker = ipo.ticker or "BIST"
+        company = ipo.company_name or ticker
+        price = ipo.ipo_price or "?"
+
+        # ── Claude AI ile Thread İçeriği Üret ──
+        thread_tweets = await _generate_ayin_thread_with_ai(
+            company=company,
+            ticker=ticker,
+            price=price,
+            overall_score=overall_score,
+            verdict=verdict,
+            report_data=report_data,
+        )
+
+        if not thread_tweets or len(thread_tweets) < 2:
+            # Claude başarısız olursa fallback: tek tweet
+            logger.warning("[ADMIN] Claude thread üretemedi, tek tweet'e düşülüyor")
+            thread_tweets = None
+            tweet_text = (
+                f"📊 AYIN EN DİKKAT ÇEKEN HALKA ARZI\n\n"
+                f"🏢 {company}\n"
+                f"📌 Ticker: ${ticker}\n"
+                f"💰 Halka Arz Fiyatı: {price} TL\n"
+                f"🤖 AI Değerlendirme Puanı: {overall_score}/10\n\n"
+                f"📋 Detaylı analiz raporu ve video aşağıda 👇\n\n"
+                f"⚠️ Yatırım tavsiyesi değildir.\n\n"
+                f"#halkaarz #{ticker} #borsa #BIST #yatırım"
+            )
+        else:
+            # Thread başarılı — ilk tweet ana metin olarak kullanılır
+            tweet_text = thread_tweets[0]
+
+        # Pending tweet olarak ekle (thread_data ile birlikte)
+        from app.models.pending_tweet import PendingTweet
+
+        pending = PendingTweet(
+            text=tweet_text,
+            source="tweet_ayin_halka_arz",
+            status="pending",
+            thread_data=_json.dumps(thread_tweets, ensure_ascii=False) if thread_tweets else None,
+        )
+        db.add(pending)
+        await db.commit()
+
+        thread_info = f" ({len(thread_tweets)} tweet thread)" if thread_tweets else ""
+        logger.info(
+            "[ADMIN] Ayın Halka Arzı tweeti kuyruğa eklendi: %s (id=%d, score=%s)%s",
+            ticker, pending.id, overall_score, thread_info,
+        )
+
+        msg = quote(
+            f"Ayın Halka Arzı kuyruğa eklendi: {ticker} "
+            f"(Puan: {overall_score}/10){thread_info}"
+        )
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=1", status_code=303)
+
+    except Exception as e:
+        logger.error("[ADMIN] Ayın Halka Arzı hatası: %s", e, exc_info=True)
+        msg = quote(f"Hata: {str(e)[:100]}")
+        return RedirectResponse(url=f"/admin/tweets?trigger_msg={msg}&trigger_ok=0", status_code=303)
+
+
+# ── Claude AI Thread Üretici — Ayın Halka Arzı ──
+
+_THREAD_SYSTEM_PROMPT = """Sen @szalgofinans hesabının profesyonel finans içerik editörüsün.
+X (Twitter) için 4 tweet'lik thread yazıyorsun.
+
+KRİTİK KURALLAR:
+1. Her tweet MAX 270 karakter (emoji dahil). ASLA 280'i geçme.
+2. Türkçe karakterler ZORUNLU: ö, ü, ş, ç, ğ, ı, İ, Ö, Ü, Ş, Ç, Ğ
+3. Yatırım tavsiyesi içermez — bilgilendirme amaçlıdır.
+4. Tweet 1'de 🧵👇 ile thread olduğunu belirt.
+5. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı + #hashtag'ler olmalı.
+6. Profesyonel ama samimi ton — sohbet havası, resmi değil.
+7. Rakamları ve verileri doğal akışta kullan.
+8. Sadece JSON döndür, başka metin ekleme."""
+
+_THREAD_USER_PROMPT = """Halka arz AI raporu verisinden 4 tweet'lik profesyonel thread oluştur.
+
+VERİ:
+- Şirket: {company}
+- Ticker: ${ticker}
+- Halka Arz Fiyatı: {price} TL
+- AI Genel Puan: {overall_score}/10
+- AI Değerlendirme: {verdict}
+- Rapor Detayları: {report_summary}
+
+THREAD YAPISI (4 tweet):
+
+Tweet 1 — ANA TWEET (dikkat çekici, merak uyandıran):
+"📊 AYIN EN DİKKAT ÇEKEN HALKA ARZI" başlığıyla aç.
+Şirket adı, ticker, AI puanı. "Detaylı analiz 🧵👇" ile kapat.
+
+Tweet 2 — ŞİRKET & HALKA ARZ DETAYLARI:
+Sektör, deneyim, fiyat, pazar bilgisi. Kısa ve öz.
+
+Tweet 3 — FİNANSAL ANALİZ & AI PUANLAMA:
+Finansal göstergeler + AI alt puanları (varsa). Rakamlarla destekle.
+
+Tweet 4 — SONUÇ & CTA:
+Genel değerlendirme + "Detaylı rapor uygulamamızda 📱 szalgo.net.tr"
+⚠️ disclaimer + hashtag'ler.
+
+JSON formatında döndür:
+["tweet1 metni", "tweet2 metni", "tweet3 metni", "tweet4 metni"]"""
+
+
+async def _generate_ayin_thread_with_ai(
+    company: str,
+    ticker: str,
+    price: str,
+    overall_score: str,
+    verdict: str,
+    report_data: dict,
+) -> list[str] | None:
+    """Claude AI ile 4 tweet'lik thread içeriği üretir.
+
+    Returns:
+        4 elemanlı string listesi veya hata durumunda None
+    """
+    import json as _json
+    import httpx as _hx
+
+    from app.config import get_settings
+    settings = get_settings()
+    api_key = settings.ANTHROPIC_API_KEY
+    if not api_key:
+        logger.warning("[THREAD-AI] ANTHROPIC_API_KEY tanımlı değil, thread üretilemedi")
+        return None
+
+    # Rapor özetini oluştur (Claude'a gönderilecek)
+    report_summary = ""
+    try:
+        if report_data:
+            # Raporun önemli kısımlarını çıkar
+            parts = []
+            if report_data.get("company_overview"):
+                parts.append(f"Şirket: {report_data['company_overview'][:200]}")
+            if report_data.get("sector"):
+                parts.append(f"Sektör: {report_data['sector']}")
+            if report_data.get("strengths"):
+                s = report_data["strengths"]
+                if isinstance(s, list):
+                    parts.append(f"Güçlü yönler: {', '.join(s[:3])}")
+                elif isinstance(s, str):
+                    parts.append(f"Güçlü yönler: {s[:200]}")
+            if report_data.get("risks"):
+                r = report_data["risks"]
+                if isinstance(r, list):
+                    parts.append(f"Riskler: {', '.join(r[:3])}")
+                elif isinstance(r, str):
+                    parts.append(f"Riskler: {r[:200]}")
+            if report_data.get("financial_analysis"):
+                parts.append(f"Finansal: {str(report_data['financial_analysis'])[:300]}")
+            if report_data.get("scoring"):
+                parts.append(f"Puanlama: {str(report_data['scoring'])[:200]}")
+            report_summary = "\n".join(parts)
+    except Exception:
+        report_summary = str(report_data)[:500] if report_data else ""
+
+    if not report_summary:
+        report_summary = f"Genel değerlendirme: {verdict}" if verdict else "Detay yok"
+
+    prompt = _THREAD_USER_PROMPT.format(
+        company=company,
+        ticker=ticker,
+        price=price,
+        overall_score=overall_score,
+        verdict=verdict,
+        report_summary=report_summary,
+    )
+
+    try:
+        async with _hx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1500,
+                    "system": _THREAD_SYSTEM_PROMPT,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.4,
+                },
+            )
+
+        if resp.status_code != 200:
+            logger.error("[THREAD-AI] Claude API hatası (%d): %s", resp.status_code, resp.text[:300])
+            return None
+
+        data = resp.json()
+        content_text = ""
+        for block in data.get("content", []):
+            if block.get("type") == "text":
+                content_text = block.get("text", "").strip()
+                break
+
+        if not content_text:
+            logger.error("[THREAD-AI] Claude boş yanıt döndü")
+            return None
+
+        # JSON parse
+        if content_text.startswith("```"):
+            content_text = content_text.split("```")[1]
+            if content_text.startswith("json"):
+                content_text = content_text[4:]
+            content_text = content_text.strip()
+
+        tweets = _json.loads(content_text)
+
+        if not isinstance(tweets, list) or len(tweets) < 2:
+            logger.error("[THREAD-AI] Claude geçersiz format döndü: %s", content_text[:200])
+            return None
+
+        # Her tweet'in karakter limitini kontrol et
+        validated = []
+        for i, t in enumerate(tweets[:4]):
+            t = str(t).strip()
+            if len(t) > 280:
+                logger.warning("[THREAD-AI] Tweet %d uzun (%d kar), kısaltılıyor", i + 1, len(t))
+                t = t[:277] + "..."
+            validated.append(t)
+
+        logger.info(
+            "[THREAD-AI] Thread üretildi: %d tweet, toplam %d karakter",
+            len(validated), sum(len(t) for t in validated),
+        )
+        return validated
+
+    except _json.JSONDecodeError as je:
+        logger.error("[THREAD-AI] JSON parse hatası: %s — yanıt: %s", je, content_text[:300])
+        return None
+    except Exception as e:
+        logger.error("[THREAD-AI] Claude thread hatası: %s", e, exc_info=True)
+        return None
 
 
 @router.post("/tweets/toggle-auto-send")

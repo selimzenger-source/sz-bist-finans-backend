@@ -3463,10 +3463,10 @@ async def daily_subscription_report():
 
 
 async def cleanup_notification_logs():
-    """Bildirim Merkezi — 24 saatten eski kayitlari temizle.
+    """Bildirim Merkezi — tum kayitlari sifirla.
 
-    Her gece 02:00 TR (UTC 23:00) calisir.
-    notification_logs tablosundan 24 saat ötesindeki kayitlari siler.
+    Her cumartesi 23:50 TR (UTC 20:50) calisir.
+    notification_logs tablosundaki TUM kayitlari siler.
     """
     try:
         from sqlalchemy import delete, text as sa_text
@@ -3474,18 +3474,17 @@ async def cleanup_notification_logs():
 
         async with async_session() as db:
             result = await db.execute(sa_text(
-                "DELETE FROM notification_logs "
-                "WHERE created_at < NOW() - INTERVAL '24 hours'"
+                "DELETE FROM notification_logs"
             ))
             deleted = result.rowcount
             await db.commit()
 
             if deleted > 0:
-                logger.info("Bildirim Merkezi temizlik: %d eski kayit silindi", deleted)
+                logger.info("Bildirim Merkezi haftalik sifirlama: %d kayit silindi", deleted)
             else:
-                logger.debug("Bildirim Merkezi temizlik: silinecek kayit yok")
+                logger.debug("Bildirim Merkezi haftalik sifirlama: silinecek kayit yok")
     except Exception as e:
-        logger.error("Bildirim Merkezi temizlik hatasi: %s", e)
+        logger.error("Bildirim Merkezi sifirlama hatasi: %s", e)
 
 
 def setup_scheduler():
@@ -3945,12 +3944,12 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Bildirim Merkezi Temizlik — her gece 02:00 TR (UTC 23:00) ───
+    # ─── Bildirim Merkezi Sifirlama — her cumartesi 23:50 TR (UTC 20:50) ───
     scheduler.add_job(
         cleanup_notification_logs,
-        CronTrigger(hour=23, minute=0),  # UTC 23:00 = TR 02:00
+        CronTrigger(day_of_week="sat", hour=20, minute=50),  # UTC 20:50 = TR 23:50
         id="notification_log_cleanup",
-        name="Bildirim Merkezi Temizlik (02:00 TR)",
+        name="Bildirim Merkezi Haftalik Sifirlama (Cumartesi 23:50 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -535,6 +535,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v44 migration: pending_tweets.thread_data (Thread tweet desteği — Ayın Halka Arzı)
+        try:
+            await conn.execute(
+                text("ALTER TABLE pending_tweets ADD COLUMN IF NOT EXISTS thread_data TEXT")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

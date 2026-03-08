@@ -460,6 +460,161 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
 
 
 # ================================================================
+# THREAD (SERİ TWEET) DESTEĞI — Ayın Halka Arzı gibi uzun içerikler
+# ================================================================
+
+# Thread tweetleri arası bekleme süresi (saniye) — spam engeli
+_THREAD_DELAY_SECONDS = 4
+
+
+def _post_tweet_get_id(text: str, reply_to: str | None = None) -> str | None:
+    """Tweet at ve tweet ID'sini döndür. Thread zincirleme için kullanılır.
+
+    Args:
+        text: Tweet metni
+        reply_to: Yanıtlanacak tweet ID (None ise bağımsız tweet)
+
+    Returns:
+        Tweet ID string veya None (hata durumunda)
+    """
+    try:
+        creds = _load_credentials()
+        if not creds:
+            logger.info("[TWITTER-DRY-RUN-THREAD] %s...", text[:60])
+            return None
+
+        wait = _wait_for_tweet_rate_limit()
+        if wait > 0:
+            time.sleep(wait)
+
+        if len(text) > 4000:
+            text = text[:3997] + "..."
+
+        auth_header = _build_oauth_header(creds)
+
+        payload: dict = {"text": text}
+        if reply_to:
+            payload["reply"] = {"in_reply_to_tweet_id": reply_to}
+
+        resp = httpx.post(
+            _TWITTER_TWEET_URL,
+            json=payload,
+            headers={
+                "Authorization": auth_header,
+                "Content-Type": "application/json",
+            },
+            timeout=15.0,
+        )
+
+        if resp.status_code in (200, 201):
+            tweet_id = resp.json().get("data", {}).get("id")
+            label = "Reply" if reply_to else "Tweet"
+            logger.info("%s başarılı (id=%s): %s...", label, tweet_id, text[:60])
+            _mark_tweet_sent(text)
+            _record_tweet_sent()
+            return tweet_id
+        else:
+            logger.error("Tweet hatası HTTP %d: %s", resp.status_code, resp.text[:200])
+            return None
+
+    except Exception as e:
+        logger.error("Tweet hatası (_post_tweet_get_id): %s", e)
+        return None
+
+
+def _safe_tweet_thread(
+    thread_tweets: list[str],
+    source: str = "unknown",
+    force_send: bool = False,
+) -> bool:
+    """Thread (seri tweet) olarak birden fazla tweeti zincirleme atar.
+
+    1. İlk tweeti bağımsız atar → tweet_id alır
+    2. Sonraki her tweet, bir öncekine reply olarak atılır
+    3. Tweetler arası _THREAD_DELAY_SECONDS bekler (spam engeli)
+
+    Args:
+        thread_tweets: Sıralı tweet metinleri listesi (min 2)
+        source: Tweet kaynağı
+        force_send: True ise auto_send/kill_switch atlanır
+
+    Returns:
+        True: En az ilk tweet başarılı
+        False: İlk tweet bile gönderilemedi
+    """
+    if not thread_tweets:
+        logger.warning("Thread: boş tweet listesi")
+        return False
+
+    if len(thread_tweets) < 2:
+        # Tek tweet → normal gönder
+        return _safe_tweet(thread_tweets[0], source=source, force_send=force_send)
+
+    try:
+        # KILL SWITCH
+        if not force_send and is_tweets_killed():
+            logger.warning("[TWEET KILL SWITCH] Thread durduruldu: %s", thread_tweets[0][:60])
+            return False
+
+        # Duplicate kontrolu — ilk tweet üzerinden
+        if _is_duplicate_tweet(thread_tweets[0]):
+            logger.info("Thread duplicate, atlanıyor")
+            return True
+
+        total = len(thread_tweets)
+        logger.info("Thread gönderimi başlıyor: %d tweet", total)
+
+        # 1. İlk tweet (bağımsız)
+        first_id = _post_tweet_get_id(thread_tweets[0])
+        if not first_id:
+            logger.error("Thread: ilk tweet gönderilemedi, iptal")
+            _notify_tweet_failure(thread_tweets[0], "[THREAD] İlk tweet başarısız")
+            return False
+
+        logger.info("Thread 1/%d gönderildi (id=%s)", total, first_id)
+
+        # Global tweet id'yi güncelle (video pipeline için)
+        global _last_tweet_id
+        _last_tweet_id = first_id
+
+        # 2. Sonraki tweetler (reply chain)
+        prev_id = first_id
+        success_count = 1
+
+        for i, tweet_text in enumerate(thread_tweets[1:], start=2):
+            # Spam engeli: tweetler arası bekleme
+            logger.info(
+                "Thread %d/%d bekleniyor (%ds)...",
+                i, total, _THREAD_DELAY_SECONDS,
+            )
+            time.sleep(_THREAD_DELAY_SECONDS)
+
+            reply_id = _post_tweet_get_id(tweet_text, reply_to=prev_id)
+            if reply_id:
+                logger.info("Thread %d/%d gönderildi (id=%s → reply_to=%s)", i, total, reply_id, prev_id)
+                prev_id = reply_id
+                success_count += 1
+            else:
+                logger.warning("Thread %d/%d başarısız, kalan atlanıyor", i, total)
+                # Devam et — kalan tweetleri de dene
+                # (prev_id değişmez, sonraki tweet kırık zincirin son başarılısına bağlanır)
+
+        logger.info(
+            "Thread tamamlandı: %d/%d tweet gönderildi (ilk_id=%s)",
+            success_count, total, first_id,
+        )
+        return True
+
+    except Exception as e:
+        logger.error("Thread hatası (sistem etkilenmez): %s", e)
+        _notify_tweet_failure(
+            thread_tweets[0] if thread_tweets else "?",
+            f"[THREAD] {str(e)}",
+        )
+        return False
+
+
+# ================================================================
 # APP LINK & SABIT DEGERLER — Admin panelden duzenlenebilir
 # ================================================================
 _DEFAULTS = {
@@ -1371,7 +1526,8 @@ def tweet_bist30_news(
             emoji = "\U0001F534"  # Kirmizi top
 
         # Keyword temizligi (Haber Detayı Bulunamadı vb.)
-        clean_kw = matched_keyword
+        # Virgulden onceki ilk kelimeyi al (cok kelimeli keyword'leri kirp)
+        clean_kw = matched_keyword.split(",")[0].strip() if matched_keyword else matched_keyword
         if not clean_kw or "BULUNAMADI" in clean_kw.upper() or clean_kw == ticker:
             clean_kw = "Yeni KAP Bildirimi"
 
@@ -1971,9 +2127,13 @@ def _get_turkish_month(month: int) -> str:
 def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str = "") -> str:
     """SPK onayi icin Telegram mesaj sablonu."""
     price_line = f"\n💰 Halka arz fiyatı: {price} TL" if price else ""
+    # Virgulden onceki ilk kelimeyi bold yap, geri kalani normal
+    parts = company_name.split(",", 1)
+    bold_name = f"<b>{parts[0].strip()}</b>"
+    rest_name = f" {parts[1].strip()}" if len(parts) > 1 else ""
     return (
         f"🚨 <b>SPK Bülteni Yayımlandı!</b>\n\n"
-        f"<b>{company_name}</b> için halka arz başvurusu SPK tarafından onaylandı."
+        f"{bold_name}{rest_name} için halka arz başvurusu SPK tarafından onaylandı."
         f"{price_line}\n\n"
         f"📋 Bülten No: {bulletin_no}\n\n"
         f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"

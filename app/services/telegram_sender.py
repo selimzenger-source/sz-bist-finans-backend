@@ -74,7 +74,9 @@ def _format_telegram_message(
     if news_title:
         lines.append(f"Konu: {news_title}")
 
-    lines.append(f"Anahtar Kelime: {matched_keyword}")
+    # Virgulden onceki ilk kelimeyi al (cok kelimeli keyword'leri kirp)
+    clean_kw = matched_keyword.split(",")[0].strip() if matched_keyword else matched_keyword
+    lines.append(f"Yakalanan Kelime: {clean_kw}")
 
     if kap_id:
         lines.append(f"HaberId: {kap_id}")

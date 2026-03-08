@@ -1113,6 +1113,20 @@ async def generate_and_save_ipo_report(ipo_id: int, force: bool = False) -> bool
                 breakdown.get("kirmizi_bayrak_penalti", 0),
             )
 
+            # Kullanicilara push bildirim — AI rapor hazir
+            try:
+                from app.services.notification import NotificationService
+                notif_service = NotificationService(session)
+                notif_count = await notif_service.notify_ai_report_ready(
+                    ipo, report["overall_score"]
+                )
+                logger.info(
+                    "AI rapor bildirimi gonderildi: %s — %d kullanici",
+                    ipo.ticker or ipo.company_name, notif_count,
+                )
+            except Exception as notif_err:
+                logger.warning("AI rapor push bildirim hatasi: %s", notif_err)
+
             # Admin Telegram bildirimi
             try:
                 from app.services.admin_telegram import send_admin_notification

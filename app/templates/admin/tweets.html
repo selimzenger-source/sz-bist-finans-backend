@@ -57,6 +57,29 @@
         <div id="res-push-opening" class="mt-2 hidden"></div>
     </div>
 
+    <!-- AYIN HALKA ARZI TEKLİ VİDEO TWEET -->
+    <div class="bg-gray-800 rounded-lg border border-purple-600 p-4">
+        <h3 class="font-bold text-lg text-purple-400 mb-3">🏆 Ayın En Dikkat Çeken Halka Arzı (Uzun Video)</h3>
+        <form id="form-ayin-ha" method="post" action="/admin/tweets/trigger-ayin-halka-arzi" class="flex flex-wrap gap-3 items-end">
+            <div class="flex flex-col gap-1">
+                <label class="text-xs text-gray-400">Halka Arz Seç (AI Raporlu)</label>
+                <select name="ipo_id" id="ayin-ipo-select" class="bg-gray-700 border border-gray-600 text-white text-sm rounded px-3 py-2 min-w-[250px]">
+                    <option value="">-- IPO Seç --</option>
+                    {% for ipo in ipos_with_report %}
+                    <option value="{{ ipo.id }}">{{ ipo.ticker or '?' }} — {{ ipo.company_name[:40] }} ({{ ipo.ipo_price or '?' }} TL)</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" id="btn-ayin-ha"
+                    onclick="return confirm('Bu halka arz için Ayın Tweeti + uzun video oluşturulacak. Onaylıyor musunuz?')"
+                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold text-sm px-4 py-2 rounded transition flex items-center gap-2">
+                🎬 Ayın Tweeti At
+            </button>
+        </form>
+        <p class="text-xs text-gray-500 mt-2">Seçilen IPO'nun AI raporuyla 1.5-2 dk uzun format video tweet'i oluşturulur. Tweet kuyruğa düşer, onayladığınızda atılır.</p>
+        <div id="res-ayin-ha" class="mt-2 hidden"></div>
+    </div>
+
     <!-- Hatırlatma Tetikleyici -->
     <div class="bg-gray-800 rounded-lg border border-orange-600 p-4">
         <h3 class="font-bold text-lg text-orange-400 mb-3">⏰ Hatırlatma Tweet + Push (Manuel)</h3>
@@ -130,6 +153,9 @@
                     {{ tweet.status|upper }}
                 </span>
                 <span class="text-xs text-gray-400">{{ tweet.source }}</span>
+                {% if tweet.thread_data %}
+                <span class="text-xs bg-purple-900 text-purple-300 px-1.5 py-0.5 rounded">🧵 Thread</span>
+                {% endif %}
                 {% if tweet.image_path %}
                 <span class="text-xs text-blue-400">📷 Görselli</span>
                 {% endif %}
@@ -142,8 +168,21 @@
         <!-- Tweet metni + görsel önizleme -->
         <div class="px-4 py-3 flex gap-3">
             <div class="flex-1">
+                {% if tweet.thread_data %}
+                {# Thread önizleme: her tweeti numaralı göster #}
+                {% set thread_list = tweet.thread_data | fromjson if tweet.thread_data else [] %}
+                {% for t in thread_list %}
+                <div class="mb-2 pb-2 {{ 'border-b border-gray-700' if not loop.last else '' }}">
+                    <span class="text-xs font-bold text-purple-400">🧵 {{ loop.index }}/{{ thread_list|length }}</span>
+                    <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed mt-0.5">{{ t }}</pre>
+                    <span class="text-xs text-gray-500">{{ t|length }} kar</span>
+                </div>
+                {% endfor %}
+                <span class="text-xs text-purple-400">Toplam: {{ thread_list|length }} tweet, ~{{ thread_list|length * 4 }}s aralıkla gönderilecek</span>
+                {% else %}
                 <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed">{{ tweet.text }}</pre>
                 <span class="text-xs text-gray-500">{{ tweet.text|length }} karakter</span>
+                {% endif %}
             </div>
             {% if tweet.image_path %}
             <div class="flex-shrink-0">
@@ -181,10 +220,17 @@
 
             <!-- Onayla (tweet at) -->
             <form method="post" action="/admin/tweets/{{ tweet.id }}/approve" style="display:inline">
+                {% if tweet.thread_data %}
+                <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white text-sm px-3 py-1.5 rounded transition"
+                        onclick="return confirm('Bu thread ({{ (tweet.thread_data | fromjson)|length }} tweet) X\'e gönderilsin mi?\n\nTweetler arası 4 saniye beklenecek.')">
+                    🧵 Thread Gönder
+                </button>
+                {% else %}
                 <button type="submit" class="bg-green-600 hover:bg-green-500 text-white text-sm px-3 py-1.5 rounded transition"
                         onclick="return confirm('Bu tweet X\'e gönderilsin mi?')">
                     ✅ Onayla & Gönder
                 </button>
+                {% endif %}
             </form>
 
             <!-- Reddet -->
