@@ -1974,19 +1974,23 @@ async def trigger_ayin_halka_arzi(
 # ── Claude AI Thread Üretici — Ayın Halka Arzı ──
 
 _THREAD_SYSTEM_PROMPT = """Sen @szalgofinans hesabının profesyonel finans içerik editörüsün.
-X (Twitter) için 4 tweet'lik thread yazıyorsun.
+X (Twitter) Premium hesap için 4 tweet'lik detaylı thread yazıyorsun.
 
 KRİTİK KURALLAR:
-1. Her tweet MAX 270 karakter (emoji dahil). ASLA 280'i geçme.
+1. Premium hesap — her tweet 500-1500 karakter arası olabilir. KISA YAZMA, detaylı ve bilgilendirici yaz.
 2. Türkçe karakterler ZORUNLU: ö, ü, ş, ç, ğ, ı, İ, Ö, Ü, Ş, Ç, Ğ
 3. Yatırım tavsiyesi içermez — bilgilendirme amaçlıdır.
 4. Tweet 1'de 🧵👇 ile thread olduğunu belirt.
 5. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı + #hashtag'ler olmalı.
-6. Profesyonel ama samimi ton — sohbet havası, resmi değil.
-7. Rakamları ve verileri doğal akışta kullan.
-8. Sadece JSON döndür, başka metin ekleme."""
+6. Profesyonel ama samimi ton — sohbet havası, sanki takipçilerle sohbet ediyorsun.
+7. Rakamları, yüzdeleri, oranları detaylı kullan — okuyucu rakam görmek istiyor.
+8. Her tweette satır araları bırak, okunabilirlik önemli.
+9. Emoji kullan ama abartma — her bilgi satırının başına uygun emoji koy.
+10. Sadece JSON döndür, başka metin ekleme."""
 
-_THREAD_USER_PROMPT = """Halka arz AI raporu verisinden 4 tweet'lik profesyonel thread oluştur.
+_THREAD_USER_PROMPT = """Halka arz AI raporu verisinden 4 tweet'lik DETAYLI profesyonel thread oluştur.
+
+ÖNEMLI: Premium hesabız, her tweet 500-1500 karakter olabilir. Kısa yazma, detaylı ve bilgi dolu yaz!
 
 VERİ:
 - Şirket: {company}
@@ -1996,21 +2000,34 @@ VERİ:
 - AI Değerlendirme: {verdict}
 - Rapor Detayları: {report_summary}
 
-THREAD YAPISI (4 tweet):
+THREAD YAPISI (4 tweet, her biri 500-1500 karakter):
 
 Tweet 1 — ANA TWEET (dikkat çekici, merak uyandıran):
 "📊 AYIN EN DİKKAT ÇEKEN HALKA ARZI" başlığıyla aç.
-Şirket adı, ticker, AI puanı. "Detaylı analiz 🧵👇" ile kapat.
+Şirket adı, ticker, fiyat, AI puanı ver.
+Şirketin ne yaptığını, hangi sektörde olduğunu kısaca anlat.
+Neden dikkat çektiğini 2-3 cümle ile açıkla.
+"Detaylı analizimiz 🧵👇" ile kapat.
 
 Tweet 2 — ŞİRKET & HALKA ARZ DETAYLARI:
-Sektör, deneyim, fiyat, pazar bilgisi. Kısa ve öz.
+📋 Şirketin geçmişi, kuruluş yılı, kaç yıllık deneyim.
+Sektör, faaliyet alanı, Türkiye'deki konumu.
+Halka arz fiyatı, hangi pazarda işlem göreceği.
+Talep toplama tarihleri (varsa), halka açıklık oranı.
+Toplam halka arz büyüklüğü (varsa).
 
 Tweet 3 — FİNANSAL ANALİZ & AI PUANLAMA:
-Finansal göstergeler + AI alt puanları (varsa). Rakamlarla destekle.
+📈 Gelir büyümesi, kâr marjı, F/K oranı ve sektör karşılaştırması.
+Borçluluk oranı, özkaynak yapısı.
+🤖 AI puanlama detayı: iş modeli, finansal sağlık, değerleme, büyüme potansiyeli puanları.
+Güçlü yönleri (3-4 madde) ve risk faktörleri (2-3 madde) ayrı ayrı listele.
 
-Tweet 4 — SONUÇ & CTA:
-Genel değerlendirme + "Detaylı rapor uygulamamızda 📱 szalgo.net.tr"
-⚠️ disclaimer + hashtag'ler.
+Tweet 4 — SONUÇ & DEĞERLENDİRME:
+✅ veya ⚠️ Genel değerlendirme özeti (olumlu/nötr/dikkat).
+Bu halka arzı öne çıkaran 2-3 ana faktör.
+"📱 Detaylı rapor ve güncel veriler uygulamamızda → szalgo.net.tr" CTA.
+⚠️ Yatırım tavsiyesi değildir disclaimer.
+İlgili hashtag'ler: #halkaarz #{ticker} #borsa #BIST #yatırım #borsaistanbul
 
 JSON formatında döndür:
 ["tweet1 metni", "tweet2 metni", "tweet3 metni", "tweet4 metni"]"""
@@ -2092,7 +2109,7 @@ async def _generate_ayin_thread_with_ai(
                 },
                 json={
                     "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 1500,
+                    "max_tokens": 4000,
                     "system": _THREAD_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.4,
@@ -2131,9 +2148,9 @@ async def _generate_ayin_thread_with_ai(
         validated = []
         for i, t in enumerate(tweets[:4]):
             t = str(t).strip()
-            if len(t) > 280:
-                logger.warning("[THREAD-AI] Tweet %d uzun (%d kar), kısaltılıyor", i + 1, len(t))
-                t = t[:277] + "..."
+            if len(t) > 4000:
+                logger.warning("[THREAD-AI] Tweet %d çok uzun (%d kar), kısaltılıyor", i + 1, len(t))
+                t = t[:3997] + "..."
             validated.append(t)
 
         logger.info(
