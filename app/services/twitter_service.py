@@ -1213,8 +1213,8 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                          floor_days: int = 0) -> bool:
     """Her islem gunu 18:20'de gunluk takip tweeti.
 
-    - 1-5. gun: Eski metin format + statik banner
-    - 6-24. gun: Dinamik PNG gorsel + kisa metin
+    Tum gunler (1-25) dinamik PNG gorsel + kisa metin.
+    Gorsel olusturulamazsa fallback: eski metin format + statik banner.
     """
     try:
         ipo_price = float(ipo.ipo_price) if ipo.ipo_price else 0
@@ -1230,9 +1230,9 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
         durum_text = durum_map.get(durum, durum)
         daily_emoji = "\U0001F7E2" if pct_change >= 0 else "\U0001F534"
 
-        # ── 6+ gun: Dinamik PNG gorsel ───────────────────
+        # ── Tum gunler: Dinamik PNG gorsel ───────────────────
         image_path = None
-        if trading_day >= 6 and days_data and ipo_price > 0:
+        if days_data and ipo_price > 0:
             try:
                 from app.services.chart_image_generator import generate_daily_tracking_image
                 image_path = generate_daily_tracking_image(
@@ -1256,7 +1256,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
             )
             banner = image_path
         else:
-            # ── 1-5 gun (veya gorsel hata): Eski metin format ──
+            # ── Fallback (gorsel olusturulamadiysa): Eski metin format ──
             table_lines = []
             if days_data and ipo_price > 0:
                 for d in days_data:
