@@ -14,7 +14,7 @@ Tweet Tipleri:
 8.  Gunluk Takip (18:20 her islem gunu)
 9.  25 Gün Performans Ozeti (25. gunde bir kez)
 10. Yillik Halka Arz Ozeti (her ayin 1'i 20:00, ocak haric)
-11. BIST 50 KAP Haberi (aninda)
+11. KAP Haber Bildirimi (tum hisseler, her 3 haberden 1'i)
 12. Son Gun Sabah Tweeti (07:30 — hafif uyari tonu)
 13. Sirket Tanitim Tweeti (ertesi gun 20:00 — izahname sonrasi)
 14. SPK Bekleyenler Gorselli Tweet (her ayin 1'i — gorsel ile)
@@ -1494,9 +1494,14 @@ def tweet_yearly_summary(
 
 
 # ================================================================
-# 11. BIST 50 KAP HABERI
+# 11. KAP HABER BILDIRIMI (Tum hisseler — her 3 haberden 1'i)
 # ================================================================
-def tweet_bist30_news(
+
+# Sayac: her 3 haberden 1'ini tweetlemek icin (restart'ta sifirlanir, sorun degil)
+_kap_tweet_counter = {"total": 0}
+
+
+def tweet_kap_news(
     ticker: str,
     matched_keyword: str,
     sentiment: str,
@@ -1505,7 +1510,7 @@ def tweet_bist30_news(
     kap_url: str | None = None,
     ai_hashtags: list | None = None,
 ) -> bool:
-    """BIST 50 hissesi icin KAP haberi tweeti.
+    """KAP haberi tweeti — tum hisseler (her 3 haberden 1'i tweetlenir).
 
     AI skoru, ozeti ve hashtag'leri varsa tweet'e dahil edilir.
     AI skoru yoksa eski formata fallback.
@@ -1564,16 +1569,21 @@ def tweet_bist30_news(
             tags = " ".join(f"#{t}" for t in ai_hashtags[:5])  # max 5 hashtag
             extra_hashtags = f" {tags}"
 
+        # CTA: uygulama indirme yonlendirmesi
+        cta_text = (
+            "Her 3 haberden 1'i gönderilmektedir.\n"
+            f"Tüm bildirimlere ulaşmak için uygulamamızı indirin 📲 {APP_LINK}"
+        )
+
         text = (
             f"{emoji} #{ticker} — Haber Bildirimi\n\n"
             f"Anlık Haber Yakalandı {now_str}\n\n"
             f"İlişkili Kelime : {clean_kw}\n"
             f"{ai_section}"
             f"{kap_section}\n"
-            f"{_get_setting('T11_CTA')}\n"
-            f"📲 {KAP_HABER_LINK}\n"
+            f"{cta_text}\n"
             f"⚠️YT değildir\n"
-            f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+            f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
         )
 
         # Blue Tick 4000 karakter limiti — AI ozeti ile birlikte sigmazsa kirp
@@ -1591,10 +1601,9 @@ def tweet_bist30_news(
                 f"İlişkili Kelime : {clean_kw}\n"
                 f"{ai_section_mid}"
                 f"{kap_section}\n"
-                f"{_get_setting('T11_CTA')}\n"
-                f"📲 {KAP_HABER_LINK}\n"
+                f"{cta_text}\n"
                 f"⚠️YT değildir\n"
-                f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # Hala cok uzunsa: sadece skor, ozet yok
@@ -1608,10 +1617,9 @@ def tweet_bist30_news(
                 f"İlişkili Kelime : {clean_kw}\n"
                 f"{ai_section_short}"
                 f"{kap_section}\n"
-                f"{_get_setting('T11_CTA')}\n"
-                f"📲 {KAP_HABER_LINK}\n"
+                f"{cta_text}\n"
                 f"⚠️YT değildir\n"
-                f"#BIST50 #{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
@@ -1621,12 +1629,16 @@ def tweet_bist30_news(
             ticker, len(text), bool(img_path), ai_score,
         )
         if img_path:
-            return _safe_tweet_with_media(text, img_path, source="tweet_bist30_news", force_send=True)
+            return _safe_tweet_with_media(text, img_path, source="tweet_kap_news", force_send=True)
         else:
-            return _safe_tweet(text, source="tweet_bist30_news", force_send=True)
+            return _safe_tweet(text, source="tweet_kap_news", force_send=True)
     except Exception as e:
-        logger.error(f"tweet_bist50_news hatasi: {e}")
+        logger.error(f"tweet_kap_news hatasi: {e}")
         return False
+
+
+# Backward compat alias — eski referanslar icin
+tweet_bist30_news = tweet_kap_news
 
 
 # ================================================================

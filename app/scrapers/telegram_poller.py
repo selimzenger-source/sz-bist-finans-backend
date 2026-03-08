@@ -488,26 +488,28 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             )
 
             # ----------------------------------------------------------------
-            # TWITTER ENTEGRASYONU (Sadece BIST 50)
+            # TWITTER ENTEGRASYONU (Tum haberler — her 3 haberden 1'i)
             # AI skoru dusukse tweet de atilmaz (notr/olumsuz haber)
             # ----------------------------------------------------------------
             if should_notify and message_type != "seans_disi_acilis":  # seans_disi_acilis = sadece acilis gap, tweet atilmaz
                 try:
-                    from app.services.news_service import get_bist50_tickers_sync
-                    from app.services.twitter_service import tweet_bist30_news
+                    from app.services.twitter_service import tweet_kap_news, _kap_tweet_counter
 
-                    bist50 = get_bist50_tickers_sync()
-                    if ticker and ticker.upper() in bist50:
+                    # Her 3 haberden 1'ini tweetle
+                    _kap_tweet_counter["total"] += 1
+                    _counter_val = _kap_tweet_counter["total"]
+
+                    if _counter_val % 3 == 1:  # 1., 4., 7., 10. ... haber tweet atilir
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
 
                         logger.info(
-                            "[TWEET-FLOW] KAP tweet baslatiliyor: %s | kw=%s | ai=%s | url=%s",
-                            ticker, tweet_kw, ai_score, kap_url,
+                            "[TWEET-FLOW] KAP tweet baslatiliyor (%d. haber, tweet atilacak): %s | kw=%s | ai=%s | url=%s",
+                            _counter_val, ticker, tweet_kw, ai_score, kap_url,
                         )
 
-                        tw_success = tweet_bist30_news(
+                        tw_success = tweet_kap_news(
                             ticker,
                             tweet_kw,
                             "positive",
@@ -523,13 +525,13 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
                         from app.services.admin_telegram import notify_tweet_sent
                         await notify_tweet_sent(
-                            "bist50_kap_haber", ticker, tw_success,
-                            f"Anahtar: {tweet_kw} | AI: {ai_score}/10" if ai_score is None else f"Anahtar: {tweet_kw} | AI: {ai_score:.1f}/10",
+                            "kap_haber", ticker, tw_success,
+                            f"Anahtar: {tweet_kw} | AI: {ai_score}/10 | Sayac: {_counter_val}" if ai_score is None else f"Anahtar: {tweet_kw} | AI: {ai_score:.1f}/10 | Sayac: {_counter_val}",
                         )
                     else:
                         logger.info(
-                            "[TWEET-FLOW] BIST50 disinda, tweet atilmadi: %s (BIST50=%d hisse)",
-                            ticker, len(bist50),
+                            "[TWEET-FLOW] Sayac %d, tweet atilmadi (her 3'te 1): %s",
+                            _counter_val, ticker,
                         )
 
                 except Exception as tw_err:
