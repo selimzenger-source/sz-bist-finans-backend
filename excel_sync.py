@@ -703,12 +703,17 @@ def live_sync(filepath, interval=15):
                 fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
                 son_str = f"{float(son):.2f}" if son else ""
 
+                # Pre-opening suppression: bildirim susturulduysa prev state'i guncelleme
+                # Boylece acilis bildirimi sonrasi 10:00:01'de tavan/taban kitledi ayrica gider
+                # (Farkli kullanicilar acilis paketi vs tavan/taban bildirimlerine abone olabilir)
+                suppress_ceiling_update = False
+                suppress_floor_update = False
+
                 # 1a. Tavana Kitledi: önceki döngü tavanda değildi, şimdi tavanda
-                # NOT: Açılış bildirimi gönderilmeden önce (10:00 öncesi) tavan bildirimi gönderme.
-                # Açılış bildirimi zaten "TAVAN AÇTI!" diyor, çift bildirim olmasın.
                 if not was_ceiling and hit_ceiling:
                     if not opening_notif_sent and hour_min <= 1000:
                         log(f"  ⏳ TAVANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
+                        suppress_ceiling_update = True
                     else:
                         last_t = ceiling_cooldown.get(ticker, 0)
                         if time.time() - last_t >= COOLDOWN_SECONDS:
@@ -727,6 +732,7 @@ def live_sync(filepath, interval=15):
                 elif was_ceiling and not hit_ceiling:
                     if not opening_notif_sent and hour_min <= 1000:
                         log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
+                        suppress_ceiling_update = True
                     else:
                         last_t = ceiling_cooldown.get(ticker, 0)
                         if time.time() - last_t >= COOLDOWN_SECONDS:
@@ -745,6 +751,7 @@ def live_sync(filepath, interval=15):
                 if not was_floor and hit_floor:
                     if not opening_notif_sent and hour_min <= 1000:
                         log(f"  ⏳ TABANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
+                        suppress_floor_update = True
                     else:
                         last_t = floor_cooldown.get(ticker, 0)
                         if time.time() - last_t >= COOLDOWN_SECONDS:
@@ -763,6 +770,7 @@ def live_sync(filepath, interval=15):
                 elif was_floor and not hit_floor:
                     if not opening_notif_sent and hour_min <= 1000:
                         log(f"  ⏳ TABAN KALKTI ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
+                        suppress_floor_update = True
                     else:
                         last_t = floor_cooldown.get(ticker, 0)
                         if time.time() - last_t >= COOLDOWN_SECONDS:
@@ -808,9 +816,12 @@ def live_sync(filepath, interval=15):
                         sent.add("pct4")
                         pct_alerts_sent[ticker] = sent
 
-                # Durumlari guncelle
-                prev_hit_ceiling[ticker] = hit_ceiling
-                prev_hit_floor[ticker] = hit_floor
+                # Durumlari guncelle — acilis oncesi susturulan bildirimler icin
+                # state'i guncelleme ki 10:00:01'de tavan/taban kitledi ayrica gidebilsin
+                if not suppress_ceiling_update:
+                    prev_hit_ceiling[ticker] = hit_ceiling
+                if not suppress_floor_update:
+                    prev_hit_floor[ticker] = hit_floor
 
             # Bildirim state'ini diske kaydet (restart-safe)
             # Her dongude kaydeder — maliyet dusuk (kucuk JSON dosyasi)
