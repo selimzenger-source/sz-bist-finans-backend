@@ -505,9 +505,12 @@ Karar iptal mi edilmiş? → EMPTY yaz.
 {"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
 {"OLUMLU bir haber olmalı: sözleşme kazanma, güçlü bilanço, bedelsiz, temettü, ihale, yeni yatırım, ortaklık gibi." if is_ceiling else "OLUMSUZ bir haber olmalı: zarar açıklama, sözleşme kaybetme, dava, ceza, satış baskısı, düşük bilanço gibi."}
 - "Pay geri alım programı SONLANDIRILDI" → Bu OLUMSUZ bir haber! Tavan hisse için YAZMA, EMPTY yaz.
+- "Zayıf yıllık bilanço açıklandı." → Bu OLUMSUZ bir haber! Tavan hisse için YAZMA, EMPTY yaz.
+- "Düşük kârlılık raporu." → Bu OLUMSUZ bir haber! Tavan hisse için YAZMA, EMPTY yaz.
 - "Yeni anlaşmayı duyurdu" → Bu OLUMLU bir haber! Taban hisse için YAZMA, EMPTY yaz.
-- İptal, sonlandırma, fesih, kısıtlama, ceza → OLUMSUZ → {"Tavan için YAZMA!" if is_ceiling else "Taban için uygundur."}
-- Kazanma, büyüme, artırım, onay, yeni sözleşme → OLUMLU → {"Tavan için uygundur." if is_ceiling else "Taban için YAZMA!"}
+- "Güçlü bilanço açıklandı." → Bu OLUMLU bir haber! Taban hisse için YAZMA, EMPTY yaz.
+- İptal, sonlandırma, fesih, kısıtlama, ceza, zayıf, düşük → OLUMSUZ → {"Tavan için YAZMA!" if is_ceiling else "Taban için uygundur."}
+- Kazanma, büyüme, artırım, onay, güçlü, rekor, yeni sözleşme → OLUMLU → {"Tavan için uygundur." if is_ceiling else "Taban için YAZMA!"}
 Sebep yönü hissenin hareketiyle UYUŞMUYORSA → EMPTY yaz.
 
 ━━━ ADIM 4 — ÇIKTI ━━━
@@ -534,10 +537,15 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
     # Yön filtresi — tavan hissede olumsuz, taban hissede olumlu ifadeler elensin
     negative_words = ["sonlandırıldı", "sonlandırma", "iptal", "fesih", "feshedil",
                       "ceza", "zarar", "düşüş", "kaybetti", "kaybetme", "azaldı",
-                      "daralma", "kısıtlama", "yasaklandı", "soruşturma"]
+                      "daralma", "kısıtlama", "yasaklandı", "soruşturma",
+                      "zayıf", "düşük", "geriledi", "gerileme", "beklenti altı",
+                      "beklentinin altı", "olumsuz", "negatif", "kan kaybı",
+                      "daraldı", "küçüldü", "eritildi", "eridi"]
     positive_words = ["anlaşma duyur", "yeni anlaşma", "kazandı", "kazanma",
                       "büyüme", "yükseldi", "artış", "artırım", "yeni sözleşme",
-                      "güçlü bilanço", "yeni yatırım", "onaylandı"]
+                      "güçlü bilanço", "yeni yatırım", "onaylandı",
+                      "güçlü", "rekor", "beklenti üstü", "beklentinin üstü",
+                      "olumlu", "pozitif", "toparlandı", "toparlanma"]
 
     def _clean_ai_text(raw: str) -> str:
         """AI yanıtını temizle — EMPTY veya jenerik ise boş dön, hedef fiyat rakamlarını sil."""
