@@ -87,16 +87,22 @@ async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
                     try:
                         price = float(price_str)
                         change = float(change_str)
-                        
-                        if is_ceiling and change >= 9.75:
+
+                        # %10.01 filtresi — uzmanpara bazen yanlış veri verir
+                        # Tavan: +9.75 ile +10.01 arası, Taban: -10.01 ile -9.75 arası
+                        if is_ceiling and 9.75 <= change <= 10.01:
                             results.append({"ticker": ticker, "price": price, "change": change})
-                        elif not is_ceiling and change <= -9.75:
+                        elif not is_ceiling and -10.01 <= change <= -9.75:
                             results.append({"ticker": ticker, "price": price, "change": change})
+                        elif is_ceiling and change > 10.01:
+                            logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} > +10.01 (veri hatası)")
+                        elif not is_ceiling and change < -10.01:
+                            logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} < -10.01 (veri hatası)")
                     except ValueError:
                         continue
     except Exception as e:
         logger.error(f"Uzmanpara scrape hatasi: {e}")
-    
+
     return results
 
 
@@ -439,9 +445,18 @@ Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → O zaman EMPTY yaz.
 Haber 14 günden eski mi? → EMPTY yaz.
 Karar iptal mi edilmiş? → EMPTY yaz.
 
+━━━ ADIM 3.5 — SEBEP YÖNÜ DOĞRULA (KRİTİK!) ━━━
+{"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
+{"OLUMLU bir haber olmalı: sözleşme kazanma, güçlü bilanço, bedelsiz, temettü, ihale, yeni yatırım, ortaklık gibi." if is_ceiling else "OLUMSUZ bir haber olmalı: zarar açıklama, sözleşme kaybetme, dava, ceza, satış baskısı, düşük bilanço gibi."}
+- "Pay geri alım programı SONLANDIRILDI" → Bu OLUMSUZ bir haber! Tavan hisse için YAZMA, EMPTY yaz.
+- "Yeni anlaşmayı duyurdu" → Bu OLUMLU bir haber! Taban hisse için YAZMA, EMPTY yaz.
+- İptal, sonlandırma, fesih, kısıtlama, ceza → OLUMSUZ → {"Tavan için YAZMA!" if is_ceiling else "Taban için uygundur."}
+- Kazanma, büyüme, artırım, onay, yeni sözleşme → OLUMLU → {"Tavan için uygundur." if is_ceiling else "Taban için YAZMA!"}
+Sebep yönü hissenin hareketiyle UYUŞMUYORSA → EMPTY yaz.
+
 ━━━ ADIM 4 — ÇIKTI ━━━
-Yukarıda A-G'den birinde somut bulgu varsa → 4-6 kelime ile Türkçe yaz.
-Somut bulgu yoksa → sadece "EMPTY" yaz.
+Yukarıda A-G'den birinde somut bulgu varsa VE sebebin yönü hissenin hareketiyle uyuşuyorsa → 4-6 kelime ile Türkçe yaz.
+Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
 
 ❌ YASAK: trend yorumu, "momentum", "alıcı/satıcı baskısı", "hacimli", "volatilite",
    "piyasa beklentisi", "yatırımcı talebi", "konsolide", "istikrarlı", "potansiyel",
@@ -460,6 +475,14 @@ Somut bulgu yoksa → sadece "EMPTY" yaz.
            "potansiyeli ile", "sektörü potansiyeli", "güvenini pekiştir", "seyir izliyor",
            "seyirde", "katalizör eksikliği"]
 
+    # Yön filtresi — tavan hissede olumsuz, taban hissede olumlu ifadeler elensin
+    negative_words = ["sonlandırıldı", "sonlandırma", "iptal", "fesih", "feshedil",
+                      "ceza", "zarar", "düşüş", "kaybetti", "kaybetme", "azaldı",
+                      "daralma", "kısıtlama", "yasaklandı", "soruşturma"]
+    positive_words = ["anlaşma duyur", "yeni anlaşma", "kazandı", "kazanma",
+                      "büyüme", "yükseldi", "artış", "artırım", "yeni sözleşme",
+                      "güçlü bilanço", "yeni yatırım", "onaylandı"]
+
     def _clean_ai_text(raw: str) -> str:
         """AI yanıtını temizle — EMPTY veya jenerik ise boş dön, hedef fiyat rakamlarını sil."""
         import re
@@ -468,6 +491,18 @@ Somut bulgu yoksa → sadece "EMPTY" yaz.
             return ""
         if any(x in t.lower() for x in bad):
             return ""
+        # Yön filtresi — tavan=olumlu, taban=olumsuz olmalı
+        t_lower = t.lower()
+        if is_ceiling:
+            # Tavan hissede olumsuz kelime varsa → boş dön
+            if any(neg in t_lower for neg in negative_words):
+                logger.info(f"[YÖN FİLTRE] Tavan hisse {ticker}: olumsuz sebep elendi → '{t[:50]}'")
+                return ""
+        else:
+            # Taban hissede olumlu kelime varsa → boş dön
+            if any(pos in t_lower for pos in positive_words):
+                logger.info(f"[YÖN FİLTRE] Taban hisse {ticker}: olumlu sebep elendi → '{t[:50]}'")
+                return ""
         # Hedef fiyat rakamlarını temizle — "68,36 TL" → kaldır (yatırım tavsiyesi riski)
         t = re.sub(r'\d+[.,]\d+\s*TL', '', t).strip()
         t = re.sub(r'hedef\s*(?:fiyat[ıi]?\s*)?\d+[.,]?\d*', 'hedef fiyat', t, flags=re.IGNORECASE).strip()
