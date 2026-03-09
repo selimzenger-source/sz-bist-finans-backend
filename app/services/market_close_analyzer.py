@@ -20,6 +20,45 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════
+# Ticker → Şirket Adı Mapping (Tavily arama kalitesi için)
+# Haber kaynakları ticker kodu yerine şirket adı kullanır.
+# Örn: "Halkbank ABD davası" haberi "HALKB" ile aranınca bulunamaz.
+# ═══════════════════════════════════════════════════════════════════
+TICKER_COMPANY_MAP = {
+    # Bankalar
+    "HALKB": "Halkbank", "GARAN": "Garanti Bankası", "AKBNK": "Akbank",
+    "YKBNK": "Yapı Kredi", "ISCTR": "İş Bankası", "VAKBN": "Vakıfbank",
+    "QNBFB": "QNB Finansbank", "TSKB": "TSKB", "SKBNK": "Şekerbank",
+    "ALBRK": "Albaraka Türk", "ICBCT": "ICBC Turkey",
+    # Holding / Sanayi
+    "SAHOL": "Sabancı Holding", "KCHOL": "Koç Holding", "SISE": "Şişecam",
+    "EREGL": "Ereğli Demir Çelik", "KRDMD": "Kardemir", "ASELS": "Aselsan",
+    "TOASO": "Tofaş", "FROTO": "Ford Otosan", "OTKAR": "Otokar",
+    "TUPRS": "Tüpraş", "PETKM": "Petkim", "THYAO": "Türk Hava Yolları",
+    "PGSUS": "Pegasus", "TCELL": "Turkcell", "TTKOM": "Türk Telekom",
+    "BIMAS": "BİM", "MGROS": "Migros", "SOKM": "Şok Marketler",
+    "TAVHL": "TAV Havalimanları", "EKGYO": "Emlak Konut GYO",
+    "ENKAI": "Enka İnşaat", "KOZAL": "Koza Altın", "KOZAA": "Koza Anadolu",
+    "TTRAK": "Türk Traktör", "ARCLK": "Arçelik", "VESTL": "Vestel",
+    "DOHOL": "Doğan Holding", "AGHOL": "AG Anadolu Grubu",
+    "GUBRF": "Gübre Fabrikaları", "ISGYO": "İş GYO",
+    "KONTR": "Kontrolmatik", "ULKER": "Ülker", "AEFES": "Anadolu Efes",
+    "CCOLA": "Coca Cola İçecek", "HEKTS": "Hektaş", "BRYAT": "Borusan Yatırım",
+    "DOAS": "Doğuş Otomotiv", "ANHYT": "Anadolu Hayat", "AKSA": "Aksa Akrilik",
+    "GESAN": "Giresun Sanayi", "OYAKC": "Oyak Çimento", "CIMSA": "Çimsa",
+    "BUCIM": "Bursa Çimento",
+    # Enerji
+    "AYEN": "Aydem Enerji", "AKSEN": "Aksa Enerji", "ODAS": "Odaş Enerji",
+    "EUPWR": "Europower Enerji", "ZOREN": "Zorlu Enerji",
+    # Teknoloji
+    "LOGO": "Logo Yazılım", "PAPIL": "Papilon", "INDES": "İndeks Bilgisayar",
+    "NETAS": "Netaş",
+    # Diğer sık tavan/taban olanlar
+    "MRGYO": "Marti GYO", "YGYO": "Yeşil GYO", "VKGYO": "Vakıf GYO",
+    "MIATK": "Mia Teknoloji", "MEGAP": "Mega Polietilen",
+}
+
+# ═══════════════════════════════════════════════════════════════════
 # System Prompt Yönetimi
 # ═══════════════════════════════════════════════════════════════════
 
@@ -179,16 +218,20 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         logger.warning(f"Internal KAP news error for {ticker}: {e}")
 
     query_action = "neden yükseldi tavan" if is_ceiling else "neden düştü taban"
-    query = f"{ticker} hisse {query_action} son haberler"
+    # Şirket adı mapping — haber kaynakları ticker yerine şirket adı kullanır
+    company_name = TICKER_COMPANY_MAP.get(ticker, "")
+    search_name = f"{ticker} {company_name}" if company_name else ticker
+    query = f"{search_name} hisse {query_action} son haberler"
     external_search = ""
     bilanco_search = ""
+    corporate_search = ""  # 3. sorgu: hukuki/kurumsal gelişmeler
     if tavily_key:
         try:
-            async with httpx.AsyncClient() as client:
-                # 1a. Genel haber araması
+            async with httpx.AsyncClient(timeout=15) as client:
+                # 1a. Genel haber araması (şirket adı + ticker ile)
                 res = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 3, "days": 14}
+                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 5, "days": 14}
                 )
                 if res.status_code == 200:
                     data = res.json()
@@ -197,15 +240,26 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
 
                 # 1b. Bilanço / finansal sonuç araması
                 current_year = date.today().year
-                bilanco_query = f"{ticker} bilanço finansal sonuçlar kâr gelir {current_year}"
+                bilanco_query = f"{search_name} bilanço finansal sonuçlar kâr gelir {current_year}"
                 res2 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 2, "days": 14}
+                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 3, "days": 14}
                 )
                 if res2.status_code == 200:
                     data2 = res2.json()
                     results2 = data2.get("results", [])
                     bilanco_search = "\n".join([r.get("content", "") for r in results2])
+
+                # 1c. Hukuki / kurumsal gelişme araması (dava, anlaşma, ceza, soruşturma)
+                corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye"
+                res3 = await client.post(
+                    "https://api.tavily.com/search",
+                    json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 3, "days": 14}
+                )
+                if res3.status_code == 200:
+                    data3 = res3.json()
+                    results3 = data3.get("results", [])
+                    corporate_search = "\n".join([r.get("content", "") for r in results3])
         except Exception as e:
             logger.warning(f"Tavily search error for {ticker}: {e}")
 
@@ -367,7 +421,9 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     combined_context = "\n".join(internal_news) + "\n" + external_search
     if bilanco_search and len(bilanco_search.strip()) > 20:
         combined_context += "\n\nBİLANÇO / FİNANSAL SONUÇLAR:\n" + bilanco_search
-    has_news = bool(internal_news) or len(external_search.strip()) > 20 or len(bilanco_search.strip()) > 20
+    if corporate_search and len(corporate_search.strip()) > 20:
+        combined_context += "\n\nHUKUKİ / KURUMSAL GELİŞMELER:\n" + corporate_search
+    has_news = bool(internal_news) or len(external_search.strip()) > 20 or len(bilanco_search.strip()) > 20 or len(corporate_search.strip()) > 20
     f_pct = f"{pct:+.2f}" if pct is not None else ("+9.95" if is_ceiling else "-9.95")
     f_price = f"{price:.2f}" if price is not None else "0.00"
     
