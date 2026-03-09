@@ -404,7 +404,7 @@ def _safe_reply_tweet(reply_text: str, in_reply_to_tweet_id: str) -> bool:
         if resp.status_code in (200, 201):
             reply_id = resp.json().get("data", {}).get("id", "?")
             logger.info("Reply tweet başarılı (id=%s, reply_to=%s)", reply_id, in_reply_to_tweet_id)
-            _mark_tweet_sent(reply_text)
+            _mark_tweet_sent(reply_text, source="reply_disclaimer")
             _record_tweet_sent()
             return True
         else:

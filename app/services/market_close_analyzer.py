@@ -848,7 +848,7 @@ async def scrape_and_analyze_market_close(force: bool = False):
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=tavan_images,
-                    source="market_close_analyzer"
+                    source="market_close_tavan"
                 )
                 logger.info(f"✅ TAVAN tweet gönderildi ({len(c_stats)} hisse)")
                 # Disclaimer flood reply — 5 saniye bekle sonra at
@@ -898,7 +898,7 @@ async def scrape_and_analyze_market_close(force: bool = False):
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=taban_images,
-                    source="market_close_analyzer"
+                    source="market_close_taban"
                 )
                 logger.info(f"✅ TABAN tweet gönderildi ({len(fl_stats)} hisse)")
                 # Disclaimer flood reply — 5 saniye bekle sonra at
