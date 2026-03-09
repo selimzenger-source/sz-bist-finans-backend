@@ -2354,7 +2354,86 @@ FORMAT KURALLARI:
 - Her bölümü emoji + başlık ile ayır (örn: 📊 Sermaye Artırımları)
 - Bültende ilgili içerik YOKSA o bölümü hiç yazma (boş bölüm olmasın)
 - Cümleleri düzgün kur, madde işareti kullanırken bile anlaşılır ifadeler yaz
-- Uydurmaya GEREK YOK — sadece bültendeki verileri kullan"""
+- Uydurmaya GEREK YOK — sadece bültendeki verileri kullan
+
+TEKRAR YASAĞI (ÇOK ÖNEMLİ):
+- Aynı cümleyi veya çok benzer cümleleri KESİNLİKLE İKİ KEZ YAZMA
+- "Bu bültende... bulunmuyor" gibi özet cümleler sadece 1 KEZ yazılmalı
+- Eğer halka arz, sermaye artırımı ve para cezası yoksa tek bir cümle yaz: "Bu bültende yatırımcıları doğrudan ilgilendiren yeni halka arz, sermaye artırımı veya idari para cezası kararı bulunmuyor." — bunu her bölüm için ayrı ayrı TEKRARLAMA
+- Her bilgi sadece 1 kez geçmeli, farklı kelimelerle bile olsa aynı şeyi tekrar etme"""
+
+
+def _dedup_sentences(text: str) -> str:
+    """AI ciktisindaki tekrarlanan cumleleri temizler.
+
+    Ayni veya cok benzer cumlelerin birden fazla gectigini tespit eder
+    ve sadece ilk geceni birakir. Ozellikle 'Bu bultende... bulunmuyor'
+    tipi ozet cumlelerinin tekrari icin.
+    """
+    import re as _re
+
+    if not text or len(text) < 80:
+        return text
+
+    # Cumleleri ayir — '. ' veya satir sonu ile
+    # Satir bazli yaklasim: bos satirlari ayirac olarak kullan
+    lines = text.split('\n')
+    seen_sentences: set[str] = set()
+    result_lines: list[str] = []
+    removed = 0
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            # Bos satiri koru
+            result_lines.append(line)
+            continue
+
+        # Normalizasyon: kucuk harf, fazla bosluk temizle, emoji cikar
+        normalized = _re.sub(r'[\U00010000-\U0010ffff]', '', stripped.lower())
+        normalized = _re.sub(r'\s+', ' ', normalized).strip()
+        # Noktalama temizle (karsilastirma icin)
+        normalized_clean = _re.sub(r'[^\w\s]', '', normalized).strip()
+
+        # 15 kelimeden kisa satirlari atla (baslik, hashtag vs.)
+        word_count = len(normalized_clean.split())
+        if word_count < 10:
+            result_lines.append(line)
+            continue
+
+        # Bu cumle daha once goruldu mu?
+        if normalized_clean in seen_sentences:
+            logger.info("DEDUP: Tekrarlanan cumle cikarildi: %s...", stripped[:60])
+            removed += 1
+            continue
+
+        # Benzeri goruldu mu? (%80 kelime eslesmesi)
+        is_duplicate = False
+        for seen in seen_sentences:
+            seen_words = set(seen.split())
+            cur_words = set(normalized_clean.split())
+            if not seen_words or not cur_words:
+                continue
+            overlap = len(seen_words & cur_words)
+            max_len = max(len(seen_words), len(cur_words))
+            if max_len > 0 and overlap / max_len > 0.80:
+                logger.info("DEDUP: Benzer cumle cikarildi (%d%% eslesme): %s...",
+                            int(overlap / max_len * 100), stripped[:60])
+                is_duplicate = True
+                removed += 1
+                break
+
+        if not is_duplicate:
+            seen_sentences.add(normalized_clean)
+            result_lines.append(line)
+
+    if removed > 0:
+        logger.info("DEDUP: Toplam %d tekrarlanan satir cikarildi", removed)
+
+    # Bos satirlari temizle (3+ ardisik bos satiri 2'ye indir)
+    cleaned = '\n'.join(result_lines)
+    cleaned = _re.sub(r'\n{3,}', '\n\n', cleaned)
+    return cleaned.strip()
 
 
 def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:
@@ -2469,6 +2548,9 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             logger.error("SPK bulten AI: Tum providerlar basarisiz")
             return None
 
+        # Tekrarlanan cumleleri temizle
+        content = _dedup_sentences(content)
+
         # Max 3500 karakter (link + hashtag icin bosluk birak)
         if len(content) > 3500:
             content = content[:3497] + "..."
@@ -2502,9 +2584,16 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
             logger.warning("SPK bulten analiz: AI metin uretilemedi, tweet atilmadi")
             return False
 
-        # 2. Tweet metnini olustur
+        # 2. Bulten tarihini olustur (bultenler yayin gunu islendiginden bugunun tarihi)
+        from datetime import datetime as _dt
+        _AYLAR_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                     "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        _now = _dt.now()
+        _tarih_str = f"{_now.day} {_AYLAR_TR[_now.month - 1]} {_now.year}"
+
+        # 3. Tweet metnini olustur — tarih + bulten no baslik, AI analiz govde
         text = (
-            f"📋 SPK Bülteni {bulletin_no} — Analiz\n\n"
+            f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
             f"{ai_text}\n\n"
             f"📲 {APP_LINK}\n"
             f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
@@ -2516,7 +2605,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
             max_ai = 3950 - len(text) + len(ai_text) - 10
             ai_text = ai_text[:max_ai] + "..."
             text = (
-                f"📋 SPK Bülteni {bulletin_no} — Analiz\n\n"
+                f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                 f"{ai_text}\n\n"
                 f"📲 {APP_LINK}\n"
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
