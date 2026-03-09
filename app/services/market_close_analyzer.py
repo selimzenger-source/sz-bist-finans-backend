@@ -757,7 +757,7 @@ async def _save_market_close_data(session, today, ceilings, floors):
 
 
 async def scrape_and_analyze_market_close(force: bool = False):
-    """18:35'te calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder.
+    """18:50'de calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder.
     Eksik veri veya hata durumunda 1 dk arayla 3 kez daha dener (toplam 4 deneme).
     force=True: Mevcut kayıtları silip yeniden analiz + tweet yapar.
     """
@@ -899,9 +899,9 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 tweet_error_msg += f"Tavan tweet hata: {e} | "
                 logger.error(f"TAVAN tweet hatası: {e}")
 
-            # Tavan ve taban tweetleri arası 60 saniye bekle
-            logger.info("Tavan tweeti atıldı, taban tweeti için 60s bekleniyor...")
-            await asyncio.sleep(60)
+            # Tavan ve taban tweetleri arası 90 saniye bekle (1.5 dk mesafe)
+            logger.info("Tavan tweeti atıldı, taban tweeti için 90s bekleniyor...")
+            await asyncio.sleep(90)
 
             # ── TABAN TWEET (0 hisse dahil) ──
             try:

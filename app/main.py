@@ -247,7 +247,7 @@ async def lifespan(app: FastAPI):
 
     # ── Startup: Tavan/taban tweet — scheduler'a bırakılıyor ──
     # Startup'ta ağır AI analiz çalıştırmak Render health check'i bozuyor.
-    # Bunun yerine sadece scheduler (18:35 TR) ve admin trigger endpoint kullanılır.
+    # Bunun yerine sadece scheduler (18:50 TR) ve admin trigger endpoint kullanılır.
     logger.info("Startup: Tavan/taban tweet kontrolü scheduler'a bırakıldı (startup'ta çalıştırılmayacak).")
 
     yield
