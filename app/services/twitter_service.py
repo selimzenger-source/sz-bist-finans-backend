@@ -1545,13 +1545,13 @@ def tweet_kap_news(
             score_emoji = ""
 
         # AI bolumu (varsa)
-        # Blue Tick = 4000 karakter — AI ozeti TAMAM olarak goster (500 char)
+        # Blue Tick = 4000 karakter — overhead ~350 char, AI ozeti icin ~3400 char kullanilabilir
         ai_section = ""
         if ai_score is not None:
             ai_section += f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
         if ai_summary:
-            summary_text = ai_summary[:500]
-            if len(ai_summary) > 500:
+            summary_text = ai_summary[:3000]
+            if len(ai_summary) > 3000:
                 summary_text += "..."
             ai_section += f"\n💬 {summary_text}\n"
 
