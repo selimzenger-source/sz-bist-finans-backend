@@ -501,6 +501,14 @@ Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → O zaman EMPTY yaz.
 Haber 14 günden eski mi? → EMPTY yaz.
 Karar iptal mi edilmiş? → EMPTY yaz.
 
+━━━ ADIM 3.3 — GÜNCELLIK ÖNCELİĞİ (KRİTİK!) ━━━
+Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
+- İki haber arasında 2+ gün fark varsa → KESİNLİKLE daha yeni olanı yaz, eski olanı GÖRMEZDEN GEL.
+- Dünkü veya bugünkü haber VARSA → haftalık/aylık haberleri kesinlikle yazma.
+- Örnek: Şirketin dün "rekor bilanço" açıklaması + 3 hafta önce "sermaye tavanı artırımı" → "Rekor yıllık bilanço açıklandı." yaz.
+- Örnek: Bugün "ABD davası anlaşması" + 1 ay önce "bedelsiz karar" → bugünkü davayı yaz.
+Bugün: {date.today().strftime("%d.%m.%Y")} — haberlerin tarihlerine dikkat et!
+
 ━━━ ADIM 3.5 — SEBEP YÖNÜ DOĞRULA (KRİTİK!) ━━━
 {"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
 {"OLUMLU bir haber olmalı: sözleşme kazanma, güçlü bilanço, bedelsiz, temettü, ihale, yeni yatırım, ortaklık gibi." if is_ceiling else "OLUMSUZ bir haber olmalı: zarar açıklama, sözleşme kaybetme, dava, ceza, satış baskısı, düşük bilanço gibi."}
