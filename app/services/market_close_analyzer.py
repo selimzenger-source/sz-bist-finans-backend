@@ -971,9 +971,9 @@ async def scrape_and_analyze_market_close(force: bool = False):
                 tweet_error_msg += f"Tavan tweet hata: {e} | "
                 logger.error(f"TAVAN tweet hatası: {e}")
 
-            # Tavan ve taban tweetleri arası 90 saniye bekle (1.5 dk mesafe)
-            logger.info("Tavan tweeti atıldı, taban tweeti için 90s bekleniyor...")
-            await asyncio.sleep(90)
+            # Tavan ve taban tweetleri arası 210 saniye bekle (3.5 dk mesafe)
+            logger.info("Tavan tweeti atıldı, taban tweeti için 210s (3.5dk) bekleniyor...")
+            await asyncio.sleep(210)
 
             # ── TABAN TWEET (0 hisse dahil) ──
             try:
