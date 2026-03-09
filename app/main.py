@@ -3222,6 +3222,7 @@ async def get_sent_tweets(
             "text": t.text,
             "source": t.source,
             "image_path": t.image_path,
+            "twitter_tweet_id": t.twitter_tweet_id,
             "sent_at": t.sent_at.isoformat() if t.sent_at else None,
             "created_at": t.created_at.isoformat() if t.created_at else None,
         }

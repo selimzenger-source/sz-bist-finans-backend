@@ -174,11 +174,13 @@ def _is_duplicate_tweet(text: str) -> bool:
     return False
 
 
-def _mark_tweet_sent(text: str, image_path: str | None = None, source: str = "unknown"):
+def _mark_tweet_sent(text: str, image_path: str | None = None, source: str = "unknown",
+                     twitter_tweet_id: str | None = None):
     """Basarili tweet'i cache'e + pending_tweets tablosuna kaydet.
 
     pending_tweets kaydı video pipeline'ın (sent-tweets endpoint) tweet'i görmesi için gerekli.
     Auto-send modunda da pipeline çalışabilsin diye her başarılı tweet DB'ye yazılır.
+    twitter_tweet_id: Twitter API'den dönen tweet ID — pipeline resim çekimi için.
     """
     import time as _time
     text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -202,6 +204,7 @@ def _mark_tweet_sent(text: str, image_path: str | None = None, source: str = "un
             tweet = PendingTweet(
                 text=text,
                 image_path=image_path,
+                twitter_tweet_id=twitter_tweet_id,
                 source=source,
                 status="sent",
                 sent_at=datetime.now(timezone.utc),
@@ -477,7 +480,7 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
         if response.status_code in (200, 201):
             tweet_id = response.json().get("data", {}).get("id", "?")
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
-            _mark_tweet_sent(text, source=source)
+            _mark_tweet_sent(text, source=source, twitter_tweet_id=str(tweet_id))
             _record_tweet_sent()
             return True
         else:
@@ -1992,7 +1995,8 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
         if tweet_resp.status_code in (200, 201):
             tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
             logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
-            _mark_tweet_sent(text, image_path=image_path, source=source)
+            _mark_tweet_sent(text, image_path=image_path, source=source,
+                             twitter_tweet_id=str(tweet_id))
             _record_tweet_sent()
             global _last_tweet_id
             _last_tweet_id = tweet_id
@@ -2135,7 +2139,8 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
         if tweet_resp.status_code in (200, 201):
             tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
             logger.info(f"Multi-media tweet basarili (id={tweet_id}, {len(media_ids)} gorsel): {text[:60]}...")
-            _mark_tweet_sent(text, image_path=image_paths[0] if image_paths else None, source=source)
+            _mark_tweet_sent(text, image_path=image_paths[0] if image_paths else None,
+                             source=source, twitter_tweet_id=str(tweet_id))
             _record_tweet_sent()
             global _last_tweet_id
             _last_tweet_id = tweet_id

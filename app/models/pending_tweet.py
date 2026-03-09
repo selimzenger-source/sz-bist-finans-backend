@@ -16,6 +16,10 @@ class PendingTweet(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    twitter_tweet_id: Mapped[str | None] = mapped_column(
+        String(50), nullable=True,
+        comment="Twitter API'den dönen tweet ID — video pipeline resim çekimi için"
+    )
     source: Mapped[str] = mapped_column(
         String(50), nullable=False, default="unknown",
         comment="tweet_bist30_news, tweet_new_ipo, tweet_daily_tracking, vs."

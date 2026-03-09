@@ -543,6 +543,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v45 migration: pending_tweets.twitter_tweet_id (Video pipeline resim çekimi için)
+        try:
+            await conn.execute(
+                text("ALTER TABLE pending_tweets ADD COLUMN IF NOT EXISTS twitter_tweet_id VARCHAR(50)")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
