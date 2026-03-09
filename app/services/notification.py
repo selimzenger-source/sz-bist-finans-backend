@@ -829,6 +829,7 @@ class NotificationService:
         news_type: str,
         pct_change: Optional[str] = None,
         ai_score: Optional[float] = None,
+        ai_summary: Optional[str] = None,
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
@@ -860,6 +861,9 @@ class NotificationService:
         # Seans ici yuzdesel degisim varsa ekle
         if news_type == "seans_ici" and pct_change:
             body += f"\nDeğişim: {pct_change}"
+        # AI ozeti varsa ekle — bildirim merkezinde genisletince gorulecek
+        if ai_summary and ai_summary.strip():
+            body += f"\n\n📝 AI Analiz:\n{ai_summary.strip()}"
 
         data = {
             "type": "kap_news",
@@ -1088,8 +1092,10 @@ class NotificationService:
 
         title = f"{emoji} {ticker} — {sentiment_tag} Haber"
 
-        # Bildirim govdesi
+        # Bildirim govdesi — AI ozeti varsa ekle
         body = (disclosure.title or "")[:200]
+        if disclosure.ai_summary and disclosure.ai_summary.strip():
+            body += f"\n\n📝 AI Analiz:\n{disclosure.ai_summary.strip()}"
 
         data = {
             "type": "kap_watchlist",
