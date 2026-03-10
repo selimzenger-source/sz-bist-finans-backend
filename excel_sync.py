@@ -850,8 +850,7 @@ def live_sync(filepath, interval=15):
                 log(f"  AÇILIŞ BİLDİRİMİ GÖNDERİLİYOR")
                 log(f"  {'='*50}")
 
-                # Tüm hisselerin açılış bilgisini topla
-                opening_lines = []  # [(ticker, emoji, kısa_durum)]
+                opening_count = 0
                 for row in rows:
                     ticker = row["ticker"]
                     son = row.get("son")
@@ -864,50 +863,40 @@ def live_sync(filepath, interval=15):
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
-                        opening_lines.append((ticker, "🔒", "Tavan"))
+                        title = f"🚀 Seans Açılış: {ticker} Tavan Açtı!"
+                        body = f"{ticker} tavan fiyatından açıldı 🎯"
                         log(f"  {ticker}: TAVAN AÇTI!")
                     elif is_floor:
-                        opening_lines.append((ticker, "🔒", "Taban"))
+                        title = f"📉 Seans Açılış: {ticker} Taban Açtı!"
+                        body = f"{ticker} taban fiyatından açıldı ⚠️"
                         log(f"  {ticker}: TABAN AÇTI!")
                     else:
                         pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                        # %0.00 nötr — bildirim gönderme
                         if abs(pct_val) < 0.005:
                             log(f"  {ticker}: NÖTR AÇILIŞ %0.00 — atlanıyor")
                             continue
-                        gap_str = f"%{pct_val:+.1f}"
+                        gap_str = f"%+{abs(pct_val):.2f}" if pct_val >= 0 else f"%-{abs(pct_val):.2f}"
                         if pct_val >= 0:
-                            opening_lines.append((ticker, "🟢", gap_str))
+                            title = f"🟢 Seans Açılış: {ticker} Alıcılı Açtı"
+                            body = f"Açılış Gap: {gap_str}"
                             log(f"  {ticker}: ALICILI AÇTI {gap_str}")
                         else:
-                            opening_lines.append((ticker, "🔴", gap_str))
+                            title = f"🔴 Seans Açılış: {ticker} Satıcılı Açtı"
+                            body = f"Açılış Gap: {gap_str}"
                             log(f"  {ticker}: SATICILI AÇTI {gap_str}")
 
-                if opening_lines:
-                    # Özet body oluştur: "🔒SVGYO Tavan | 🔴AKHAN %-0.8 | ..."
-                    summary_parts = [f"{em}{t} {s}" for t, em, s in opening_lines]
-                    summary_body = " | ".join(summary_parts)
-                    # Push bildirim karakter limiti (~240 char body) — uzunsa kırp
-                    if len(summary_body) > 220:
-                        summary_body = summary_body[:217] + "..."
-
-                    summary_title = f"📊 Seans Açılış: {len(opening_lines)} Halka Arz Hissesi"
-
-                    # Her hisse için ayrı bildirim yerine, her hisseye TEK özet bildirim gönder
-                    # Böylece kullanıcı takip ettiği hisselerden birinin bildirimiyle özeti alır
-                    sent_tickers = set()
-                    for ticker, _, _ in opening_lines:
-                        _send_realtime_notification(
-                            ticker, "gunluk_acilis_kapanis",
-                            summary_title, summary_body,
-                        )
-                        sent_tickers.add(ticker)
-                        # Hisseler arası kısa bekleme (aynı kullanıcıya duplikat push engeli)
-                        time.sleep(2)
-
+                    _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
+                    opening_count += 1
+                    # Birden fazla hisse takip eden kullanıcıya spam olmaması için
+                    # her hisse arasında 5 sn bekle
+                    if opening_count < len(rows):
+                        time.sleep(5)
+                if opening_count > 0:
                     opening_notif_sent = True
                     _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
                                 pct_alerts_sent, opening_notif_sent, closing_notif_sent)
-                    log(f"  Açılış bildirimi: {len(opening_lines)} hisse özet olarak gönderildi")
+                    log(f"  Açılış bildirimi: {opening_count} hisse için gönderildi (~{opening_count * 5}sn yayılarak)")
                 log(f"  {'='*50}")
 
             # ── Günlük kapanış bildirimi (18:08) ──
@@ -919,8 +908,7 @@ def live_sync(filepath, interval=15):
                 log(f"  KAPANIŞ BİLDİRİMİ GÖNDERİLİYOR")
                 log(f"  {'='*50}")
 
-                # Tüm hisselerin kapanış bilgisini topla
-                closing_lines = []
+                closing_count = 0
                 for row in rows:
                     ticker = row["ticker"]
                     son = row.get("son")
@@ -933,39 +921,36 @@ def live_sync(filepath, interval=15):
                     is_floor = bool(taban_limit and son and abs(son - taban_limit) <= PRICE_TOLERANCE)
 
                     if is_ceiling:
-                        closing_lines.append((ticker, "🔒", "Tavan"))
+                        title = f"🏆 Günsonu Kapanış: {ticker} Tavan Kapattı!"
+                        body = f"{ticker} tavan fiyatından kapattı 🎯"
                         log(f"  {ticker}: TAVAN KAPATTI!")
                     elif is_floor:
-                        closing_lines.append((ticker, "🔒", "Taban"))
+                        title = f"📉 Günsonu Kapanış: {ticker} Taban Kapattı!"
+                        body = f"{ticker} taban fiyatından kapattı ⚠️"
                         log(f"  {ticker}: TABAN KAPATTI!")
                     else:
                         pct_val = float(daily_pct) if daily_pct is not None else 0.0
+                        # %0.00 nötr — bildirim gönderme
                         if abs(pct_val) < 0.005:
                             log(f"  {ticker}: NÖTR KAPANIŞ %0.00 — atlanıyor")
                             continue
-                        gap_str = f"%{pct_val:+.1f}"
+                        fark_str = f"%+{abs(pct_val):.2f}" if pct_val >= 0 else f"%-{abs(pct_val):.2f}"
                         if pct_val >= 0:
-                            closing_lines.append((ticker, "🟢", gap_str))
-                            log(f"  {ticker}: ALICILI KAPATTI {gap_str}")
+                            title = f"🟢 Günsonu Kapanış: {ticker} Alıcılı Kapattı"
+                            body = f"Günsonu Fark: {fark_str}"
+                            log(f"  {ticker}: ALICILI KAPATTI {fark_str}")
                         else:
-                            closing_lines.append((ticker, "🔴", gap_str))
-                            log(f"  {ticker}: SATICILI KAPATTI {gap_str}")
+                            title = f"🔴 Günsonu Kapanış: {ticker} Satıcılı Kapattı"
+                            body = f"Günsonu Fark: {fark_str}"
+                            log(f"  {ticker}: SATICILI KAPATTI {fark_str}")
 
-                if closing_lines:
-                    summary_parts = [f"{em}{t} {s}" for t, em, s in closing_lines]
-                    summary_body = " | ".join(summary_parts)
-                    if len(summary_body) > 220:
-                        summary_body = summary_body[:217] + "..."
-
-                    summary_title = f"📊 Günsonu Kapanış: {len(closing_lines)} Halka Arz Hissesi"
-
-                    for ticker, _, _ in closing_lines:
-                        _send_realtime_notification(
-                            ticker, "gunluk_acilis_kapanis",
-                            summary_title, summary_body,
-                        )
-                        time.sleep(2)
-
+                    _send_realtime_notification(ticker, "gunluk_acilis_kapanis", title, body)
+                    closing_count += 1
+                    # Birden fazla hisse takip eden kullanıcıya spam olmaması için
+                    # her hisse arasında 5 sn bekle
+                    if closing_count < len(rows):
+                        time.sleep(5)
+                if closing_count > 0:
                     closing_notif_sent = True
                     _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
                                 pct_alerts_sent, opening_notif_sent, closing_notif_sent)
