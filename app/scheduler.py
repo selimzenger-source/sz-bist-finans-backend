@@ -3733,16 +3733,17 @@ def _setup_scheduler_impl():
         misfire_grace_time=7200,  # 2 saat grace
     )
 
-    # 16. Acilis Fiyati Tweet — her gun 09:58 Turkiye (UTC 06:58) Pzt-Cuma
-    # Borsa 09:55 acilis, excel_sync ~1 dk icinde veriyi yazar
-    scheduler.add_job(
-        tweet_opening_price_job,
-        CronTrigger(hour=6, minute=58, day_of_week="mon-fri"),
-        id="opening_price_tweet",
-        name="Acilis Fiyati Tweet (09:58 TR)",
-        replace_existing=True,
-        misfire_grace_time=3600,  # 1 saat grace
-    )
+    # 16. Acilis Fiyati Tweet — DEVRE DISI
+    # Seans Acilis Analizi tweeti (opening_summary_tweet) zaten tum hisseleri kapsiyor.
+    # Ayri "Acilis Fiyati Belli Oldu!" tweeti gereksiz tekrar yaratiyordu.
+    # scheduler.add_job(
+    #     tweet_opening_price_job,
+    #     CronTrigger(hour=6, minute=58, day_of_week="mon-fri"),
+    #     id="opening_price_tweet",
+    #     name="Acilis Fiyati Tweet (09:58 TR)",
+    #     replace_existing=True,
+    #     misfire_grace_time=3600,
+    # )
 
     # 17. Ay Sonu Raporu Tweet — her ayin 1'i 00:00 Turkiye (UTC 21:00 onceki gun)
     # Ayin son gunu gece yarisi = yeni ayin 1'i 00:00 TR
