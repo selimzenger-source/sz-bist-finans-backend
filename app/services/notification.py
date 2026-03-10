@@ -259,7 +259,7 @@ class NotificationService:
             if user:
                 logger.warning(f"Stale Expo token temizleniyor — user_id={user.id}")
                 user.expo_push_token = None
-                await self.db.flush()
+                await self.db.commit()
         except Exception as e:
             logger.error(f"Expo token temizleme hatasi: {e}")
 
@@ -360,7 +360,7 @@ class NotificationService:
                 data_json=json.dumps(data, ensure_ascii=False) if data else None,
             )
             self.db.add(log)
-            await self.db.flush()
+            await self.db.commit()
         except Exception as e:
             logger.debug("NotificationLog insert hatasi: %s", e)
 
@@ -383,7 +383,7 @@ class NotificationService:
                     f"device_id={user.device_id[:8]}..."
                 )
                 user.fcm_token = None
-                await self.db.flush()
+                await self.db.commit()
 
                 # Telegram admin bildirimi
                 try:
