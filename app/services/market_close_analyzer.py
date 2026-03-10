@@ -266,6 +266,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     # 2. IPO kontrolu — gercekten yeni halka arz mi? Detayli bilgi cek.
     is_recent_ipo = False
     ipo_info = ""
+    ipo_days = 0  # IPO'dan bu yana geçen gün — _clean_ai_text ve ipo_rule'da kullanılır
     try:
         async with async_session() as session:
             cutoff = date.today() - timedelta(days=60)
@@ -279,6 +280,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             if ipo:
                 is_recent_ipo = True
                 days_since = (date.today() - ipo.trading_start).days
+                ipo_days = days_since
                 parts = [f"\nÖNEMLİ HALKA ARZ BİLGİSİ:"]
                 parts.append(f"- Şirket: {ipo.company_name}")
                 if ipo.sector: parts.append(f"- Sektör: {ipo.sector}")
@@ -429,28 +431,18 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     
     ipo_rule = ""
     if is_recent_ipo:
-        days_since = 0
-        try:
-            for line in ipo_info.split("\n"):
-                if "başlayalı" in line:
-                    import re
-                    m = re.search(r"(\d+) gün", line)
-                    if m: days_since = int(m.group(1))
-        except: pass
-        
-        if days_since <= 10:
+        # ipo_days try bloğunda DB'den hesaplanıp set edildi (line 283)
+        # Eski kod: regex ile ipo_info text'ten parse ediyordu, başarısız olursa 0 kalıyordu (BUG)
+
+        if ipo_days <= 15:
             if is_ceiling:
-                ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası yoğun talep.' yaz."
+                ipo_rule = f"\n- Bu hisse YENİ HALKA ARZ, henüz {ipo_days}. işlem gününde (≤15 gün). 'Halka arz sonrası yoğun talep.' yaz."
             else:
-                ipo_rule = "\n- Bu hisse YENİ HALKA ARZ ve henüz ilk 10 işlem gününde. 'Halka arz sonrası kâr satışı.' yaz."
-        elif days_since <= 30:
-            if is_ceiling:
-                ipo_rule = "\n- Bu hisse halka arz olalı {0} gün oldu. Tavan serisi devam ediyorsa 'Halka arz sonrası talep devam ediyor.' yaz, somut haber varsa onu tercih et.".format(days_since)
-            else:
-                ipo_rule = "\n- Bu hisse halka arz olalı {0} gün oldu. Düşüyorsa 'Tavan serisi sonrası kâr realizasyonu.' yaz, somut haber varsa onu tercih et.".format(days_since)
+                ipo_rule = f"\n- Bu hisse YENİ HALKA ARZ, henüz {ipo_days}. işlem gününde (≤15 gün). 'Halka arz sonrası kâr satışı.' yaz."
         else:
-            ipo_rule = ("\n- Bu hisse halka arz oldu ama ilk 30 günü geçti. Artık basit 'halka arz' açıklaması yetmez."
-                       "\n  Somut bir sebep bul veya boş bırak.")
+            ipo_rule = (f"\n- Bu hisse halka arz olalı {ipo_days} gün oldu (>15 gün). Artık basit 'halka arz' açıklaması YASAK."
+                       "\n  SADECE somut haber/veri bazlı sebep yaz. Somut sebep yoksa EMPTY yaz."
+                       "\n  ❌ YAZMA: 'Halka arz sonrası talep', 'Halka arz sonrası yoğun ilgi', 'Halka arz sonrası kâr satışı'")
     else:
         ipo_rule = "\n- Bu hisse ESKİ bir şirket. ASLA 'halka arz' deme."
     
@@ -495,19 +487,24 @@ F) HALKA ARZ: Yeni halka arz mı? (IPO bilgisi kontrol et)
 
 G) SEKTÖR/MAKRO: Sektörü doğrudan etkileyen düzenleme, kota, yasal karar var mı?
 
-━━━ ADIM 3 — TICKER DOĞRULA ━━━
-Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
-Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → O zaman EMPTY yaz.
-Haber 14 günden eski mi? → EMPTY yaz.
-Karar iptal mi edilmiş? → EMPTY yaz.
+━━━ ADIM 3 — TICKER + TARİH DOĞRULA (KRİTİK!) ━━━
+Bugünün tarihi: {date.today().strftime("%d.%m.%Y")}
+A) Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
+   Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → EMPTY yaz.
+B) ⚠️ TARİH FİLTRESİ — EN ÖNEMLİ KURAL:
+   Haberin tarihi 14 günden eski mi? → KESİNLİKLE EMPTY yaz!
+   • 2+ hafta önce, 1 ay önce, 2 ay önce, 6 ay önce → HEPSI GEÇERSİZ → EMPTY yaz.
+   • Haberde tarih belirtilmemiş ama olay eski bir gelişmeyse (bölünme, eski dava sonucu, geçmiş SPK kararı) → EMPTY yaz.
+   • Sadece son 14 gün içindeki (bugünden geriye) haberler geçerlidir.
+C) Karar iptal mi edilmiş? → EMPTY yaz.
 
-━━━ ADIM 3.3 — GÜNCELLIK ÖNCELİĞİ (KRİTİK!) ━━━
+━━━ ADIM 3.3 — GÜNCELLIK ÖNCELİĞİ ━━━
 Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
 - İki haber arasında 2+ gün fark varsa → KESİNLİKLE daha yeni olanı yaz, eski olanı GÖRMEZDEN GEL.
 - Dünkü veya bugünkü haber VARSA → haftalık/aylık haberleri kesinlikle yazma.
 - Örnek: Şirketin dün "rekor bilanço" açıklaması + 3 hafta önce "sermaye tavanı artırımı" → "Rekor yıllık bilanço açıklandı." yaz.
 - Örnek: Bugün "ABD davası anlaşması" + 1 ay önce "bedelsiz karar" → bugünkü davayı yaz.
-Bugün: {date.today().strftime("%d.%m.%Y")} — haberlerin tarihlerine dikkat et!
+- ⚠️ TEKRAR: 14 günden eski olay = GEÇERSİZ. 1 ay, 2 ay, 6 ay önceki olayları ASLA sebep olarak kullanma!
 
 ━━━ ADIM 3.5 — SEBEP YÖNÜ DOĞRULA (KRİTİK!) ━━━
 {"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
@@ -563,6 +560,14 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
             return ""
         if any(x in t.lower() for x in bad):
             return ""
+        # Halka arz filtresi — 15 günü geçmiş IPO hisselerde "halka arz" ifadesi yasak
+        t_lower_check = t.lower()
+        if is_recent_ipo and ipo_days > 15:
+            halka_arz_phrases = ["halka arz", "halka arza", "ipo sonrası", "ipo talep",
+                                  "yoğun talep", "ilk işlem", "ilk gün"]
+            if any(phrase in t_lower_check for phrase in halka_arz_phrases):
+                logger.info(f"[HALKA ARZ FİLTRE] {ticker}: {ipo_days} gün geçmiş, halka arz sebebi elendi → '{t[:60]}'")
+                return ""
         # Yön filtresi — tavan=olumlu, taban=olumsuz olmalı
         t_lower = t.lower()
         if is_ceiling:
