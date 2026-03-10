@@ -500,9 +500,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     if _kap_tweet_counter["total"] == 0:
                         try:
                             from app.models.pending_tweet import PendingTweet
-                            from sqlalchemy import select, func as sqlfunc
-                            from datetime import date as _date_type, datetime as _dt_type, time as _time_type
-                            _today_start = _dt_type.combine(_date_type.today(), _time_type.min)
+                            from sqlalchemy import func as sqlfunc
+                            from datetime import time as _time_type
+                            _today_start = datetime.combine(date.today(), _time_type.min)
                             _db_count_result = await session.execute(
                                 select(sqlfunc.count(PendingTweet.id)).where(
                                     PendingTweet.source == "kap_haber",
