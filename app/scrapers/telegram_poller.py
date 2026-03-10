@@ -496,6 +496,32 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 try:
                     from app.services.twitter_service import tweet_kap_news, _kap_tweet_counter
 
+                    # Restart sonrasi sayaci DB'den yukle (bir kerelik)
+                    if _kap_tweet_counter["total"] == 0:
+                        try:
+                            from app.models.pending_tweet import PendingTweet
+                            from sqlalchemy import select, func as sqlfunc
+                            from datetime import date as _date_type, datetime as _dt_type, time as _time_type
+                            _today_start = _dt_type.combine(_date_type.today(), _time_type.min)
+                            _db_count_result = await session.execute(
+                                select(sqlfunc.count(PendingTweet.id)).where(
+                                    PendingTweet.source == "kap_haber",
+                                    PendingTweet.created_at >= _today_start,
+                                )
+                            )
+                            _db_count = _db_count_result.scalar() or 0
+                            if _db_count > 0:
+                                # DB'de bugun kac KAP tweet atilmis → sayaci oradan devam ettir
+                                # Her tweet = 3 haber (1., 4., 7. ...) → toplam haber = tweet * 3 - 2
+                                # Ama basit olsun: tweet * 3 kadar sayalim ki bir sonraki cycle'da dogru calıssin
+                                _kap_tweet_counter["total"] = _db_count * 3
+                                logger.info(
+                                    "[TWEET-FLOW] Sayac DB'den yuklendi: bugun %d KAP tweet atilmis → sayac=%d",
+                                    _db_count, _kap_tweet_counter["total"],
+                                )
+                        except Exception as _cnt_err:
+                            logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
+
                     # Her 3 haberden 1'ini tweetle
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
