@@ -143,7 +143,7 @@ CEILING_TIER_PRICES = {
 }
 
 # YENİ v2: Bildirim tipi bazli fiyatlama (hisse basina, 25 gun)
-# 5 bildirim tipi — v20: el_degistirme eklendi
+# 4 bildirim tipi — yuzde_dusus tek hizmet: %4 ve %7 esik, gunde max 2 bildirim
 NOTIFICATION_TIER_PRICES = {
     "tavan_bozulma": {
         "price_tl": Decimal("15.00"),
@@ -154,11 +154,6 @@ NOTIFICATION_TIER_PRICES = {
         "price_tl": Decimal("10.00"),
         "label": "Taban Acilinca Bildirim",
         "description": "Taban acildiginda anlik bildirim",
-    },
-    "el_degistirme": {
-        "price_tl": Decimal("10.00"),
-        "label": "El Degistirme Orani (E.D.O)",
-        "description": "Kumulatif %10, %25, %50, %75, %100, %125 esiklerinde bildirim",
     },
     "gunluk_acilis_kapanis": {
         "price_tl": Decimal("5.00"),
@@ -171,7 +166,7 @@ NOTIFICATION_TIER_PRICES = {
         "description": "%4 ve %7 esik bildirimi — gunde max 2 (once %4, sonra %7)",
     },
 }
-COMBO_PRICE = Decimal("44.00")  # 60 TL → %27 indirim → 44 TL (60 TL yerine 44 TL)
+COMBO_PRICE = Decimal("44.00")  # 50 TL → %11 indirim → ~44 TL
 QUARTERLY_PRICE = Decimal("90.00")  # 3 Aylik
 ANNUAL_BUNDLE_PRICE = Decimal("245.00")  # Yillik
 

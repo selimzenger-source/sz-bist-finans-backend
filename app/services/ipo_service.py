@@ -393,8 +393,6 @@ class IPOService:
         alis_lot: Optional[int] = None,
         satis_lot: Optional[int] = None,
         pct_change: Optional[float] = None,
-        gunluk_adet: Optional[int] = None,
-        senet_sayisi: Optional[int] = None,
     ) -> IPOCeilingTrack:
         """Tavan/taban takip bilgisini gunceller veya olusturur.
 
@@ -522,30 +520,6 @@ class IPOService:
             track.durum = "alici_kapatti"
         else:
             track.durum = "satici_kapatti"
-
-        # v20: E.D.O (El Degistirme Orani) hesapla
-        if gunluk_adet is not None:
-            track.gunluk_adet = gunluk_adet
-        if senet_sayisi is not None:
-            track.senet_sayisi = senet_sayisi
-            if ipo:
-                ipo.senet_sayisi = senet_sayisi
-
-        # Kumulatif EDO hesapla: onceki gunlerin toplam hacmi + bugunun hacmi
-        if gunluk_adet and senet_sayisi and senet_sayisi > 0 and ipo:
-            prev_cumulative = ipo.cumulative_volume or 0
-            # Ayni gun icin guncelleme mi yoksa yeni gun mu?
-            # Eger track zaten gunluk_adet'e sahipse, farki ekle
-            old_gunluk = 0
-            if track.id and hasattr(track, '_sa_instance_state') and not track._sa_instance_state.pending:
-                # Mevcut kayit guncelleniyor — eski gunluk adeti cikar
-                from sqlalchemy import inspect as sa_inspect
-                hist = sa_inspect(track).attrs.gunluk_adet.history
-                if hist.deleted:
-                    old_gunluk = hist.deleted[0] or 0
-            new_cumulative = prev_cumulative - old_gunluk + gunluk_adet
-            ipo.cumulative_volume = new_cumulative
-            track.cumulative_edo_pct = (new_cumulative / senet_sayisi) * 100
 
         await self.db.flush()
         return track
