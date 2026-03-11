@@ -251,7 +251,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                     bilanco_search = "\n".join([r.get("content", "") for r in results2])
 
                 # 1c. Hukuki / kurumsal gelişme araması (dava, anlaşma, ceza, soruşturma)
-                corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye"
+                corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye varlık satışı borç"
                 res3 = await client.post(
                     "https://api.tavily.com/search",
                     json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 3, "days": 14}
@@ -478,6 +478,10 @@ B) SERMAYE HAREKETLERİ: Bedelsiz/bedelli sermaye artırımı, temettü, hisse g
 
 C) KURUMSAL OLAY: İhale kazanma/kaybetme, önemli sözleşme, ortaklık, proje ihalesi, lisans var mı?
 
+C2) VARLIK SATIŞI / BORÇ KAPANMASI: Maddi duran varlık satımı, gayrimenkul/otel/fabrika satışı, borç ödenmesi/kapanması var mı?
+   → Borç kapanması + varlık satışı = OLUMLU (bilanço temizlenmesi). Örnek: "Otel satışı ile borç kapandı."
+   → Sadece varlık satışı = bağlama göre değerlendir. Zarar ile satış → OLUMSUZ, kârlı satış → OLUMLU.
+
 D) HUKUKİ/YÖNETİM: Tutukluluk kararı, beraat, mahkeme kararı, yönetim değişikliği var mı?
 
 E) HEDEFLİ FİYAT / ANALIST RAPORU: Aracı kurum raporu var mı?
@@ -516,6 +520,7 @@ Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
 - "Güçlü bilanço açıklandı." → Bu OLUMLU bir haber! Taban hisse için YAZMA, EMPTY yaz.
 - İptal, sonlandırma, fesih, kısıtlama, ceza, zayıf, düşük → OLUMSUZ → {"Tavan için YAZMA!" if is_ceiling else "Taban için uygundur."}
 - Kazanma, büyüme, artırım, onay, güçlü, rekor, yeni sözleşme → OLUMLU → {"Tavan için uygundur." if is_ceiling else "Taban için YAZMA!"}
+- Borç kapanması, borç ödenmesi, varlık satışı ile bilanço temizlenmesi → OLUMLU → {"Tavan için uygundur." if is_ceiling else "Taban için YAZMA!"}
 Sebep yönü hissenin hareketiyle UYUŞMUYORSA → EMPTY yaz.
 
 ━━━ ADIM 4 — ÇIKTI ━━━
@@ -526,7 +531,8 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
    "piyasa beklentisi", "yatırımcı talebi", "konsolide", "istikrarlı", "potansiyel",
    rakam içeren hedef fiyat, rakam içeren kâr/zarar tutarı.
 ✅ İSTENEN FORMAT: "Bedelsiz sermaye artırımı kararı alındı." / "Güçlü 3Ç bilançosu açıklandı." /
-   "Yüksek hedef fiyat raporu yayınlandı." / "Önemli ihale sözleşmesi imzalandı."
+   "Yüksek hedef fiyat raporu yayınlandı." / "Önemli ihale sözleşmesi imzalandı." /
+   "Varlık satışı ile borç kapandı." / "Gayrimenkul satışı ile bilanço düzeldi."
 """
 
     # Ortak filtre — jenerik/dolgu yanıtları yakala

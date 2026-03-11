@@ -2557,31 +2557,9 @@ async def daily_ceiling_update():
                     except Exception as tweet_err:
                         logger.error("Tweet hatasi (sistemi etkilemez): %s", tweet_err)
 
-                    # Push bildirim — IPO bildirim abonelerine gunluk takip bildirimi
-                    try:
-                        if days_data:
-                            from app.services.notification import NotificationService
-                            notif_svc = NotificationService(db)
-                            _current_day = len(days_data)
-                            _last_day = days_data[-1]
-                            _last_close = float(_last_day["close"])
-                            if len(days_data) > 1:
-                                _prev_c = float(days_data[-2]["close"])
-                            else:
-                                _prev_c = float(ipo.ipo_price) if ipo.ipo_price else 0
-                            _daily_pct = (
-                                ((_last_close - _prev_c) / _prev_c) * 100
-                                if _prev_c > 0 else 0
-                            )
-                            _last_durum = (tracks[-1].durum or "not_kapatti") if tracks else "not_kapatti"
-                            await notif_svc.notify_daily_tracking(
-                                ipo=ipo,
-                                current_day=_current_day,
-                                daily_pct=_daily_pct,
-                                durum=_last_durum,
-                            )
-                    except Exception as push_err:
-                        logger.error("Gunluk takip push hatasi (%s): %s", ipo.ticker, push_err)
+                    # Push bildirim KALDIRILDI — excel_sync.py zaten günsonu kapanış bildirimi gönderiyor
+                    # Aynı hisse için iki bildirim (kapanış + günlük takip) gitmesini önlemek için
+                    # push bildirim burada atlanıyor, tweet yeterli.
 
                 except Exception as ticker_err:
                     logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
