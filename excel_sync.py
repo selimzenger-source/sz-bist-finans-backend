@@ -520,11 +520,9 @@ def live_sync(filepath, interval=15):
     prev_hit_floor = {}    # {ticker: bool}
     prev_lots = {}         # {ticker: (alis_lot, satis_lot)} — lot degisimi takibi
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
-    ceiling_lock_cd = {}   # {ticker: float(timestamp)} — son "tavana kitledi" bildirimi
-    ceiling_break_cd = {}  # {ticker: float(timestamp)} — son "tavan çözüldü" bildirimi
-    floor_lock_cd = {}     # {ticker: float(timestamp)} — son "tabana kitledi" bildirimi
-    floor_break_cd = {}    # {ticker: float(timestamp)} — son "taban kalktı" bildirimi
-    COOLDOWN_SECONDS = 180  # 3 dakika — AYNI YÖN bildirimleri arasi (kitledi↔çözüldü birbirini ENGELLEMEZ)
+    ceiling_streak = {}    # {ticker: int} — pozitif=tavanda ardışık döngü, negatif=tavandan uzak ardışık döngü
+    floor_streak = {}      # {ticker: int} — pozitif=tabanda ardışık döngü, negatif=tabandan uzak ardışık döngü
+    CONFIRM_CYCLES = 2     # 2 ardışık döngü (30sn) onay — sınır zıplaması spam engeli
     opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
@@ -542,6 +540,11 @@ def live_sync(filepath, interval=15):
         opening_notif_sent = saved.get("opening_notif_sent", False)
         closing_notif_sent = saved.get("closing_notif_sent", False)
         last_session_date = date.today()  # State bugune ait → gun degisimi tetiklemeyi engelle
+        # Streak'leri kayıtlı state'ten başlat (zaten onaylanmış durumlar)
+        for t, val in prev_hit_ceiling.items():
+            ceiling_streak[t] = CONFIRM_CYCLES if val else -CONFIRM_CYCLES
+        for t, val in prev_hit_floor.items():
+            floor_streak[t] = CONFIRM_CYCLES if val else -CONFIRM_CYCLES
         log("  ✅ Restart-safe: onceki bildirim state'i yuklendi — duplicate bildirim engellendi")
     else:
         log("  ℹ State dosyasi yok/baska gun — temiz basliyor")
@@ -589,8 +592,8 @@ def live_sync(filepath, interval=15):
                 prev_hit_floor.clear()
                 prev_lots.clear()
                 pct_alerts_sent.clear()
-                ceiling_cooldown.clear()
-                floor_cooldown.clear()
+                ceiling_streak.clear()
+                floor_streak.clear()
                 opening_notif_sent = False
                 closing_notif_sent = False
                 # Yeni gun icin temiz state kaydet
@@ -697,102 +700,103 @@ def live_sync(filepath, interval=15):
                 pct_str = f" %{float(daily_pct):+.1f}" if daily_pct else ""
                 log(f"  {ticker}: {son} TL {status}{pct_str}")
 
-                # ── Anlik bildirim tespiti (Tavan/Taban + 5dk Cooldown) ──
+                # ── Anlık bildirim tespiti ──
 
-                was_ceiling = prev_hit_ceiling.get(ticker, False)
-                was_floor = prev_hit_floor.get(ticker, False)
                 pct_val = float(daily_pct) if daily_pct is not None else 0.0
                 fark_str = f"%+{abs(pct_val):.1f}" if pct_val >= 0 else f"%-{abs(pct_val):.1f}"
                 son_str = f"{float(son):.2f}" if son else ""
 
-                # Pre-opening suppression: bildirim susturulduysa prev state'i guncelleme
-                # Boylece acilis bildirimi sonrasi 10:00:01'de tavan/taban kitledi ayrica gider
-                # (Farkli kullanicilar acilis paketi vs tavan/taban bildirimlerine abone olabilir)
-                suppress_ceiling_update = False
-                suppress_floor_update = False
-
                 # ════════════════════════════════════════════════════════
-                # TAVAN / TABAN BİLDİRİM SİSTEMİ
-                # Per-yön cooldown: "kitledi" ve "çözüldü" ayrı cooldown.
-                # Kitledi→Çözüldü anında gider (farklı yön).
-                # Kitledi→Kitledi 3dk bekler (aynı yön, anti-spam).
+                # TAVAN / TABAN BİLDİRİM SİSTEMİ — STREAK DEBOUNCE
+                #
+                # Cooldown yerine "streak" (ardışık döngü sayacı) kullanır.
+                # Tavanda → streak pozitif artar (+1, +2, +3...)
+                # Tavandan uzak → streak negatif artar (-1, -2, -3...)
+                # Yön değişince streak sıfırdan başlar.
+                #
+                # Bildirim SADECE streak tam CONFIRM_CYCLES'a ulaşınca gider.
+                # Bu sayede:
+                #   ✅ Gerçek tavan: 30sn sonra onaylanır, bildirim gider
+                #   ✅ Gerçek bozulma: 30sn sonra onaylanır, bildirim gider
+                #   ✅ Tekrar tavan: yeni streak başlar, 30sn sonra bildirim gider
+                #   ❌ Sınır zıplaması: streak hiç ±2'ye ulaşamaz, spam olmaz
                 # ════════════════════════════════════════════════════════
 
-                # 1a. Tavana Kitledi: önceki döngü tavanda değildi, şimdi tavanda
-                if not was_ceiling and hit_ceiling:
-                    if not opening_notif_sent and hour_min <= 1000:
+                # ── TAVAN STREAK ──
+                c_str = ceiling_streak.get(ticker, 0)
+                if hit_ceiling:
+                    c_str = (c_str + 1) if c_str >= 0 else 1
+                else:
+                    c_str = (c_str - 1) if c_str <= 0 else -1
+                ceiling_streak[ticker] = c_str
+
+                can_notify = opening_notif_sent or hour_min > 1000
+
+                if c_str == CONFIRM_CYCLES:
+                    # 30sn boyunca tavanda kaldı → onaylandı
+                    if can_notify:
+                        log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "tavan_bozulma",
+                            f"🔒 {ticker} Tavana Kitledi!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                    else:
                         log(f"  ⏳ TAVANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
-                        suppress_ceiling_update = True
-                    else:
-                        last_t = ceiling_lock_cd.get(ticker, 0)
-                        if time.time() - last_t >= COOLDOWN_SECONDS:
-                            log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
-                            _send_realtime_notification(
-                                ticker, "tavan_bozulma",
-                                f"🔒 {ticker} Tavana Kitledi!",
-                                f"Son: {son_str} TL | Fark: {fark_str}",
-                            )
-                            ceiling_lock_cd[ticker] = time.time()
-                        else:
-                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
-                            log(f"  ⏳ TAVANA KİTLEDİ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
-                # 1b. Tavan Çözüldü: önceki döngü tavandaydı, şimdi değil
-                elif was_ceiling and not hit_ceiling:
-                    if not opening_notif_sent and hour_min <= 1000:
+                elif c_str == -CONFIRM_CYCLES:
+                    # 30sn boyunca tavandan uzak kaldı → onaylandı
+                    if can_notify:
+                        log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "tavan_bozulma",
+                            f"🔓 {ticker} Tavan Çözüldü!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                    else:
                         log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
-                        suppress_ceiling_update = True
-                    else:
-                        last_t = ceiling_break_cd.get(ticker, 0)
-                        if time.time() - last_t >= COOLDOWN_SECONDS:
-                            log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
-                            _send_realtime_notification(
-                                ticker, "tavan_bozulma",
-                                f"🔓 {ticker} Tavan Çözüldü!",
-                                f"Son: {son_str} TL | Fark: {fark_str}",
-                            )
-                            ceiling_break_cd[ticker] = time.time()
-                        else:
-                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
-                            log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
-                # 2a. Tabana Kitledi: önceki döngü tabanda değildi, şimdi tabanda
-                if not was_floor and hit_floor:
-                    if not opening_notif_sent and hour_min <= 1000:
+                # Tavan state güncelle (onaylanmış durumlardan)
+                if c_str >= CONFIRM_CYCLES:
+                    prev_hit_ceiling[ticker] = True
+                elif c_str <= -CONFIRM_CYCLES:
+                    prev_hit_ceiling[ticker] = False
+
+                # ── TABAN STREAK ──
+                f_str = floor_streak.get(ticker, 0)
+                if hit_floor:
+                    f_str = (f_str + 1) if f_str >= 0 else 1
+                else:
+                    f_str = (f_str - 1) if f_str <= 0 else -1
+                floor_streak[ticker] = f_str
+
+                if f_str == CONFIRM_CYCLES:
+                    if can_notify:
+                        log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "taban_acilma",
+                            f"🔒 {ticker} Tabana Kitledi!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
+                    else:
                         log(f"  ⏳ TABANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
-                        suppress_floor_update = True
-                    else:
-                        last_t = floor_lock_cd.get(ticker, 0)
-                        if time.time() - last_t >= COOLDOWN_SECONDS:
-                            log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
-                            _send_realtime_notification(
-                                ticker, "taban_acilma",
-                                f"🔒 {ticker} Tabana Kitledi!",
-                                f"Son: {son_str} TL | Fark: {fark_str}",
-                            )
-                            floor_lock_cd[ticker] = time.time()
-                        else:
-                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
-                            log(f"  ⏳ TABANA KİTLEDİ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
-                # 2b. Taban Kalktı: önceki döngü tabandaydı, şimdi değil
-                elif was_floor and not hit_floor:
-                    if not opening_notif_sent and hour_min <= 1000:
-                        log(f"  ⏳ TABAN KALKTI ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
-                        suppress_floor_update = True
+                elif f_str == -CONFIRM_CYCLES:
+                    if can_notify:
+                        log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
+                        _send_realtime_notification(
+                            ticker, "taban_acilma",
+                            f"📈 {ticker} Taban Kalktı!",
+                            f"Son: {son_str} TL | Fark: {fark_str}",
+                        )
                     else:
-                        last_t = floor_break_cd.get(ticker, 0)
-                        if time.time() - last_t >= COOLDOWN_SECONDS:
-                            log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
-                            _send_realtime_notification(
-                                ticker, "taban_acilma",
-                                f"📈 {ticker} Taban Kalktı!",
-                                f"Son: {son_str} TL | Fark: {fark_str}",
-                            )
-                            floor_break_cd[ticker] = time.time()
-                        else:
-                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
-                            log(f"  ⏳ TABAN KALKTI ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
+                        log(f"  ⏳ TABAN KALKTI ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
+
+                # Taban state güncelle (onaylanmış durumlardan)
+                if f_str >= CONFIRM_CYCLES:
+                    prev_hit_floor[ticker] = True
+                elif f_str <= -CONFIRM_CYCLES:
+                    prev_hit_floor[ticker] = False
 
                 # 3. Yüzde düşüş: Günün en yükseğinden %4 ve %7 eşik (gün içi 1 kere)
                 gun_ey = row.get("gun_en_yuksek")
@@ -824,13 +828,6 @@ def live_sync(filepath, interval=15):
                         )
                         sent.add("pct4")
                         pct_alerts_sent[ticker] = sent
-
-                # Durumlari guncelle — acilis oncesi susturulan bildirimler icin
-                # state'i guncelleme ki 10:00:01'de tavan/taban kitledi ayrica gidebilsin
-                if not suppress_ceiling_update:
-                    prev_hit_ceiling[ticker] = hit_ceiling
-                if not suppress_floor_update:
-                    prev_hit_floor[ticker] = hit_floor
 
             # Bildirim state'ini diske kaydet (restart-safe)
             # Her dongude kaydeder — maliyet dusuk (kucuk JSON dosyasi)
@@ -903,6 +900,20 @@ def live_sync(filepath, interval=15):
                         time.sleep(5)
                 if opening_count > 0:
                     opening_notif_sent = True
+                    # Streak'leri mevcut durumla senkronize et — açılış bildirimi
+                    # zaten tavan/taban durumunu duyurdu, tekrar bildirim göndermeyi engelle
+                    for row in rows:
+                        t = row["ticker"]
+                        s = row.get("son")
+                        if s and s > 0:
+                            tv = row.get("tavan_limit")
+                            tb = row.get("taban_limit")
+                            is_c = bool(tv and abs(s - tv) <= PRICE_TOLERANCE)
+                            is_f = bool(tb and abs(s - tb) <= PRICE_TOLERANCE)
+                            ceiling_streak[t] = CONFIRM_CYCLES if is_c else -CONFIRM_CYCLES
+                            floor_streak[t] = CONFIRM_CYCLES if is_f else -CONFIRM_CYCLES
+                            prev_hit_ceiling[t] = is_c
+                            prev_hit_floor[t] = is_f
                     _save_state(today_str, prev_hit_ceiling, prev_hit_floor,
                                 pct_alerts_sent, opening_notif_sent, closing_notif_sent)
                     log(f"  Açılış bildirimi: {opening_count} hisse için gönderildi (~{opening_count * 5}sn yayılarak)")
