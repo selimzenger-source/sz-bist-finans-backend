@@ -520,9 +520,11 @@ def live_sync(filepath, interval=15):
     prev_hit_floor = {}    # {ticker: bool}
     prev_lots = {}         # {ticker: (alis_lot, satis_lot)} — lot degisimi takibi
     pct_alerts_sent = {}   # {ticker: set("pct4","pct7")} — gun ici tekrar gonderme
-    ceiling_cooldown = {}  # {ticker: float(timestamp)} — son tavan bildirimi zamani (5dk cooldown)
-    floor_cooldown = {}    # {ticker: float(timestamp)} — son taban bildirimi zamani (5dk cooldown)
-    COOLDOWN_SECONDS = 300  # 5 dakika — tavan/taban bildirimleri arasi bekleme
+    ceiling_lock_cd = {}   # {ticker: float(timestamp)} — son "tavana kitledi" bildirimi
+    ceiling_break_cd = {}  # {ticker: float(timestamp)} — son "tavan çözüldü" bildirimi
+    floor_lock_cd = {}     # {ticker: float(timestamp)} — son "tabana kitledi" bildirimi
+    floor_break_cd = {}    # {ticker: float(timestamp)} — son "taban kalktı" bildirimi
+    COOLDOWN_SECONDS = 180  # 3 dakika — AYNI YÖN bildirimleri arasi (kitledi↔çözüldü birbirini ENGELLEMEZ)
     opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
@@ -711,9 +713,9 @@ def live_sync(filepath, interval=15):
 
                 # ════════════════════════════════════════════════════════
                 # TAVAN / TABAN BİLDİRİM SİSTEMİ
-                # State transition (was→hit) zaten duplicate engelliyor.
-                # Cooldown KALDIRILDI: tavan→bozulma→tavan farklı event'ler,
-                # eski 5dk cooldown 2. tavanı engelliyordu (kritik bug).
+                # Per-yön cooldown: "kitledi" ve "çözüldü" ayrı cooldown.
+                # Kitledi→Çözüldü anında gider (farklı yön).
+                # Kitledi→Kitledi 3dk bekler (aynı yön, anti-spam).
                 # ════════════════════════════════════════════════════════
 
                 # 1a. Tavana Kitledi: önceki döngü tavanda değildi, şimdi tavanda
@@ -722,12 +724,18 @@ def live_sync(filepath, interval=15):
                         log(f"  ⏳ TAVANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
                         suppress_ceiling_update = True
                     else:
-                        log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
-                        _send_realtime_notification(
-                            ticker, "tavan_bozulma",
-                            f"🔒 {ticker} Tavana Kitledi!",
-                            f"Son: {son_str} TL | Fark: {fark_str}",
-                        )
+                        last_t = ceiling_lock_cd.get(ticker, 0)
+                        if time.time() - last_t >= COOLDOWN_SECONDS:
+                            log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
+                            _send_realtime_notification(
+                                ticker, "tavan_bozulma",
+                                f"🔒 {ticker} Tavana Kitledi!",
+                                f"Son: {son_str} TL | Fark: {fark_str}",
+                            )
+                            ceiling_lock_cd[ticker] = time.time()
+                        else:
+                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                            log(f"  ⏳ TAVANA KİTLEDİ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
                 # 1b. Tavan Çözüldü: önceki döngü tavandaydı, şimdi değil
                 elif was_ceiling and not hit_ceiling:
@@ -735,12 +743,18 @@ def live_sync(filepath, interval=15):
                         log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
                         suppress_ceiling_update = True
                     else:
-                        log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
-                        _send_realtime_notification(
-                            ticker, "tavan_bozulma",
-                            f"🔓 {ticker} Tavan Çözüldü!",
-                            f"Son: {son_str} TL | Fark: {fark_str}",
-                        )
+                        last_t = ceiling_break_cd.get(ticker, 0)
+                        if time.time() - last_t >= COOLDOWN_SECONDS:
+                            log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
+                            _send_realtime_notification(
+                                ticker, "tavan_bozulma",
+                                f"🔓 {ticker} Tavan Çözüldü!",
+                                f"Son: {son_str} TL | Fark: {fark_str}",
+                            )
+                            ceiling_break_cd[ticker] = time.time()
+                        else:
+                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                            log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
                 # 2a. Tabana Kitledi: önceki döngü tabanda değildi, şimdi tabanda
                 if not was_floor and hit_floor:
@@ -748,12 +762,18 @@ def live_sync(filepath, interval=15):
                         log(f"  ⏳ TABANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
                         suppress_floor_update = True
                     else:
-                        log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
-                        _send_realtime_notification(
-                            ticker, "taban_acilma",
-                            f"🔒 {ticker} Tabana Kitledi!",
-                            f"Son: {son_str} TL | Fark: {fark_str}",
-                        )
+                        last_t = floor_lock_cd.get(ticker, 0)
+                        if time.time() - last_t >= COOLDOWN_SECONDS:
+                            log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
+                            _send_realtime_notification(
+                                ticker, "taban_acilma",
+                                f"🔒 {ticker} Tabana Kitledi!",
+                                f"Son: {son_str} TL | Fark: {fark_str}",
+                            )
+                            floor_lock_cd[ticker] = time.time()
+                        else:
+                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                            log(f"  ⏳ TABANA KİTLEDİ ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
                 # 2b. Taban Kalktı: önceki döngü tabandaydı, şimdi değil
                 elif was_floor and not hit_floor:
@@ -761,12 +781,18 @@ def live_sync(filepath, interval=15):
                         log(f"  ⏳ TABAN KALKTI ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
                         suppress_floor_update = True
                     else:
-                        log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
-                        _send_realtime_notification(
-                            ticker, "taban_acilma",
-                            f"📈 {ticker} Taban Kalktı!",
-                            f"Son: {son_str} TL | Fark: {fark_str}",
-                        )
+                        last_t = floor_break_cd.get(ticker, 0)
+                        if time.time() - last_t >= COOLDOWN_SECONDS:
+                            log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
+                            _send_realtime_notification(
+                                ticker, "taban_acilma",
+                                f"📈 {ticker} Taban Kalktı!",
+                                f"Son: {son_str} TL | Fark: {fark_str}",
+                            )
+                            floor_break_cd[ticker] = time.time()
+                        else:
+                            remaining = COOLDOWN_SECONDS - (time.time() - last_t)
+                            log(f"  ⏳ TABAN KALKTI ama cooldown (anti-spam): {ticker} ({remaining:.0f}sn kaldı)")
 
                 # 3. Yüzde düşüş: Günün en yükseğinden %4 ve %7 eşik (gün içi 1 kere)
                 gun_ey = row.get("gun_en_yuksek")
