@@ -11,7 +11,7 @@ from decimal import Decimal
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ipo import IPO, IPOBroker, IPOAllocation, IPOCeilingTrack, DeletedIPO
@@ -531,21 +531,34 @@ class IPOService:
             if ipo:
                 ipo.senet_sayisi = senet_sayisi
 
-        # Kumulatif EDO hesapla: onceki gunlerin toplam hacmi + bugunun hacmi
-        if gunluk_adet and senet_sayisi and senet_sayisi > 0 and ipo:
-            prev_cumulative = ipo.cumulative_volume or 0
-            # Ayni gun icin guncelleme mi yoksa yeni gun mu?
-            # Eger track zaten gunluk_adet'e sahipse, farki ekle
-            old_gunluk = 0
-            if track.id and hasattr(track, '_sa_instance_state') and not track._sa_instance_state.pending:
-                # Mevcut kayit guncelleniyor — eski gunluk adeti cikar
-                from sqlalchemy import inspect as sa_inspect
-                hist = sa_inspect(track).attrs.gunluk_adet.history
-                if hist.deleted:
-                    old_gunluk = hist.deleted[0] or 0
-            new_cumulative = prev_cumulative - old_gunluk + gunluk_adet
-            ipo.cumulative_volume = new_cumulative
-            track.cumulative_edo_pct = (new_cumulative / senet_sayisi) * 100
+        # Kumulatif EDO hesapla — SUM sorgusuyla (history tracking yerine)
+        senet = senet_sayisi or (ipo.senet_sayisi if ipo else None)
+        has_adet = gunluk_adet or track.gunluk_adet  # mevcut veya yeni
+        if has_adet and senet and senet > 0 and ipo:
+            # Once bu track'i flush et ki SUM sorgusunda yeni deger gorunsun
+            await self.db.flush()
+
+            # Tum gunlerin gunluk_adet toplamini hesapla (her zaman dogru)
+            total_result = await self.db.execute(
+                select(
+                    sa_func.coalesce(sa_func.sum(IPOCeilingTrack.gunluk_adet), 0)
+                ).where(IPOCeilingTrack.ipo_id == ipo_id)
+            )
+            total_volume = int(total_result.scalar() or 0)
+            ipo.cumulative_volume = total_volume
+
+            # Her gun icin kumulatif EDO hesapla (running total)
+            all_tracks_result = await self.db.execute(
+                select(IPOCeilingTrack).where(
+                    IPOCeilingTrack.ipo_id == ipo_id
+                ).order_by(IPOCeilingTrack.trading_day)
+            )
+            running_total = 0
+            for t in all_tracks_result.scalars().all():
+                running_total += (t.gunluk_adet or 0)
+                t.cumulative_edo_pct = round(
+                    Decimal(running_total) / Decimal(senet) * 100, 2
+                )
 
         await self.db.flush()
         return track
