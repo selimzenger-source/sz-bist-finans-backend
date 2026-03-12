@@ -2894,37 +2894,6 @@ async def send_realtime_notification(
 
     notif_service = NotificationService(db)
 
-    # Bu IPO + bildirim tipi icin aktif aboneleri bul
-    # NOT: muted.isnot(True) kullan — NULL degerler False gibi davransin
-    #       (muted kolonu sonradan eklendiyse eski kayitlarda NULL olabilir)
-    stock_notif_result = await db.execute(
-        select(StockNotificationSubscription).where(
-            and_(
-                or_(
-                    # Bu IPO icin spesifik abone
-                    and_(
-                        StockNotificationSubscription.ipo_id == ipo.id,
-                        StockNotificationSubscription.notification_type == data.notification_type,
-                    ),
-                    # Paket aboneleri — bundle (3 aylik/yillik) tum halka arzlar icin
-                    StockNotificationSubscription.is_annual_bundle == True,
-                ),
-                StockNotificationSubscription.is_active == True,
-                # muted=NULL veya muted=False olanlari al (True olanlari atla)
-                or_(
-                    StockNotificationSubscription.muted == False,
-                    StockNotificationSubscription.muted.is_(None),
-                ),
-            )
-        )
-    )
-    active_subs = list(stock_notif_result.scalars().all())
-
-    logging.info(
-        "[REALTIME-NOTIF] %s %s — %d abone bulundu (ipo_id=%s)",
-        data.ticker, data.notification_type, len(active_subs), ipo.id,
-    )
-
     notifications_sent = 0
     errors = 0
     skip_reasons = {
@@ -2937,99 +2906,186 @@ async def send_realtime_notification(
         "toggle_off": 0,
         "send_fail": 0,
     }
-
-    # Dedup — ayni kullaniciya 2 kere gonderme
     notified_user_ids: set = set()
-
     _now_utc = datetime.now(timezone.utc)
+    total_target = 0
 
-    for sub in active_subs:
-        # Suresi dolmus mu? (scheduler saatte 1 temizliyor ama arada kacabilir)
-        if sub.expires_at:
-            # expires_at timezone-aware mi kontrol et
-            sub_expires = sub.expires_at
-            if sub_expires.tzinfo is None:
-                # Naive datetime — UTC olarak yorumla
-                from datetime import timezone as _tz
-                sub_expires = sub_expires.replace(tzinfo=_tz.utc)
-            if sub_expires < _now_utc:
-                sub.is_active = False
-                skip_reasons["expired"] += 1
+    # =========================================================
+    # FREE_FOR_ALL modu — tum kullanicilara gonder (EDO %1 gibi)
+    # =========================================================
+    if data.free_for_all:
+        all_users_result = await db.execute(
+            select(User).where(
+                User.notifications_enabled == True,
+            )
+        )
+        all_users = list(all_users_result.scalars().all())
+        total_target = len(all_users)
+
+        logging.info(
+            "[REALTIME-NOTIF] FREE_FOR_ALL: %s %s — %d kullanici hedefleniyor",
+            data.ticker, data.notification_type, total_target,
+        )
+
+        for user in all_users:
+            # Kullanici ucretsiz EDO bildirimini kapatmis mi?
+            if not getattr(user, "notify_edo_free", True):
+                skip_reasons["toggle_off"] += 1
                 continue
 
-        # Bundle aboneliklerde tip bazli mute kontrolu
-        if sub.muted_types:
+            fcm = (user.fcm_token or "").strip()
+            expo = (user.expo_push_token or "").strip()
+            if not fcm and not expo:
+                skip_reasons["no_token"] += 1
+                continue
+
+            if user.id in notified_user_ids:
+                skip_reasons["dedup"] += 1
+                continue
+
             try:
-                muted_list = _json.loads(sub.muted_types)
-                if data.notification_type in muted_list:
-                    skip_reasons["muted_type"] += 1
-                    continue  # Bu tip mute edilmis, atla
-            except (ValueError, TypeError):
-                pass
-
-        if sub.user_id in notified_user_ids:
-            skip_reasons["dedup"] += 1
-            continue
-
-        notif_title = data.title
-        notif_body = data.body
-
-        user_result = await db.execute(
-            select(User).where(User.id == sub.user_id)
-        )
-        user = user_result.scalar_one_or_none()
-        if not user:
-            skip_reasons["no_user"] += 1
-            continue
-        # Token kontrolu — FCM veya Expo token olmali
-        fcm = (user.fcm_token or "").strip()
-        expo = (user.expo_push_token or "").strip()
-        if not fcm and not expo:
-            skip_reasons["no_token"] += 1
-            continue
-        # Master switch kontrolu — tum bildirimler kapaliysa atla
-        if not user.notifications_enabled:
-            skip_reasons["master_off"] += 1
-            continue
-
-        # Kullanici bazli bildirim tipi toggle kontrolu
-        _type_toggle_map = {
-            "tavan_bozulma": "notify_ceiling_break",
-            "taban_acilma": "notify_taban_break",
-            "gunluk_acilis_kapanis": "notify_daily_open_close",
-            "yuzde_dusus": "notify_percent_drop",
-        }
-        _toggle_field = _type_toggle_map.get(data.notification_type)
-        if _toggle_field and not getattr(user, _toggle_field, True):
-            skip_reasons["toggle_off"] += 1
-            continue  # Kullanici bu bildirim tipini kapatmis
-
-        try:
-            success = await notif_service._send_to_user(
-                user=user,
-                title=notif_title,
-                body=notif_body,
-                data={
-                    "type": "stock_notification",
-                    "notification_type": data.notification_type,
-                    "ticker": data.ticker,
-                    "ipo_id": str(ipo.id),
-                    "screen": "halka-arz-detay",
-                },
-                channel_id="ceiling_alerts_v2",
-                category="ipo",
-            )
-            if success:
-                notifications_sent += 1
-                notified_user_ids.add(sub.user_id)
-            else:
+                success = await notif_service._send_to_user(
+                    user=user,
+                    title=data.title,
+                    body=data.body,
+                    data={
+                        "type": "stock_notification",
+                        "notification_type": data.notification_type,
+                        "ticker": data.ticker,
+                        "ipo_id": str(ipo.id),
+                        "screen": "halka-arz-detay",
+                    },
+                    channel_id="ceiling_alerts_v2",
+                    category="ipo",
+                )
+                if success:
+                    notifications_sent += 1
+                    notified_user_ids.add(user.id)
+                else:
+                    errors += 1
+                    skip_reasons["send_fail"] += 1
+            except Exception as e:
                 errors += 1
                 skip_reasons["send_fail"] += 1
-            sub.notified_count = (sub.notified_count or 0) + 1
-        except Exception as e:
-            errors += 1
-            skip_reasons["send_fail"] += 1
-            logging.warning(f"Bildirim gonderilemedi (user={user.id}): {e}")
+                logging.warning(f"FREE bildirim gonderilemedi (user={user.id}): {e}")
+
+    else:
+        # =========================================================
+        # NORMAL mod — sadece abonelere gonder
+        # =========================================================
+        # Bu IPO + bildirim tipi icin aktif aboneleri bul
+        stock_notif_result = await db.execute(
+            select(StockNotificationSubscription).where(
+                and_(
+                    or_(
+                        # Bu IPO icin spesifik abone
+                        and_(
+                            StockNotificationSubscription.ipo_id == ipo.id,
+                            StockNotificationSubscription.notification_type == data.notification_type,
+                        ),
+                        # Paket aboneleri — bundle (3 aylik/yillik) tum halka arzlar icin
+                        StockNotificationSubscription.is_annual_bundle == True,
+                    ),
+                    StockNotificationSubscription.is_active == True,
+                    # muted=NULL veya muted=False olanlari al (True olanlari atla)
+                    or_(
+                        StockNotificationSubscription.muted == False,
+                        StockNotificationSubscription.muted.is_(None),
+                    ),
+                )
+            )
+        )
+        active_subs = list(stock_notif_result.scalars().all())
+        total_target = len(active_subs)
+
+        logging.info(
+            "[REALTIME-NOTIF] %s %s — %d abone bulundu (ipo_id=%s)",
+            data.ticker, data.notification_type, total_target, ipo.id,
+        )
+
+        for sub in active_subs:
+            # Suresi dolmus mu?
+            if sub.expires_at:
+                sub_expires = sub.expires_at
+                if sub_expires.tzinfo is None:
+                    from datetime import timezone as _tz
+                    sub_expires = sub_expires.replace(tzinfo=_tz.utc)
+                if sub_expires < _now_utc:
+                    sub.is_active = False
+                    skip_reasons["expired"] += 1
+                    continue
+
+            # Bundle aboneliklerde tip bazli mute kontrolu
+            if sub.muted_types:
+                try:
+                    muted_list = _json.loads(sub.muted_types)
+                    if data.notification_type in muted_list:
+                        skip_reasons["muted_type"] += 1
+                        continue
+                except (ValueError, TypeError):
+                    pass
+
+            if sub.user_id in notified_user_ids:
+                skip_reasons["dedup"] += 1
+                continue
+
+            notif_title = data.title
+            notif_body = data.body
+
+            user_result = await db.execute(
+                select(User).where(User.id == sub.user_id)
+            )
+            user = user_result.scalar_one_or_none()
+            if not user:
+                skip_reasons["no_user"] += 1
+                continue
+            fcm = (user.fcm_token or "").strip()
+            expo = (user.expo_push_token or "").strip()
+            if not fcm and not expo:
+                skip_reasons["no_token"] += 1
+                continue
+            if not user.notifications_enabled:
+                skip_reasons["master_off"] += 1
+                continue
+
+            # Kullanici bazli bildirim tipi toggle kontrolu
+            _type_toggle_map = {
+                "tavan_bozulma": "notify_ceiling_break",
+                "taban_acilma": "notify_taban_break",
+                "gunluk_acilis_kapanis": "notify_daily_open_close",
+                "yuzde_dusus": "notify_percent_drop",
+            }
+            _toggle_field = _type_toggle_map.get(data.notification_type)
+            if _toggle_field and not getattr(user, _toggle_field, True):
+                skip_reasons["toggle_off"] += 1
+                continue
+
+            try:
+                success = await notif_service._send_to_user(
+                    user=user,
+                    title=notif_title,
+                    body=notif_body,
+                    data={
+                        "type": "stock_notification",
+                        "notification_type": data.notification_type,
+                        "ticker": data.ticker,
+                        "ipo_id": str(ipo.id),
+                        "screen": "halka-arz-detay",
+                    },
+                    channel_id="ceiling_alerts_v2",
+                    category="ipo",
+                )
+                if success:
+                    notifications_sent += 1
+                    notified_user_ids.add(sub.user_id)
+                else:
+                    errors += 1
+                    skip_reasons["send_fail"] += 1
+                sub.notified_count = (sub.notified_count or 0) + 1
+            except Exception as e:
+                errors += 1
+                skip_reasons["send_fail"] += 1
+                logging.warning(f"Bildirim gonderilemedi (user={user.id}): {e}")
 
     await db.flush()
 
@@ -3038,7 +3094,7 @@ async def send_realtime_notification(
     logging.info(
         "[REALTIME-NOTIF] SONUC: %s %s — sent=%d, errors=%d, subs=%d%s",
         data.ticker, data.notification_type,
-        notifications_sent, errors, len(active_subs),
+        notifications_sent, errors, total_target,
         f" | skip: {skip_summary}" if skip_summary else "",
     )
 
@@ -3050,7 +3106,8 @@ async def send_realtime_notification(
             await send_admin_message(
                 f"{status_emoji} <b>Realtime Bildirim</b>\n"
                 f"Ticker: {data.ticker} | Tip: {data.notification_type}\n"
-                f"Abone: {len(active_subs)} | Gönderildi: {notifications_sent} | Hata: {errors}\n"
+                f"Hedef: {total_target} | Gönderildi: {notifications_sent} | Hata: {errors}\n"
+                + (f"Mod: FREE_FOR_ALL\n" if data.free_for_all else "")
                 + (f"Skip: {skip_summary}" if skip_summary else "")
             )
         except Exception:
@@ -3060,7 +3117,8 @@ async def send_realtime_notification(
         "status": "ok",
         "ticker": data.ticker,
         "notification_type": data.notification_type,
-        "active_subscribers": len(active_subs),
+        "active_subscribers": total_target,
+        "free_for_all": data.free_for_all,
         "notifications_sent": notifications_sent,
         "errors": errors,
         "notified_users": list(notified_user_ids),

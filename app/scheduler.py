@@ -2586,18 +2586,29 @@ async def daily_ceiling_update():
                                     # Push bildirim gonder
                                     try:
                                         import httpx
-                                        edo_msgs = {
-                                            1: f"E.D.O %1'i Aştı!",
-                                            3: f"E.D.O %3'ü Aştı!",
-                                            10: f"E.D.O %10'u Aştı!",
-                                            25: f"E.D.O %25'i Aştı! Senetlerin çeyreği el değiştirdi",
-                                            50: f"E.D.O %50'yi Aştı! Senetlerin yarısı el değiştirdi",
-                                            75: f"E.D.O %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
-                                            100: f"E.D.O %100'ü Aştı! Tüm senetler el değiştirdi",
-                                            125: f"E.D.O %125'i Aştı! Senetler 1.25 kez döndü",
-                                        }
-                                        title = f"{ipo.ticker} {edo_msgs.get(threshold, f'E.D.O %{threshold} aşıldı')}"
-                                        body = f"Kümülatif E.D.O: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
+                                        # Turkce esik eki
+                                        _edo_suffix = {1: "'i", 3: "'ü", 10: "'u", 25: "'i", 50: "'yi", 75: "'i", 100: "'ü", 125: "'i"}
+
+                                        if threshold == 1:
+                                            # %1 — FREE: tum kullanicilara gonder
+                                            title = f"{ipo.ticker} El Değiştirme Oranı %{threshold}{_edo_suffix.get(threshold, '')} Aştı!"
+                                            body = f"Anlık E.D.O: %{edo_pct:.2f} — 8 farklı eşik bildirimi için E.D.O Paketini aç!"
+                                            is_free = True
+                                        else:
+                                            # Diger esikler — sadece abonelere
+                                            edo_msgs = {
+                                                3: "El Değiştirme Oranı %3'ü Aştı!",
+                                                10: "El Değiştirme Oranı %10'u Aştı!",
+                                                25: "El Değiştirme Oranı %25'i Aştı! Senetlerin çeyreği el değiştirdi",
+                                                50: "El Değiştirme Oranı %50'yi Aştı! Senetlerin yarısı el değiştirdi",
+                                                75: "El Değiştirme Oranı %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
+                                                100: "El Değiştirme Oranı %100'ü Aştı! Tüm senetler el değiştirdi",
+                                                125: "El Değiştirme Oranı %125'i Aştı! Senetler 1.25 kez döndü",
+                                            }
+                                            title = f"{ipo.ticker} {edo_msgs.get(threshold, f'El Değiştirme Oranı %{threshold} aşıldı')}"
+                                            body = f"Kümülatif E.D.O: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
+                                            is_free = False
+
                                         import os
                                         api_url = os.getenv("API_URL", "https://sz-bist-finans-api.onrender.com")
                                         admin_pw = os.getenv("ADMIN_PASSWORD", "")
@@ -2610,6 +2621,7 @@ async def daily_ceiling_update():
                                                     "notification_type": "el_degistirme",
                                                     "title": title,
                                                     "body": body,
+                                                    "free_for_all": is_free,
                                                 },
                                             )
                                     except Exception as notif_err:

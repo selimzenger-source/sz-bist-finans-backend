@@ -39,6 +39,7 @@ class User(Base):
     notify_taban_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Taban acilinca bildirimi")
     notify_daily_open_close: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunluk acilis kapanis bildirimi")
     notify_percent_drop: Mapped[bool] = mapped_column(Boolean, default=True, comment="Yuzde dusus bildirimi")
+    notify_edo_free: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretsiz EDO %1 bildirimi")
     notify_kap_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, comment="KAP takip listesi bildirimleri")
 
     # Hatirlatma zamanlari (son gun icin)

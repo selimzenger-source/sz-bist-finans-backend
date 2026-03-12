@@ -342,6 +342,7 @@ class UserUpdate(BaseModel):
     notify_taban_break: Optional[bool] = None
     notify_daily_open_close: Optional[bool] = None
     notify_percent_drop: Optional[bool] = None
+    notify_edo_free: Optional[bool] = None
     # Hatirlatma zamanları
     reminder_30min: Optional[bool] = None
     reminder_1h: Optional[bool] = None
@@ -377,6 +378,7 @@ class UserOut(BaseModel):
     notify_taban_break: bool = True
     notify_daily_open_close: bool = True
     notify_percent_drop: bool = True
+    notify_edo_free: bool = True
     reminder_30min: bool = False
     reminder_1h: bool = True
     reminder_2h: bool = False
@@ -485,6 +487,7 @@ class RealtimeNotifRequest(BaseModel):
     title: str
     body: str
     sub_event: Optional[str] = None  # yuzde_dusus icin: "pct4" veya "pct7"
+    free_for_all: bool = False  # True ise tum kullanicilara gonder (EDO %1 gibi ucretsiz esikler)
 
 
 class StockNotificationCreate(BaseModel):

@@ -576,6 +576,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v47 migration: notify_edo_free kolonu (ucretsiz EDO %1 bildirimi tercihi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_edo_free BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
