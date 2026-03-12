@@ -551,6 +551,31 @@ async def init_db():
         except Exception:
             pass
 
+        # v46 migration: E.D.O (El Degistirme Orani) kolonlari
+        try:
+            # IPO tablosu — senet_sayisi, cumulative_volume, edo_notified_thresholds
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS senet_sayisi BIGINT")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS cumulative_volume BIGINT DEFAULT 0")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS edo_notified_thresholds TEXT")
+            )
+            # Ceiling track tablosu — gunluk_adet, senet_sayisi, cumulative_edo_pct
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS gunluk_adet BIGINT")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS senet_sayisi BIGINT")
+            )
+            await conn.execute(
+                text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS cumulative_edo_pct NUMERIC(10,2)")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

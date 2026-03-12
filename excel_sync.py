@@ -16,6 +16,8 @@ Excel Formati (Matriks):
   J: G.EN YUKSEK   (Gun ici en yuksek fiyat)
   K: ALISTAKI LOT  (1. kademe alis lotu)
   L: SATISTAKI LOT (1. kademe satis lotu)
+  M: GUNLUK ADET   (Gunluk islem adedi — E.D.O icin)
+  N: SENET SAYISI   (Toplam senet sayisi — E.D.O icin)
 
 Canli mod (--live):
   win32com ile acik Excel'den canli Matriks verilerini okur.
@@ -184,6 +186,7 @@ def read_matriks_excel_live(filepath):
     Sutunlar:
     A: ILK ISLEM | B: HISSE | C: TAVAN | D: TABAN | E: ALIS | F: SATIS
     G: SON | H: %G FARK | I: TARIH | J: G.EN YUKSEK | K: ALISTAKI LOT | L: SATISTAKI LOT
+    M: GUNLUK ADET | N: SENET SAYISI
 
     Returns: list of dict
     """
@@ -263,6 +266,14 @@ def read_matriks_excel_live(filepath):
         satis_lot_val = sheet.Range(f"L{row_idx}").Value
         satis_lot = int(float(satis_lot_val)) if satis_lot_val and float(satis_lot_val) > 0 else None
 
+        # M: GUNLUK ADET (E.D.O icin)
+        gunluk_adet_val = sheet.Range(f"M{row_idx}").Value
+        gunluk_adet = int(float(gunluk_adet_val)) if gunluk_adet_val and float(gunluk_adet_val) > 0 else None
+
+        # N: SENET SAYISI (E.D.O icin)
+        senet_sayisi_val = sheet.Range(f"N{row_idx}").Value
+        senet_sayisi = int(float(senet_sayisi_val)) if senet_sayisi_val and float(senet_sayisi_val) > 0 else None
+
         rows.append({
             "ticker": ticker,
             "tavan_limit": tavan_limit,
@@ -275,6 +286,8 @@ def read_matriks_excel_live(filepath):
             "gun_en_yuksek": gun_en_yuksek,
             "alis_lot": alis_lot,
             "satis_lot": satis_lot,
+            "gunluk_adet": gunluk_adet,
+            "senet_sayisi": senet_sayisi,
             "row_idx": row_idx,
         })
 
@@ -694,6 +707,14 @@ def live_sync(filepath, interval=15):
                     track["alis_lot"] = alis_lot_raw
                 if satis_lot_raw:
                     track["satis_lot"] = satis_lot_raw
+
+                # E.D.O: Gunluk adet ve senet sayisi (M ve N sutunlari)
+                gunluk_adet_raw = row.get("gunluk_adet")
+                senet_sayisi_raw = row.get("senet_sayisi")
+                if gunluk_adet_raw:
+                    track["gunluk_adet"] = gunluk_adet_raw
+                if senet_sayisi_raw:
+                    track["senet_sayisi"] = senet_sayisi_raw
 
                 status = "TAVAN" if hit_ceiling else ("TABAN" if hit_floor else "NORMAL")
                 changed_tracks.append(track)
