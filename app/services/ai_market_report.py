@@ -29,6 +29,9 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Turkiye saat dilimi (UTC+3)
+_TR_TZ = timezone(timedelta(hours=3))
+
 # ────────────────────────────────────────────
 # Rapor Cache — aksam raporu → sabah raporu baglantisi
 # ────────────────────────────────────────────
@@ -886,22 +889,34 @@ KURAL:
 4. Halka arz performanslarini SADECE verilen verilerden yaz
 5. Gunun onemli haberlerini RSS + KAP + Tavily kaynaklarindan ozetle
 6. Hic yatirim tavsiyesi VERME — "yatirim tavsiyesi degildir" notu ekle
-7. Tweet formati: max 3800 karakter (gorsel ile 4000 limiti var)
-8. Yapilandirilmis format kullan: basliklar ve maddeler ile
+7. Rapor 2000-3000 karakter arasi olmali (gorsel PNG'ye cevrildigi icin 3000'i ASMA!)
+8. Yapilandirilmis format kullan: emoji basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
 10. Sonda mutlaka szalgo.net.tr linki olmali
 11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
 HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
-- Hashtag'leri AGRESIF kullan! X algoritmasi hashtag'li icerikleri KATKAT daha fazla kisi gosteriyor.
 - Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
 - IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
 - Yuksek etkili KAP haberlerindeki sirket kodlarini hashtag yap
-- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #hisse #yatirim #BorsaIstanbul #HalkaArz #piyasa #finans
+- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul
 - Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
 - MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
 - Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
+
+GORSEL FORMAT KURALI (COK ONEMLI — RAPOR PNG GORSELE CEVRILIYOR):
+Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun gorunsun diye bu kurallara KESINLIKLE uy:
+1. Her bolum MUTLAKA dogru emoji ile baslamali (🇹🇷, 🇺🇸, 💰, 📰, 📅, 🏦, 📌). Emoji olmadan baslik yazma!
+2. Bolumler arasinda BOS SATIR birak — bolumler bitisik olmamali
+3. Haber ve halka arz maddelerinde MUTLAKA • (bullet) karakteri ile basla — tire (-) kullanma
+4. Her madde AYRI SATIRDA olmali — maddeleri birlestirip tek paragraf yapma
+5. Her bolum MAKSIMUM 4-5 satir olsun — cok uzun paragraflar gorselde okunmaz
+6. Halka arz bullet'lari MUTLAKA "#TICKER: aciklama" formatinda olsun (hashtag + iki nokta + kisa bilgi)
+7. Haber bullet'lari: mumkunse "#TICKER — haber ozeti" veya "Konu: kisa aciklama" formatinda
+8. Toplam rapor 2000-3000 karakter arasi olmali — COZUNURLUK SINIRI: 3000 karakteri ASMA!
+9. Sondaki hashtag satirini EN FAZLA 8-10 hashtag ile sinirla — fazlasi gorselde tasma yapar
+10. ⚠️ Tavsiye notu ve szalgo.net.tr AYRI SATIRLARDA ve EN SONDA olmali
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -1052,7 +1067,7 @@ KURAL:
 4. Halka arz performanslarini SADECE verilen verilerden yaz
 5. Gunun onemli haberlerini RSS + KAP kaynaklarindan ozetle
 6. Hic yatirim tavsiyesi VERME — "yatirim tavsiyesi degildir" notu ekle
-7. Tweet formati: max 3800 karakter (gorsel ile 4000 limiti var)
+7. Rapor 2000-3000 karakter arasi olmali (gorsel PNG'ye cevrildigi icin 3000'i ASMA!)
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
 10. Sonda mutlaka szalgo.net.tr linki olmali
@@ -1060,13 +1075,25 @@ KURAL:
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
 HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
-- Hashtag'leri AGRESIF kullan! X algoritmasi hashtag'li icerikleri KATKAT daha fazla kisi gosteriyor.
 - Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
 - IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
 - Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #hisse #yatirim #BorsaIstanbul #HalkaArz #piyasa #finans
 - Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
 - MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
 - Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
+
+GORSEL FORMAT KURALI (COK ONEMLI — RAPOR PNG GORSELE CEVRILIYOR):
+Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun gorunsun diye bu kurallara KESINLIKLE uy:
+1. Her bolum MUTLAKA dogru emoji ile baslamali (🇹🇷, 🇺🇸, 💰, 📰, 📅, 🏦, 📌). Emoji olmadan baslik yazma!
+2. Bolumler arasinda BOS SATIR birak — bolumler bitisik olmamali
+3. Haber ve halka arz maddelerinde MUTLAKA • (bullet) karakteri ile basla — tire (-) kullanma
+4. Her madde AYRI SATIRDA olmali — maddeleri birlestirip tek paragraf yapma
+5. Her bolum MAKSIMUM 4-5 satir olsun — cok uzun paragraflar gorselde okunmaz
+6. Halka arz bullet'lari MUTLAKA "#TICKER: aciklama" formatinda olsun (hashtag + iki nokta + kisa bilgi)
+7. Haber bullet'lari: mumkunse "#TICKER — haber ozeti" veya "Konu: kisa aciklama" formatinda
+8. Toplam rapor 2000-3000 karakter arasi olmali — COZUNURLUK SINIRI: 3000 karakteri ASMA!
+9. Sondaki hashtag satirini EN FAZLA 8-10 hashtag ile sinirla — fazlasi gorselde tasma yapar
+10. ⚠️ Tavsiye notu ve szalgo.net.tr AYRI SATIRLARDA ve EN SONDA olmali
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -1585,6 +1612,293 @@ async def _collect_all_data() -> tuple:
     return market_data, ipos, kap_news, telegram_news, rss_headlines, econ_calendar, ipo_events
 
 
+def _condense_bullet(text: str, max_rest: int = 55) -> str:
+    """Haber/halka arz bullet'ini kisa formata cevir.
+
+    "#TICKER Sirket Adi: uzun aciklama..." → "• #TICKER — kisa bilgi"
+    "Genel haber: uzun aciklama..." → "• Genel haber bilgisi"
+    """
+    import re
+
+    ticker_m = re.match(r'(#[A-Z]{3,6})\b', text)
+    if ticker_m:
+        ticker = ticker_m.group(1)
+        rest = text[len(ticker):].strip()
+        # Parantez icindeki sirket adini atla: "(Gentas Kimya)"
+        rest = re.sub(r'^\s*\([^)]+\)\s*', '', rest).strip()
+        rest = rest.lstrip(":—–- ").strip()
+        # Anlamli kesme: ilk cumle sonu (buyuk harfle devam eden noktadan kes)
+        sentences = re.split(r'(?<=[.!])\s+(?=[A-ZÇŞĞÜÖİ])', rest)
+        short = sentences[0] if sentences else rest
+        # Virgulde kes AMA sayi virgulunu atla (12,36 gibi)
+        for i, ch in enumerate(short):
+            if ch == "," and i > 8 and i < max_rest:
+                # Sayi virgulu mu? (digit,digit)
+                if i > 0 and short[i-1].isdigit() and i+1 < len(short) and short[i+1].isdigit():
+                    continue
+                short = short[:i]
+                break
+        if len(short) > max_rest:
+            short = short[:max_rest - 3] + "..."
+        return f"\u2022 {ticker} \u2014 {short}" if short else ""
+    else:
+        # Ticker yoksa kisa metin
+        short = text
+        for i, ch in enumerate(short):
+            if ch in (",", ".") and i > 10 and i < 55:
+                if ch == "," and i > 0 and short[i-1].isdigit() and i+1 < len(short) and short[i+1].isdigit():
+                    continue
+                short = short[:i]
+                break
+        if len(short) > 55:
+            short = short[:52] + "..."
+        return f"\u2022 {short}" if short else ""
+
+
+def _extract_short_summary(report_text: str, report_type: str = "morning") -> str:
+    """AI rapor metninden kisa tweet ozeti cikarir (~600-800 char).
+
+    Format:
+        🏦 Acilis Analizi | DD Mart
+        [BIST 100 hook — 1-2 cumle]
+        💵 Dolar X | Altin X$ | S&P %X | Nasdaq %X
+        📌 One Cikanlar:
+        • #TICKER — kisa bilgi
+        🏗 Halka Arz Takibi:
+        • #TICKER — kisa bilgi
+        ⏰ Ekonomik takvim bilgisi
+        ⚠️ Yatirim tavsiyesi degildir.
+        szalgo.net.tr
+        #HalkaArz #borsa #BIST100
+    """
+    import re
+
+    full_text = report_text.strip()
+    lines = full_text.split("\n")
+    now_tr = datetime.now(_TR_TZ)
+    date_str = now_tr.strftime("%d %B").replace(
+        "January", "Ocak").replace("February", "Subat").replace("March", "Mart"
+    ).replace("April", "Nisan").replace("May", "Mayis").replace("June", "Haziran"
+    ).replace("July", "Temmuz").replace("August", "Agustos").replace("September", "Eylul"
+    ).replace("October", "Ekim").replace("November", "Kasim").replace("December", "Aralik")
+
+    title_emoji = "\U0001f3e6"  # 🏦
+    title = "Acilis Analizi" if report_type == "morning" else "Kapanis Raporu"
+
+    # ── Section'lari bol (emoji veya **bold** header) ──
+    _EMOJI_SECTIONS = ["🇹🇷", "🔴", "🇺🇸", "💰", "💵", "📰", "📈", "🏦", "📅", "⏰", "📌", "🚀", "🔮"]
+    _BOLD_KEYWORDS = {
+        "bist 100": "bist", "xu100": "bist",
+        "abd piyasa": "abd",
+        "dolar": "dolar", "altin": "dolar", "altın": "dolar",
+        "onemli gelis": "haber", "önemli gelis": "haber", "önemli gelişme": "haber",
+        "günün gelişme": "haber", "gunun gelisme": "haber",
+        "halka arz": "halka_arz",
+        "ekonomik takvim": "takvim",
+        "kritik nokta": "kritik", "bugünün kritik": "kritik", "bugunun kritik": "kritik",
+    }
+
+    sections_raw: dict[str, list[str]] = {}  # key → lines
+    current_key = "hook"
+    sections_raw["hook"] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Emoji section header?
+        new_key = None
+        for em in _EMOJI_SECTIONS:
+            if stripped.startswith(em):
+                if em in ("🇹🇷", "🔴"):
+                    new_key = "bist"
+                elif em == "🇺🇸":
+                    new_key = "abd"
+                elif em in ("💰", "💵"):
+                    new_key = "dolar"
+                elif em == "📰":
+                    new_key = "haber"
+                elif em in ("📈", "🏦"):
+                    new_key = "halka_arz"
+                elif em in ("📅", "⏰"):
+                    new_key = "takvim"
+                elif em in ("📌", "🚀"):
+                    new_key = "kritik"
+                elif em == "🔮":
+                    new_key = "beklenti"
+                break
+
+        # **Bold** section header?
+        if not new_key and stripped.startswith("**") and stripped.endswith("**"):
+            inner = stripped.strip("* ").lower()
+            for kw, key in _BOLD_KEYWORDS.items():
+                if kw in inner:
+                    new_key = key
+                    break
+
+        # Footer kontrolu
+        footer_marks = ["Sizce", "sizce", "Yatirim tavsiyesi", "Yatırım tavsiyesi",
+                        "yatirim tavsiyesi", "yatırım tavsiyesi", "💬", "❓", "⚠"]
+        is_footer = any(stripped.startswith(m) for m in footer_marks)
+        if is_footer:
+            new_key = "footer"
+
+        if new_key:
+            current_key = new_key
+            if current_key not in sections_raw:
+                sections_raw[current_key] = []
+            continue
+
+        if current_key not in sections_raw:
+            sections_raw[current_key] = []
+        sections_raw[current_key].append(stripped)
+
+    # ── 1. HOOK (BIST 100 ozeti) ──
+    bist_text = " ".join(sections_raw.get("bist", [])).replace("**", "")
+    bist_text = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', bist_text).strip()
+    # Ilk 1-2 cumleyi al (rakamli sira numaralarinda kesme)
+    hook_sentences = re.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİK])', bist_text)
+    hook = hook_sentences[0].strip() if hook_sentences else ""
+    # Cok kisaysa 2. cumleyi ekle
+    if hook and len(hook) < 80 and len(hook_sentences) > 1:
+        hook = hook + " " + hook_sentences[1].strip()
+    if not hook:
+        # Fallback: rapor basindaki hook
+        for line in sections_raw.get("hook", []):
+            clean = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', line).strip()
+            clean = clean.replace("**", "")
+            if clean and len(clean) > 10:
+                hook = clean
+                break
+    if len(hook) > 160:
+        hook = hook[:157] + "..."
+
+    # ── 2. DATA OZET SATIRI: Dolar X | Altin X$ | S&P %X | Nasdaq %X ──
+    combined_text = full_text.replace("**", "")
+
+    # Dolar/TL — "44,11" veya "44.11" pattern
+    dolar_m = re.search(r'(?:dolar|usd|dolar/tl)[^0-9]{0,50}?(\d{2,3}[.,]\d{1,2})', combined_text, re.IGNORECASE)
+    dolar_val = dolar_m.group(1).replace(",", ".") if dolar_m else ""
+
+    # Altin — "5150$" veya "5.150 dolar"
+    altin_m = re.search(r'(?:alt[ıi]n|ons)[^0-9]{0,40}?(\d{1,2}\.?\d{3})\s*[\$]?', combined_text, re.IGNORECASE)
+    altin_val = altin_m.group(1) if altin_m else ""
+
+    # S&P 500 — "-%0,08" veya "+0.08%"
+    sp_m = re.search(r'S&P\s*500?\s*[^0-9%+-]{0,15}?([+-]?\s*%?\s*\d+[.,]?\d*\s*%?)', combined_text)
+    sp_val = sp_m.group(1).replace(" ", "").strip() if sp_m else ""
+
+    # Nasdaq — "+%0,08" veya "-0.08%"
+    nq_m = re.search(r'Nasdaq\s*[^0-9%+-]{0,15}?([+-]?\s*%?\s*\d+[.,]?\d*\s*%?)', combined_text, re.IGNORECASE)
+    nq_val = nq_m.group(1).replace(" ", "").strip() if nq_m else ""
+
+    data_parts = []
+    if dolar_val:
+        data_parts.append(f"Dolar {dolar_val}")
+    if altin_val:
+        data_parts.append(f"Altin {altin_val}$")
+    if sp_val:
+        data_parts.append(f"S&P {sp_val}")
+    if nq_val:
+        data_parts.append(f"Nasdaq {nq_val}")
+    data_line = " | ".join(data_parts) if data_parts else ""
+
+    # ── 3. ONE CIKANLAR: Haber bullet'lari (kisa ve ozetli) ──
+    one_cikanlar = []
+    for line in sections_raw.get("haber", []):
+        if line.startswith("•") or line.startswith("-"):
+            clean = line.replace("**", "").strip()
+            clean = re.sub(r'[\U0001F300-\U0001F9FF]', '', clean).strip()
+            clean = clean.lstrip("•- ").strip()
+            short = _condense_bullet(clean)
+            if short:
+                one_cikanlar.append(short)
+            if len(one_cikanlar) >= 3:
+                break
+
+    # ── 4. HALKA ARZ: IPO bullet'lari (ticker + kisa bilgi) ──
+    halka_arz_lines = []
+    for line in sections_raw.get("halka_arz", []):
+        if line.startswith("•") or line.startswith("-"):
+            clean = line.replace("**", "").strip()
+            clean = re.sub(r'[\U0001F300-\U0001F9FF]', '', clean).strip()
+            clean = clean.lstrip("•- ").strip()
+            # Ticker yoksa (baslik satiri gibi "Tavan Serilerinde...") atla
+            if not re.match(r'#[A-Z]{3,6}\b', clean):
+                continue
+            short = _condense_bullet(clean, max_rest=40)
+            if short:
+                halka_arz_lines.append(short)
+            if len(halka_arz_lines) >= 4:
+                break
+
+    # ── 5. EKONOMIK TAKVIM one-liner ──
+    takvim_text = ""
+    takvim_raw = " ".join(sections_raw.get("takvim", []))
+    takvim_raw = takvim_raw.replace("**", "")
+    # Saat + olay pattern'leri cek
+    saat_olaylar = re.findall(r"saat\s+(\d{1,2}[:.]\d{2})\s*'?\s*(?:te|da|de|t[ea])?\s+(.{5,60}?)(?:\.|,|;|$)", takvim_raw, re.IGNORECASE)
+    if saat_olaylar:
+        takvim_parts = []
+        for saat, olay in saat_olaylar[:3]:
+            olay_clean = olay.strip()
+            # Gereksiz dolgu kelimeleri kes
+            for prefix in ["aciklanacak olan ", "açıklanacak olan ",
+                           "açıklanacak ", "aciklanacak "]:
+                if olay_clean.lower().startswith(prefix):
+                    olay_clean = olay_clean[len(prefix):]
+                    break
+            # Fazla uzunsa kisalt
+            if len(olay_clean) > 30:
+                olay_clean = olay_clean[:27] + "..."
+            takvim_parts.append(f"{saat} {olay_clean}")
+        takvim_text = " | ".join(takvim_parts)
+    else:
+        if takvim_raw and len(takvim_raw) > 10:
+            takvim_text = takvim_raw[:60]
+
+    # ── 6. HASHTAG'LER ──
+    all_tickers = set(re.findall(r'#([A-Z]{3,6})', report_text))
+    # Genel/sahte ticker'lari filtrele
+    exclude_tags = {"BIST100", "BIST", "HalkaArz", "BorsaIstanbul", "TCMB", "SPK"}
+    ticker_tags = " ".join(f"#{t}" for t in sorted(all_tickers - exclude_tags)[:6])
+
+    # ── TWEET MONTAJ ──
+    parts = [f"{title_emoji} {title} | {date_str}"]
+
+    if hook:
+        parts.append(hook)
+
+    if data_line:
+        parts.append(f"\U0001f4b5 {data_line}")  # 💵
+
+    if one_cikanlar:
+        parts.append("\U0001f4cc One Cikanlar:")  # 📌
+        for oc in one_cikanlar:
+            parts.append(oc)
+
+    if halka_arz_lines:
+        parts.append("\U0001f3d7 Halka Arz Takibi:")  # 🏗
+        for hl in halka_arz_lines:
+            parts.append(hl)
+
+    if takvim_text:
+        parts.append(f"\u23f0 {takvim_text}")  # ⏰
+
+    parts.append("\u26a0\ufe0f Yatirim tavsiyesi degildir.")  # ⚠️
+    parts.append("szalgo.net.tr")
+    parts.append(f"#HalkaArz #borsa #BIST100 {ticker_tags}".strip())
+
+    result = "\n".join(parts)
+
+    # 800 karakter limitini asmasin
+    if len(result) > 800:
+        result = result[:797] + "..."
+
+    return result
+
+
 async def send_morning_report_tweet():
     """Sabah acilis raporu tweeti gonderir (08:15 TR).
 
@@ -1630,13 +1944,35 @@ async def send_morning_report_tweet():
         logger.error("Sabah raporu uretilemedi — tweet atilmadi")
         return
 
+    # v8: Rapor metnini PNG görsele çevir, tweet metnini kısalt
+    from app.services.chart_image_generator import generate_report_image
+    report_image = generate_report_image(report_text, "morning")
+
+    if report_image:
+        short_text = _extract_short_summary(report_text, "morning")
+        tweet_text = short_text
+        tweet_image = report_image
+        logger.info("Sabah raporu: gorsel olusturuldu, kisa ozet hazir (%d char)", len(short_text))
+    else:
+        # Fallback: görsel oluşturulamazsa eski davranış
+        logger.warning("Sabah raporu gorseli olusturulamadi — eski format kullaniliyor")
+        tweet_text = report_text
+        tweet_image = _ACILIS_IMAGE
+
     from app.services.twitter_service import _safe_tweet_with_media
     success = _safe_tweet_with_media(
-        report_text,
-        _ACILIS_IMAGE,
+        tweet_text,
+        tweet_image,
         source="morning_market_report",
         force_send=True,
     )
+
+    # Görsel temp dosyasını temizle
+    if report_image and report_image != _ACILIS_IMAGE:
+        try:
+            os.remove(report_image)
+        except OSError:
+            pass
 
     if success:
         logger.info("Sabah acilis raporu tweeti basarili!")
@@ -1666,13 +2002,34 @@ async def send_evening_report_tweet():
     # Aksam raporunu cache'e kaydet — sabah raporu kullanacak
     save_report_to_cache("evening", report_text)
 
+    # v8: Rapor metnini PNG görsele çevir, tweet metnini kısalt
+    from app.services.chart_image_generator import generate_report_image
+    report_image = generate_report_image(report_text, "evening")
+
+    if report_image:
+        short_text = _extract_short_summary(report_text, "evening")
+        tweet_text = short_text
+        tweet_image = report_image
+        logger.info("Aksam raporu: gorsel olusturuldu, kisa ozet hazir (%d char)", len(short_text))
+    else:
+        logger.warning("Aksam raporu gorseli olusturulamadi — eski format kullaniliyor")
+        tweet_text = report_text
+        tweet_image = _KAPANIS_IMAGE
+
     from app.services.twitter_service import _safe_tweet_with_media
     success = _safe_tweet_with_media(
-        report_text,
-        _KAPANIS_IMAGE,
+        tweet_text,
+        tweet_image,
         source="evening_market_report",
         force_send=True,
     )
+
+    # Görsel temp dosyasını temizle
+    if report_image and report_image != _KAPANIS_IMAGE:
+        try:
+            os.remove(report_image)
+        except OSError:
+            pass
 
     if success:
         logger.info("Aksam kapanis raporu tweeti basarili!")

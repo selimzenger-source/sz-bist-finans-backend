@@ -68,6 +68,10 @@ DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "halka arz TAVAN TABAN.xlsm")
 # Tavan/taban eslesme toleransi (kurus)
 PRICE_TOLERANCE = Decimal("0.02")
 
+# Veri gelmezse Telegram uyarisi (saniye)
+STALE_DATA_TIMEOUT = 180  # 3 dakika
+
+
 # Restart-safe state dosyasi — script ile ayni dizinde
 # Elektrik gidip PC yeniden acildiginda bildirim state'i buradan yuklenir
 STATE_FILE = str(Path(__file__).parent / "bist_sync_state.json")
@@ -82,6 +86,46 @@ def log(msg):
         # Windows console charmap sorunu — ASCII'ye donustur
         safe = msg.encode("ascii", errors="replace").decode("ascii")
         print(f"[{ts}] {safe}")
+
+
+def _send_telegram_alert(text: str):
+    """Admin'e Telegram uyarisi gonder — Render API uzerinden.
+
+    Lokal PC'de token olmayabilir, bu yuzden backend'deki
+    /api/v1/admin/send-telegram endpointini kullanir.
+    Endpoint yoksa direkt Telegram API'yi dener (env var varsa).
+    """
+    # Yol 1: Render API uzerinden gonder
+    try:
+        resp = requests.post(
+            f"{API_URL}/api/v1/admin/send-telegram",
+            json={
+                "admin_password": ADMIN_PASSWORD,
+                "text": text,
+            },
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            log("  Telegram uyarisi gonderildi (API uzerinden)")
+            return
+        log(f"  Telegram API endpoint hata: {resp.status_code}")
+    except Exception as e:
+        log(f"  Telegram API gonderim hatasi: {e}")
+
+    # Yol 2: Direkt Telegram API (env var varsa)
+    bot_token = os.getenv("ADMIN_TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("ADMIN_TELEGRAM_CHAT_ID", "")
+    if bot_token and chat_id:
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                log("  Telegram uyarisi gonderildi (direkt)")
+        except Exception as e:
+            log(f"  Telegram direkt gonderim hatasi: {e}")
 
 
 def _load_state(today_str: str) -> dict | None:
@@ -540,6 +584,8 @@ def live_sync(filepath, interval=15):
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
     last_session_date = None  # Seans gun degisiminde cache temizle + IPO yenile
+    last_data_time = None        # Son veri degisikligi zamani
+    stale_alert_sent = False     # 3dk uyarisi gonderildi mi (tekrar spam engeli)
 
     # ── Restart-safe state yukle ──────────────────────────────────────
     # Elektrik gidip/program kapanip yeniden acilinca mevcut tavan/taban
@@ -609,6 +655,8 @@ def live_sync(filepath, interval=15):
                 floor_streak.clear()
                 opening_notif_sent = False
                 closing_notif_sent = False
+                last_data_time = None
+                stale_alert_sent = False
                 # Yeni gun icin temiz state kaydet
                 _save_state(today_str, {}, {}, {}, False, False)
                 try:
@@ -863,10 +911,39 @@ def live_sync(filepath, interval=15):
                     log(f"  ✓ {result.get('loaded', 0)} kayit yuklendi")
                 else:
                     log(f"  ✗ Yukleme basarisiz")
+                # Veri geldi → zamani guncelle, uyari sifirla
+                last_data_time = time.monotonic()
+                stale_alert_sent = False
             else:
                 # Her 4 donguede bir (1 dakika) sessiz log
                 if cycle % 4 == 0:
                     log(f"[{now}] #{cycle} — Degisiklik yok")
+
+            # ── Stale data kontrolu (3 dk veri gelmezse Telegram uyarisi) ──
+            # Sadece 10:00:30 - 17:59:30 arasi (seans icinde)
+            hour_min_sec = now_dt.hour * 10000 + now_dt.minute * 100 + now_dt.second  # 100030, 175930
+            if 100030 <= hour_min_sec <= 175930:
+                if last_data_time is None and hour_min_sec >= 100330:
+                    # Seans basladi ama hic veri gelmedi (10:00:30'dan 3dk sonra = 10:03:30)
+                    if not stale_alert_sent:
+                        _send_telegram_alert(
+                            f"⚠️ <b>Excel Sync Uyarisi</b>\n"
+                            f"Seans basladi ama henuz hic veri gelmedi!\n"
+                            f"Matriks veya Excel baglantisini kontrol edin."
+                        )
+                        stale_alert_sent = True
+                        log(f"  ⚠ STALE DATA: Seans basladi ama hic veri gelmedi — Telegram uyarisi gonderildi")
+                elif last_data_time is not None:
+                    elapsed = time.monotonic() - last_data_time
+                    if elapsed >= STALE_DATA_TIMEOUT and not stale_alert_sent:
+                        mins = int(elapsed // 60)
+                        _send_telegram_alert(
+                            f"⚠️ <b>Excel Sync Uyarisi</b>\n"
+                            f"Son {mins} dakikadir veri degisikligi yok!\n"
+                            f"Matriks veya Excel baglantisini kontrol edin."
+                        )
+                        stale_alert_sent = True
+                        log(f"  ⚠ STALE DATA: {mins} dakikadir veri gelmedi — Telegram uyarisi gonderildi")
 
             # ── Günlük açılış bildirimi (09:56) ──
             # Seans açılışında abonelere push bildirim gönder

@@ -3151,6 +3151,23 @@ async def send_realtime_notification(
     }
 
 
+@app.post("/api/v1/admin/send-telegram")
+@limiter.limit("5/minute")
+async def admin_send_telegram(request: Request, payload: dict):
+    """Excel sync'ten gelen Telegram uyari mesajlarini admin'e iletir."""
+    pw = payload.get("admin_password", "")
+    if pw != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    text = payload.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="text gerekli")
+
+    from app.services.admin_telegram import send_admin_message
+    ok = await send_admin_message(text)
+    return {"status": "ok" if ok else "failed", "sent": ok}
+
+
 @app.post("/api/v1/admin/bulk-ceiling-track")
 @limiter.limit("10/minute")
 async def bulk_ceiling_track(

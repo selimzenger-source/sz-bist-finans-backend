@@ -1711,3 +1711,460 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
     except Exception as e:
         logger.error("generate_spk_onay_image hatasi: %s", e, exc_info=True)
         return None
+
+
+# ════════════════════════════════════════════════════════════════
+# AI MARKET REPORT → PNG GÖRSEL
+# ════════════════════════════════════════════════════════════════
+
+# Bölüm renk haritası — emoji header → (accent_color, clean_title)
+_SECTION_MAP = [
+    # (emoji_pattern, accent_color, display_title)
+    ("🇹🇷", RED,    "BIST 100"),
+    ("🔴", RED,     "BIST 100"),
+    ("🇺🇸", (34, 211, 238),  "ABD Piyasalari"),
+    ("💰", GOLD,   "Dolar & Altin"),
+    ("💵", GOLD,   "Dolar & Altin"),
+    ("📰", ORANGE, "Gunun Onemli Gelismeleri"),
+    ("📈", GREEN,  "Halka Arz Takibi"),
+    ("🏦", GREEN,  "Halka Arz Takibi"),
+    ("📅", GRAY,   "Ekonomik Takvim"),
+    ("⏰", GRAY,   "Ekonomik Takvim"),
+    ("📌", RED,    "Kritik Noktalar"),
+    ("🚀", RED,    "Kritik Noktalar"),
+    ("🔮", ORANGE, "Yarin Icin Beklentiler"),
+]
+
+# **bold** metin section header'ları (emoji olmadan) — fallback matching
+_BOLD_SECTION_MAP = [
+    # (keyword_pattern, accent_color, display_title)
+    ("bist 100",             RED,            "BIST 100 (XU100)"),
+    ("bist100",              RED,            "BIST 100 (XU100)"),
+    ("xu100",                RED,            "BIST 100 (XU100)"),
+    ("abd piyasa",           (34, 211, 238), "ABD Piyasalari"),
+    ("dolar",                GOLD,           "Dolar & Altin"),
+    ("altin",                GOLD,           "Dolar & Altin"),
+    ("onemli gelis",         ORANGE,         "Gunun Onemli Gelismeleri"),
+    ("önemli gelis",         ORANGE,         "Gunun Onemli Gelismeleri"),
+    ("önemli gelişme",       ORANGE,         "Günün Önemli Gelişmeleri"),
+    ("gunun gelisme",        ORANGE,         "Gunun Onemli Gelismeleri"),
+    ("günün gelişme",        ORANGE,         "Günün Önemli Gelişmeleri"),
+    ("halka arz",            GREEN,          "Halka Arz Takibi"),
+    ("ekonomik takvim",      GRAY,           "Ekonomik Takvim"),
+    ("kritik nokta",         RED,            "Kritik Noktalar"),
+    ("bugünün kritik",       RED,            "Bugünün Kritik Noktaları"),
+    ("bugunun kritik",       RED,            "Bugunun Kritik Noktalari"),
+    ("yarin icin",           ORANGE,         "Yarin Icin Beklentiler"),
+    ("yarın için",           ORANGE,         "Yarın İçin Beklentiler"),
+]
+
+# Sondaki bölümler (footer olarak render edilecek)
+_FOOTER_MARKERS = ["💬", "❓", "🗣", "⚠️", "⚠", "📲", "#BIST",
+                    "Sizce", "sizce", "Yatirim tavsiyesi", "Yatırım tavsiyesi",
+                    "yatirim tavsiyesi", "yatırım tavsiyesi"]
+
+CYAN = (34, 211, 238)
+
+
+def _parse_report_sections(report_text: str) -> dict:
+    """AI rapor metnini bölümlere ayırır.
+
+    Returns:
+        {
+            "hook": str,           # İlk 1-2 satır (⚡ hook)
+            "sections": [          # Ana bölümler
+                {"color": (r,g,b), "title": str, "lines": [str]},
+                ...
+            ],
+            "footer_lines": [str], # Soru + disclaimer + link + hashtags
+        }
+    """
+    import re
+
+    lines = report_text.strip().split("\n")
+
+    # ── Hook: İlk anlamlı satırlar (emoji veya metin, bölüm header'ı olmayan) ──
+    hook_lines = []
+    body_start = 0
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            if hook_lines:
+                body_start = i + 1
+                break
+            continue
+
+        # Bu satır bir section header mı? (emoji veya **bold** kontrol)
+        is_section = False
+        for emoji, _, _ in _SECTION_MAP:
+            if stripped.startswith(emoji):
+                is_section = True
+                break
+        # **bold** header kontrolü
+        if not is_section and stripped.startswith("**") and stripped.endswith("**"):
+            inner = stripped.strip("* ").lower()
+            for keyword, _, _ in _BOLD_SECTION_MAP:
+                if keyword in inner:
+                    is_section = True
+                    break
+
+        if is_section and hook_lines:
+            body_start = i
+            break
+
+        # Hook satırı — ⚡, 🔥, 🚨 gibi emojileri temizle
+        clean = re.sub(r'^[⚡🔥🚨📊🔴📈💥🔑🏦]\s*', '', stripped).strip()
+        if clean:
+            hook_lines.append(clean)
+
+        if len(hook_lines) >= 2:
+            body_start = i + 1
+            break
+
+    # ── Bölümleri parse et ──
+    sections = []
+    current_section = None
+    footer_lines = []
+    in_footer = False
+
+    for i in range(body_start, len(lines)):
+        stripped = lines[i].strip()
+        if not stripped:
+            continue
+
+        # Footer marker kontrolü
+        if not in_footer:
+            for marker in _FOOTER_MARKERS:
+                if stripped.startswith(marker):
+                    in_footer = True
+                    break
+
+        if in_footer:
+            # Emoji'leri temizle, plain text al
+            clean = re.sub(r'^[⚠️📲💬❓🗣🗨]\s*', '', stripped).strip()
+            if clean and not clean.startswith("#BIST") and not clean.startswith("#borsa"):
+                footer_lines.append(clean)
+            continue
+
+        # Section header kontrolü — emoji prefix
+        matched_section = None
+        for emoji, color, title in _SECTION_MAP:
+            if stripped.startswith(emoji):
+                raw_title = stripped
+                raw_title = re.sub(r'[\U0001F1E0-\U0001F1FF\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF]', '', raw_title).strip()
+                raw_title = raw_title.replace("**", "").strip()
+                if not raw_title:
+                    raw_title = title
+                matched_section = {"color": color, "title": raw_title, "lines": []}
+                break
+
+        # Fallback: **bold text** header kontrolü (emoji yoksa)
+        if not matched_section and stripped.startswith("**") and stripped.endswith("**"):
+            inner = stripped.strip("* ").lower()
+            for keyword, color, title in _BOLD_SECTION_MAP:
+                if keyword in inner:
+                    display_title = stripped.strip("* ").strip()
+                    matched_section = {"color": color, "title": display_title, "lines": []}
+                    break
+
+        if matched_section:
+            if current_section and current_section["lines"]:
+                sections.append(current_section)
+            current_section = matched_section
+        elif current_section is not None:
+            # Body satırı — temizle
+            clean = stripped
+            clean = clean.replace("**", "")  # Bold marker kaldır
+            # Emoji'leri kaldır (text fontlar desteklemiyor)
+            clean = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', clean).strip()
+            # Hashtag (#) işaretlerini kaldır — resimde hashtag olmayacak
+            clean = re.sub(r'#([A-Za-z])', r'\1', clean)
+            if clean:
+                current_section["lines"].append(clean)
+
+    if current_section and current_section["lines"]:
+        sections.append(current_section)
+
+    return {
+        "hook": "\n".join(hook_lines) if hook_lines else "",
+        "sections": sections,
+        "footer_lines": footer_lines,
+    }
+
+
+def _wrap_text(text: str, font, max_width: int, draw: ImageDraw.Draw) -> list[str]:
+    """Metni verilen genişliğe göre satırlara böler (word-wrap)."""
+    words = text.split()
+    if not words:
+        return []
+
+    lines_out = []
+    current_line = words[0]
+
+    for word in words[1:]:
+        test = current_line + " " + word
+        bbox = draw.textbbox((0, 0), test, font=font)
+        w = bbox[2] - bbox[0]
+        if w <= max_width:
+            current_line = test
+        else:
+            lines_out.append(current_line)
+            current_line = word
+
+    lines_out.append(current_line)
+    return lines_out
+
+
+def generate_report_image(report_text: str, report_type: str = "morning") -> Optional[str]:
+    """AI piyasa rapor metnini şık bir PNG görsele çevirir.
+
+    Args:
+        report_text: AI'ın ürettiği rapor metni (2000+ karakter)
+        report_type: "morning" veya "evening"
+
+    Returns:
+        PNG dosya yolu veya None
+    """
+    try:
+        parsed = _parse_report_sections(report_text)
+
+        # ── Taşma koruması: bölüm ve satır sınırları ──
+        if len(parsed["sections"]) > 8:
+            parsed["sections"] = parsed["sections"][:8]
+        for sec in parsed["sections"]:
+            if len(sec["lines"]) > 6:
+                sec["lines"] = sec["lines"][:6]
+        if len(parsed["footer_lines"]) > 3:
+            parsed["footer_lines"] = parsed["footer_lines"][:3]
+
+        # ── Fontlar ──
+        font_hook = _load_font(28, bold=True)
+        font_title = _load_font(22, bold=True)
+        font_body = _load_font(18, bold=False)
+        font_body_bold = _load_font(18, bold=True)
+        font_footer = _load_font(16, bold=False)
+        font_footer_bold = _load_font(16, bold=True)
+
+        WIDTH = 1200
+        PAD = 50           # Sol/sağ padding
+        CONTENT_W = WIDTH - PAD * 2  # 1100px içerik alanı
+        SECTION_GAP = 20   # Bölümler arası boşluk
+        LINE_H = 26        # Satır yüksekliği (body)
+        ACCENT_W = 5       # Sol accent çubuk genişliği
+        ACCENT_PAD = 16    # Accent çubuk → metin arası
+
+        # ── Taşma korumaları ──
+        MAX_BODY_LINES = 8       # Bölüm başına max satır (wrap sonrası)
+        MAX_IMAGE_H = 2600       # Görsel max yükseklik (px) — çok uzun olmasın
+        MAX_SECTIONS = 8         # Max bölüm sayısı
+
+        # ── Banner yüksekliği hesapla ──
+        _img_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        if report_type == "evening":
+            banner_path = os.path.join(_img_dir, "kapanis_raporu_banner.png")
+        else:
+            banner_path = os.path.join(_img_dir, "acilis_analizi_banner.png")
+
+        BANNER_H = 200
+        banner_img = None
+        if os.path.exists(banner_path):
+            try:
+                banner_img = Image.open(banner_path)
+                # 1200px genişliğe sığdır, oran koru
+                ratio = WIDTH / banner_img.width
+                new_h = int(banner_img.height * ratio)
+                # Max 200px yükseklik — üstten kes gerekirse
+                if new_h > BANNER_H:
+                    banner_img = banner_img.resize((WIDTH, new_h), Image.LANCZOS)
+                    # Üstten kırp (başlık genelde üstte)
+                    banner_img = banner_img.crop((0, 0, WIDTH, BANNER_H))
+                else:
+                    BANNER_H = new_h
+                    banner_img = banner_img.resize((WIDTH, BANNER_H), Image.LANCZOS)
+            except Exception as e:
+                logger.warning("Banner yuklenemedi: %s", e)
+                banner_img = None
+                BANNER_H = 0
+        else:
+            BANNER_H = 0
+
+        # ── Yükseklik hesapla (pre-render) ──
+        # Geçici draw nesnesi oluştur
+        tmp_img = Image.new("RGB", (WIDTH, 100))
+        tmp_draw = ImageDraw.Draw(tmp_img)
+
+        y_calc = BANNER_H + 10  # Banner sonrası
+
+        # Hook yüksekliği
+        hook_lines_wrapped = []
+        if parsed["hook"]:
+            for hl in parsed["hook"].split("\n"):
+                hook_lines_wrapped.extend(_wrap_text(hl, font_hook, CONTENT_W, tmp_draw))
+            y_calc += len(hook_lines_wrapped) * 36 + 20  # 36px satır yüksekliği
+
+        # Bölüm yükseklikleri
+        for sec in parsed["sections"]:
+            y_calc += 8  # Divider üstü boşluk
+            y_calc += 2  # Divider çizgi
+            y_calc += 12 # Divider altı boşluk
+            y_calc += 30  # Başlık
+            y_calc += 8   # Başlık-body arası
+
+            body_x = PAD + ACCENT_W + ACCENT_PAD
+            body_w = CONTENT_W - ACCENT_W - ACCENT_PAD
+
+            sec_line_count = 0
+            for line in sec["lines"]:
+                if sec_line_count >= MAX_BODY_LINES:
+                    break
+                if line.startswith("•") or line.startswith("-"):
+                    indent = 20
+                    wrapped = _wrap_text(line, font_body, body_w - indent, tmp_draw)
+                else:
+                    wrapped = _wrap_text(line, font_body, body_w, tmp_draw)
+                # Tek bir body line max 4 wrap satırı (çok uzun paragrafları kes)
+                if len(wrapped) > 4:
+                    wrapped = wrapped[:4]
+                    wrapped[-1] = wrapped[-1][:len(wrapped[-1])-3] + "..."
+                y_calc += len(wrapped) * LINE_H
+                sec_line_count += len(wrapped)
+
+            y_calc += SECTION_GAP
+
+        # Footer yüksekliği
+        y_calc += 16  # Divider öncesi
+        y_calc += 2   # Divider
+        y_calc += 16  # Divider sonrası
+        y_calc += len(parsed["footer_lines"]) * 24 + 16
+
+        total_h = y_calc + 20  # Alt padding
+
+        # ── Taşma koruması: max yükseklik ──
+        if total_h > MAX_IMAGE_H:
+            logger.warning("Rapor gorseli cok uzun: %dpx, %dpx'e kisilacak", total_h, MAX_IMAGE_H)
+            total_h = MAX_IMAGE_H
+
+        del tmp_img, tmp_draw
+
+        # ── Asıl görseli oluştur ──
+        img = Image.new("RGB", (WIDTH, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        y = 0
+
+        # ── Banner ──
+        if banner_img:
+            img.paste(banner_img.convert("RGB"), (0, 0))
+            y = BANNER_H
+            # Banner altına ince gradient çizgi
+            for i in range(4):
+                alpha = 80 - i * 20
+                c = min(255, DIVIDER[0] + alpha), min(255, DIVIDER[1] + alpha), min(255, DIVIDER[2] + alpha)
+                draw.line([(0, y + i), (WIDTH, y + i)], fill=c)
+            y += 6
+        else:
+            y = 10
+
+        # ── Hook başlık ──
+        if hook_lines_wrapped:
+            y += 8
+            for hl in hook_lines_wrapped:
+                draw.text((PAD, y), hl, fill=GOLD, font=font_hook)
+                y += 36
+            y += 12
+
+        # ── Bölümler ──
+        for sec in parsed["sections"]:
+            # Taşma koruması: yeterli alan kalmadıysa dur
+            if y + 80 > total_h:
+                break
+
+            # Divider
+            y += 8
+            draw.line([(PAD, y), (WIDTH - PAD, y)], fill=DIVIDER, width=2)
+            y += 14
+
+            # Accent çubuk (tam bölüm yüksekliği boyunca çizilecek)
+            accent_top = y
+
+            # Başlık
+            draw.text((PAD + ACCENT_W + ACCENT_PAD, y), sec["title"], fill=WHITE, font=font_title)
+            y += 30 + 8
+
+            # Body lines
+            body_x = PAD + ACCENT_W + ACCENT_PAD
+            body_w = CONTENT_W - ACCENT_W - ACCENT_PAD
+
+            sec_line_count = 0
+            for line in sec["lines"]:
+                if sec_line_count >= MAX_BODY_LINES:
+                    break
+                is_bullet = line.startswith("•") or line.startswith("-")
+                indent = 20 if is_bullet else 0
+                available_w = body_w - indent
+
+                wrapped = _wrap_text(line, font_body, available_w, draw)
+                # Tek body line max 4 wrap satırı
+                if len(wrapped) > 4:
+                    wrapped = wrapped[:4]
+                    wrapped[-1] = wrapped[-1][:max(0, len(wrapped[-1])-3)] + "..."
+                for j, wl in enumerate(wrapped):
+                    if y + LINE_H > total_h - 100:  # Footer'a yer bırak
+                        break
+                    line_color = GRAY
+                    used_font = font_body
+
+                    # Bullet ilk satırı — bullet karakteri beyaz
+                    if j == 0 and is_bullet:
+                        bullet_char = line[0]
+                        draw.text((body_x + 4, y), bullet_char, fill=WHITE, font=font_body_bold)
+                        rest = wl[2:] if len(wl) > 2 else wl
+                        draw.text((body_x + indent, y), rest, fill=GRAY, font=font_body)
+                    else:
+                        draw.text((body_x + indent, y), wl, fill=line_color, font=used_font)
+                    y += LINE_H
+                    sec_line_count += 1
+
+            accent_bottom = y
+
+            # Sol accent çubuk çiz (bölüm başından sonuna)
+            draw.rectangle(
+                [(PAD, accent_top), (PAD + ACCENT_W, accent_bottom)],
+                fill=sec["color"],
+            )
+
+            y += SECTION_GAP
+
+        # ── Footer ──
+        y += 8
+        draw.line([(PAD, y), (WIDTH - PAD, y)], fill=DIVIDER, width=2)
+        y += 16
+
+        for fl in parsed["footer_lines"]:
+            if "yatirim tavsiyesi" in fl.lower() or "yatırım tavsiyesi" in fl.lower():
+                draw.text((PAD, y), fl, fill=GRAY, font=font_footer)
+            elif "szalgo" in fl.lower():
+                draw.text((PAD, y), fl, fill=GOLD, font=font_footer_bold)
+            else:
+                # Soru satırı
+                draw.text((PAD, y), fl, fill=GOLD, font=font_footer)
+            y += 24
+
+        # ── Watermark ──
+        _draw_bg_watermark(img, WIDTH, total_h)
+
+        # ── Kaydet ──
+        ts = datetime.now(_TR_TZ).strftime("%Y%m%d_%H%M%S")
+        rtype = "acilis" if report_type == "morning" else "kapanis"
+        filename = f"rapor_{rtype}_{ts}.png"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        del img, draw
+        gc.collect()
+        logger.info("Rapor gorseli olusturuldu: %s (%.1f KB)", filepath, os.path.getsize(filepath) / 1024)
+        return filepath
+
+    except Exception as e:
+        logger.error("generate_report_image hatasi: %s", e, exc_info=True)
+        return None
