@@ -1342,6 +1342,37 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
 
 
 # ================================================================
+# 8b. E.D.O ESIK TWEETI (%10 ve %100 asildiginda)
+# ================================================================
+def tweet_edo_threshold(ipo, threshold: int, edo_pct: float, trading_day: int) -> bool:
+    """E.D.O esik tweeti — %10 ve %100 asildiginda atilir."""
+    try:
+        ticker = ipo.ticker or ipo.company_name
+
+        if threshold == 100:
+            emoji = "\U0001F534"
+            desc = "Tüm senetler el değiştirdi!"
+        else:
+            emoji = "\U0001F4CA"
+            desc = f"Senetlerin %{threshold}'i el değiştirdi"
+
+        text = (
+            f"{emoji} #{ticker}'DA EL DEĞİŞTİRME ORANI %{threshold}'{'Ü' if threshold == 100 else 'U' if threshold in [10, 50] else 'İ' if threshold == 25 else 'İ'} AŞTI!\n\n"
+            f"Kümülatif E.D.O: %{edo_pct:.1f}\n"
+            f"{trading_day}. İşlem Günü\n"
+            f"{desc}\n\n"
+            f"Her an el değiştirme oranını takip etmek için uygulamamızı indirebilirsiniz! 📲\n"
+            f"{HALKAARZ_LINK}\n\n"
+            f"#HalkaArz #{ticker} #BorsaIstanbul #ElDeğiştirme"
+        )
+
+        return _safe_tweet(text, source="tweet_edo_threshold")
+    except Exception as e:
+        logger.error(f"tweet_edo_threshold hatasi: {e}")
+        return False
+
+
+# ================================================================
 # 9. 25 GUN PERFORMANS OZETI (25. gun tamamlandiginda bir kez)
 # ================================================================
 def tweet_25_day_performance(

@@ -708,9 +708,16 @@ def generate_daily_tracking_image(
         draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
         y += 15
 
+        # ── E.D.O kolonu var mi kontrol (MCARD+) ────────
+        has_edo = any(d.get("cumulative_edo_pct") is not None for d in days_data)
+
         # ── SUTUN BASLIKLARI ─────────────────────────────
-        col_x = [padding, 140, 370, 580, 810]
-        col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum"]
+        if has_edo:
+            col_x = [padding, 130, 310, 490, 670, 890]
+            col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum", "E.D.O"]
+        else:
+            col_x = [padding, 140, 370, 580, 810]
+            col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum"]
 
         for i, label in enumerate(col_labels):
             draw.text((col_x[i], y), label, fill=GOLD, font=font_col_header)
@@ -758,6 +765,15 @@ def generate_daily_tracking_image(
             durum_color = durum_color_map.get(durum_raw, GRAY)
             if durum_label:
                 draw.text((col_x[4], text_y), durum_label, fill=durum_color, font=font_row_bold)
+
+            # E.D.O kolonu (MCARD+)
+            if has_edo:
+                edo_val = d.get("cumulative_edo_pct")
+                if edo_val is not None:
+                    edo_text = f"%{edo_val:.2f}"
+                    draw.text((col_x[5], text_y), edo_text, fill=GOLD, font=font_row)
+                else:
+                    draw.text((col_x[5], text_y), "—", fill=GRAY, font=font_row)
 
         # ── FOOTER (sadece szalgo.net.tr) ────────────────
         footer_y = banner_h + header_h + table_h + 15
