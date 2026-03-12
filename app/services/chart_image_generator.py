@@ -714,7 +714,7 @@ def generate_daily_tracking_image(
         # ── SUTUN BASLIKLARI ─────────────────────────────
         if has_edo:
             col_x = [padding, 130, 310, 490, 670, 890]
-            col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum", "E.D.O"]
+            col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum", "Küm. E.D.O"]
         else:
             col_x = [padding, 140, 370, 580, 810]
             col_labels = ["Gün", "Kapanış", "Günlük %", "Kümülatif %", "Durum"]
@@ -1059,6 +1059,23 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
                 lot_color = _pct_to_color(daily_fark)
                 draw.text((padding + 180, row2_y), lot_text, fill=lot_color, font=font_lot)
 
+            # Küm. E.D.O (lot text'ten sonra, orta alan)
+            edo_pct = stock.get("edo_pct")
+            if edo_pct is not None:
+                edo_label = "Küm. E.D.O: "
+                edo_val = f"%{edo_pct:.2f}"
+                # Lot text yoksa padding+180, varsa lot'un yanina koy
+                edo_x = padding + 180
+                if durum == "tavan":
+                    lot_t = f"Alış Lot: {_format_lot(alis_lot)}"
+                    edo_x = padding + 180 + font_lot.getbbox(lot_t)[2] - font_lot.getbbox(lot_t)[0] + 20
+                elif durum == "taban":
+                    lot_t = f"Satış Lot: {_format_lot(satis_lot)}"
+                    edo_x = padding + 180 + font_lot.getbbox(lot_t)[2] - font_lot.getbbox(lot_t)[0] + 20
+                draw.text((edo_x, row2_y + 2), edo_label, fill=GRAY, font=font_badge_sm)
+                lbl_w = font_badge_sm.getbbox(edo_label)[2] - font_badge_sm.getbbox(edo_label)[0]
+                draw.text((edo_x + lbl_w, row2_y + 2), edo_val, fill=GOLD, font=font_badge_sm)
+
             # Halka Arz fiyati (sag alt)
             ipo_price = stock.get("ipo_price")
             if ipo_price:
@@ -1372,6 +1389,15 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
                                font_value, TABAN_RED)
             # Normal durumda lot gösterme
+
+            # ─ Kümülatif E.D.O (MCARD+ — senet_sayisi olan IPO'lar) ─
+            edo_pct = stock.get("edo_pct")
+            if edo_pct is not None:
+                # Lot'tan sonra kalan alana E.D.O yaz
+                edo_y = cy + card_h - 40  # kart alt kenarından 40px yukari
+                _draw_centered(draw, mid_x, edo_y, "Küm. E.D.O", font_small, GRAY)
+                _draw_centered(draw, mid_x, edo_y + 14, f"%{edo_pct:.2f}",
+                               font_badge, GOLD)
 
         # ── Footer ────────────────────────────────
         footer_y = total_h - footer_h

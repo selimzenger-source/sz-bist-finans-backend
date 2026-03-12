@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, validator
 
 
 # -------------------------------------------------------
@@ -322,6 +322,15 @@ class UserRegister(BaseModel):
     expo_push_token: Optional[str] = None
     platform: str  # ios, android
     app_version: Optional[str] = None
+
+    @validator("device_id")
+    def validate_device_id(cls, v):
+        if not v or len(v) < 8 or len(v) > 256:
+            raise ValueError("device_id 8-256 karakter olmali")
+        import re
+        if not re.match(r'^[a-zA-Z0-9_\-:.]+$', v):
+            raise ValueError("device_id gecersiz karakter iceriyor")
+        return v
 
 
 class UserUpdate(BaseModel):

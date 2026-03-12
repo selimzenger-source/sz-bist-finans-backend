@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     TELEGRAM_READER_BOT_TOKEN: str = ""
 
     # Admin paneli
-    ADMIN_PASSWORD: str = "zenger7245175"
+    ADMIN_PASSWORD: str = ""
 
     # Admin Telegram bot — hata/durum bildirimleri icin
     ADMIN_TELEGRAM_BOT_TOKEN: str = ""
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     TWITTER_AUTO_SEND: bool = False
 
     # Abacus AI (RouteLLM) — scraper veri dogrulama + haber puanlama
-    ABACUS_API_KEY: str = "s2_7dd1a20a70d14d01ae4f2838ce862da8"
+    ABACUS_API_KEY: str = ""
 
     # Google Gemini API (yedek) — Abacus kredi bitince otomatik devreye girer
     # Ücretsiz: https://aistudio.google.com → Get API Key

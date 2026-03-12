@@ -2124,6 +2124,11 @@ async def _market_snapshot_attempt(retry_num: int = 0):
             # Durum
             durum = today_track.durum or "not_kapatti"
 
+            # E.D.O (Kumulatif El Degistirme Orani) — senet_sayisi olan IPO'lar icin
+            edo_pct = None
+            if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
+                edo_pct = round((ipo.cumulative_volume / ipo.senet_sayisi) * 100, 2)
+
             snapshot_data.append({
                 "ticker": ipo.ticker,
                 "trading_day": real_trading_day,
@@ -2134,6 +2139,7 @@ async def _market_snapshot_attempt(retry_num: int = 0):
                 "alis_lot": today_track.alis_lot,
                 "satis_lot": today_track.satis_lot,
                 "ipo_price": ipo_price,
+                "edo_pct": edo_pct,
             })
 
         # Eger hic bugunku track yoksa ve henuz retry hakki varsa → "retry" sinyali don
@@ -2592,7 +2598,7 @@ async def daily_ceiling_update():
                                         if threshold == 1:
                                             # %1 — FREE: tum kullanicilara gonder
                                             title = f"{ipo.ticker} El Değiştirme Oranı %{threshold}{_edo_suffix.get(threshold, '')} Aştı!"
-                                            body = f"Anlık E.D.O: %{edo_pct:.2f} — 8 farklı eşik bildirimi için E.D.O Paketini aç!"
+                                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.2f} — 8 farklı eşik bildirimi için paketi aç!"
                                             is_free = True
                                         else:
                                             # Diger esikler — sadece abonelere
@@ -2606,7 +2612,7 @@ async def daily_ceiling_update():
                                                 125: "El Değiştirme Oranı %125'i Aştı! Senetler 1.25 kez döndü",
                                             }
                                             title = f"{ipo.ticker} {edo_msgs.get(threshold, f'El Değiştirme Oranı %{threshold} aşıldı')}"
-                                            body = f"Kümülatif E.D.O: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
+                                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
                                             is_free = False
 
                                         import os
@@ -3870,14 +3876,14 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,  # 1 saat grace
     )
 
-    # 23. Push Bildirim Saglik Raporu — 4 saatte bir
-    scheduler.add_job(
-        push_health_report_job,
-        CronTrigger(hour="3,7,11,15,19,23", minute=0),
-        id="push_health_report",
-        name="Push Saglik Raporu (4 saatte bir)",
-        replace_existing=True,
-    )
+    # 23. Push Bildirim Saglik Raporu — DEVRE DISI (artik gerek yok)
+    # scheduler.add_job(
+    #     push_health_report_job,
+    #     CronTrigger(hour="3,7,11,15,19,23", minute=0),
+    #     id="push_health_report",
+    #     name="Push Saglik Raporu (4 saatte bir)",
+    #     replace_existing=True,
+    # )
 
     # 24. BIST 50 Endeks Guncelleme — her ayin 1'i 09:00 TR (UTC 06:00)
     scheduler.add_job(

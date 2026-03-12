@@ -72,6 +72,15 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+import re as _re
+_DEVICE_ID_PATTERN = _re.compile(r'^[a-zA-Z0-9_\-:.]{8,256}$')
+
+def _validate_device_id_param(device_id: str) -> str:
+    """Path parametresindeki device_id'yi dogrula. Gecersizse 400 dondur."""
+    if not _DEVICE_ID_PATTERN.match(device_id):
+        raise HTTPException(status_code=400, detail="Gecersiz device_id formati")
+    return device_id
+
 
 # -------------------------------------------------------
 # Uygulama Yasam Dongusu
@@ -533,14 +542,14 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
                     return {
                         "status": "error",
                         "key_exists": True,
-                        "key_prefix": gemini_key[:8] + "...",
+                        "key_prefix": gemini_key[:4] + "***",
                         "parse_error": str(parse_err),
                         "raw_response": str(data)[:500],
                     }
                 return {
                     "status": "ok",
                     "key_exists": True,
-                    "key_prefix": gemini_key[:8] + "...",
+                    "key_prefix": gemini_key[:4] + "***",
                     "model": "gemini-2.5-flash",
                     "response": ai_text[:200],
                 }
@@ -548,7 +557,7 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
                 return {
                     "status": "error",
                     "key_exists": True,
-                    "key_prefix": gemini_key[:8] + "...",
+                    "key_prefix": gemini_key[:4] + "***",
                     "http_status": resp.status_code,
                     "error": resp.text[:300],
                 }
@@ -556,7 +565,7 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
         return {
             "status": "error",
             "key_exists": True,
-            "key_prefix": gemini_key[:8] + "...",
+            "key_prefix": gemini_key[:4] + "***",
             "exception": str(e),
         }
 
@@ -567,16 +576,18 @@ async def test_gemini(request: Request, payload: dict = Body(...)):
 
 @app.get("/health")
 async def health_check():
-    from app.services.notification import is_firebase_initialized
-    settings = get_settings()
-    return {
+    resp = {
         "status": "ok",
         "service": "bist-finans-backend",
         "version": "2.0.0",
-        "firebase_initialized": is_firebase_initialized(),
-        "telegram_configured": bool(settings.TELEGRAM_BOT_TOKEN),
-        "telegram_reader_configured": bool(settings.TELEGRAM_READER_BOT_TOKEN),
     }
+    # Dahili sistem bilgilerini sadece development'ta goster
+    if not settings.is_production:
+        from app.services.notification import is_firebase_initialized
+        resp["firebase_initialized"] = is_firebase_initialized()
+        resp["telegram_configured"] = bool(settings.TELEGRAM_BOT_TOKEN)
+        resp["telegram_reader_configured"] = bool(settings.TELEGRAM_READER_BOT_TOKEN)
+    return resp
 
 
 # -------------------------------------------------------
@@ -1564,7 +1575,7 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
 
 @app.get("/api/v1/users/{device_id}", response_model=UserOut)
 async def get_user(
-    device_id: str,
+    device_id: str = Depends(_validate_device_id_param),
     db: AsyncSession = Depends(get_db),
 ):
     """Kullanici profilini getirir — bildirim tercihleri dahil."""
@@ -1579,8 +1590,8 @@ async def get_user(
 
 @app.put("/api/v1/users/{device_id}", response_model=UserOut)
 async def update_user(
-    device_id: str,
-    data: UserUpdate,
+    device_id: str = Depends(_validate_device_id_param),
+    data: UserUpdate = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Kullanici bilgilerini ve bildirim tercihlerini guncelle."""
@@ -1635,7 +1646,7 @@ async def update_user(
 
 @app.delete("/api/v1/users/{device_id}")
 async def delete_user_account(
-    device_id: str,
+    device_id: str = Depends(_validate_device_id_param),
     db: AsyncSession = Depends(get_db),
 ):
     """Kullanici hesabini ve tum verilerini kalici olarak siler.
@@ -1878,8 +1889,8 @@ async def admin_test_notification(
             "status": "error",
             "message": f"Test bildirim HATASI: {str(e)}",
             "error_type": type(e).__name__,
-            "traceback": traceback.format_exc()[-800:],
             "token_info": token_info,
+            **({"traceback": traceback.format_exc()[-800:]} if not settings.is_production else {}),
         }
 
 
@@ -2093,7 +2104,10 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
             return {"status": "ok", "message": "SPK bulten kontrolu tamamlandi"}
         except Exception as e:
             import traceback
-            return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+            resp = {"status": "error", "message": str(e)[:500]}
+            if not settings.is_production:
+                resp["traceback"] = traceback.format_exc()[-1000:]
+            return resp
 
     # Debug mode — adim adim isle ve sonuclari dondur
     try:
@@ -2202,7 +2216,10 @@ async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSess
 
     except Exception as e:
         import traceback
-        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1500:]}
+        resp = {"status": "error", "message": str(e)[:500]}
+        if not settings.is_production:
+            resp["traceback"] = traceback.format_exc()[-1500:]
+        return resp
 
 
 @app.post("/api/v1/admin/reset-spk-bulletin-no")
@@ -2263,7 +2280,7 @@ def _check_daily_reset(user: User):
 
 @app.get("/api/v1/users/{device_id}/wallet", response_model=WalletBalanceOut)
 @limiter.limit("30/minute")
-async def get_wallet(request: Request, device_id: str, db: AsyncSession = Depends(get_db)):
+async def get_wallet(request: Request, device_id: str = Depends(_validate_device_id_param), db: AsyncSession = Depends(get_db)):
     """Kullanicinin cuzdan bakiyesini ve reklam durumunu getirir."""
     result = await db.execute(select(User).where(User.device_id == device_id))
     user = result.scalar_one_or_none()
@@ -2340,8 +2357,8 @@ async def wallet_daily_checkin(
 @limiter.limit("35/minute")
 async def wallet_earn(
     request: Request,
-    device_id: str,
-    data: WalletEarnRequest,
+    device_id: str = Depends(_validate_device_id_param),
+    data: WalletEarnRequest = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Reklam izleme sonrasi puan kazanimi — sunucu tarafinda kontrol."""
@@ -2400,8 +2417,8 @@ async def wallet_earn(
 @limiter.limit("20/minute")
 async def wallet_spend(
     request: Request,
-    device_id: str,
-    data: WalletSpendRequest,
+    device_id: str = Depends(_validate_device_id_param),
+    data: WalletSpendRequest = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     """Puan harcama — paket satin alma oncesi bakiye kontrolu + sunucu tarafindan fiyat dogrulama."""
@@ -2747,7 +2764,9 @@ async def delete_ipo_alert(
 # -------------------------------------------------------
 
 @app.post("/api/v1/ceiling-track")
+@limiter.limit("60/minute")
 async def update_ceiling_track(
+    request: Request,
     data: CeilingTrackUpdate,
     db: AsyncSession = Depends(get_db),
 ):
@@ -2809,7 +2828,10 @@ async def update_ceiling_track(
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"ceiling-track update_ceiling_track HATASI ({data.ticker}): {e}\n{tb}")
-        return {"status": "error", "phase": "update_ceiling_track", "detail": str(e), "traceback": tb}
+        resp = {"status": "error", "phase": "update_ceiling_track", "detail": str(e)[:200]}
+        if not settings.is_production:
+            resp["traceback"] = tb
+        return resp
 
     # Bildirimler artik excel_sync.py → /api/v1/realtime-notification uzerinden gonderiliyor.
     # Bu endpoint sadece veri kaydeder, bildirim gondermez.
@@ -2820,7 +2842,10 @@ async def update_ceiling_track(
     except Exception as e:
         tb = traceback.format_exc()
         logger.error(f"ceiling-track flush HATASI ({data.ticker}): {e}\n{tb}")
-        return {"status": "error", "phase": "flush", "detail": str(e), "traceback": tb}
+        resp = {"status": "error", "phase": "flush", "detail": str(e)[:200]}
+        if not settings.is_production:
+            resp["traceback"] = tb
+        return resp
 
     return {
         "status": "ok",
@@ -2953,7 +2978,7 @@ async def send_realtime_notification(
                         "notification_type": data.notification_type,
                         "ticker": data.ticker,
                         "ipo_id": str(ipo.id),
-                        "screen": "halka-arz-detay",
+                        "screen": "bildirim-merkezi",
                     },
                     channel_id="ceiling_alerts_v2",
                     category="ipo",
@@ -3070,7 +3095,7 @@ async def send_realtime_notification(
                         "notification_type": data.notification_type,
                         "ticker": data.ticker,
                         "ipo_id": str(ipo.id),
-                        "screen": "halka-arz-detay",
+                        "screen": "bildirim-merkezi",
                     },
                     channel_id="ceiling_alerts_v2",
                     category="ipo",
@@ -3679,6 +3704,11 @@ async def trigger_opening_tweet(
         else:
             durum = "not_kapatti"
 
+        # E.D.O (Kumulatif El Degistirme Orani)
+        edo_pct = None
+        if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
+            edo_pct = round((ipo.cumulative_volume / ipo.senet_sayisi) * 100, 2)
+
         stocks.append({
             "ticker": ipo.ticker,
             "company_name": ipo.company_name,
@@ -3694,6 +3724,7 @@ async def trigger_opening_tweet(
             "normal_days": normal_days,
             "alis_lot": alis_lot,
             "satis_lot": satis_lot,
+            "edo_pct": edo_pct,
         })
 
     if not stocks:
@@ -5733,7 +5764,8 @@ class FeedbackRequest(BaseModel):
     device_id: Optional[str] = None
 
 @app.post("/api/v1/feedback")
-async def submit_feedback(body: FeedbackRequest):
+@limiter.limit("5/minute")
+async def submit_feedback(request: Request, body: FeedbackRequest):
     """Kullanici geri bildirimi alir ve admin Telegram'a iletir."""
     from app.services.admin_telegram import send_admin_message
 
@@ -6333,7 +6365,10 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
         return {"status": "ok", "message": "KAP scrape tamamlandi (Uzmanpara)"}
     except Exception as e:
         import traceback
-        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+        resp = {"status": "error", "message": str(e)[:500]}
+        if not settings.is_production:
+            resp["traceback"] = traceback.format_exc()[-1000:]
+        return resp
 
 
 # -------------------------------------------------------
@@ -6424,7 +6459,10 @@ async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
         }
     except Exception as e:
         import traceback
-        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+        resp = {"status": "error", "message": str(e)[:500]}
+        if not settings.is_production:
+            resp["traceback"] = traceback.format_exc()[-1000:]
+        return resp
 
 
 # -------------------------------------------------------
@@ -6494,4 +6532,7 @@ async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)
         }
     except Exception as e:
         import traceback
-        return {"status": "error", "message": str(e)[:500], "traceback": traceback.format_exc()[-1000:]}
+        resp = {"status": "error", "message": str(e)[:500]}
+        if not settings.is_production:
+            resp["traceback"] = traceback.format_exc()[-1000:]
+        return resp
