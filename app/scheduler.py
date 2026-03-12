@@ -2568,7 +2568,7 @@ async def daily_ceiling_update():
                         if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
                             import json as _json
                             edo_pct = (ipo.cumulative_volume / ipo.senet_sayisi) * 100
-                            edo_thresholds = [10, 25, 50, 75, 100, 125]
+                            edo_thresholds = [1, 3, 10, 25, 50, 75, 100, 125]
                             notified_raw = ipo.edo_notified_thresholds or "[]"
                             try:
                                 notified = _json.loads(notified_raw)
@@ -2587,6 +2587,8 @@ async def daily_ceiling_update():
                                     try:
                                         import httpx
                                         edo_msgs = {
+                                            1: f"E.D.O %1'i Aştı!",
+                                            3: f"E.D.O %3'ü Aştı!",
                                             10: f"E.D.O %10'u Aştı!",
                                             25: f"E.D.O %25'i Aştı! Senetlerin çeyreği el değiştirdi",
                                             50: f"E.D.O %50'yi Aştı! Senetlerin yarısı el değiştirdi",
@@ -2613,8 +2615,8 @@ async def daily_ceiling_update():
                                     except Exception as notif_err:
                                         logger.error("E.D.O bildirim hatasi: %s", notif_err)
 
-                                    # Twitter tweet — sadece %10 ve %100
-                                    if threshold in [10, 100]:
+                                    # Twitter tweet — %1, %10 ve %100
+                                    if threshold in [1, 10, 100]:
                                         try:
                                             from app.services.twitter_service import tweet_edo_threshold
                                             tweet_edo_threshold(ipo, threshold, edo_pct, len(days_data))
