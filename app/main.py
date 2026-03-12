@@ -140,27 +140,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("IPO last_day kolonlari eklenemedi (muhtemelen zaten var): %s", e)
 
-    # v20: EDO (El Degistirme Orani) kolonlari
-    try:
-        async with async_session() as db:
-            # IPO tablosu
-            await db.execute(sa_text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS senet_sayisi BIGINT"))
-            await db.execute(sa_text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS cumulative_volume BIGINT DEFAULT 0"))
-            await db.execute(sa_text("ALTER TABLE ipos ADD COLUMN IF NOT EXISTS edo_notified_thresholds TEXT"))
-            # Ceiling track tablosu
-            await db.execute(sa_text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS gunluk_adet BIGINT"))
-            await db.execute(sa_text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS senet_sayisi BIGINT"))
-            await db.execute(sa_text("ALTER TABLE ipo_ceiling_tracks ADD COLUMN IF NOT EXISTS cumulative_edo_pct NUMERIC(10,2)"))
-            # MCARD senet sayisi set et (sadece NULL ise)
-            await db.execute(sa_text(
-                "UPDATE ipos SET senet_sayisi = 14545919 "
-                "WHERE ticker = 'MCARD' AND senet_sayisi IS NULL"
-            ))
-            await db.commit()
-            logger.info("EDO kolonlari OK")
-    except Exception as e:
-        logger.warning("EDO kolonlari eklenemedi (muhtemelen zaten var): %s", e)
-
     # BIST50 cache'ini DB'den yukle
     try:
         from app.database import async_session
@@ -2859,10 +2838,9 @@ async def send_realtime_notification(
     """
     Gercek zamanli bildirim gonder — excel_sync.py'den cagirilir.
 
-    5 bildirim tipi:
+    4 bildirim tipi:
       - tavan_bozulma:          Tavan acilinca/kitlenince
       - taban_acilma:           Taban acilinca/kitlenince
-      - el_degistirme:          E.D.O kumulatif esik asildiginda (%10,%25,%50,%75,%100,%125)
       - gunluk_acilis_kapanis:  Gunluk acilis (09:56) ve kapanis (18:08)
       - yuzde_dusus:            Tek hizmet — %4 ve %7 esik, gunde max 2 bildirim
                                 sub_event: "pct4" veya "pct7"
@@ -2877,7 +2855,7 @@ async def send_realtime_notification(
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     valid_types = [
-        "tavan_bozulma", "taban_acilma", "el_degistirme",
+        "tavan_bozulma", "taban_acilma",
         "gunluk_acilis_kapanis", "yuzde_dusus",
     ]
     if data.notification_type not in valid_types:
@@ -3157,8 +3135,6 @@ async def bulk_ceiling_track(
             alis_lot = int(t["alis_lot"]) if t.get("alis_lot") else None
             satis_lot = int(t["satis_lot"]) if t.get("satis_lot") else None
             pct_change = float(t["pct_change"]) if t.get("pct_change") is not None else None
-            gunluk_adet = int(t["gunluk_adet"]) if t.get("gunluk_adet") else None
-            senet_sayisi_val = int(t["senet_sayisi"]) if t.get("senet_sayisi") else None
 
             track = await ipo_service.update_ceiling_track(
                 ipo_id=ipo.id,
@@ -3173,8 +3149,6 @@ async def bulk_ceiling_track(
                 alis_lot=alis_lot,
                 satis_lot=satis_lot,
                 pct_change=pct_change,
-                gunluk_adet=gunluk_adet,
-                senet_sayisi=senet_sayisi_val,
             )
 
             # trading_day_count GUNCELLENMEZ — sadece daily_ceiling_update scheduler yapar.

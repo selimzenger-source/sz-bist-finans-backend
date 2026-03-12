@@ -131,17 +131,6 @@ class IPO(Base):
         Numeric(12, 2), comment="Islem basindan bu yana en yuksek fiyat (%4 dusus hesabi icin)"
     )
 
-    # --- E.D.O (El Degistirme Orani) ---
-    senet_sayisi: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True, comment="Halka arz senet sayisi (toplam lot)"
-    )
-    cumulative_volume: Mapped[int | None] = mapped_column(
-        BigInteger, nullable=True, default=0, comment="Kumulatif gunluk adet toplami"
-    )
-    edo_notified_thresholds: Mapped[str | None] = mapped_column(
-        Text, nullable=True, comment="Bildirim gonderilen EDO esikleri JSON [10,25,50]"
-    )
-
     # --- AI Rapor ---
     ai_report: Mapped[str | None] = mapped_column(
         Text, nullable=True, comment="AI halka arz degerlendirme raporu (JSON)"
@@ -281,13 +270,6 @@ class IPOCeilingTrack(Base):
     # v19: 1. kademe lot verileri (ogle arasi market snapshot icin)
     alis_lot: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="1. kademe alis lotu")
     satis_lot: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="1. kademe satis lotu")
-
-    # v20: E.D.O (El Degistirme Orani) verileri
-    gunluk_adet: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Gunluk islem adedi")
-    senet_sayisi: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="Toplam senet sayisi")
-    cumulative_edo_pct: Mapped[Decimal | None] = mapped_column(
-        Numeric(10, 2), nullable=True, comment="O gune kadar kumulatif EDO %"
-    )
 
     ipo: Mapped["IPO"] = relationship(back_populates="ceiling_tracks")
 

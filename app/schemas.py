@@ -49,10 +49,6 @@ class IPOCeilingTrackOut(BaseModel):
     # v3: 5 durum + kumulatif % fark — veri yoksa None (frontend 'alici_kapatti' defaultundan kaçın)
     durum: Optional[str] = None
     pct_change: Optional[Decimal] = None
-    # v20: E.D.O (El Degistirme Orani)
-    gunluk_adet: Optional[int] = None
-    senet_sayisi: Optional[int] = None
-    cumulative_edo_pct: Optional[Decimal] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -89,9 +85,6 @@ class IPOListOut(BaseModel):
     archived: bool = False
     trading_day_count: int = 0
     high_from_start: Optional[Decimal] = None
-    # v20: E.D.O
-    senet_sayisi: Optional[int] = None
-    cumulative_volume: Optional[int] = None
 
     # AI Rapor (admin panel icin de lazim)
     ai_report: Optional[str] = None

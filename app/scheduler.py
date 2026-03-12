@@ -2474,7 +2474,6 @@ async def daily_ceiling_update():
                             "close": t.close_price,
                             "volume": 0,
                             "durum": t.durum or "",
-                            "cumulative_edo_pct": float(t.cumulative_edo_pct) if t.cumulative_edo_pct else None,
                         })
 
                     if not days_data:
@@ -2561,69 +2560,6 @@ async def daily_ceiling_update():
                     # Push bildirim KALDIRILDI — excel_sync.py zaten günsonu kapanış bildirimi gönderiyor
                     # Aynı hisse için iki bildirim (kapanış + günlük takip) gitmesini önlemek için
                     # push bildirim burada atlanıyor, tweet yeterli.
-
-                    # --- E.D.O (El Degistirme Orani) Threshold Check ---
-                    # Sadece senet_sayisi olan IPO'lar icin (MCARD+)
-                    try:
-                        if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
-                            import json as _json
-                            edo_pct = (ipo.cumulative_volume / ipo.senet_sayisi) * 100
-                            edo_thresholds = [10, 25, 50, 75, 100, 125]
-                            notified_raw = ipo.edo_notified_thresholds or "[]"
-                            try:
-                                notified = _json.loads(notified_raw)
-                            except Exception:
-                                notified = []
-
-                            for threshold in edo_thresholds:
-                                if edo_pct >= threshold and threshold not in notified:
-                                    notified.append(threshold)
-                                    logger.info(
-                                        "E.D.O ESIK: %s — %%%d asildi (mevcut: %%.2f)",
-                                        ipo.ticker, threshold, edo_pct,
-                                    )
-
-                                    # Push bildirim gonder
-                                    try:
-                                        import httpx
-                                        edo_msgs = {
-                                            10: f"E.D.O %10'u Aştı!",
-                                            25: f"E.D.O %25'i Aştı! Senetlerin çeyreği el değiştirdi",
-                                            50: f"E.D.O %50'yi Aştı! Senetlerin yarısı el değiştirdi",
-                                            75: f"E.D.O %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
-                                            100: f"E.D.O %100'ü Aştı! Tüm senetler el değiştirdi",
-                                            125: f"E.D.O %125'i Aştı! Senetler 1.25 kez döndü",
-                                        }
-                                        title = f"{ipo.ticker} {edo_msgs.get(threshold, f'E.D.O %{threshold} aşıldı')}"
-                                        body = f"Kümülatif E.D.O: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
-                                        import os
-                                        api_url = os.getenv("API_URL", "https://sz-bist-finans-api.onrender.com")
-                                        admin_pw = os.getenv("ADMIN_PASSWORD", "")
-                                        async with httpx.AsyncClient(timeout=30) as client:
-                                            await client.post(
-                                                f"{api_url}/api/v1/realtime-notification",
-                                                json={
-                                                    "admin_password": admin_pw,
-                                                    "ticker": ipo.ticker,
-                                                    "notification_type": "el_degistirme",
-                                                    "title": title,
-                                                    "body": body,
-                                                },
-                                            )
-                                    except Exception as notif_err:
-                                        logger.error("E.D.O bildirim hatasi: %s", notif_err)
-
-                                    # Twitter tweet — sadece %10 ve %100
-                                    if threshold in [10, 100]:
-                                        try:
-                                            from app.services.twitter_service import tweet_edo_threshold
-                                            tweet_edo_threshold(ipo, threshold, edo_pct, len(days_data))
-                                        except Exception as tw_err:
-                                            logger.error("E.D.O tweet hatasi: %s", tw_err)
-
-                            ipo.edo_notified_thresholds = _json.dumps(notified)
-                    except Exception as edo_err:
-                        logger.error("E.D.O threshold check hatasi (%s): %s", ipo.ticker, edo_err)
 
                 except Exception as ticker_err:
                     logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)
