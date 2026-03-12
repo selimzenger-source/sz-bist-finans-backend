@@ -2124,9 +2124,12 @@ async def _market_snapshot_attempt(retry_num: int = 0):
             # Durum
             durum = today_track.durum or "not_kapatti"
 
-            # E.D.O (Kumulatif El Degistirme Orani) — senet_sayisi olan IPO'lar icin
+            # E.D.O (Kumulatif El Degistirme Orani) — MCARD ve sonrasi icin
+            from datetime import date as _d
+            _EDO_START = _d(2026, 3, 10)
             edo_pct = None
-            if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
+            if (ipo.trading_start and ipo.trading_start >= _EDO_START
+                    and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
                 edo_pct = round((ipo.cumulative_volume / ipo.senet_sayisi) * 100, 2)
 
             snapshot_data.append({
@@ -2323,6 +2326,14 @@ async def _opening_summary_attempt(retry_num: int = 0):
             else:
                 durum = "not_kapatti"
 
+            # E.D.O (Kumulatif El Degistirme Orani) — 10 Mart 2026 ve sonrasi
+            from datetime import date as _d
+            _EDO_START = _d(2026, 3, 10)
+            edo_pct = None
+            if (ipo.trading_start and ipo.trading_start >= _EDO_START
+                    and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
+                edo_pct = round((ipo.cumulative_volume / ipo.senet_sayisi) * 100, 2)
+
             stocks.append({
                 "ticker": ipo.ticker,
                 "company_name": ipo.company_name,
@@ -2338,6 +2349,7 @@ async def _opening_summary_attempt(retry_num: int = 0):
                 "normal_days": normal_days,
                 "alis_lot": alis_lot,
                 "satis_lot": satis_lot,
+                "edo_pct": edo_pct,
             })
 
         if not stocks and no_open_count > 0 and retry_num < 3:
@@ -2569,9 +2581,12 @@ async def daily_ceiling_update():
                     # push bildirim burada atlanıyor, tweet yeterli.
 
                     # --- E.D.O (El Degistirme Orani) Threshold Check ---
-                    # Sadece senet_sayisi olan IPO'lar icin (MCARD+)
+                    # 10 Mart 2026 ve sonrasi icin (MCARD+)
                     try:
-                        if ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume:
+                        from datetime import date as _dt
+                        _EDO_CUT = _dt(2026, 3, 10)
+                        if (ipo.trading_start and ipo.trading_start >= _EDO_CUT
+                                and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
                             import json as _json
                             edo_pct = (ipo.cumulative_volume / ipo.senet_sayisi) * 100
                             edo_thresholds = [1, 3, 10, 25, 50, 75, 100, 125]

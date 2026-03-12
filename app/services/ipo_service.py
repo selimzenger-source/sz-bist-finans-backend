@@ -524,16 +524,21 @@ class IPOService:
             track.durum = "satici_kapatti"
 
         # v20: E.D.O (El Degistirme Orani) hesapla
-        if gunluk_adet is not None:
+        # Sadece MCARD ve sonrasi (trading_start >= 2026-03-11) icin EDO
+        from datetime import date as _date_type
+        _EDO_START = _date_type(2026, 3, 10)
+        _edo_ok = bool(ipo and ipo.trading_start and ipo.trading_start >= _EDO_START)
+
+        if _edo_ok and gunluk_adet is not None:
             track.gunluk_adet = gunluk_adet
-        if senet_sayisi is not None:
+        if _edo_ok and senet_sayisi is not None:
             track.senet_sayisi = senet_sayisi
             if ipo:
                 ipo.senet_sayisi = senet_sayisi
 
         # Kumulatif EDO hesapla — SUM sorgusuyla (history tracking yerine)
-        senet = senet_sayisi or (ipo.senet_sayisi if ipo else None)
-        has_adet = gunluk_adet or track.gunluk_adet  # mevcut veya yeni
+        senet = (ipo.senet_sayisi if ipo else None) if _edo_ok else None
+        has_adet = (gunluk_adet or track.gunluk_adet) if _edo_ok else None
         if has_adet and senet and senet > 0 and ipo:
             # Once bu track'i flush et ki SUM sorgusunda yeni deger gorunsun
             await self.db.flush()

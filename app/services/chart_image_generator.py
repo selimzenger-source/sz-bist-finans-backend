@@ -1222,11 +1222,11 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
 
         # ── Boyutlar ─────────────────────────────
         width = 1200
-        padding = 30
-        card_gap = 22           # kartlar arasi bosluk (daha genis — ayrisik kartlar)
+        padding = 40
+        card_gap = 20           # kartlar arasi bosluk
         card_w = (width - 2 * padding - (cols - 1) * card_gap) // cols
-        card_h = 350            # her kart yuksekligi
-        card_radius = 16        # daha yumusak koseler
+        card_h = 380            # her kart yuksekligi (EDO + lot icin alan)
+        card_radius = 18        # daha yumusak koseler
 
         # Banner
         banner_h = 0
@@ -1372,32 +1372,38 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
             _draw_centered(draw, mid_x, y, pct_text, font_value_lg, price_color)
             y += 32
 
-            # ─ Lot bilgileri ─
+            # ─ Lot bilgileri (tavan/taban'a özel) ─
             _alis = alis_lot or 0
             _satis = satis_lot or 0
-            left_mid = cx + card_w // 4
-            right_mid = cx + 3 * card_w // 4
 
             if durum == "tavan":
-                _draw_centered(draw, mid_x, y, "Alış Bekleyen", font_small, (100, 100, 120))
+                _draw_centered(draw, mid_x, y, "Tavana Alış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_alis)} lot",
                                font_value, TAVAN_GREEN)
+                y += 28
             elif durum == "taban":
-                _draw_centered(draw, mid_x, y, "Satış Bekleyen", font_small, (100, 100, 120))
+                _draw_centered(draw, mid_x, y, "Tabana Satış Bekleyen", font_small, (100, 100, 120))
                 y += 16
                 _draw_centered(draw, mid_x, y, f"{_format_lot(_satis)} lot",
                                font_value, TABAN_RED)
+                y += 28
             # Normal durumda lot gösterme
 
-            # ─ Kümülatif E.D.O (MCARD+ — senet_sayisi olan IPO'lar) ─
+            # ─ Kümülatif E.D.O (senet_sayisi olan IPO'lar) ─
             edo_pct = stock.get("edo_pct")
             if edo_pct is not None:
-                # Lot'tan sonra kalan alana E.D.O yaz
-                edo_y = cy + card_h - 40  # kart alt kenarından 40px yukari
+                # İnce ayırıcı çizgi
+                line_pad = 20
+                draw.line(
+                    [(cx + line_pad, cy + card_h - 50),
+                     (cx + card_w - line_pad, cy + card_h - 50)],
+                    fill=CARD_BORDER, width=1,
+                )
+                edo_y = cy + card_h - 42
                 _draw_centered(draw, mid_x, edo_y, "Küm. E.D.O", font_small, GRAY)
-                _draw_centered(draw, mid_x, edo_y + 14, f"%{edo_pct:.2f}",
-                               font_badge, GOLD)
+                _draw_centered(draw, mid_x, edo_y + 16, f"%{edo_pct:.2f}",
+                               font_value, GOLD)
 
         # ── Footer ────────────────────────────────
         footer_y = total_h - footer_h

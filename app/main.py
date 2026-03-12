@@ -152,6 +152,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("IPO last_day kolonlari eklenemedi (muhtemelen zaten var): %s", e)
 
+    # E.D.O temizligi: trading_start < 2026-03-10 olan IPO'larin EDO verisini sifirla
+    # MCARD (2026-03-10) ve sonrasi icin EDO aktif, oncesini temizle
+    try:
+        async with async_session() as db:
+            # IPO tablosunda: eski hisselerin senet_sayisi ve cumulative_volume'u temizle
+            await db.execute(sa_text(
+                "UPDATE ipos SET senet_sayisi = NULL, cumulative_volume = NULL "
+                "WHERE (trading_start IS NULL OR trading_start < '2026-03-10') "
+                "AND senet_sayisi IS NOT NULL"
+            ))
+            # Track tablosunda: eski track'lerin EDO verisini temizle
+            await db.execute(sa_text(
+                "UPDATE ipo_ceiling_tracks SET gunluk_adet = NULL, senet_sayisi = NULL, cumulative_edo_pct = NULL "
+                "WHERE ipo_id IN (SELECT id FROM ipos WHERE trading_start IS NULL OR trading_start < '2026-03-10')"
+            ))
+            await db.commit()
+            logger.info("E.D.O temizligi: Eski IPO'larin EDO verisi sifirlandi")
+    except Exception as e:
+        logger.warning("E.D.O temizligi hatasi: %s", e)
+
     # BIST50 cache'ini DB'den yukle
     try:
         from app.services.news_service import load_bist50_from_db
