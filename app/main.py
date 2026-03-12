@@ -152,25 +152,87 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("IPO last_day kolonlari eklenemedi (muhtemelen zaten var): %s", e)
 
-    # E.D.O temizligi: trading_start < 2026-03-10 olan IPO'larin EDO verisini sifirla
-    # MCARD (2026-03-10) ve sonrasi icin EDO aktif, oncesini temizle
+    # E.D.O: trading_start backfill — NULL olan trading IPO'lar icin ilk track tarihinden set et
     try:
         async with async_session() as db:
-            # IPO tablosunda: eski hisselerin senet_sayisi ve cumulative_volume'u temizle
             await db.execute(sa_text(
-                "UPDATE ipos SET senet_sayisi = NULL, cumulative_volume = NULL "
-                "WHERE (trading_start IS NULL OR trading_start < '2026-03-10') "
-                "AND senet_sayisi IS NOT NULL"
-            ))
-            # Track tablosunda: eski track'lerin EDO verisini temizle
-            await db.execute(sa_text(
-                "UPDATE ipo_ceiling_tracks SET gunluk_adet = NULL, senet_sayisi = NULL, cumulative_edo_pct = NULL "
-                "WHERE ipo_id IN (SELECT id FROM ipos WHERE trading_start IS NULL OR trading_start < '2026-03-10')"
+                "UPDATE ipos SET trading_start = sub.first_date "
+                "FROM (SELECT ipo_id, MIN(trade_date) as first_date "
+                "      FROM ipo_ceiling_tracks GROUP BY ipo_id) sub "
+                "WHERE ipos.id = sub.ipo_id "
+                "AND ipos.trading_start IS NULL AND ipos.status = 'trading'"
             ))
             await db.commit()
-            logger.info("E.D.O temizligi: Eski IPO'larin EDO verisi sifirlandi")
+            logger.info("E.D.O: trading_start backfill OK")
+    except Exception as e:
+        logger.warning("E.D.O trading_start backfill hatasi: %s", e)
+
+    # E.D.O temizligi: KESIN eski IPO'larin EDO verisini sifirla
+    # DIKKAT: trading_start IS NULL olanlara DOKUNMA (yeni/backfill eksik olabilir)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "UPDATE ipos SET senet_sayisi = NULL, cumulative_volume = NULL "
+                "WHERE trading_start IS NOT NULL AND trading_start < '2026-03-10' "
+                "AND senet_sayisi IS NOT NULL"
+            ))
+            await db.execute(sa_text(
+                "UPDATE ipo_ceiling_tracks SET gunluk_adet = NULL, senet_sayisi = NULL, "
+                "cumulative_edo_pct = NULL "
+                "WHERE ipo_id IN ("
+                "  SELECT id FROM ipos "
+                "  WHERE trading_start IS NOT NULL AND trading_start < '2026-03-10'"
+                ")"
+            ))
+            await db.commit()
+            logger.info("E.D.O temizligi OK (trading_start < 2026-03-10)")
     except Exception as e:
         logger.warning("E.D.O temizligi hatasi: %s", e)
+
+    # E.D.O: MCARD 1. gun veri kurtarma — startup sırasında kaybolan gunluk_adet'i geri yukle
+    # 1. gun kapanista EDO %0.12 idi, senet_sayisi ~18,898,620 → gunluk_adet ≈ 22,678
+    # Bu one-time fix: sadece gunluk_adet NULL ise set eder (tekrar tekrar calissa bile guvenli)
+    try:
+        async with async_session() as db:
+            # MCARD'in 1. gun track kaydini bul (trading_day=1 ve gunluk_adet NULL)
+            fix_res = await db.execute(sa_text(
+                "UPDATE ipo_ceiling_tracks SET gunluk_adet = 22678 "
+                "WHERE ipo_id = (SELECT id FROM ipos WHERE ticker = 'MCARD' LIMIT 1) "
+                "AND trading_day = 1 "
+                "AND (gunluk_adet IS NULL OR gunluk_adet = 0)"
+            ))
+            if fix_res.rowcount > 0:
+                # Kumulatif EDO'yu da yeniden hesapla
+                # Tum gunlerin toplamini al
+                mcard_id_res = await db.execute(sa_text(
+                    "SELECT id, senet_sayisi FROM ipos WHERE ticker = 'MCARD' LIMIT 1"
+                ))
+                mcard_row = mcard_id_res.fetchone()
+                if mcard_row:
+                    mcard_ipo_id = mcard_row[0]
+                    mcard_senet = mcard_row[1]
+                    if mcard_senet and mcard_senet > 0:
+                        # Her gun icin running total ile cumulative_edo_pct hesapla
+                        tracks_res = await db.execute(sa_text(
+                            "SELECT id, trading_day, gunluk_adet FROM ipo_ceiling_tracks "
+                            "WHERE ipo_id = :ipo_id ORDER BY trading_day"
+                        ), {"ipo_id": mcard_ipo_id})
+                        running = 0
+                        for tr in tracks_res.fetchall():
+                            running += (tr[2] or 0)
+                            pct = round(running / mcard_senet * 100, 2)
+                            await db.execute(sa_text(
+                                "UPDATE ipo_ceiling_tracks SET cumulative_edo_pct = :pct "
+                                "WHERE id = :tid"
+                            ), {"pct": pct, "tid": tr[0]})
+                        # cumulative_volume guncelle
+                        await db.execute(sa_text(
+                            "UPDATE ipos SET cumulative_volume = :vol WHERE id = :iid"
+                        ), {"vol": running, "iid": mcard_ipo_id})
+                await db.commit()
+                logger.info("E.D.O: MCARD 1. gun verisi geri yuklendi (gunluk_adet=22678, EDO≈0.12%%)")
+    except Exception as e:
+        logger.warning("E.D.O MCARD fix hatasi: %s", e)
 
     # BIST50 cache'ini DB'den yukle
     try:

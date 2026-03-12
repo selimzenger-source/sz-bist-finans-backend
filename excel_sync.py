@@ -310,13 +310,33 @@ def read_matriks_excel_live(filepath):
         satis_lot_val = sheet.Range(f"L{row_idx}").Value
         satis_lot = int(float(satis_lot_val)) if satis_lot_val and float(satis_lot_val) > 0 else None
 
-        # M: GUNLUK ADET (E.D.O icin)
-        gunluk_adet_val = sheet.Range(f"M{row_idx}").Value
-        gunluk_adet = int(float(gunluk_adet_val)) if gunluk_adet_val and float(gunluk_adet_val) > 0 else None
+        # A: ILK ISLEM tarihi (E.D.O filtresi icin)
+        # Sadece 10 Mart 2026 ve sonrasi IPO'lar icin EDO verisi gonder
+        ilk_islem_val = sheet.Range(f"A{row_idx}").Value
+        edo_eligible = False
+        if ilk_islem_val:
+            try:
+                from datetime import datetime as _dt
+                if hasattr(ilk_islem_val, 'year'):
+                    ilk_islem_date = ilk_islem_val
+                else:
+                    ilk_islem_date = _dt.strptime(str(ilk_islem_val).strip(), "%d.%m.%Y")
+                # 10 Mart 2026 ve sonrasi → EDO aktif
+                if ilk_islem_date.year > 2026 or (ilk_islem_date.year == 2026 and (ilk_islem_date.month > 3 or (ilk_islem_date.month == 3 and ilk_islem_date.day >= 10))):
+                    edo_eligible = True
+            except Exception:
+                pass
 
-        # N: SENET SAYISI (E.D.O icin)
-        senet_sayisi_val = sheet.Range(f"N{row_idx}").Value
-        senet_sayisi = int(float(senet_sayisi_val)) if senet_sayisi_val and float(senet_sayisi_val) > 0 else None
+        # M: GUNLUK ADET (E.D.O icin — sadece eligible IPO'lar)
+        gunluk_adet = None
+        senet_sayisi = None
+        if edo_eligible:
+            gunluk_adet_val = sheet.Range(f"M{row_idx}").Value
+            gunluk_adet = int(float(gunluk_adet_val)) if gunluk_adet_val and float(gunluk_adet_val) > 0 else None
+
+            # N: SENET SAYISI (E.D.O icin)
+            senet_sayisi_val = sheet.Range(f"N{row_idx}").Value
+            senet_sayisi = int(float(senet_sayisi_val)) if senet_sayisi_val and float(senet_sayisi_val) > 0 else None
 
         rows.append({
             "ticker": ticker,
