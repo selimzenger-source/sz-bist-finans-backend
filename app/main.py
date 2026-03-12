@@ -169,11 +169,14 @@ async def lifespan(app: FastAPI):
 
     # E.D.O temizligi: KESIN eski IPO'larin EDO verisini sifirla
     # DIKKAT: trading_start IS NULL olanlara DOKUNMA (yeni/backfill eksik olabilir)
+    # EDO_START_DATE: tek merkezi sabit (app/config.py)
     try:
+        from app.config import EDO_START_DATE
+        _edo_cutoff = str(EDO_START_DATE)  # '2026-03-10'
         async with async_session() as db:
             await db.execute(sa_text(
                 "UPDATE ipos SET senet_sayisi = NULL, cumulative_volume = NULL "
-                "WHERE trading_start IS NOT NULL AND trading_start < '2026-03-10' "
+                f"WHERE trading_start IS NOT NULL AND trading_start < '{_edo_cutoff}' "
                 "AND senet_sayisi IS NOT NULL"
             ))
             await db.execute(sa_text(
@@ -181,11 +184,11 @@ async def lifespan(app: FastAPI):
                 "cumulative_edo_pct = NULL "
                 "WHERE ipo_id IN ("
                 "  SELECT id FROM ipos "
-                "  WHERE trading_start IS NOT NULL AND trading_start < '2026-03-10'"
+                f"  WHERE trading_start IS NOT NULL AND trading_start < '{_edo_cutoff}'"
                 ")"
             ))
             await db.commit()
-            logger.info("E.D.O temizligi OK (trading_start < 2026-03-10)")
+            logger.info("E.D.O temizligi OK (trading_start < %s)", _edo_cutoff)
     except Exception as e:
         logger.warning("E.D.O temizligi hatasi: %s", e)
 

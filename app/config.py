@@ -1,7 +1,13 @@
 """Uygulama konfigurasyonu."""
 
+from datetime import date
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# ── E.D.O (El Degistirme Orani) Sabitleri ──────────────────
+# Bu tarihten itibaren isleme baslamis IPO'lar icin EDO hesaplanir.
+# Tek yerde tanimlanir, tum backend bu sabiti kullanir.
+EDO_START_DATE = date(2026, 3, 10)
 
 
 class Settings(BaseSettings):

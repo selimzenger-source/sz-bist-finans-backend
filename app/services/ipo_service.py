@@ -524,12 +524,11 @@ class IPOService:
             track.durum = "satici_kapatti"
 
         # v20: E.D.O (El Degistirme Orani) hesapla
-        # EDO filtresi: KESIN trading_start >= 2026-03-10 kontrolu
+        # EDO filtresi: KESIN trading_start >= EDO_START_DATE kontrolu
         # Excel ne gonderdigi onemli degil — backend HER ZAMAN tarih kontrol eder
-        from datetime import date as _date_type
-        _EDO_START = _date_type(2026, 3, 10)
+        from app.config import EDO_START_DATE
         _edo_ok = False
-        if ipo and ipo.trading_start and ipo.trading_start >= _EDO_START:
+        if ipo and ipo.trading_start and ipo.trading_start >= EDO_START_DATE:
             _edo_ok = True
 
         if _edo_ok and gunluk_adet is not None:

@@ -2124,9 +2124,8 @@ async def _market_snapshot_attempt(retry_num: int = 0):
             # Durum
             durum = today_track.durum or "not_kapatti"
 
-            # E.D.O (Kumulatif El Degistirme Orani) — MCARD ve sonrasi icin
-            from datetime import date as _d
-            _EDO_START = _d(2026, 3, 10)
+            # E.D.O (Kumulatif El Degistirme Orani) — EDO_START_DATE sonrasi
+            from app.config import EDO_START_DATE as _EDO_START
             edo_pct = None
             if (ipo.trading_start and ipo.trading_start >= _EDO_START
                     and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
@@ -2326,9 +2325,8 @@ async def _opening_summary_attempt(retry_num: int = 0):
             else:
                 durum = "not_kapatti"
 
-            # E.D.O (Kumulatif El Degistirme Orani) — 10 Mart 2026 ve sonrasi
-            from datetime import date as _d
-            _EDO_START = _d(2026, 3, 10)
+            # E.D.O (Kumulatif El Degistirme Orani) — EDO_START_DATE sonrasi
+            from app.config import EDO_START_DATE as _EDO_START
             edo_pct = None
             if (ipo.trading_start and ipo.trading_start >= _EDO_START
                     and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
@@ -2583,8 +2581,7 @@ async def daily_ceiling_update():
                     # --- E.D.O (El Degistirme Orani) Threshold Check ---
                     # 10 Mart 2026 ve sonrasi icin (MCARD+)
                     try:
-                        from datetime import date as _dt
-                        _EDO_CUT = _dt(2026, 3, 10)
+                        from app.config import EDO_START_DATE as _EDO_CUT
                         if (ipo.trading_start and ipo.trading_start >= _EDO_CUT
                                 and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
                             import json as _json
