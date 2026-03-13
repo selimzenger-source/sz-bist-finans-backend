@@ -625,66 +625,82 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
     # Tüm modeller için ortak sistem kişiliği (Sıfır Halüsinasyon prensibi)
     _SYSTEM_PERSONA = get_system_prompt()
 
-    # FALLBACK SİSTEMİ
+    # FALLBACK SİSTEMİ (rate limit 429 → 3sn bekle + 1 retry)
     # ── 1. ANTHROPIC (Claude — birincil) ──
     if settings.ANTHROPIC_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=25) as client:
-                res = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": settings.ANTHROPIC_API_KEY,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json"
-                    },
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 150,
-                        "system": _SYSTEM_PERSONA,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1
-                    }
-                )
-                if res.status_code == 200:
-                    ai_text = _clean_ai_text(res.json()["content"][0]["text"])
-                    if ai_text:
-                        logger.info(f"Anthropic result for {ticker}: {ai_text}")
-                        return ai_text
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=25) as client:
+                    res = await client.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": settings.ANTHROPIC_API_KEY,
+                            "anthropic-version": "2023-06-01",
+                            "content-type": "application/json"
+                        },
+                        json={
+                            "model": "claude-sonnet-4-20250514",
+                            "max_tokens": 150,
+                            "system": _SYSTEM_PERSONA,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.1
+                        }
+                    )
+                    if res.status_code == 200:
+                        ai_text = _clean_ai_text(res.json()["content"][0]["text"])
+                        if ai_text:
+                            logger.info(f"Anthropic result for {ticker}: {ai_text}")
+                            return ai_text
+                        else:
+                            logger.info(f"Anthropic empty/filtered for {ticker}")
+                            break  # Sonuç geldi ama filtrelendi, retry gereksiz
+                    elif res.status_code == 429 and attempt == 0:
+                        logger.info(f"Anthropic 429 for {ticker}, 3sn bekleyip tekrar deniyor...")
+                        await asyncio.sleep(3)
+                        continue
                     else:
-                        logger.info(f"Anthropic empty/filtered for {ticker}")
-                else:
-                    logger.warning(f"Anthropic HTTP {res.status_code} for {ticker}: {res.text[:150]}")
-        except Exception as e:
-            logger.warning(f"Anthropic error for {ticker}: {e}")
+                        logger.warning(f"Anthropic HTTP {res.status_code} for {ticker}: {res.text[:150]}")
+                        break
+            except Exception as e:
+                logger.warning(f"Anthropic error for {ticker}: {e}")
+                break
 
     # ── 2. OPENAI (GPT-4o) ──
     if settings.OPENAI_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                res = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
-                    json={
-                        "model": "gpt-4o",
-                        "max_tokens": 150,
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PERSONA},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1
-                    }
-                )
-                if res.status_code == 200:
-                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if ai_text:
-                        logger.info(f"OpenAI result for {ticker}: {ai_text}")
-                        return ai_text
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=20) as client:
+                    res = await client.post(
+                        "https://api.openai.com/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}"},
+                        json={
+                            "model": "gpt-4o",
+                            "max_tokens": 150,
+                            "messages": [
+                                {"role": "system", "content": _SYSTEM_PERSONA},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": 0.1
+                        }
+                    )
+                    if res.status_code == 200:
+                        ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                        if ai_text:
+                            logger.info(f"OpenAI result for {ticker}: {ai_text}")
+                            return ai_text
+                        else:
+                            logger.info(f"OpenAI empty/filtered for {ticker}")
+                            break
+                    elif res.status_code == 429 and attempt == 0:
+                        logger.info(f"OpenAI 429 for {ticker}, 3sn bekleyip tekrar deniyor...")
+                        await asyncio.sleep(3)
+                        continue
                     else:
-                        logger.info(f"OpenAI empty/filtered for {ticker}")
-                else:
-                    logger.warning(f"OpenAI HTTP {res.status_code} for {ticker}: {res.text[:150]}")
-        except Exception as e:
-            logger.warning(f"OpenAI error for {ticker}: {e}")
+                        logger.warning(f"OpenAI HTTP {res.status_code} for {ticker}: {res.text[:150]}")
+                        break
+            except Exception as e:
+                logger.warning(f"OpenAI error for {ticker}: {e}")
+                break
 
     # ── 3. ABACUS (Sonnet) ──
     if settings.ABACUS_API_KEY:
@@ -716,34 +732,42 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
 
     # ── 4. GEMINI REST API ──
     if settings.GEMINI_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                res = await client.post(
-                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.GEMINI_API_KEY}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "gemini-2.5-pro",
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PERSONA},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1
-                    }
-                )
-                if res.status_code == 200:
-                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if ai_text:
-                        logger.info(f"Gemini result for {ticker}: {ai_text}")
-                        return ai_text
+        for attempt in range(2):
+            try:
+                async with httpx.AsyncClient(timeout=20) as client:
+                    res = await client.post(
+                        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {settings.GEMINI_API_KEY}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": "gemini-2.5-pro",
+                            "messages": [
+                                {"role": "system", "content": _SYSTEM_PERSONA},
+                                {"role": "user", "content": prompt}
+                            ],
+                            "temperature": 0.1
+                        }
+                    )
+                    if res.status_code == 200:
+                        ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                        if ai_text:
+                            logger.info(f"Gemini result for {ticker}: {ai_text}")
+                            return ai_text
+                        else:
+                            logger.info(f"Gemini empty/filtered for {ticker}")
+                            break
+                    elif res.status_code in (429, 503) and attempt == 0:
+                        logger.info(f"Gemini {res.status_code} for {ticker}, 3sn bekleyip tekrar deniyor...")
+                        await asyncio.sleep(3)
+                        continue
                     else:
-                        logger.info(f"Gemini empty/filtered for {ticker}")
-                else:
-                    logger.warning(f"Gemini HTTP {res.status_code} for {ticker}: {res.text[:100]}")
-        except Exception as e:
-            logger.warning(f"Gemini error for {ticker}: {e}")
+                        logger.warning(f"Gemini HTTP {res.status_code} for {ticker}: {res.text[:100]}")
+                        break
+            except Exception as e:
+                logger.warning(f"Gemini error for {ticker}: {e}")
+                break
 
     # Tüm AI modelleri boş / başarısız — programatik fallback
     if programmatic_reason:
@@ -822,20 +846,21 @@ async def _save_market_close_data(session, today, ceilings, floors):
 
     logger.info(f"Faz1 OK: {len(prepared)} hisse. AI paralel analiz başlıyor...")
 
-    # ── FAZ 2: AI analiz — 5 paralel, DB bağımsız ──
-    sem = asyncio.Semaphore(5)
-    async def _ai(s):
-        async with sem:
-            try:
-                return await _analyze_reason_with_ai(
-                    ticker=s["ticker"], is_ceiling=s["is_ceiling"],
-                    price=float(s["price"]), pct=float(s["pct"]),
-                    consec=s["consec"], monthly=s["monthly"])
-            except Exception as e:
-                logger.error(f"AI {s['ticker']}: {e}")
-                return ""
-
-    reasons = await asyncio.gather(*[_ai(s) for s in prepared])
+    # ── FAZ 2: AI analiz — sıralı + aralarında delay (rate limit koruması) ──
+    reasons = []
+    for i, s in enumerate(prepared):
+        try:
+            reason = await _analyze_reason_with_ai(
+                ticker=s["ticker"], is_ceiling=s["is_ceiling"],
+                price=float(s["price"]), pct=float(s["pct"]),
+                consec=s["consec"], monthly=s["monthly"])
+            reasons.append(reason)
+        except Exception as e:
+            logger.error(f"AI {s['ticker']}: {e}")
+            reasons.append("")
+        # Rate limit koruması: her 3 hissede 2 sn bekle
+        if (i + 1) % 3 == 0 and i < len(prepared) - 1:
+            await asyncio.sleep(2)
     ai_ok = sum(1 for r in reasons if r)
     logger.info(f"Faz2 OK: {ai_ok}/{len(prepared)} AI başarılı.")
 
