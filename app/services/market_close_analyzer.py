@@ -844,9 +844,10 @@ async def _save_market_close_data(session, today, ceilings, floors):
         except Exception as e:
             logger.error(f"[PREP] {stock.get('ticker','?')} hata: {e}")
 
-    logger.info(f"Faz1 OK: {len(prepared)} hisse. AI paralel analiz başlıyor...")
+    logger.info(f"Faz1 OK: {len(prepared)} hisse. AI sıralı analiz başlıyor...")
 
-    # ── FAZ 2: AI analiz — sıralı + aralarında delay (rate limit koruması) ──
+    # ── FAZ 2: AI analiz — sıralı + her hisse arasında delay (rate limit koruması) ──
+    # Anthropic limiti: 30K token/dakika. Her prompt ~5-8K token → 3-4 hisse/dakika güvenli.
     reasons = []
     for i, s in enumerate(prepared):
         try:
@@ -858,9 +859,9 @@ async def _save_market_close_data(session, today, ceilings, floors):
         except Exception as e:
             logger.error(f"AI {s['ticker']}: {e}")
             reasons.append("")
-        # Rate limit koruması: her 3 hissede 2 sn bekle
-        if (i + 1) % 3 == 0 and i < len(prepared) - 1:
-            await asyncio.sleep(2)
+        # Rate limit koruması: her hisseden sonra 4 sn bekle (dakikada ~12 hisse)
+        if i < len(prepared) - 1:
+            await asyncio.sleep(4)
     ai_ok = sum(1 for r in reasons if r)
     logger.info(f"Faz2 OK: {ai_ok}/{len(prepared)} AI başarılı.")
 
