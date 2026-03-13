@@ -192,50 +192,54 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("E.D.O temizligi hatasi: %s", e)
 
-    # E.D.O: MCARD 1. gun veri kurtarma — startup sırasında kaybolan gunluk_adet'i geri yukle
-    # 1. gun kapanista EDO %0.12 idi, senet_sayisi ~18,898,620 → gunluk_adet ≈ 22,678
-    # Bu one-time fix: sadece gunluk_adet NULL ise set eder (tekrar tekrar calissa bile guvenli)
-    try:
-        async with async_session() as db:
-            # MCARD'in 1. gun track kaydini bul (trading_day=1 ve gunluk_adet NULL)
-            fix_res = await db.execute(sa_text(
-                "UPDATE ipo_ceiling_tracks SET gunluk_adet = 22678 "
-                "WHERE ipo_id = (SELECT id FROM ipos WHERE ticker = 'MCARD' LIMIT 1) "
-                "AND trading_day = 1 "
-                "AND (gunluk_adet IS NULL OR gunluk_adet = 0)"
-            ))
-            if fix_res.rowcount > 0:
-                # Kumulatif EDO'yu da yeniden hesapla
-                # Tum gunlerin toplamini al
-                mcard_id_res = await db.execute(sa_text(
-                    "SELECT id, senet_sayisi FROM ipos WHERE ticker = 'MCARD' LIMIT 1"
-                ))
-                mcard_row = mcard_id_res.fetchone()
-                if mcard_row:
-                    mcard_ipo_id = mcard_row[0]
-                    mcard_senet = mcard_row[1]
-                    if mcard_senet and mcard_senet > 0:
-                        # Her gun icin running total ile cumulative_edo_pct hesapla
+    # E.D.O: Gecmis veri kurtarma — startup sirasinda kaybolan gunluk_adet degerlerini geri yukle
+    # Sadece gunluk_adet NULL/0 ise set eder (tekrar tekrar calissa bile guvenli — idempotent)
+    # Her IPO icin {trading_day: gunluk_adet} eslesmesi
+    _EDO_RESTORE = {
+        "MCARD": {1: 22678},                  # 1. gun %0.12 (senet ~18.9M)
+        "LXGYO": {1: 59996, 2: 227983},       # 1. gun %0.05, 2. gun %0.19 (senet ~120M)
+    }
+    for _ticker, _day_map in _EDO_RESTORE.items():
+        try:
+            async with async_session() as db:
+                any_fixed = False
+                for _day, _adet in _day_map.items():
+                    fix_res = await db.execute(sa_text(
+                        f"UPDATE ipo_ceiling_tracks SET gunluk_adet = {_adet} "
+                        f"WHERE ipo_id = (SELECT id FROM ipos WHERE ticker = '{_ticker}' LIMIT 1) "
+                        f"AND trading_day = {_day} "
+                        "AND (gunluk_adet IS NULL OR gunluk_adet = 0)"
+                    ))
+                    if fix_res.rowcount > 0:
+                        any_fixed = True
+
+                if any_fixed:
+                    # Kumulatif EDO'yu yeniden hesapla (running total)
+                    ipo_res = await db.execute(sa_text(
+                        f"SELECT id, senet_sayisi FROM ipos WHERE ticker = '{_ticker}' LIMIT 1"
+                    ))
+                    ipo_row = ipo_res.fetchone()
+                    if ipo_row and ipo_row[1] and ipo_row[1] > 0:
+                        _ipo_id, _senet = ipo_row[0], ipo_row[1]
                         tracks_res = await db.execute(sa_text(
                             "SELECT id, trading_day, gunluk_adet FROM ipo_ceiling_tracks "
                             "WHERE ipo_id = :ipo_id ORDER BY trading_day"
-                        ), {"ipo_id": mcard_ipo_id})
+                        ), {"ipo_id": _ipo_id})
                         running = 0
                         for tr in tracks_res.fetchall():
                             running += (tr[2] or 0)
-                            pct = round(running / mcard_senet * 100, 2)
+                            pct = round(running / _senet * 100, 2)
                             await db.execute(sa_text(
                                 "UPDATE ipo_ceiling_tracks SET cumulative_edo_pct = :pct "
                                 "WHERE id = :tid"
                             ), {"pct": pct, "tid": tr[0]})
-                        # cumulative_volume guncelle
                         await db.execute(sa_text(
                             "UPDATE ipos SET cumulative_volume = :vol WHERE id = :iid"
-                        ), {"vol": running, "iid": mcard_ipo_id})
-                await db.commit()
-                logger.info("E.D.O: MCARD 1. gun verisi geri yuklendi (gunluk_adet=22678, EDO≈0.12%%)")
-    except Exception as e:
-        logger.warning("E.D.O MCARD fix hatasi: %s", e)
+                        ), {"vol": running, "iid": _ipo_id})
+                    await db.commit()
+                    logger.info("E.D.O: %s gecmis veri geri yuklendi (%s)", _ticker, _day_map)
+        except Exception as e:
+            logger.warning("E.D.O %s fix hatasi: %s", _ticker, e)
 
     # BIST50 cache'ini DB'den yukle
     try:
