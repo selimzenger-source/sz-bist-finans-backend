@@ -66,7 +66,9 @@ ADMIN_PASSWORD = os.getenv("BIST_ADMIN_PW", "zenger7245175")
 DEFAULT_EXCEL_PATH = str(Path.home() / "Desktop" / "halka arz TAVAN TABAN.xlsm")
 
 # Tavan/taban eslesme toleransi (kurus)
-PRICE_TOLERANCE = Decimal("0.02")
+# 0.004 TL = yarım kuruşun altı → SADECE birebir eşleşme sayılır
+# BIST en küçük tick = 0.01 TL, dolayısıyla 1 tick uzaktaki fiyat asla match olmaz
+PRICE_TOLERANCE = Decimal("0.004")
 
 # Veri gelmezse Telegram uyarisi (saniye)
 STALE_DATA_TIMEOUT = 180  # 3 dakika

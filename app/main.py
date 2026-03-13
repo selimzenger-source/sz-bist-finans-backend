@@ -3590,8 +3590,10 @@ async def trigger_market_close_tweet(
     import asyncio
     from app.services.market_close_analyzer import scrape_and_analyze_market_close
     force = payload.get("force", False)
-    asyncio.create_task(scrape_and_analyze_market_close(force=force))
-    return {"status": "ok", "message": f"Tavan/Taban tweet arka planda başlatıldı (force={force}). Sonuç Telegram'dan gelecek."}
+    analyze_only = payload.get("analyze_only", False)
+    asyncio.create_task(scrape_and_analyze_market_close(force=force, analyze_only=analyze_only))
+    mode = "Sadece analiz (tweet yok)" if analyze_only else "Analiz + tweet"
+    return {"status": "ok", "message": f"{mode} arka planda başlatıldı (force={force}). Sonuç Telegram'dan gelecek."}
 
 
 @app.post("/api/v1/admin/debug-market-close")

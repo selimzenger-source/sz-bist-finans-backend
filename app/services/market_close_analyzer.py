@@ -53,9 +53,31 @@ TICKER_COMPANY_MAP = {
     # Teknoloji
     "LOGO": "Logo Yazılım", "PAPIL": "Papilon", "INDES": "İndeks Bilgisayar",
     "NETAS": "Netaş",
-    # Diğer sık tavan/taban olanlar
+    # GYO / Gayrimenkul
     "MRGYO": "Marti GYO", "YGYO": "Yeşil GYO", "VKGYO": "Vakıf GYO",
+    "LXGYO": "Lider Faktoring GYO", "SVGYO": "Sağlam GYO", "ZGYO": "Ziraat GYO",
+    "RYGYO": "Ray GYO", "OZKGY": "Özerden GYO", "TRGYO": "Torunlar GYO",
+    "HLGYO": "Halk GYO", "PAGYO": "Panora GYO",
+    # Teknoloji / Yazılım
     "MIATK": "Mia Teknoloji", "MEGAP": "Mega Polietilen",
+    "MCARD": "MasterCard Ödeme", "EMPAE": "Empaş Enerji",
+    "KRONT": "Kron Telekomünikasyon", "SERNT": "Serenity Teknoloji",
+    "KIMMR": "Kim Market", "DMRGD": "Demirer Gıda",
+    # Sanayi / Üretim
+    "ATEKS": "Ateks Tekstil", "YBTAS": "Yibitaş İnşaat",
+    "POLHO": "Polho Kimya", "YAPRK": "Yaprak Süt",
+    "GEREL": "Gersan Elektrik", "KERVN": "Kervan Gıda",
+    "HURGZ": "Hürgüç Gazetecilik",
+    # Enerji / Madencilik
+    "MEYSU": "Meysu Gıda", "MARMAR": "Marmara Deniz",
+    "ECOGR": "Ecogreen Enerji",
+    # Diğer sık tavan/taban
+    "DGATE": "Datagate Bilgisayar", "MERIT": "Merit Turizm",
+    "PEKGY": "Peker GYO", "FLAP": "Flap Teknoloji",
+    "HATEK": "Hateks Hatay Tekstil", "KLSER": "Kaleseramik",
+    "PRDGS": "Pardus Girişim", "ROYAL": "Royal Halı",
+    "SMART": "Smartiks Yazılım", "TURSG": "Türkiye Sigorta",
+    "DGKLB": "Değirmen Kelebek",
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -203,11 +225,11 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     internal_news = []
     try:
         async with async_session() as session:
-            since = datetime.now(timezone.utc) - timedelta(days=14)
+            since = datetime.now(timezone.utc) - timedelta(days=30)
             stmt = select(KapAllDisclosure).where(
                 KapAllDisclosure.company_code == ticker,
                 KapAllDisclosure.created_at >= since
-            ).order_by(desc(KapAllDisclosure.created_at)).limit(10)
+            ).order_by(desc(KapAllDisclosure.created_at)).limit(30)
             res = await session.execute(stmt)
             news_items = res.scalars().all()
             for n in news_items:
@@ -231,7 +253,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 # 1a. Genel haber araması (şirket adı + ticker ile)
                 res = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 5, "days": 14}
+                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 10, "days": 30}
                 )
                 if res.status_code == 200:
                     data = res.json()
@@ -243,7 +265,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 bilanco_query = f"{search_name} bilanço finansal sonuçlar kâr gelir {current_year}"
                 res2 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 3, "days": 14}
+                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 5, "days": 30}
                 )
                 if res2.status_code == 200:
                     data2 = res2.json()
@@ -254,7 +276,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye varlık satışı borç"
                 res3 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 3, "days": 14}
+                    json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 5, "days": 30}
                 )
                 if res3.status_code == 200:
                     data3 = res3.json()
@@ -389,14 +411,14 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             )
             if ref_start > 0:
                 gain_15d = ((ref_end - ref_start) / ref_start) * 100
-                # TABAN senaryosu: 15 günde %30+ yükseliş, dün %5+ artış, bugün taban → kâr satışı
-                if not is_ceiling and gain_15d >= 30 and prev_day_chg >= 5:
+                # TABAN senaryosu: 15 günde %20+ yükseliş, bugün taban → kâr satışı
+                if not is_ceiling and gain_15d >= 20:
                     programmatic_reason = "Sert yükseliş sonrası kâr satışı."
                     logger.info(
                         f"[PROG] {ticker} kâr satışı tespit: 15g={gain_15d:.0f}%, dün={prev_day_chg:.1f}%"
                     )
-                # TAVAN senaryosu: 15 günde %30+ düşüş, dün %5+ düşüş, bugün tavan → tepki alışı
-                elif is_ceiling and gain_15d <= -30 and prev_day_chg <= -5:
+                # TAVAN senaryosu: 15 günde %20+ düşüş, bugün tavan → tepki alışı
+                elif is_ceiling and gain_15d <= -20:
                     programmatic_reason = "Derin düşüş sonrası tepki alışı."
                     logger.info(
                         f"[PROG] {ticker} tepki alışı tespit: 15g={gain_15d:.0f}%, dün={prev_day_chg:.1f}%"
@@ -446,8 +468,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     else:
         ipo_rule = "\n- Bu hisse ESKİ bir şirket. ASLA 'halka arz' deme."
     
-    # Trend kuralı — AI ASLA trend yorumu yapmasın
-    trend_rule = "\n- ASLA 'derin satış', 'tepki alışı', 'kâr satışı', 'sert yükseliş' gibi trend yorumları YAZMA. Sadece somut haber/veri bazlı sebepler."
+    # Trend kuralı kaldırıldı — "kâr satışı" ve "tepki alışı" programatik olarak tespit edildiğinde meşru sebepler
 
     # Context string oluştur (KAP haberleri + web arama + IPO bilgisi)
     context_parts = []
@@ -495,20 +516,20 @@ G) SEKTÖR/MAKRO: Sektörü doğrudan etkileyen düzenleme, kota, yasal karar va
 Bugünün tarihi: {date.today().strftime("%d.%m.%Y")}
 A) Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
    Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → EMPTY yaz.
-B) ⚠️ TARİH FİLTRESİ — EN ÖNEMLİ KURAL:
-   Haberin tarihi 14 günden eski mi? → KESİNLİKLE EMPTY yaz!
-   • 2+ hafta önce, 1 ay önce, 2 ay önce, 6 ay önce → HEPSI GEÇERSİZ → EMPTY yaz.
+B) ⚠️ TARİH FİLTRESİ:
+   Haberin tarihi 30 günden eski mi? → KESİNLİKLE EMPTY yaz!
+   • 2+ ay önce, 6 ay önce → GEÇERSİZ → EMPTY yaz.
    • Haberde tarih belirtilmemiş ama olay eski bir gelişmeyse (bölünme, eski dava sonucu, geçmiş SPK kararı) → EMPTY yaz.
-   • Sadece son 14 gün içindeki (bugünden geriye) haberler geçerlidir.
+   • Son 30 gün içindeki haberler geçerlidir. Son 7 gün içindeki haberleri ÖNCELIKLE tercih et.
 C) Karar iptal mi edilmiş? → EMPTY yaz.
 
 ━━━ ADIM 3.3 — GÜNCELLIK ÖNCELİĞİ ━━━
 Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
 - İki haber arasında 2+ gün fark varsa → KESİNLİKLE daha yeni olanı yaz, eski olanı GÖRMEZDEN GEL.
-- Dünkü veya bugünkü haber VARSA → haftalık/aylık haberleri kesinlikle yazma.
+- Dünkü veya bugünkü haber VARSA → aylık haberleri kesinlikle yazma.
 - Örnek: Şirketin dün "rekor bilanço" açıklaması + 3 hafta önce "sermaye tavanı artırımı" → "Rekor yıllık bilanço açıklandı." yaz.
 - Örnek: Bugün "ABD davası anlaşması" + 1 ay önce "bedelsiz karar" → bugünkü davayı yaz.
-- ⚠️ TEKRAR: 14 günden eski olay = GEÇERSİZ. 1 ay, 2 ay, 6 ay önceki olayları ASLA sebep olarak kullanma!
+- ⚠️ TEKRAR: 30 günden eski olay = GEÇERSİZ. 2 ay, 6 ay önceki olayları ASLA sebep olarak kullanma!
 
 ━━━ ADIM 3.5 — SEBEP YÖNÜ DOĞRULA (KRİTİK!) ━━━
 {"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
@@ -527,36 +548,39 @@ Sebep yönü hissenin hareketiyle UYUŞMUYORSA → EMPTY yaz.
 Yukarıda A-G'den birinde somut bulgu varsa VE sebebin yönü hissenin hareketiyle uyuşuyorsa → 4-6 kelime ile Türkçe yaz.
 Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
 
-❌ YASAK: trend yorumu, "momentum", "alıcı/satıcı baskısı", "hacimli", "volatilite",
-   "piyasa beklentisi", "yatırımcı talebi", "konsolide", "istikrarlı", "potansiyel",
-   rakam içeren hedef fiyat, rakam içeren kâr/zarar tutarı.
-✅ İSTENEN FORMAT: "Bedelsiz sermaye artırımı kararı alındı." / "Güçlü 3Ç bilançosu açıklandı." /
+❌ YASAK: "momentum", "alıcı/satıcı baskısı", "hacimli kırılım", "volatilite",
+   "piyasa beklentisi", "yatırımcı talebi", "konsolide", "istikrarlı seyir", "potansiyel",
+   rakam içeren hedef fiyat (örn: "68 TL hedef"), rakam içeren kâr/zarar tutarı.
+✅ İSTENEN FORMAT ÖRNEKLERİ:
+   "Bedelsiz sermaye artırımı kararı alındı." / "Güçlü yıllık bilanço açıklandı." /
    "Yüksek hedef fiyat raporu yayınlandı." / "Önemli ihale sözleşmesi imzalandı." /
-   "Varlık satışı ile borç kapandı." / "Gayrimenkul satışı ile bilanço düzeldi."
+   "Varlık satışı ile borç kapandı." / "Beklenti altı bilanço açıklandı." /
+   "Sert yükseliş sonrası kâr satışı." / "Derin düşüş sonrası tepki alışı." /
+   "Yönetim kurulunda değişiklik yapıldı." / "SPK soruşturması açıldı."
 """
 
-    # Ortak filtre — jenerik/dolgu yanıtları yakala
+    # Ortak filtre — jenerik/dolgu yanıtları yakala (somut haber içermeyen trend yorumları)
     bad = ["momentum", "alıcı baskısı", "satıcı baskısı", "trend direnci", "hacimli kırılım",
            "piyasa beklentisi", "yatırımcı talebi", "teknik trend", "fiyatlama", "tavan serisi",
-           "taban serisi", "serisi devam", "derin satış", "tepki alışı", "kâr satışı",
-           "sert yükseliş", "kar satışı", "tepki yükselişi", "düşük işlem hacmi",
+           "taban serisi", "serisi devam", "düşük işlem hacmi",
            "yatay seyir", "konsolide", "volatilite", "sessiz yükseliş", "istikrarlı seyir",
            "kurumsal kalite", "sınırlı hareket", "rutin işlem", "sessiz seans",
            "potansiyeli ile", "sektörü potansiyeli", "güvenini pekiştir", "seyir izliyor",
            "seyirde", "katalizör eksikliği"]
 
     # Yön filtresi — tavan hissede olumsuz, taban hissede olumlu ifadeler elensin
-    negative_words = ["sonlandırıldı", "sonlandırma", "iptal", "fesih", "feshedil",
-                      "ceza", "zarar", "düşüş", "kaybetti", "kaybetme", "azaldı",
-                      "daralma", "kısıtlama", "yasaklandı", "soruşturma",
-                      "zayıf", "düşük", "geriledi", "gerileme", "beklenti altı",
-                      "beklentinin altı", "olumsuz", "negatif", "kan kaybı",
-                      "daraldı", "küçüldü", "eritildi", "eridi"]
-    positive_words = ["anlaşma duyur", "yeni anlaşma", "kazandı", "kazanma",
-                      "büyüme", "yükseldi", "artış", "artırım", "yeni sözleşme",
-                      "güçlü bilanço", "yeni yatırım", "onaylandı",
-                      "güçlü", "rekor", "beklenti üstü", "beklentinin üstü",
-                      "olumlu", "pozitif", "toparlandı", "toparlanma"]
+    # NOT: Tek kelimeler ("güçlü", "düşük") çok agresif — bağlam bozar. Daha spesifik ifadeler kullan.
+    negative_words = ["sonlandırıldı", "sonlandırma", "iptal edildi", "fesih", "feshedil",
+                      "ceza aldı", "ceza kesildi", "zarar açıklandı", "zarar etti",
+                      "kaybetti", "kaybetme", "yasaklandı",
+                      "zayıf bilanço", "düşük kârlılık", "beklenti altı bilanço",
+                      "beklentinin altında", "olumsuz bilanço", "kan kaybı",
+                      "küçüldü", "eritildi"]
+    positive_words = ["yeni anlaşma imzalandı", "ihale kazandı", "sözleşme kazandı",
+                      "güçlü bilanço", "güçlü kâr", "rekor kâr", "rekor gelir",
+                      "beklenti üstü bilanço", "beklentinin üstünde",
+                      "yeni yatırım", "bedelsiz sermaye", "temettü dağıtım",
+                      "olumlu bilanço", "toparlandı", "toparlanma"]
 
     def _clean_ai_text(raw: str) -> str:
         """AI yanıtını temizle — EMPTY veya jenerik ise boş dön, hedef fiyat rakamlarını sil."""
@@ -839,10 +863,11 @@ async def _save_market_close_data(session, today, ceilings, floors):
     logger.info(f"Faz3 OK: {saved}/{len(prepared)} kayıt, AI: {ai_ok} başarılı.")
 
 
-async def scrape_and_analyze_market_close(force: bool = False):
+async def scrape_and_analyze_market_close(force: bool = False, analyze_only: bool = False):
     """18:50'de calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder.
     Eksik veri veya hata durumunda 1 dk arayla 3 kez daha dener (toplam 4 deneme).
     force=True: Mevcut kayıtları silip yeniden analiz + tweet yapar.
+    analyze_only=True: Sadece analiz + DB kaydet, tweet ATMAZ.
     """
     for attempt in range(4):
         try:
@@ -918,6 +943,11 @@ async def scrape_and_analyze_market_close(force: bool = False):
                         DailyStockMarketStat.is_floor == True
                     ).order_by(DailyStockMarketStat.consecutive_floor_count.desc())
                 )).scalars().all()
+
+            # analyze_only modunda tweet ve görsel atlanır
+            if analyze_only:
+                logger.info(f"analyze_only=True: {len(c_stats)} tavan, {len(fl_stats)} taban kayıt DB'ye yazıldı. Tweet atlanıyor.")
+                return
 
             # GÖRSEL ÜRETİMİ VE TWITTER
             tweet_ok = True
