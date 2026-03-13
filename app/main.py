@@ -197,7 +197,7 @@ async def lifespan(app: FastAPI):
     # Her IPO icin {trading_day: gunluk_adet} eslesmesi
     _EDO_RESTORE = {
         "MCARD": {1: 22678},                  # 1. gun %0.12 (senet ~18.9M)
-        "LXGYO": {1: 59996, 2: 227983},       # 1. gun %0.05, 2. gun %0.19 (senet ~120M)
+        "LXGYO": {1: 59996, 2: 227983, 3: 2003852},  # 1.gun %0.05, 2.gun %0.19, 3.gun %1.67 (senet ~120M)
     }
     for _ticker, _day_map in _EDO_RESTORE.items():
         try:
