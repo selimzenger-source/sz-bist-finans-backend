@@ -2578,84 +2578,8 @@ async def daily_ceiling_update():
                     # Aynı hisse için iki bildirim (kapanış + günlük takip) gitmesini önlemek için
                     # push bildirim burada atlanıyor, tweet yeterli.
 
-                    # --- E.D.O (El Degistirme Orani) Threshold Check ---
-                    # 10 Mart 2026 ve sonrasi icin (MCARD+)
-                    try:
-                        from app.config import EDO_START_DATE as _EDO_CUT
-                        if (ipo.trading_start and ipo.trading_start >= _EDO_CUT
-                                and ipo.senet_sayisi and ipo.senet_sayisi > 0 and ipo.cumulative_volume):
-                            import json as _json
-                            edo_pct = (ipo.cumulative_volume / ipo.senet_sayisi) * 100
-                            edo_thresholds = [1, 3, 10, 25, 50, 75, 100, 125]
-                            notified_raw = ipo.edo_notified_thresholds or "[]"
-                            try:
-                                notified = _json.loads(notified_raw)
-                            except Exception:
-                                notified = []
-
-                            for threshold in edo_thresholds:
-                                if edo_pct >= threshold and threshold not in notified:
-                                    notified.append(threshold)
-                                    logger.info(
-                                        "E.D.O ESIK: %s — %%%d asildi (mevcut: %%.2f)",
-                                        ipo.ticker, threshold, edo_pct,
-                                    )
-
-                                    # Push bildirim gonder
-                                    try:
-                                        import httpx
-                                        # Turkce esik eki
-                                        _edo_suffix = {1: "'i", 3: "'ü", 10: "'u", 25: "'i", 50: "'yi", 75: "'i", 100: "'ü", 125: "'i"}
-
-                                        if threshold == 1:
-                                            # %1 — FREE: tum kullanicilara gonder
-                                            title = f"{ipo.ticker} El Değiştirme Oranı %{threshold}{_edo_suffix.get(threshold, '')} Aştı!"
-                                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.2f} — 8 farklı eşik bildirimi için paketi aç!"
-                                            is_free = True
-                                        else:
-                                            # Diger esikler — sadece abonelere
-                                            edo_msgs = {
-                                                3: "El Değiştirme Oranı %3'ü Aştı!",
-                                                10: "El Değiştirme Oranı %10'u Aştı!",
-                                                25: "El Değiştirme Oranı %25'i Aştı! Senetlerin çeyreği el değiştirdi",
-                                                50: "El Değiştirme Oranı %50'yi Aştı! Senetlerin yarısı el değiştirdi",
-                                                75: "El Değiştirme Oranı %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
-                                                100: "El Değiştirme Oranı %100'ü Aştı! Tüm senetler el değiştirdi",
-                                                125: "El Değiştirme Oranı %125'i Aştı! Senetler 1.25 kez döndü",
-                                            }
-                                            title = f"{ipo.ticker} {edo_msgs.get(threshold, f'El Değiştirme Oranı %{threshold} aşıldı')}"
-                                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.1f} — {len(days_data)}. İşlem Günü"
-                                            is_free = False
-
-                                        import os
-                                        api_url = os.getenv("API_URL", "https://sz-bist-finans-api.onrender.com")
-                                        admin_pw = os.getenv("ADMIN_PASSWORD", "")
-                                        async with httpx.AsyncClient(timeout=30) as client:
-                                            await client.post(
-                                                f"{api_url}/api/v1/realtime-notification",
-                                                json={
-                                                    "admin_password": admin_pw,
-                                                    "ticker": ipo.ticker,
-                                                    "notification_type": "el_degistirme",
-                                                    "title": title,
-                                                    "body": body,
-                                                    "free_for_all": is_free,
-                                                },
-                                            )
-                                    except Exception as notif_err:
-                                        logger.error("E.D.O bildirim hatasi: %s", notif_err)
-
-                                    # Twitter tweet — %1, %10 ve %100
-                                    if threshold in [1, 10, 100]:
-                                        try:
-                                            from app.services.twitter_service import tweet_edo_threshold
-                                            tweet_edo_threshold(ipo, threshold, edo_pct, len(days_data))
-                                        except Exception as tw_err:
-                                            logger.error("E.D.O tweet hatasi: %s", tw_err)
-
-                            ipo.edo_notified_thresholds = _json.dumps(notified)
-                    except Exception as edo_err:
-                        logger.error("E.D.O threshold check hatasi (%s): %s", ipo.ticker, edo_err)
+                    # E.D.O Threshold Check artik CANLI seans icinde yapiliyor
+                    # (ceiling-update endpoint, main.py). Kapanista tekrar kontrol GEREKSIZ.
 
                 except Exception as ticker_err:
                     logger.error("Tavan takip %s hatasi: %s", ipo.ticker, ticker_err)

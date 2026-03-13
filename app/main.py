@@ -3367,6 +3367,106 @@ async def bulk_ceiling_track(
 
     await db.commit()
 
+    # ── E.D.O Threshold Check — CANLI seans icinde (her sync'te) ──
+    # Kapanış job'undan buraya taşındı. Her 15sn'de güncellenen EDO degerini
+    # kontrol eder, esik asilmissa bildirim gonderir. edo_notified_thresholds
+    # duplicate'leri onler — ayni esik icin sadece 1 kez gider.
+    try:
+        from app.config import EDO_START_DATE
+        import json as _json
+
+        for r in results:
+            _ticker = r["ticker"]
+            _ipo_q = await db.execute(
+                select(IPO).where(IPO.ticker == _ticker)
+            )
+            _ipo = _ipo_q.scalar_one_or_none()
+            if not _ipo:
+                continue
+            if not (_ipo.trading_start and _ipo.trading_start >= EDO_START_DATE):
+                continue
+            if not (_ipo.senet_sayisi and _ipo.senet_sayisi > 0 and _ipo.cumulative_volume):
+                continue
+
+            edo_pct = (_ipo.cumulative_volume / _ipo.senet_sayisi) * 100
+            edo_thresholds = [1, 3, 10, 25, 50, 75, 100, 125]
+            notified_raw = _ipo.edo_notified_thresholds or "[]"
+            try:
+                notified = _json.loads(notified_raw)
+            except Exception:
+                notified = []
+
+            new_thresholds = []
+            for threshold in edo_thresholds:
+                if edo_pct >= threshold and threshold not in notified:
+                    notified.append(threshold)
+                    new_thresholds.append(threshold)
+
+            if new_thresholds:
+                _ipo.edo_notified_thresholds = _json.dumps(notified)
+                await db.commit()
+
+                # Bildirim gonder
+                _edo_suffix = {1: "'i", 3: "'ü", 10: "'u", 25: "'i", 50: "'yi", 75: "'i", 100: "'ü", 125: "'i"}
+
+                # Kac islem gunu?
+                _day_count_q = await db.execute(
+                    select(func.count(IPOCeilingTrack.id)).where(
+                        IPOCeilingTrack.ipo_id == _ipo.id
+                    )
+                )
+                _day_count = _day_count_q.scalar() or 0
+
+                for threshold in new_thresholds:
+                    try:
+                        import httpx
+                        import os
+                        if threshold == 1:
+                            title = f"{_ticker} El Değiştirme Oranı %{threshold}{_edo_suffix.get(threshold, '')} Aştı!"
+                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.2f} — 8 farklı eşik bildirimi için paketi aç!"
+                            is_free = True
+                        else:
+                            edo_msgs = {
+                                3: "El Değiştirme Oranı %3'ü Aştı!",
+                                10: "El Değiştirme Oranı %10'u Aştı!",
+                                25: "El Değiştirme Oranı %25'i Aştı! Senetlerin çeyreği el değiştirdi",
+                                50: "El Değiştirme Oranı %50'yi Aştı! Senetlerin yarısı el değiştirdi",
+                                75: "El Değiştirme Oranı %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
+                                100: "El Değiştirme Oranı %100'ü Aştı! Tüm senetler el değiştirdi",
+                                125: "El Değiştirme Oranı %125'i Aştı! Senetler 1.25 kez döndü",
+                            }
+                            title = f"{_ticker} {edo_msgs.get(threshold, f'El Değiştirme Oranı %{threshold} aşıldı')}"
+                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.1f} — {_day_count}. İşlem Günü"
+                            is_free = False
+
+                        api_url = os.getenv("API_URL", "https://sz-bist-finans-api.onrender.com")
+                        admin_pw = os.getenv("ADMIN_PASSWORD", "")
+                        async with httpx.AsyncClient(timeout=30) as client:
+                            await client.post(
+                                f"{api_url}/api/v1/realtime-notification",
+                                json={
+                                    "admin_password": admin_pw,
+                                    "ticker": _ticker,
+                                    "notification_type": "el_degistirme",
+                                    "title": title,
+                                    "body": body,
+                                    "free_for_all": is_free,
+                                },
+                            )
+                        logger.info("E.D.O LIVE: %s — %%%d esik bildirimi gonderildi (EDO: %%.2f)", _ticker, threshold, edo_pct)
+                    except Exception as notif_err:
+                        logger.error("E.D.O LIVE bildirim hatasi: %s", notif_err)
+
+                    # Tweet — %1, %10, %100
+                    if threshold in [1, 10, 100]:
+                        try:
+                            from app.services.twitter_service import tweet_edo_threshold
+                            tweet_edo_threshold(_ipo, threshold, edo_pct, _day_count)
+                        except Exception as tw_err:
+                            logger.error("E.D.O tweet hatasi: %s", tw_err)
+    except Exception as edo_live_err:
+        logger.warning("E.D.O live threshold check hatasi: %s", edo_live_err)
+
     return {
         "status": "ok",
         "loaded": len(results),
