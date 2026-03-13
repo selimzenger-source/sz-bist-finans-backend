@@ -646,10 +646,10 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                     }
                 )
                 if res.status_code == 200:
-                    text = _clean_ai_text(res.json()["content"][0]["text"])
-                    if text:
-                        logger.info(f"Anthropic result for {ticker}: {text}")
-                        return text
+                    ai_text = _clean_ai_text(res.json()["content"][0]["text"])
+                    if ai_text:
+                        logger.info(f"Anthropic result for {ticker}: {ai_text}")
+                        return ai_text
                     else:
                         logger.info(f"Anthropic empty/filtered for {ticker}")
                 else:
@@ -675,10 +675,10 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                     }
                 )
                 if res.status_code == 200:
-                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if text:
-                        logger.info(f"OpenAI result for {ticker}: {text}")
-                        return text
+                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if ai_text:
+                        logger.info(f"OpenAI result for {ticker}: {ai_text}")
+                        return ai_text
                     else:
                         logger.info(f"OpenAI empty/filtered for {ticker}")
                 else:
@@ -703,10 +703,10 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                     }
                 )
                 if res.status_code == 200:
-                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if text:
-                        logger.info(f"Abacus result for {ticker}: {text}")
-                        return text
+                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if ai_text:
+                        logger.info(f"Abacus result for {ticker}: {ai_text}")
+                        return ai_text
                     else:
                         logger.info(f"Abacus empty/filtered for {ticker}")
                 else:
@@ -734,10 +734,10 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                     }
                 )
                 if res.status_code == 200:
-                    text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if text:
-                        logger.info(f"Gemini result for {ticker}: {text}")
-                        return text
+                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if ai_text:
+                        logger.info(f"Gemini result for {ticker}: {ai_text}")
+                        return ai_text
                     else:
                         logger.info(f"Gemini empty/filtered for {ticker}")
                 else:
