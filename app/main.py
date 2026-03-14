@@ -1765,6 +1765,21 @@ async def delete_user_account(
     if sub:
         await db.delete(sub)
 
+    # device_id ile bagli tablolar (FK degil, cascade calismaz)
+    from app.models.notification_log import NotificationLog
+    from app.models.user_watchlist import UserWatchlist
+    from app.models.user import FeatureInterest
+
+    await db.execute(
+        delete(NotificationLog).where(NotificationLog.device_id == device_id)
+    )
+    await db.execute(
+        delete(UserWatchlist).where(UserWatchlist.device_id == device_id)
+    )
+    await db.execute(
+        delete(FeatureInterest).where(FeatureInterest.device_id == device_id)
+    )
+
     # Kullaniciyi sil — cascade ile tum iliskili veriler silinir
     await db.delete(user)
     await db.commit()
@@ -2764,6 +2779,35 @@ async def wallet_redeem_coupon(
     )
     db.add(tx)
     await db.flush()
+
+    # Telegram bildirim — kupon kullanildiginda admin'e haber ver
+    if is_db_coupon and db_coupon:
+        remaining = db_coupon.max_uses - db_coupon.uses_count
+        try:
+            from app.services.admin_telegram import send_admin_message
+            if remaining == 0:
+                # Son kullanim — kupon tukendi!
+                await send_admin_message(
+                    f"🎟🔴 <b>Kupon Tükendi!</b>\n"
+                    f"Kod: <code>{code}</code>\n"
+                    f"Puan: +{int(amount)}\n"
+                    f"Kullanan: {device_id[:12]}…\n"
+                    f"Kullanım: {db_coupon.uses_count}/{db_coupon.max_uses} ✅\n"
+                    f"Tüm haklar kullanıldı!",
+                    silent=False,
+                )
+            else:
+                await send_admin_message(
+                    f"🎟 <b>Kupon Kullanıldı!</b>\n"
+                    f"Kod: <code>{code}</code>\n"
+                    f"Puan: +{int(amount)}\n"
+                    f"Kullanan: {device_id[:12]}…\n"
+                    f"Kullanım: {db_coupon.uses_count}/{db_coupon.max_uses}\n"
+                    f"Kalan: {remaining}",
+                    silent=False,
+                )
+        except Exception:
+            pass  # Telegram hatasi uygulama akisini bozmasin
 
     _check_daily_reset(user)
     cooldown = _get_wallet_cooldown(user)

@@ -3091,6 +3091,20 @@ async def admin_create_coupon(
     db.add(coupon)
     await db.flush()
 
+    # Telegram bildirim — yeni kupon olusturuldu
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            f"🎟 <b>Yeni Kupon Oluşturuldu!</b>\n"
+            f"Kod: <code>{code}</code>\n"
+            f"Puan: {int(amount)}\n"
+            f"Limit: {max_uses} kişi\n"
+            f"SKT: {expire_dt.strftime('%d.%m.%Y') if expire_dt else 'Süresiz'}",
+            silent=False,
+        )
+    except Exception:
+        pass
+
     return RedirectResponse(f"/admin/coupons?success=Kupon+olusturuldu:+{code}", status_code=302)
 
 
