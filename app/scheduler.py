@@ -3515,18 +3515,18 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 3a. SPK Bulten Monitor — YOGUN: her 1 dk (18:00-00:00 UTC = 21:00-03:00 TR)
+    # 3a. SPK Bulten Monitor — YOGUN: her 15 dk (16:00-00:00 UTC = 19:00-03:00 TR)
     scheduler.add_job(
         check_spk_bulletins_job,
-        CronTrigger(minute="*/1", hour="18-23"),
+        CronTrigger(minute="*/15", hour="16-23"),
         id="spk_bulletin_monitor_peak",
         name="SPK Bulten Monitor (Yogun)",
         replace_existing=True,
     )
-    # 3b. SPK Bulten Monitor — GECE: her 5 dk (00:00-05:00 UTC = 03:00-08:00 TR)
+    # 3b. SPK Bulten Monitor — GECE: her 30 dk (00:00-05:00 UTC = 03:00-08:00 TR)
     scheduler.add_job(
         check_spk_bulletins_job,
-        CronTrigger(minute="*/5", hour="0-4"),
+        CronTrigger(minute="*/30", hour="0-4"),
         id="spk_bulletin_monitor_night",
         name="SPK Bulten Monitor (Gece)",
         replace_existing=True,
