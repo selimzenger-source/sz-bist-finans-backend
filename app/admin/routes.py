@@ -1783,7 +1783,7 @@ async def trigger_spk_analysis_from_admin(
         except Exception:
             pass
         pdf_url = body.get("pdf_url") or request.query_params.get("pdf_url")
-        bulletin_no = body.get("bulletin_no") or request.query_params.get("bulletin_no", "2026/10")
+        bulletin_no = body.get("bulletin_no") or request.query_params.get("bulletin_no") or ""
 
         if not pdf_url:
             # Scraper ile bul
@@ -1791,12 +1791,14 @@ async def trigger_spk_analysis_from_admin(
             scraper = SPKBulletinScraper()
             try:
                 bulletins = await scraper.fetch_bulletin_list(year=2026)
-                target = bulletins[-1] if bulletins else None
-                for b in reversed(bulletins):
-                    yr, no = bulletin_no.split("/") if "/" in bulletin_no else (2026, 10)
-                    if b["bulletin_no"] == (int(yr), int(no)):
-                        target = b
-                        break
+                target = bulletins[-1] if bulletins else None  # default: en son bülten
+                if bulletin_no and "/" in bulletin_no:
+                    # Belirli bir bülten istenmişse onu bul
+                    yr, no = bulletin_no.split("/")
+                    for b in reversed(bulletins):
+                        if b["bulletin_no"] == (int(yr), int(no)):
+                            target = b
+                            break
                 if target:
                     pdf_url = target["pdf_url"]
                     bulletin_no = bulletin_no_str(*target["bulletin_no"])
