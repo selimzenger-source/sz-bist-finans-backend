@@ -45,6 +45,64 @@ logger = logging.getLogger(__name__)
 # Twitter API v2 endpoint
 _TWITTER_TWEET_URL = "https://api.twitter.com/2/tweets"
 
+# ── Facebook Page Post (tweet mirror) ──
+_FB_PAGE_ID = os.getenv("FB_PAGE_ID", "")
+_FB_PAGE_ACCESS_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN", "")
+_FB_GRAPH_URL = "https://graph.facebook.com/v25.0"
+
+
+def _mirror_to_facebook(text: str):
+    """Tweet metnini Facebook Page'e de at. Hata olursa sessizce loglar — Twitter'ı etkilemez."""
+    if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
+        return
+    try:
+        resp = httpx.post(
+            f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/feed",
+            data={
+                "message": text,
+                "access_token": _FB_PAGE_ACCESS_TOKEN,
+            },
+            timeout=15.0,
+        )
+        if resp.status_code in (200, 201):
+            post_id = resp.json().get("id", "?")
+            logger.info(f"[FB-MIRROR] Facebook post basarili (id={post_id}): {text[:60]}...")
+        else:
+            logger.warning(f"[FB-MIRROR] Facebook post hatasi HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        logger.warning(f"[FB-MIRROR] Facebook post hatasi (Twitter etkilenmez): {e}")
+
+
+def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
+    """Tweet metnini + gorseli Facebook Page'e at. Gorsel yoksa sadece metin atar."""
+    if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
+        return
+    if not image_path or not os.path.exists(image_path):
+        return _mirror_to_facebook(text)
+    try:
+        with open(image_path, "rb") as f:
+            resp = httpx.post(
+                f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/photos",
+                data={
+                    "message": text,
+                    "access_token": _FB_PAGE_ACCESS_TOKEN,
+                },
+                files={"source": (os.path.basename(image_path), f, "image/jpeg")},
+                timeout=30.0,
+            )
+        if resp.status_code in (200, 201):
+            post_id = resp.json().get("id", "?")
+            logger.info(f"[FB-MIRROR] Facebook gorsel post basarili (id={post_id}): {text[:60]}...")
+        else:
+            logger.warning(f"[FB-MIRROR] Facebook gorsel post hatasi HTTP {resp.status_code}: {resp.text[:200]}")
+            # Gorsel yuklenemezse sadece metni at
+            _mirror_to_facebook(text)
+    except Exception as e:
+        logger.warning(f"[FB-MIRROR] Facebook gorsel post hatasi (Twitter etkilenmez): {e}")
+        # Fallback: sadece metin
+        _mirror_to_facebook(text)
+
+
 # ── Global Tweet Rate Limiter ──
 # Dakikada max 3 tweet — ban riskini önler (reply + normal tweet dahil)
 import threading
@@ -482,6 +540,10 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
             _mark_tweet_sent(text, source=source, twitter_tweet_id=str(tweet_id))
             _record_tweet_sent()
+
+            # Facebook'a da ayni metni at (Twitter'i etkilemez)
+            _mirror_to_facebook(text)
+
             return True
         else:
             error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
@@ -639,6 +701,11 @@ def _safe_tweet_thread(
             "Thread tamamlandı: %d/%d tweet gönderildi (ilk_id=%s)",
             success_count, total, first_id,
         )
+
+        # Thread'in tamamini birlestirip Facebook'a tek post at
+        fb_text = "\n\n".join(thread_tweets)
+        _mirror_to_facebook(fb_text)
+
         return True
 
     except Exception as e:
@@ -2038,6 +2105,10 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             _record_tweet_sent()
             global _last_tweet_id
             _last_tweet_id = tweet_id
+
+            # Facebook'a da at — gorsel varsa gorselli, yoksa sadece metin
+            _mirror_to_facebook_with_image(text, image_path)
+
             return True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
@@ -2182,6 +2253,10 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
             _record_tweet_sent()
             global _last_tweet_id
             _last_tweet_id = tweet_id
+
+            # Facebook'a da at — ilk gorselle
+            _mirror_to_facebook_with_image(text, image_paths[0] if image_paths else None)
+
             return True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
