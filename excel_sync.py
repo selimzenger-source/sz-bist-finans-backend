@@ -602,6 +602,10 @@ def live_sync(filepath, interval=15):
     ceiling_streak = {}    # {ticker: int} — pozitif=tavanda ardışık döngü, negatif=tavandan uzak ardışık döngü
     floor_streak = {}      # {ticker: int} — pozitif=tabanda ardışık döngü, negatif=tabandan uzak ardışık döngü
     CONFIRM_CYCLES = 2     # 2 ardışık döngü (30sn) onay — sınır zıplaması spam engeli
+    TIME_FALLBACK_SEC = 300  # 5 dakika — bu süre geçtiyse tek döngü (±1) yeterli
+    # Son bildirim zamanı ve yönü — time-based fallback için
+    ceiling_last_notif: dict[str, tuple[float, str]] = {}  # {ticker: (timestamp, "locked"|"opened")}
+    floor_last_notif: dict[str, tuple[float, str]] = {}    # {ticker: (timestamp, "locked"|"opened")}
     opening_notif_sent = False   # Gunluk acilis bildirimi gonderildi mi
     closing_notif_sent = False   # Gunluk kapanis bildirimi gonderildi mi
     cycle = 0
@@ -823,27 +827,43 @@ def live_sync(filepath, interval=15):
 
                 can_notify = opening_notif_sent or hour_min > 1000
 
-                if c_str == CONFIRM_CYCLES:
-                    # 30sn boyunca tavanda kaldı → onaylandı
+                # Time-based fallback: 5dk geçtiyse tek döngü (±1) yeterli
+                c_last = ceiling_last_notif.get(ticker)
+                c_time_ok = (c_last is None) or (time.time() - c_last[0] >= TIME_FALLBACK_SEC)
+                c_dir_changed = (c_last is None) or (
+                    (c_str > 0 and c_last[1] != "locked") or
+                    (c_str < 0 and c_last[1] != "opened")
+                )
+                c_threshold = 1 if (c_time_ok and c_dir_changed) else CONFIRM_CYCLES
+
+                if c_str > 0 and c_str == c_threshold:
+                    # Tavanda kaldı → onaylandı
                     if can_notify:
-                        log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        log(f"  🔔 TAVANA KİTLEDİ: {ticker} ({son_str} TL) [threshold={c_threshold}]")
                         _send_realtime_notification(
                             ticker, "tavan_bozulma",
                             f"🔒 {ticker} Tavana Kitledi!",
                             f"Son: {son_str} TL | Fark: {fark_str}",
                         )
+                        ceiling_last_notif[ticker] = (time.time(), "locked")
+                        # Streak'i threshold ötesine atla — çift bildirim engeli
+                        c_str = CONFIRM_CYCLES + 1
+                        ceiling_streak[ticker] = c_str
                     else:
                         log(f"  ⏳ TAVANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
 
-                elif c_str == -CONFIRM_CYCLES:
-                    # 30sn boyunca tavandan uzak kaldı → onaylandı
+                elif c_str < 0 and c_str == -c_threshold:
+                    # Tavandan uzak kaldı → onaylandı
                     if can_notify:
-                        log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL)")
+                        log(f"  🔔 TAVAN ÇÖZÜLDÜ: {ticker} ({son_str} TL) [threshold={c_threshold}]")
                         _send_realtime_notification(
                             ticker, "tavan_bozulma",
                             f"🔓 {ticker} Tavan Çözüldü!",
                             f"Son: {son_str} TL | Fark: {fark_str}",
                         )
+                        ceiling_last_notif[ticker] = (time.time(), "opened")
+                        c_str = -(CONFIRM_CYCLES + 1)
+                        ceiling_streak[ticker] = c_str
                     else:
                         log(f"  ⏳ TAVAN ÇÖZÜLDÜ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
 
@@ -861,25 +881,41 @@ def live_sync(filepath, interval=15):
                     f_str = (f_str - 1) if f_str <= 0 else -1
                 floor_streak[ticker] = f_str
 
-                if f_str == CONFIRM_CYCLES:
+                # Time-based fallback: 5dk geçtiyse tek döngü (±1) yeterli
+                f_last = floor_last_notif.get(ticker)
+                f_time_ok = (f_last is None) or (time.time() - f_last[0] >= TIME_FALLBACK_SEC)
+                f_dir_changed = (f_last is None) or (
+                    (f_str > 0 and f_last[1] != "locked") or
+                    (f_str < 0 and f_last[1] != "opened")
+                )
+                f_threshold = 1 if (f_time_ok and f_dir_changed) else CONFIRM_CYCLES
+
+                if f_str > 0 and f_str == f_threshold:
                     if can_notify:
-                        log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL)")
+                        log(f"  🔔 TABANA KİTLEDİ: {ticker} ({son_str} TL) [threshold={f_threshold}]")
                         _send_realtime_notification(
                             ticker, "taban_acilma",
                             f"🔒 {ticker} Tabana Kitledi!",
                             f"Son: {son_str} TL | Fark: {fark_str}",
                         )
+                        floor_last_notif[ticker] = (time.time(), "locked")
+                        # Streak'i threshold ötesine atla — çift bildirim engeli
+                        f_str = CONFIRM_CYCLES + 1
+                        floor_streak[ticker] = f_str
                     else:
                         log(f"  ⏳ TABANA KİTLEDİ ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
 
-                elif f_str == -CONFIRM_CYCLES:
+                elif f_str < 0 and f_str == -f_threshold:
                     if can_notify:
-                        log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL)")
+                        log(f"  🔔 TABAN KALKTI: {ticker} ({son_str} TL) [threshold={f_threshold}]")
                         _send_realtime_notification(
                             ticker, "taban_acilma",
                             f"📈 {ticker} Taban Kalktı!",
                             f"Son: {son_str} TL | Fark: {fark_str}",
                         )
+                        floor_last_notif[ticker] = (time.time(), "opened")
+                        f_str = -(CONFIRM_CYCLES + 1)
+                        floor_streak[ticker] = f_str
                     else:
                         log(f"  ⏳ TABAN KALKTI ama açılış bildirimi bekleniyor: {ticker} ({son_str} TL)")
 

@@ -443,8 +443,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     kap_notification_id=kap_id,
                     expected_trading_date=expected_date,
                     gap_pct=gap,
-                    prev_close_price=None,
-                    theoretical_open=None,
+                    prev_close_price=prev_close,
+                    theoretical_open=theo_open,
                     message_date=msg_date,
                     ai_score=ai_score,
                     ai_summary=ai_summary,
@@ -476,8 +476,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         sentiment="positive",
                         news_type=news_type,
                         pct_change=pct_change if message_type == "seans_ici_pozitif" else None,
+                        gap_pct=f"%{gap}" if (message_type == "seans_disi_acilis" and gap is not None) else None,
                         ai_score=ai_score,
                         ai_summary=ai_summary,
+                        prev_close=str(prev_close) if (message_type == "seans_disi_acilis" and prev_close is not None) else None,
+                        theoretical_open=str(theo_open) if (message_type == "seans_disi_acilis" and theo_open is not None) else None,
                     )
                     logger.info("Push bildirim gonderildi: %s — skor=%s — %s", ticker, ai_score, title)
                 except Exception as notif_err:

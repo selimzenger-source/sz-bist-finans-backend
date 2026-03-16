@@ -828,8 +828,11 @@ class NotificationService:
         sentiment: str,
         news_type: str,
         pct_change: Optional[str] = None,
+        gap_pct: Optional[str] = None,
         ai_score: Optional[float] = None,
         ai_summary: Optional[str] = None,
+        prev_close: Optional[str] = None,
+        theoretical_open: Optional[str] = None,
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
@@ -849,18 +852,32 @@ class NotificationService:
         if news_type == "seans_ici":
             title = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}{score_tag}"
         elif news_type == "seans_disi_acilis":
-            title = f"📊 Seans Dışı Yakalanan Hisse Açılışı - {ticker}{score_tag}"
+            # Gap yuzdesini title'a ekle — kullanici bildirimde hemen gorsun
+            gap_str = f" ({gap_pct})" if gap_pct else ""
+            title = f"📊 {ticker} Açılış{gap_str}{score_tag}"
         else:
             title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
 
         # Virgulden onceki ilk kelimeyi al (cok kelimeli keyword'leri kirp)
         clean_kw = matched_keyword.split(",")[0].strip() if matched_keyword else matched_keyword
 
-        # Fiyat bilgisi gonderilmez (veri ihlali)
-        body = f"Sembol: {ticker}\nYakalanan Kelime: {clean_kw}"
-        # Seans ici yuzdesel degisim varsa ekle
-        if news_type == "seans_ici" and pct_change:
-            body += f"\nDeğişim: {pct_change}"
+        if news_type == "seans_disi_acilis":
+            # Acilis bildirimi: fiyat ve gap bilgisi on planda
+            lines = []
+            if theoretical_open:
+                lines.append(f"Teorik Açılış: {theoretical_open} TL")
+            if prev_close:
+                lines.append(f"Önceki Kapanış: {prev_close} TL")
+            if gap_pct:
+                lines.append(f"Açılış Gap: {gap_pct}")
+            lines.append(f"Yakalanan Kelime: {clean_kw}")
+            body = "\n".join(lines)
+        else:
+            # Fiyat bilgisi gonderilmez (veri ihlali)
+            body = f"Sembol: {ticker}\nYakalanan Kelime: {clean_kw}"
+            # Seans ici yuzdesel degisim varsa ekle
+            if news_type == "seans_ici" and pct_change:
+                body += f"\nDeğişim: {pct_change}"
         # AI ozeti varsa ekle — bildirim merkezinde genisletince gorulecek
         if ai_summary and ai_summary.strip():
             body += f"\n\n📝 AI Analiz:\n{ai_summary.strip()}"
