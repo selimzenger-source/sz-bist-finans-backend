@@ -76,30 +76,50 @@ def _mirror_to_facebook(text: str):
 def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
     """Tweet metnini + gorseli Facebook Page timeline'ina at.
 
-    Strateji: /photos endpoint'ine published=true ile direkt at.
-    Gorsel + mesaj birlikte timeline'da gorunur.
+    Strateji: 1) Gorseli unpublished olarak /photos'a yukle
+              2) Donen photo_id'yi /feed'e object_attachment olarak at
+    Boylece timeline'da normal gonderi olarak gorunur (albume degil).
     """
     if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
         return
     if not image_path or not os.path.exists(image_path):
         return _mirror_to_facebook(text)
     try:
+        # Adim 1: Gorseli unpublished yukle
         with open(image_path, "rb") as f:
-            resp = httpx.post(
+            photo_resp = httpx.post(
                 f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/photos",
                 data={
-                    "message": text,
-                    "published": "true",
+                    "published": "false",
                     "access_token": _FB_PAGE_ACCESS_TOKEN,
                 },
                 files={"source": (os.path.basename(image_path), f, "image/jpeg")},
                 timeout=30.0,
             )
-        if resp.status_code in (200, 201):
-            post_id = resp.json().get("id", "?")
-            logger.info(f"[FB-MIRROR] Facebook gorsel post basarili (id={post_id}): {text[:60]}...")
+        if photo_resp.status_code not in (200, 201):
+            logger.warning(f"[FB-MIRROR] Gorsel yuklenemedi HTTP {photo_resp.status_code}: {photo_resp.text[:200]}")
+            return _mirror_to_facebook(text)
+
+        photo_id = photo_resp.json().get("id")
+        if not photo_id:
+            logger.warning("[FB-MIRROR] photo_id alinamadi, sadece metin atiliyor")
+            return _mirror_to_facebook(text)
+
+        # Adim 2: Feed'e gorsel + metin olarak paylas
+        feed_resp = httpx.post(
+            f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/feed",
+            data={
+                "message": text,
+                "object_attachment": photo_id,
+                "access_token": _FB_PAGE_ACCESS_TOKEN,
+            },
+            timeout=15.0,
+        )
+        if feed_resp.status_code in (200, 201):
+            post_id = feed_resp.json().get("id", "?")
+            logger.info(f"[FB-MIRROR] Facebook gorsel+feed post basarili (id={post_id}): {text[:60]}...")
         else:
-            logger.warning(f"[FB-MIRROR] Gorsel post hatasi HTTP {resp.status_code}: {resp.text[:200]}")
+            logger.warning(f"[FB-MIRROR] Feed post hatasi HTTP {feed_resp.status_code}: {feed_resp.text[:200]}")
             _mirror_to_facebook(text)
     except Exception as e:
         logger.warning(f"[FB-MIRROR] Facebook gorsel post hatasi (Twitter etkilenmez): {e}")
