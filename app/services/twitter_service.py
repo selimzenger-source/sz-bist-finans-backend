@@ -77,7 +77,7 @@ def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
     """Tweet metnini + gorseli Facebook Page timeline'ina at.
 
     Strateji: 1) Gorseli unpublished olarak /photos'a yukle
-              2) Donen photo_id'yi /feed'e object_attachment olarak at
+              2) Donen photo_id'yi /feed'e attached_media olarak at
     Boylece timeline'da normal gonderi olarak gorunur (albume degil).
     """
     if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
@@ -105,12 +105,13 @@ def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
             logger.warning("[FB-MIRROR] photo_id alinamadi, sadece metin atiliyor")
             return _mirror_to_facebook(text)
 
-        # Adim 2: Feed'e gorsel + metin olarak paylas
+        # Adim 2: Feed'e attached_media ile paylas (object_attachment 500 veriyor)
+        import json as _json
         feed_resp = httpx.post(
             f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/feed",
             data={
                 "message": text,
-                "object_attachment": photo_id,
+                "attached_media[0]": _json.dumps({"media_fbid": photo_id}),
                 "access_token": _FB_PAGE_ACCESS_TOKEN,
             },
             timeout=15.0,
