@@ -74,32 +74,55 @@ def _mirror_to_facebook(text: str):
 
 
 def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
-    """Tweet metnini + gorseli Facebook Page'e at. Gorsel yoksa sadece metin atar."""
+    """Tweet metnini + gorseli Facebook Page timeline'ina at.
+
+    Strateji: Gorseli once published=false ile /photos'a yukle,
+    sonra /feed uzerinden object_attachment ile timeline'a gonder.
+    Bu sayede hem gorsel gorulur hem de timeline'da post olarak cikar.
+    """
     if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
         return
     if not image_path or not os.path.exists(image_path):
         return _mirror_to_facebook(text)
     try:
+        # 1) Gorseli unpublished olarak yukle (sadece ID al)
         with open(image_path, "rb") as f:
-            resp = httpx.post(
+            photo_resp = httpx.post(
                 f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/photos",
                 data={
-                    "message": text,
+                    "published": "false",
                     "access_token": _FB_PAGE_ACCESS_TOKEN,
                 },
                 files={"source": (os.path.basename(image_path), f, "image/jpeg")},
                 timeout=30.0,
             )
-        if resp.status_code in (200, 201):
-            post_id = resp.json().get("id", "?")
-            logger.info(f"[FB-MIRROR] Facebook gorsel post basarili (id={post_id}): {text[:60]}...")
+        if photo_resp.status_code not in (200, 201):
+            logger.warning(f"[FB-MIRROR] Gorsel upload hatasi HTTP {photo_resp.status_code}: {photo_resp.text[:200]}")
+            return _mirror_to_facebook(text)
+
+        photo_id = photo_resp.json().get("id")
+        if not photo_id:
+            logger.warning("[FB-MIRROR] Gorsel upload OK ama photo_id alinamadi, sadece metin")
+            return _mirror_to_facebook(text)
+
+        # 2) Feed'e gorsel ekli post at — timeline'da gorunur
+        feed_resp = httpx.post(
+            f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/feed",
+            data={
+                "message": text,
+                "object_attachment": photo_id,
+                "access_token": _FB_PAGE_ACCESS_TOKEN,
+            },
+            timeout=15.0,
+        )
+        if feed_resp.status_code in (200, 201):
+            post_id = feed_resp.json().get("id", "?")
+            logger.info(f"[FB-MIRROR] Facebook gorsel+feed post basarili (id={post_id}): {text[:60]}...")
         else:
-            logger.warning(f"[FB-MIRROR] Facebook gorsel post hatasi HTTP {resp.status_code}: {resp.text[:200]}")
-            # Gorsel yuklenemezse sadece metni at
+            logger.warning(f"[FB-MIRROR] Feed post hatasi HTTP {feed_resp.status_code}: {feed_resp.text[:200]}")
             _mirror_to_facebook(text)
     except Exception as e:
         logger.warning(f"[FB-MIRROR] Facebook gorsel post hatasi (Twitter etkilenmez): {e}")
-        # Fallback: sadece metin
         _mirror_to_facebook(text)
 
 
@@ -1344,16 +1367,22 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
             except Exception as img_err:
                 logger.warning("Gunluk takip gorsel olusturulamadi: %s", img_err)
 
+        # EDO: days_data'nin son elemaninda cumulative_edo_pct varsa al
+        edo_pct = None
+        if days_data:
+            edo_pct = days_data[-1].get("cumulative_edo_pct")
+
         if image_path:
             # Kisa tweet metni — gorsel detayi iceriyor
             cum_pct = ((close_price - ipo_price) / ipo_price) * 100 if ipo_price > 0 else 0
             normal_d = trading_day - ceiling_days - floor_days
+            edo_line = f"El Değiştirme Oranı: %{edo_pct:.1f} | " if edo_pct else ""
             text = (
                 f"\U0001F4CA #{ipo.ticker or ipo.company_name} \u2014 {trading_day}/25 Gün Sonu\n\n"
                 f"Halka Arz: {ipo_price:.2f} TL\n"
                 f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
                 f"Kümülatif: %{cum_pct:+.1f}\n\n"
-                f"Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
+                f"{edo_line}Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
                 f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
                 f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
             )
