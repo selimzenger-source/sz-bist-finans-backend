@@ -3466,18 +3466,18 @@ async def bulk_ceiling_track(
                         import httpx
                         import os
                         if threshold == 1:
-                            title = f"{_ticker} El Değiştirme Oranı %{threshold}{_edo_suffix.get(threshold, '')} Aştı!"
-                            body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.2f} — 8 farklı eşik bildirimi için paketi aç!"
+                            title = f"{_ticker} E.D.O %1'i Aştı! Senetlerin %1'i el değiştirdi"
+                            body = f"Kümülatif E.D.O: %{edo_pct:.2f} — 8 farklı eşik bildirimi için paketi aç!"
                             is_free = True
                         else:
                             edo_msgs = {
-                                3: "El Değiştirme Oranı %3'ü Aştı!",
-                                10: "El Değiştirme Oranı %10'u Aştı!",
-                                25: "El Değiştirme Oranı %25'i Aştı! Senetlerin çeyreği el değiştirdi",
-                                50: "El Değiştirme Oranı %50'yi Aştı! Senetlerin yarısı el değiştirdi",
-                                75: "El Değiştirme Oranı %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
-                                100: "El Değiştirme Oranı %100'ü Aştı! Tüm senetler el değiştirdi",
-                                125: "El Değiştirme Oranı %125'i Aştı! Senetler 1.25 kez döndü",
+                                3: "E.D.O %3'ü Aştı! Senetlerin %3'ü el değiştirdi",
+                                10: "E.D.O %10'u Aştı! Senetlerin %10'u el değiştirdi",
+                                25: "E.D.O %25'i Aştı! Senetlerin çeyreği el değiştirdi",
+                                50: "E.D.O %50'yi Aştı! Senetlerin yarısı el değiştirdi",
+                                75: "E.D.O %75'i Aştı! Senetlerin dörtte üçü el değiştirdi",
+                                100: "E.D.O %100'ü Aştı! Tüm senetler el değiştirdi",
+                                125: "E.D.O %125'i Aştı! Senetler 1.25 kez döndü",
                             }
                             title = f"{_ticker} {edo_msgs.get(threshold, f'El Değiştirme Oranı %{threshold} aşıldı')}"
                             body = f"Kümülatif El Değiştirme Oranı: %{edo_pct:.1f} — {_day_count}. İşlem Günü"

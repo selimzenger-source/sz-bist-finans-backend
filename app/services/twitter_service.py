@@ -298,6 +298,28 @@ def _mark_tweet_sent(text: str, image_path: str | None = None, source: str = "un
         logger.warning("[MARK-SENT] pending_tweets kaydı başarısız (pipeline etkilenir): %s", e)
 
 
+def _saat_eki(saat: str, hal: str = "yonelme") -> str:
+    """Saat string'ine Turkce ek dondurur. '17:00' → 'ye', '16:00' → 'ya'.
+
+    hal: 'yonelme' (-e/-a) veya 'bulunma' (-de/-da)
+    """
+    # Saat degerinin son hecesindeki unluye gore ek belirlenir
+    # 1→e, 2→ye, 3→e, 4→e, 5→e, 6→ya, 7→ye, 8→e, 9→a, 10→a, 11→e, 12→ye
+    # 00 (sifir) → a
+    try:
+        h = int(saat.split(":")[0])
+    except (ValueError, IndexError):
+        return "'e" if hal == "yonelme" else "'de"
+    # Son heceye gore: kalin (a,ı,o,u) vs ince (e,i,ö,ü)
+    # 1(bir)-e, 2(iki)-ye, 3(üç)-e, 4(dört)-e, 5(beş)-e, 6(altı)-ya
+    # 7(yedi)-ye, 8(sekiz)-e, 9(dokuz)-a, 10(on)-a, 11(on bir)-e, 12(on iki)-ye
+    kalin = {6, 9, 10, 16, 19, 20}  # son unlu kalin (a/ı/o/u)
+    if hal == "yonelme":
+        return "'a" if h in kalin else "'e" if h not in {2, 7, 12} else "'ye"
+    else:  # bulunma
+        return "'da" if h in kalin else "'de" if h not in {2, 7, 12} else "'de"
+
+
 def _validate_ipo_for_tweet(ipo, required_fields: list[str], tweet_type: str) -> bool:
     """IPO verisinin tweet icin yeterli olup olmadigini kontrol eder.
 
@@ -953,8 +975,7 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
 
         text = (
             f"{_get_setting('T1_BASLIK')}\n\n"
-            f"{bulletin_no} Bülteninde {len(ipos)} adet onaylanan halka arz "
-            f"{_get_setting('T1_ACIKLAMA')}\n\n"
+            f"{bulletin_no} Bülteninde {len(ipos)} adet halka arz başvurusu SPK tarafından onaylandı.\n\n"
             + "\n".join(lines) + "\n\n"
             f"{_get_setting('T1_CTA')}\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
@@ -1180,7 +1201,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} "
             f"{_get_setting('T4_ACIKLAMA')}"
             f"{lot_text}\n\n"
-            f"⏳ Başvurular saat {end_hour}'a kadar devam ediyor.\n\n"
+            f"⏳ Başvurular saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor.\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
@@ -1216,7 +1237,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"{_get_setting('T5_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}"
             f"{lot_text}\n\n"
-            f"Saat {end_hour}'da başvurular kapanıyor, acele edin!\n\n"
+            f"Saat {end_hour}{_saat_eki(end_hour, 'bulunma')} başvurular kapanıyor, acele edin!\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
@@ -1263,27 +1284,27 @@ def tweet_trading_date_detected(ipo) -> bool:
 
         # Pazar bilgisi
         pazar_map = {
-            "yildiz_pazar": "Yildiz Pazar",
+            "yildiz_pazar": "Yıldız Pazar",
             "ana_pazar": "Ana Pazar",
             "alt_pazar": "Alt Pazar",
         }
         pazar = pazar_map.get(ipo.market_segment or "", "")
-        pazar_line = f"\n\U0001F4CD {pazar}'da islem gorecek" if pazar else ""
+        pazar_line = f"\n\U0001F4CD {pazar}'da işlem görecek" if pazar else ""
 
         # Tarih formati — Turkce
-        _AYLAR = ["Ocak", "Subat", "Mart", "Nisan", "Mayis", "Haziran",
-                  "Temmuz", "Agustos", "Eylul", "Ekim", "Kasim", "Aralik"]
+        _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         tarih_line = ""
         if ipo.trading_start:
             d = ipo.trading_start
-            tarih_line = f"\n\U0001F4C5 Ilk islem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
+            tarih_line = f"\n\U0001F4C5 İlk işlem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
 
         text = (
-            f"\U0001F4CA Islem Tarihi Belli Oldu!\n\n"
+            f"\U0001F4CA İşlem Tarihi Belli Oldu!\n\n"
             f"{ipo.company_name}{ticker_text}"
             f"{tarih_line}"
             f"{pazar_line}\n\n"
-            f"Borsada islem gormeye basliyor! \U0001F514\n"
+            f"Borsada işlem görmeye başlıyor! \U0001F514\n"
             f"#HalkaArz #BIST100 #borsa"
         )
         if ipo.ticker:
@@ -1445,17 +1466,21 @@ def tweet_edo_threshold(ipo, threshold: int, edo_pct: float, trading_day: int) -
     try:
         ticker = ipo.ticker or ipo.company_name
 
-        if threshold == 100:
-            emoji = "\U0001F534"
-            desc = "Tüm senetler el değiştirdi!"
-        elif threshold <= 3:
-            emoji = "\U0001F4CA"
-            desc = f"Senetlerin %{threshold}'{'ü' if threshold == 3 else 'i'} el değiştirdi"
-        else:
-            emoji = "\U0001F4CA"
-            desc = f"Senetlerin %{threshold}'i el değiştirdi"
+        _desc_map = {
+            1: "Senetlerin %1'i el değiştirdi",
+            3: "Senetlerin %3'ü el değiştirdi",
+            10: "Senetlerin %10'u el değiştirdi",
+            25: "Senetlerin çeyreği el değiştirdi",
+            50: "Senetlerin yarısı el değiştirdi",
+            75: "Senetlerin dörtte üçü el değiştirdi",
+            100: "Tüm senetler el değiştirdi!",
+            125: "Senetler 1.25 kez döndü",
+        }
+        _emoji_map = {100: "\U0001F534", 125: "\U0001F534"}
+        emoji = _emoji_map.get(threshold, "\U0001F4CA")
+        desc = _desc_map.get(threshold, f"Senetlerin %{threshold}'u el değiştirdi")
 
-        # Turkcede esik sonrasi ek: 1→i, 3→ü, 10→u, 25→i, 50→yi, 75→i, 100→ü, 125→i
+        # Turkcede esik sonrasi ek (aşmak fiili — accusative): 1→i, 3→ü, 10→u, 25→i, 50→yi, 75→i, 100→ü, 125→i
         suffix_map = {1: "İ", 3: "Ü", 10: "U", 25: "İ", 50: "Yİ", 75: "İ", 100: "Ü", 125: "İ"}
         suffix = suffix_map.get(threshold, "İ")
 
@@ -1501,9 +1526,9 @@ def tweet_25_day_performance(
             lot_count = int(_lval) if _lval != int(_lval) else int(_lval)
             total_profit = (close_price_25 - ipo_price) * lot_count  # lot = adet
             if total_profit >= 0:
-                lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})"
+                lot_text = f"\nOrt Lotla Karne: +{total_profit:,.0f} TL (%{total_pct:+.1f})".replace(",", ".")
             else:
-                lot_text = f"\nOrt Lotla Karne: {total_profit:,.0f} TL (%{total_pct:+.1f})"
+                lot_text = f"\nOrt Lotla Karne: {total_profit:,.0f} TL (%{total_pct:+.1f})".replace(",", ".")
 
         # Dinamik gorsel olustur (days_data varsa)
         image_path = None
@@ -1837,7 +1862,7 @@ def tweet_last_day_morning(ipo) -> bool:
         text = (
             f"{_get_setting('T12_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} için halka arz başvuruları"
-            f" bugün saat {end_hour}'a kadar devam ediyor."
+            f" bugün saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor."
             f"{price_text}\n\n"
             f"{_get_setting('T12_CTA')}\n\n"
             f"Daha detaylı bilgiler için 📲 {HALKAARZ_LINK}\n"
