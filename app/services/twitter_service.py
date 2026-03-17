@@ -2670,38 +2670,30 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             logger.error("SPK bulten analiz: API key yok (Abacus/Claude/Gemini)")
             return None
 
-        # ── Ticker eşleştirme: DB'den bilinen şirket-ticker mapping'ini al ──
+        # ── Ticker eşleştirme: BigPara API'den TÜM BIST ticker listesi ──
         ticker_hint = ""
         try:
-            from app.services.market_close_analyzer import TICKER_COMPANY_MAP
-            from sqlalchemy import create_engine, text as _text
-
-            ticker_map_lines = []
-
-            # 1. IPO tablosundan tüm ticker-şirket eşleşmeleri (sync engine)
-            try:
-                from app.config import get_settings as _gs
-                _s = _gs()
-                _sync_url = _s.database_url_async.replace("+asyncpg", "").replace("+aiosqlite", "")
-                _sync_eng = create_engine(_sync_url, pool_pre_ping=True)
-                with _sync_eng.connect() as _conn:
-                    _rows = _conn.execute(_text("SELECT ticker, company_name FROM ipos WHERE ticker IS NOT NULL")).fetchall()
-                    for _row in _rows:
-                        if _row[0] and _row[1]:
-                            ticker_map_lines.append(f"{_row[1]} → #{_row[0]}")
-                _sync_eng.dispose()
-            except Exception as _db_err:
-                logger.warning("Bulten ticker DB sorgu hatasi: %s", _db_err)
-
-            # 2. TICKER_COMPANY_MAP'ten (büyük BIST şirketleri)
-            for _ticker, _name in TICKER_COMPANY_MAP.items():
-                ticker_map_lines.append(f"{_name} → #{_ticker}")
-
-            if ticker_map_lines:
-                ticker_hint = (
-                    "\n\n--- BİLİNEN TICKER EŞLEŞMELERİ (şirket adını gördüğünde bu ticker'ı kullan) ---\n"
-                    + "\n".join(ticker_map_lines)
-                )
+            _bp_resp = httpx.get(
+                "https://bigpara.hurriyet.com.tr/api/v1/hisse/list",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=10,
+            )
+            if _bp_resp.status_code == 200:
+                _bp_data = _bp_resp.json().get("data", [])
+                ticker_map_lines = []
+                for _item in _bp_data:
+                    _kod = _item.get("kod", "")
+                    _ad = _item.get("ad", "")
+                    if _kod and _ad:
+                        ticker_map_lines.append(f"{_ad} → #{_kod}")
+                if ticker_map_lines:
+                    ticker_hint = (
+                        "\n\n--- TÜM BIST TICKER EŞLEŞMELERİ (şirket adını gördüğünde bu ticker'ı hashtag olarak kullan) ---\n"
+                        + "\n".join(ticker_map_lines)
+                    )
+                    logger.info("Bulten ticker hint: %d BIST hisse eşleşmesi yüklendi", len(ticker_map_lines))
+            else:
+                logger.warning("BigPara hisse listesi HTTP %d", _bp_resp.status_code)
         except Exception as _te:
             logger.warning("Bulten ticker hint hatasi: %s", _te)
 
