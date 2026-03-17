@@ -2530,6 +2530,12 @@ def get_default_bulletin_prompt() -> str:
 
 _DEFAULT_BULLETIN_PROMPT = """Sen deneyimli bir SPK bülten analistisin. Verilen SPK bülteni içeriğini analiz edip, yatırımcıları ilgilendiren önemli kararları özetleyeceksin.
 
+═══ MARKDOWN YASAĞI (ÇOK ÖNEMLİ) ═══
+- Twitter/X markdown DESTEKLEMIYOR — ASLA ** kullanma, ASLA __ kullanma
+- Kalın/bold yapmak istiyorsan düz metin yaz, çünkü ** işaretleri aynen görünüyor ve çirkin duruyor
+- Başlıklar için sadece emoji kullan (örn: 🚀 Halka Arz Onayları)
+- Madde işareti olarak • veya - kullan
+
 TWEET FORMATI:
 - Türkçe, sade, akıcı ve bilgilendirici cümleler kur
 - Emoji kullan ama aşırı değil
@@ -2537,28 +2543,30 @@ TWEET FORMATI:
 - Her madde kısa, net ve anlaşılır olsun
 
 DAHİL ET (önem sırasına göre):
-1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor" yaz.
+1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor." yaz.
 2. Bedelli sermaye artırımları — şirket adı + artırım miktarı (varsa)
 3. Bedelsiz sermaye artırımları — şirket adı + oran (varsa)
 4. Şirketlere verilen önemli idari para cezaları (İPC) — şirket adı + ceza tutarı + kısa neden (orn: piyasa bozucu eylem, yanıltıcı bilgi vb.)
+5. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. (birkaç cümle yeterli)
 
 ÖNEMLİ:
 - "Halka Açık Ortaklıkların Pay İhraçları" bölümünü AYRICA YAZMA — halka arz onayları bölümünde zaten yer alıyor, tekrar etme.
 - Her şirket sadece 1 kez geçsin, aynı bilgiyi farklı başlıklar altında tekrarlama.
 
-KESİNLİKLE HARİÇ TUT (bunları YAZMA):
+KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
 - Eurobond ihraçları
-- Borsada işlem yasağı / site yasakları
+- Site yasakları / borsada işlem yasakları / erişim engelleme kararları — bunlar yatırımcıyı ilgilendirmiyor, ASLA YAZMA
 - Fon yöneticisi veya gerçek kişi bazlı cezalar (sadece ŞİRKET bazlı cezalar dahil)
 - Borçlanma araçları
 - Gayrimenkul sertifikaları / Kira sertifikaları
+- Varlık kiralama şirketi kuruluş/tadil işlemleri
 - Yatırım fonu kuruluş/tadil işlemleri
 - Portföy yönetim şirketlerinin rutin işlemleri
 
 FORMAT KURALLARI:
-- Borsada işlemi olan şirketlerin ticker sembollerini biliyorsan #TICKER formatında kullan
-- Bilmediğin ticker'ı UYDURMA, sadece şirket adını yaz
-- Her bölümü emoji + başlık ile ayır (örn: 📊 Sermaye Artırımları)
+- Şirketlerin BIST ticker sembolünü biliyorsan #TICKER formatında hashtag olarak kullan (örn: #CRDFA, #KUZGY, #SAFKR)
+- Ticker'ı bilmiyorsan sadece şirket adını yaz, UYDURMA
+- Her bölümü emoji + başlık ile ayır (örn: 💰 Sermaye Artırımları)
 - Bültende ilgili içerik YOKSA o bölümü hiç yazma (boş bölüm olmasın)
 - Cümleleri düzgün kur, madde işareti kullanırken bile anlaşılır ifadeler yaz
 - Uydurmaya GEREK YOK — sadece bültendeki verileri kullan
@@ -2567,7 +2575,12 @@ TEKRAR YASAĞI (ÇOK ÖNEMLİ):
 - Aynı cümleyi veya çok benzer cümleleri KESİNLİKLE İKİ KEZ YAZMA
 - "Bu bültende... bulunmuyor" gibi özet cümleler sadece 1 KEZ yazılmalı
 - Eğer halka arz, sermaye artırımı ve para cezası yoksa tek bir cümle yaz: "Bu bültende yatırımcıları doğrudan ilgilendiren yeni halka arz, sermaye artırımı veya idari para cezası kararı bulunmuyor." — bunu her bölüm için ayrı ayrı TEKRARLAMA
-- Her bilgi sadece 1 kez geçmeli, farklı kelimelerle bile olsa aynı şeyi tekrar etme"""
+- Her bilgi sadece 1 kez geçmeli, farklı kelimelerle bile olsa aynı şeyi tekrar etme
+
+SON KONTROL:
+- Metinde ** veya __ geçiyor mu? Geçiyorsa SİL.
+- Site yasakları/erişim engeli yazdın mı? Yazdıysan SİL.
+- Aynı şirket 2 kez mi geçiyor? Birini SİL."""
 
 
 def _dedup_sentences(text: str) -> str:
@@ -2657,10 +2670,46 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             logger.error("SPK bulten analiz: API key yok (Abacus/Claude/Gemini)")
             return None
 
+        # ── Ticker eşleştirme: DB'den bilinen şirket-ticker mapping'ini al ──
+        ticker_hint = ""
+        try:
+            from app.services.market_close_analyzer import TICKER_COMPANY_MAP
+            from sqlalchemy import create_engine, text as _text
+
+            ticker_map_lines = []
+
+            # 1. IPO tablosundan tüm ticker-şirket eşleşmeleri (sync engine)
+            try:
+                from app.config import get_settings as _gs
+                _s = _gs()
+                _sync_url = _s.database_url_async.replace("+asyncpg", "").replace("+aiosqlite", "")
+                _sync_eng = create_engine(_sync_url, pool_pre_ping=True)
+                with _sync_eng.connect() as _conn:
+                    _rows = _conn.execute(_text("SELECT ticker, company_name FROM ipos WHERE ticker IS NOT NULL")).fetchall()
+                    for _row in _rows:
+                        if _row[0] and _row[1]:
+                            ticker_map_lines.append(f"{_row[1]} → #{_row[0]}")
+                _sync_eng.dispose()
+            except Exception as _db_err:
+                logger.warning("Bulten ticker DB sorgu hatasi: %s", _db_err)
+
+            # 2. TICKER_COMPANY_MAP'ten (büyük BIST şirketleri)
+            for _ticker, _name in TICKER_COMPANY_MAP.items():
+                ticker_map_lines.append(f"{_name} → #{_ticker}")
+
+            if ticker_map_lines:
+                ticker_hint = (
+                    "\n\n--- BİLİNEN TICKER EŞLEŞMELERİ (şirket adını gördüğünde bu ticker'ı kullan) ---\n"
+                    + "\n".join(ticker_map_lines)
+                )
+        except Exception as _te:
+            logger.warning("Bulten ticker hint hatasi: %s", _te)
+
         user_message = (
             f"SPK Bulteni {bulletin_no} icerigini analiz et.\n"
             f"SADECE bultendeki GERCEK verilere dayan, hicbir bilgiyi UYDURMA.\n\n"
             f"--- BULTEN ICERIGI ---\n{bulletin_text}"
+            f"{ticker_hint}"
         )
 
         messages = [
@@ -2754,6 +2803,9 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
         if not content:
             logger.error("SPK bulten AI: Tum providerlar basarisiz")
             return None
+
+        # Markdown temizle — Twitter ** ve __ desteklemiyor
+        content = content.replace("**", "").replace("__", "")
 
         # Tekrarlanan cumleleri temizle
         content = _dedup_sentences(content)
