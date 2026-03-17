@@ -834,7 +834,7 @@ def live_sync(filepath, interval=15):
                     (c_str > 0 and c_last[1] != "locked") or
                     (c_str < 0 and c_last[1] != "opened")
                 )
-                c_threshold = 1 if (c_time_ok and c_dir_changed) else CONFIRM_CYCLES
+                c_threshold = 1 if (c_dir_changed or c_time_ok) else CONFIRM_CYCLES
 
                 if c_str > 0 and c_str == c_threshold:
                     # Tavanda kaldı → onaylandı
@@ -888,7 +888,7 @@ def live_sync(filepath, interval=15):
                     (f_str > 0 and f_last[1] != "locked") or
                     (f_str < 0 and f_last[1] != "opened")
                 )
-                f_threshold = 1 if (f_time_ok and f_dir_changed) else CONFIRM_CYCLES
+                f_threshold = 1 if (f_dir_changed or f_time_ok) else CONFIRM_CYCLES
 
                 if f_str > 0 and f_str == f_threshold:
                     if can_notify:
