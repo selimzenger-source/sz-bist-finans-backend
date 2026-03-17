@@ -2899,11 +2899,22 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
             )
 
-        # 3. Gorselli tweet at
-        if os.path.exists(BANNER_SPK_BULTEN_ANALIZ):
+        # 3. İçerik zenginliğine göre görsel/metin karar ver
+        # Bültende kaç farklı başlık/bölüm var? (• ile başlayan maddeler + emoji başlıkları)
+        _bullet_count = ai_text.count("\n•") + ai_text.count("\n-")
+        _section_headers = sum(1 for line in ai_text.split("\n")
+                               if line.strip() and any(line.strip().startswith(e) for e in
+                               ["🚀", "💰", "📊", "📈", "⚖️", "🏛", "🔔", "📋", "🏢", "💵", "🔍", "⚠️"]))
+        _is_rich = (_bullet_count >= 3) or (_section_headers >= 2)
+
+        if _is_rich and os.path.exists(BANNER_SPK_BULTEN_ANALIZ):
+            logger.info("SPK bulten analiz: zengin icerik (%d madde, %d baslik) — gorsel ile",
+                        _bullet_count, _section_headers)
             return _safe_tweet_with_media(text, BANNER_SPK_BULTEN_ANALIZ, source="tweet_spk_bulletin_analysis")
         else:
-            logger.warning("SPK bulten analiz: Gorsel bulunamadi (%s), sadece metin", BANNER_SPK_BULTEN_ANALIZ)
+            if not _is_rich:
+                logger.info("SPK bulten analiz: sade icerik (%d madde, %d baslik) — sadece metin",
+                            _bullet_count, _section_headers)
             return _safe_tweet(text, source="tweet_spk_bulletin_analysis")
 
     except Exception as e:
