@@ -501,7 +501,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             text_y = row_y + 33
 
             # Ticker
-            draw.text((col_x[0], text_y), f"#{stat.ticker}", fill=WHITE, font=font_symbol)
+            draw.text((col_x[0], text_y), stat.ticker, fill=WHITE, font=font_symbol)
 
             # Price
             color = GREEN if is_ceiling else RED
@@ -567,7 +567,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
                 s_text_y = s_row_y + 18
                 s_color = GREEN if is_ceiling else RED
                 # Ticker
-                draw.text((s_x_base, s_text_y), f"#{s_stat.ticker}", fill=(180, 180, 180), font=font_supp_symbol)
+                draw.text((s_x_base, s_text_y), s_stat.ticker, fill=(180, 180, 180), font=font_supp_symbol)
                 # Price + %
                 s_pct = getattr(s_stat, "percent_change", 0.0)
                 info_text = f"{s_stat.close_price:.2f}₺ ({s_pct:+.1f}%)"
