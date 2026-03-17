@@ -216,11 +216,35 @@ async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list
 async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = None, pct: float = None, consec: int = 1, monthly: int = 1) -> str:
     """Internal KAP + Tavily + Context ile Coklu-AI Fallback ile analiz yapar.
     Sira: OpenAI (GPT-4o) -> Anthropic (Claude 3.5 Sonnet) -> Abacus (Sonnet) -> Gemini 2.5 Pro
+    Cache: Son 10 gun icinde ayni ticker+yon icin sebep bulunmussa tekrar AI cagirmaz.
     """
+    # ── Cache kontrolu: son 10 gunde ayni ticker icin sebep var mi? ──
+    try:
+        async with async_session() as session:
+            cache_since = datetime.now(timezone.utc) - timedelta(days=10)
+            cache_stmt = select(DailyStockMarketStat).where(
+                DailyStockMarketStat.ticker == ticker,
+                DailyStockMarketStat.created_at >= cache_since,
+                DailyStockMarketStat.reason.isnot(None),
+                DailyStockMarketStat.reason != "",
+            )
+            if is_ceiling:
+                cache_stmt = cache_stmt.where(DailyStockMarketStat.is_ceiling == True)
+            else:
+                cache_stmt = cache_stmt.where(DailyStockMarketStat.is_floor == True)
+            cache_stmt = cache_stmt.order_by(desc(DailyStockMarketStat.created_at)).limit(1)
+            cache_res = await session.execute(cache_stmt)
+            cached = cache_res.scalar_one_or_none()
+            if cached and cached.reason:
+                logger.info(f"[REASON CACHE] {ticker}: '{cached.reason[:50]}' (from {cached.date})")
+                return cached.reason
+    except Exception as e:
+        logger.warning(f"Reason cache check error for {ticker}: {e}")
+
     settings = get_settings()
     tavily_key = settings.TAVILY_API_KEY
     f_price = float(price) if price else 0
-    
+
     # 1. Dahili KAP + Tavily Context Hazirla
     internal_news = []
     try:
