@@ -3284,6 +3284,80 @@ async def send_realtime_notification(
     }
 
 
+# ================================================================
+# ADMIN: Bildirim Log Geçmişi (tüm kullanıcılar, son X saat)
+# ================================================================
+@app.post("/api/v1/admin/notification-logs")
+@limiter.limit("10/minute")
+async def admin_notification_logs(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Son X saatteki tüm bildirimleri döndürür (admin).
+
+    Body: { "admin_password": "...", "hours": 1, "limit": 200, "ticker": "GENKM" (opsiyonel) }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.models.notification_log import NotificationLog
+    from datetime import timedelta
+
+    hours = min(int(payload.get("hours", 1)), 24)
+    limit = min(int(payload.get("limit", 200)), 500)
+    ticker_filter = payload.get("ticker")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    query = (
+        select(NotificationLog)
+        .where(NotificationLog.created_at >= cutoff)
+        .order_by(NotificationLog.created_at.desc())
+    )
+
+    if ticker_filter:
+        query = query.where(NotificationLog.title.ilike(f"%{ticker_filter}%"))
+
+    query = query.limit(limit)
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    # Kategorilere göre sayım
+    cat_counts: dict[str, int] = {}
+    type_counts: dict[str, int] = {}
+    for log_entry in logs:
+        cat = log_entry.category or "unknown"
+        cat_counts[cat] = cat_counts.get(cat, 0) + 1
+        # data_json'dan notification_type çıkar
+        if log_entry.data_json:
+            try:
+                import json as _json
+                d = _json.loads(log_entry.data_json)
+                nt = d.get("notification_type", "unknown")
+                type_counts[nt] = type_counts.get(nt, 0) + 1
+            except Exception:
+                pass
+
+    return {
+        "total": len(logs),
+        "hours": hours,
+        "category_counts": cat_counts,
+        "type_counts": type_counts,
+        "logs": [
+            {
+                "id": l.id,
+                "title": l.title,
+                "body": l.body,
+                "category": l.category,
+                "data_json": l.data_json,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in logs
+        ],
+    }
+
+
 @app.post("/api/v1/admin/send-telegram")
 @limiter.limit("5/minute")
 async def admin_send_telegram(request: Request, payload: dict):
