@@ -2544,18 +2544,19 @@ TWEET FORMATI:
 
 DAHİL ET (önem sırasına göre):
 1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor." yaz.
-2. Bedelli sermaye artırımları — şirket adı + artırım miktarı (varsa)
-3. Bedelsiz sermaye artırımları — şirket adı + oran (varsa)
-4. Şirketlere verilen önemli idari para cezaları (İPC) — şirket adı + ceza tutarı + kısa neden (orn: piyasa bozucu eylem, yanıltıcı bilgi vb.)
-5. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. (birkaç cümle yeterli)
+2. Bedelli/Bedelsiz sermaye artırımları — SADECE BORSADA İŞLEM GÖREN şirketler için yaz (ticker listesinde olanlar). Borsada işlem görmeyen şirketlerin sermaye artırımlarını ATLÁ.
+3. Şirketlere verilen önemli idari para cezaları (İPC) — şirket adı + ceza tutarı + kısa neden (orn: piyasa bozucu eylem, yanıltıcı bilgi vb.)
+4. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. SADECE borsada işlem gören şirketler için (birkaç cümle yeterli)
 
 ÖNEMLİ:
+- Sana verilen BIST ticker listesinde OLMAYAN şirketler borsada işlem görmüyor. Bu şirketleri yazıya DAHİL ETME (örn: kooperatif, tarım kredi, borsada olmayan AŞ'ler).
 - "Halka Açık Ortaklıkların Pay İhraçları" bölümünü AYRICA YAZMA — halka arz onayları bölümünde zaten yer alıyor, tekrar etme.
 - Her şirket sadece 1 kez geçsin, aynı bilgiyi farklı başlıklar altında tekrarlama.
 
 KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
+- Borsada işlem görmeyen şirketlerle ilgili kararlar (ticker listesinde yoksa YAZMA)
 - Eurobond ihraçları
-- Site yasakları / borsada işlem yasakları / erişim engelleme kararları — bunlar yatırımcıyı ilgilendirmiyor, ASLA YAZMA
+- Site yasakları / borsada işlem yasakları / erişim engelleme kararları
 - Fon yöneticisi veya gerçek kişi bazlı cezalar (sadece ŞİRKET bazlı cezalar dahil)
 - Borçlanma araçları
 - Gayrimenkul sertifikaları / Kira sertifikaları
@@ -2564,8 +2565,8 @@ KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
 - Portföy yönetim şirketlerinin rutin işlemleri
 
 FORMAT KURALLARI:
-- Şirketlerin BIST ticker sembolünü biliyorsan #TICKER formatında hashtag olarak kullan (örn: #CRDFA, #KUZGY, #SAFKR)
-- Ticker'ı bilmiyorsan sadece şirket adını yaz, UYDURMA
+- Ticker listesindeki şirket adlarıyla BİREBİR eşleşme arama — ilk 2-3 kelime eşleşiyorsa o ticker'ı #TICKER formatında kullan
+- Ticker listesinde OLMAYAN şirketi YAZMA, ticker'ını UYDURMA
 - Her bölümü emoji + başlık ile ayır (örn: 💰 Sermaye Artırımları)
 - Bültende ilgili içerik YOKSA o bölümü hiç yazma (boş bölüm olmasın)
 - Cümleleri düzgün kur, madde işareti kullanırken bile anlaşılır ifadeler yaz
@@ -2656,6 +2657,52 @@ def _dedup_sentences(text: str) -> str:
     return cleaned.strip()
 
 
+# ── BIST Ticker Cache (BigPara API, 2 günlük) ──
+_bist_ticker_cache: list[str] = []
+_bist_ticker_cache_time: datetime | None = None
+
+
+def _get_bist_ticker_cache() -> list[str]:
+    """BigPara API'den tüm BIST ticker-şirket eşleşmelerini döndürür.
+    Bellekte 2 gün cache'ler, süre dolunca yeniler."""
+    global _bist_ticker_cache, _bist_ticker_cache_time
+
+    # Cache geçerli mi? (2 gün = 172800 saniye)
+    if _bist_ticker_cache and _bist_ticker_cache_time:
+        elapsed = (datetime.now() - _bist_ticker_cache_time).total_seconds()
+        if elapsed < 172800:
+            logger.info("BIST ticker cache hit: %d hisse (%.0f saat once)", len(_bist_ticker_cache), elapsed / 3600)
+            return _bist_ticker_cache
+
+    # Cache yenile
+    try:
+        resp = httpx.get(
+            "https://bigpara.hurriyet.com.tr/api/v1/hisse/list",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            items = resp.json().get("data", [])
+            lines = []
+            for item in items:
+                kod = item.get("kod", "")
+                ad = item.get("ad", "")
+                if kod and ad:
+                    lines.append(f"{ad} → #{kod}")
+            if lines:
+                _bist_ticker_cache = lines
+                _bist_ticker_cache_time = datetime.now()
+                logger.info("BIST ticker cache yenilendi: %d hisse", len(lines))
+                return lines
+        else:
+            logger.warning("BigPara hisse listesi HTTP %d", resp.status_code)
+    except Exception as e:
+        logger.warning("BigPara hisse listesi hatasi: %s", e)
+
+    # API başarısızsa eski cache'i döndür
+    return _bist_ticker_cache
+
+
 def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> str | None:
     """AI ile bulten icerigini analiz eder, tweet metni uretir (senkron).
     Sirasi: Abacus AI → Claude Sonnet → Gemini Pro."""
@@ -2670,30 +2717,20 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             logger.error("SPK bulten analiz: API key yok (Abacus/Claude/Gemini)")
             return None
 
-        # ── Ticker eşleştirme: BigPara API'den TÜM BIST ticker listesi ──
+        # ── Ticker eşleştirme: BigPara API'den TÜM BIST ticker listesi (2 günlük cache) ──
         ticker_hint = ""
         try:
-            _bp_resp = httpx.get(
-                "https://bigpara.hurriyet.com.tr/api/v1/hisse/list",
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=10,
-            )
-            if _bp_resp.status_code == 200:
-                _bp_data = _bp_resp.json().get("data", [])
-                ticker_map_lines = []
-                for _item in _bp_data:
-                    _kod = _item.get("kod", "")
-                    _ad = _item.get("ad", "")
-                    if _kod and _ad:
-                        ticker_map_lines.append(f"{_ad} → #{_kod}")
-                if ticker_map_lines:
-                    ticker_hint = (
-                        "\n\n--- TÜM BIST TICKER EŞLEŞMELERİ (şirket adını gördüğünde bu ticker'ı hashtag olarak kullan) ---\n"
-                        + "\n".join(ticker_map_lines)
-                    )
-                    logger.info("Bulten ticker hint: %d BIST hisse eşleşmesi yüklendi", len(ticker_map_lines))
-            else:
-                logger.warning("BigPara hisse listesi HTTP %d", _bp_resp.status_code)
+            ticker_map_lines = _get_bist_ticker_cache()
+            if ticker_map_lines:
+                ticker_hint = (
+                    "\n\n--- TÜM BIST TICKER EŞLEŞMELERİ ---\n"
+                    "Aşağıdaki listede BORSADA İŞLEM GÖREN tüm şirketler var.\n"
+                    "Bültendeki şirket adını bu listede ara — birebir eşleşme arama, "
+                    "ilk 2-3 kelime eşleşiyorsa o ticker'ı kullan.\n"
+                    "Listede OLMAYAN şirketler borsada işlem görmüyor demektir — "
+                    "onlar için ticker hashtag'i KOYMA.\n\n"
+                    + "\n".join(ticker_map_lines)
+                )
         except Exception as _te:
             logger.warning("Bulten ticker hint hatasi: %s", _te)
 
