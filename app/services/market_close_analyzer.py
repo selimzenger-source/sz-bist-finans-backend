@@ -218,7 +218,8 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     Sira: OpenAI (GPT-4o) -> Anthropic (Claude 3.5 Sonnet) -> Abacus (Sonnet) -> Gemini 2.5 Pro
     Cache: Son 10 gun icinde ayni ticker+yon icin sebep bulunmussa tekrar AI cagirmaz.
     """
-    # ── Cache kontrolu: son 10 gunde ayni ticker icin sebep var mi? ──
+    # ── Cache: son 10 gunde ayni ticker icin sebep var mi? (fallback olarak) ──
+    _cached_reason = ""
     try:
         async with async_session() as session:
             cache_since = datetime.now(timezone.utc) - timedelta(days=10)
@@ -236,8 +237,8 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             cache_res = await session.execute(cache_stmt)
             cached = cache_res.scalar_one_or_none()
             if cached and cached.reason:
-                logger.info(f"[REASON CACHE] {ticker}: '{cached.reason[:50]}' (from {cached.date})")
-                return cached.reason
+                _cached_reason = cached.reason
+                logger.info(f"[REASON CACHE] {ticker}: cache mevcut '{_cached_reason[:50]}' (from {cached.date})")
     except Exception as e:
         logger.warning(f"Reason cache check error for {ticker}: {e}")
 
@@ -797,6 +798,12 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
     if programmatic_reason:
         logger.info(f"[PROG FALLBACK] {ticker}: {programmatic_reason}")
         return programmatic_reason
+
+    # Son fallback: cache'den onceki sebebi kullan
+    if _cached_reason:
+        logger.info(f"[REASON CACHE FALLBACK] {ticker}: AI bos, cache kullaniliyor: '{_cached_reason[:50]}'")
+        return _cached_reason
+
     return ""
 
 async def _save_market_close_data(session, today, ceilings, floors):
