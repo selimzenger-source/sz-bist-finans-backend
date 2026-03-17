@@ -2850,15 +2850,66 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
         return None
 
 
+def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
+    """AI bülten analizinden kısa tweet özeti çıkarır.
+
+    Sadece ticker hashtag'li başlıkları listeler.
+    Örn:
+        📋 SPK Bülteni 2026/16
+
+        💰 #CRDFA 200M bedelsiz sermaye artırımı
+        ⚖️ #KZGYO zorunlu pay alım teklifi — 22,89 TL
+        ✅ #SAFKR B grubu pay dönüştürme onayı
+
+        📲 Detaylar görselde 👇
+    """
+    import re
+
+    lines = ai_text.strip().split("\n")
+    highlights = []
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Sadece ticker (#XXX) içeren maddeleri al
+        ticker_match = re.search(r'#([A-Z]{3,6})\b', stripped)
+        if not ticker_match:
+            continue
+
+        ticker = ticker_match.group(1)
+        # Maddeyi kısalt — ticker + özet (max 60 char)
+        clean = stripped.lstrip("•- ").replace("**", "").strip()
+        clean = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', clean).strip()
+
+        # Kısa açıklama çıkar
+        # Parantez içi şirket adını kaldır: "#CRDFA (Creditwest Faktoring AŞ) - ..." → "..."
+        after_paren = re.sub(r'^#[A-Z]{3,6}\s*\([^)]*\)\s*[-–—]\s*', '', clean)
+        if after_paren and after_paren != clean:
+            short_desc = after_paren
+        else:
+            # Ticker'dan sonrasını al
+            after_ticker = re.sub(r'^#[A-Z]{3,6}\s*', '', clean)
+            short_desc = after_ticker
+
+        # Max 70 karakter
+        if len(short_desc) > 70:
+            short_desc = short_desc[:67] + "..."
+
+        if short_desc:
+            highlights.append(f"• #{ticker} {short_desc}")
+
+        if len(highlights) >= 5:
+            break
+
+    return "\n".join(highlights)
+
+
 def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
-    """SPK bulten analiz tweetini atar — AI analiz + gorsel + metin.
+    """SPK bulten analiz tweetini atar.
 
-    Mevcut halka arz tweetinden BAGIMSIZ calisir.
-    Bultenin tamami AI ile analiz edilip onemli kararlar ozetlenir.
-
-    Args:
-        bulletin_text: format_tables_for_analysis() ciktisi
-        bulletin_no: Bulten numarasi (orn: "2026/8")
+    Zengin bülten (3+ madde): Dinamik görsel üret + kısa tweet metni
+    Sade bülten (1-2 madde): Sadece metin tweet (görsel yok)
     """
     try:
         if not bulletin_text or len(bulletin_text) < 50:
@@ -2866,20 +2917,51 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                            len(bulletin_text) if bulletin_text else 0)
             return False
 
-        # 1. AI analiz uret
+        # 1. AI analiz üret
         ai_text = _generate_bulletin_analysis_sync(bulletin_text, bulletin_no)
         if not ai_text:
             logger.warning("SPK bulten analiz: AI metin uretilemedi, tweet atilmadi")
             return False
 
-        # 2. Bulten tarihini olustur (bultenler yayin gunu islendiginden bugunun tarihi)
+        # 2. Tarih
         from datetime import datetime as _dt
         _AYLAR_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
                      "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
         _now = _dt.now()
         _tarih_str = f"{_now.day} {_AYLAR_TR[_now.month - 1]} {_now.year}"
 
-        # 3. Tweet metnini olustur — tarih + bulten no baslik, AI analiz govde
+        # 3. İçerik zenginliği kontrolü — madde sayısına bak
+        _bullet_count = ai_text.count("\n•") + ai_text.count("\n-")
+
+        if _bullet_count >= 3:
+            # ── ZENGİN BÜLTEN: Görsel üret + kısa tweet ──
+            logger.info("SPK bulten analiz: zengin icerik (%d madde) — gorsel + kisa tweet", _bullet_count)
+
+            from app.services.chart_image_generator import generate_spk_bulletin_image
+            report_image = generate_spk_bulletin_image(ai_text, bulletin_no)
+
+            if report_image:
+                # Kısa tweet metni — sadece ticker hashtag'li başlıklar
+                short_summary = _extract_spk_short_summary(ai_text, bulletin_no)
+                text = (
+                    f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
+                    f"{short_summary}\n\n"
+                    f"📲 Detaylar görselde 👇\n"
+                    f"#SPK #BultenAnaliz #BIST100 #borsa"
+                )
+                success = _safe_tweet_with_media(text, report_image, source="tweet_spk_bulletin_analysis")
+                # Temp dosyayı temizle
+                try:
+                    os.remove(report_image)
+                except OSError:
+                    pass
+                return success
+            else:
+                logger.warning("SPK bulten gorsel uretilemedi — metin ile devam")
+                # Görsel üretilemezse metin olarak at (aşağıya düş)
+
+        # ── SADE BÜLTEN (veya görsel hatası): Tam metin tweet ──
+        logger.info("SPK bulten analiz: sade icerik (%d madde) — sadece metin tweet", _bullet_count)
         text = (
             f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
             f"{ai_text}\n\n"
@@ -2889,7 +2971,6 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
 
         # 4000 karakter Twitter limiti
         if len(text) > 3950:
-            # AI metnini kirp
             max_ai = 3950 - len(text) + len(ai_text) - 10
             ai_text = ai_text[:max_ai] + "..."
             text = (
@@ -2899,12 +2980,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
             )
 
-        # 3. Gorselli tweet at
-        if os.path.exists(BANNER_SPK_BULTEN_ANALIZ):
-            return _safe_tweet_with_media(text, BANNER_SPK_BULTEN_ANALIZ, source="tweet_spk_bulletin_analysis")
-        else:
-            logger.warning("SPK bulten analiz: Gorsel bulunamadi (%s), sadece metin", BANNER_SPK_BULTEN_ANALIZ)
-            return _safe_tweet(text, source="tweet_spk_bulletin_analysis")
+        return _safe_tweet(text, source="tweet_spk_bulletin_analysis")
 
     except Exception as e:
         logger.error("tweet_spk_bulletin_analysis hatasi: %s", e)

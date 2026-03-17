@@ -43,20 +43,21 @@ TABAN_RED = (255, 40, 40)        # #ff2828 parlak / koyu kirmizi — taban
 # ── Font ───────────────────────────────────────────────────
 # Render (Linux) DejaVu fontlari mevcut
 _FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    # Sans-serif öncelikli (Türkçe karakter desteği + okunabilirlik)
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
     # Windows fallback
+    "C:/Windows/Fonts/segoeui.ttf",
+    "C:/Windows/Fonts/arial.ttf",
     "C:/Windows/Fonts/consola.ttf",
-    "C:/Windows/Fonts/consolab.ttf",
 ]
 
 _BOLD_FONT_PATHS = [
-    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    "C:/Windows/Fonts/consolab.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "C:/Windows/Fonts/segoeuib.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
+    "C:/Windows/Fonts/consolab.ttf",
 ]
 
 
@@ -2173,4 +2174,356 @@ def generate_report_image(report_text: str, report_type: str = "morning") -> Opt
 
     except Exception as e:
         logger.error("generate_report_image hatasi: %s", e, exc_info=True)
+        return None
+
+
+# ═════════════════════════════════════════════════════════════════
+# SPK BÜLTEN ANALİZ GÖRSELİ (kapanış raporu tarzı dinamik PNG)
+# ═════════════════════════════════════════════════════════════════
+
+# SPK bülten bölüm renkleri
+_SPK_SECTION_COLORS = {
+    "halka arz": GREEN,
+    "sermaye art": GOLD,
+    "idari para": RED,
+    "önemli gelişme": ORANGE,
+    "diğer": ORANGE,
+    "pay alım": ORANGE,
+    "default": GRAY,
+}
+
+
+def _get_spk_section_color(title: str) -> tuple:
+    """Bölüm başlığına göre accent rengi döndürür."""
+    t = title.lower()
+    for key, color in _SPK_SECTION_COLORS.items():
+        if key in t:
+            return color
+    return _SPK_SECTION_COLORS["default"]
+
+
+def _parse_spk_bulletin_sections(ai_text: str) -> dict:
+    """AI ürettiği SPK bülten metnini bölümlere ayırır.
+
+    Returns:
+        {
+            "bulletin_title": str,
+            "sections": [{"title": str, "color": (r,g,b), "lines": [str]}, ...],
+            "footer_note": str,
+        }
+    """
+    import re
+
+    lines = ai_text.strip().split("\n")
+    sections = []
+    current_section = None
+    bulletin_title = ""
+    footer_note = ""
+
+    # Emoji başlık pattern'leri
+    _SECTION_EMOJIS = ["🚀", "💰", "💵", "📊", "📈", "⚖️", "🏛", "🔔", "📋",
+                       "🏢", "🔍", "⚠️", "🎯", "📌", "🔴", "🟢", "💼", "🏗"]
+
+    # Bilinen bölüm başlıkları (düz metin eşleşme — emoji/bold olmadan da yakala)
+    _KNOWN_HEADERS = [
+        "halka arz onay", "halka arz", "sermaye art", "bedelli sermaye",
+        "bedelsiz sermaye", "idari para ceza", "para cezalar",
+        "diger onemli", "diğer önemli", "önemli gelişme", "onemli gelisme",
+        "pay alim teklif", "pay alım teklif", "site yasak",
+        "piyasa tedbir",
+    ]
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # Footer/not satırı
+        s_lower = stripped.lower().replace("İ", "i").replace("ı", "i")
+        if s_lower.startswith("not:") or s_lower.startswith("bu bulten") or s_lower.startswith("bu bülten"):
+            footer_note = stripped.replace("**", "")
+            footer_note = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', footer_note).strip()
+            continue
+
+        # Bülten başlığı (SPK Bülteni 2026/16 Analizi gibi)
+        if ("spk" in s_lower or "bülten" in stripped.lower()) and ("bulten" in s_lower or "bülten" in stripped.lower()) and not bulletin_title:
+            bulletin_title = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF]', '', stripped)
+            bulletin_title = bulletin_title.replace("**", "").strip()
+            continue
+
+        # Section header kontrolü — emoji ile başlayan
+        is_header = False
+        for em in _SECTION_EMOJIS:
+            if stripped.startswith(em):
+                is_header = True
+                break
+
+        # **Bold** header kontrolü
+        if not is_header and stripped.startswith("**") and "**" in stripped[2:]:
+            inner = stripped.replace("**", "").strip()
+            if len(inner) < 60 and not inner.startswith("•") and not inner.startswith("-") and not inner.startswith("#"):
+                is_header = True
+
+        # Düz metin header kontrolü — bilinen başlıkları yakala
+        if not is_header and not stripped.startswith("•") and not stripped.startswith("-"):
+            clean_lower = stripped.replace("**", "").lower()
+            for kh in _KNOWN_HEADERS:
+                if kh in clean_lower and len(stripped) < 60:
+                    is_header = True
+                    break
+
+        if is_header:
+            # Önceki section'ı kaydet
+            if current_section and current_section["lines"]:
+                sections.append(current_section)
+
+            # Başlık temizle
+            title = stripped
+            title = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', title)
+            title = title.replace("**", "").strip()
+            if not title:
+                title = "Diğer Gelişmeler"
+
+            current_section = {
+                "title": title,
+                "color": _get_spk_section_color(title),
+                "lines": [],
+            }
+        elif current_section is not None:
+            # Body satırı — temizle
+            clean = stripped.replace("**", "")
+            clean = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', clean).strip()
+            # Resimde # işareti olmasın — hashtag sadece tweet metninde
+            clean = re.sub(r'#([A-Za-z])', r'\1', clean)
+            if clean:
+                current_section["lines"].append(clean)
+
+    if current_section and current_section["lines"]:
+        sections.append(current_section)
+
+    return {
+        "bulletin_title": bulletin_title,
+        "sections": sections,
+        "footer_note": footer_note,
+    }
+
+
+def generate_spk_bulletin_image(ai_text: str, bulletin_no: str) -> Optional[str]:
+    """SPK bülten analizini kapanış raporu tarzı PNG'ye çevirir.
+
+    Args:
+        ai_text: AI'ın ürettiği analiz metni
+        bulletin_no: Bülten numarası (orn: "2026/16")
+
+    Returns:
+        PNG dosya yolu veya None
+    """
+    try:
+        parsed = _parse_spk_bulletin_sections(ai_text)
+
+        if not parsed["sections"]:
+            logger.warning("SPK bulten gorsel: section bulunamadi")
+            return None
+
+        # Max 8 section, section başına max 6 satır
+        if len(parsed["sections"]) > 8:
+            parsed["sections"] = parsed["sections"][:8]
+        for sec in parsed["sections"]:
+            if len(sec["lines"]) > 6:
+                sec["lines"] = sec["lines"][:6]
+
+        # ── Fontlar ──
+        font_header = _load_font(36, bold=True)
+        font_subheader = _load_font(20, bold=False)
+        font_title = _load_font(22, bold=True)
+        font_body = _load_font(17, bold=False)
+        font_footer = _load_font(15, bold=False)
+        font_footer_bold = _load_font(15, bold=True)
+
+        WIDTH = 1200
+        PAD = 50
+        CONTENT_W = WIDTH - PAD * 2
+        SECTION_GAP = 18
+        LINE_H = 24
+        ACCENT_W = 5
+        ACCENT_PAD = 14
+
+        MAX_BODY_LINES = 8
+        MAX_IMAGE_H = 2400
+
+        # ── Banner görseli yükle ──
+        _img_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        _banner_path = os.path.join(_img_dir, "spk_bulten_banner.png")
+        banner_img = None
+        HEADER_H = 120  # fallback
+
+        if os.path.exists(_banner_path):
+            try:
+                banner_img = Image.open(_banner_path)
+                # 1200px genişliğe sığdır
+                ratio = WIDTH / banner_img.width
+                new_h = int(banner_img.height * ratio)
+                banner_img = banner_img.resize((WIDTH, new_h), Image.LANCZOS)
+                HEADER_H = new_h
+            except Exception as _be:
+                logger.warning("SPK banner yuklenemedi: %s", _be)
+                banner_img = None
+
+        # ── Yükseklik hesapla ──
+        tmp_img = Image.new("RGB", (WIDTH, 100))
+        tmp_draw = ImageDraw.Draw(tmp_img)
+
+        y_calc = HEADER_H + 20  # Header sonrası
+
+        for sec in parsed["sections"]:
+            y_calc += 8 + 2 + 12  # divider
+            y_calc += 28 + 8      # başlık
+
+            body_w = CONTENT_W - ACCENT_W - ACCENT_PAD
+            sec_lines = 0
+            for line in sec["lines"]:
+                if sec_lines >= MAX_BODY_LINES:
+                    break
+                indent = 20 if (line.startswith("•") or line.startswith("-")) else 0
+                wrapped = _wrap_text(line, font_body, body_w - indent, tmp_draw)
+                if len(wrapped) > 3:
+                    wrapped = wrapped[:3]
+                y_calc += len(wrapped) * LINE_H
+                sec_lines += len(wrapped)
+            y_calc += SECTION_GAP
+
+        # Footer
+        y_calc += 16 + 2 + 16  # divider
+        if parsed["footer_note"]:
+            footer_wrapped = _wrap_text(parsed["footer_note"], font_footer, CONTENT_W, tmp_draw)
+            y_calc += len(footer_wrapped) * 20
+        y_calc += 44  # disclaimer + branding
+
+        total_h = min(y_calc + 20, MAX_IMAGE_H)
+        del tmp_img, tmp_draw
+
+        # ── Görseli oluştur ──
+        img = Image.new("RGB", (WIDTH, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        # ── Header ──
+        from datetime import datetime as _dt
+
+        if banner_img:
+            # Banner görseli yapıştır
+            img.paste(banner_img.convert("RGB"), (0, 0))
+            # Bülten numarasını banner üstüne yaz ("Sermaye Piyasası Kurulu" yanına)
+            font_bno = _load_font(18, bold=False)
+            _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                      "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+            _now = _dt.now()
+            _tarih = f"{_now.day} {_AYLAR[_now.month - 1]} {_now.year}"
+            bno_text = f"Bülten {bulletin_no}  •  {_tarih}"
+            # Sermaye Piyasası Kurulu yazısının yanına/altına — banner'ın sol alt köşesi
+            draw.text((PAD, HEADER_H - 35), bno_text, fill=GOLD, font=font_bno)
+        else:
+            # Fallback: gradient header
+            for row_y in range(HEADER_H):
+                ratio = row_y / HEADER_H
+                r = int(18 + (30 - 18) * ratio)
+                g = int(18 + (40 - 18) * ratio)
+                b = int(32 + (70 - 32) * ratio)
+                draw.line([(0, row_y), (WIDTH, row_y)], fill=(r, g, b))
+            draw.line([(0, HEADER_H - 2), (WIDTH, HEADER_H - 2)], fill=GOLD, width=2)
+            draw.text((PAD, 25), "SPK BÜLTENİ ANALİZİ", fill=WHITE, font=font_header)
+            _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                      "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+            _now = _dt.now()
+            _tarih = f"{_now.day} {_AYLAR[_now.month - 1]} {_now.year}"
+            subtitle = f"Bülten {bulletin_no}  •  {_tarih}  •  BorsaCebimde"
+            draw.text((PAD, 72), subtitle, fill=GRAY, font=font_subheader)
+
+        y = HEADER_H + 16
+
+        # ── Bölümler ──
+        for sec in parsed["sections"]:
+            if y + 60 > total_h:
+                break
+
+            # Divider
+            y += 8
+            draw.line([(PAD, y), (WIDTH - PAD, y)], fill=DIVIDER, width=1)
+            y += 12
+
+            # Accent çubuk başlangıcı
+            accent_top = y
+
+            # Başlık
+            draw.text((PAD + ACCENT_W + ACCENT_PAD, y), sec["title"], fill=WHITE, font=font_title)
+            y += 28 + 6
+
+            # Body
+            body_x = PAD + ACCENT_W + ACCENT_PAD
+            body_w = CONTENT_W - ACCENT_W - ACCENT_PAD
+            sec_lines = 0
+
+            for line in sec["lines"]:
+                if sec_lines >= MAX_BODY_LINES:
+                    break
+                is_bullet = line.startswith("•") or line.startswith("-")
+                indent = 20 if is_bullet else 0
+
+                wrapped = _wrap_text(line, font_body, body_w - indent, draw)
+                if len(wrapped) > 3:
+                    wrapped = wrapped[:3]
+                    wrapped[-1] = wrapped[-1][:max(0, len(wrapped[-1]) - 3)] + "..."
+
+                for j, wl in enumerate(wrapped):
+                    if y + LINE_H > total_h - 80:
+                        break
+                    if j == 0 and is_bullet:
+                        draw.text((body_x + 4, y), line[0], fill=WHITE, font=font_body)
+                        rest = wl[2:] if len(wl) > 2 else wl
+                        draw.text((body_x + indent, y), rest, fill=GRAY, font=font_body)
+                    else:
+                        draw.text((body_x + indent, y), wl, fill=GRAY, font=font_body)
+                    y += LINE_H
+                    sec_lines += 1
+
+            accent_bottom = y
+
+            # Sol accent çubuk
+            draw.rectangle(
+                [(PAD, accent_top), (PAD + ACCENT_W, accent_bottom)],
+                fill=sec["color"],
+            )
+            y += SECTION_GAP
+
+        # ── Footer ──
+        y += 8
+        draw.line([(PAD, y), (WIDTH - PAD, y)], fill=DIVIDER, width=1)
+        y += 14
+
+        # Footer note (varsa)
+        if parsed["footer_note"]:
+            footer_wrapped = _wrap_text(parsed["footer_note"], font_footer, CONTENT_W, draw)
+            for fl in footer_wrapped:
+                draw.text((PAD, y), fl, fill=GRAY, font=font_footer)
+                y += 20
+            y += 6
+
+        draw.text((PAD, y), "Yatırım tavsiyesi değildir.", fill=GRAY, font=font_footer)
+        y += 20
+        draw.text((PAD, y), "BorsaCebimde", fill=GOLD, font=font_footer_bold)
+
+        # ── Watermark ──
+        _draw_bg_watermark(img, WIDTH, total_h)
+
+        # ── Kaydet ──
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"spk_bulten_{bulletin_no.replace('/', '_')}_{ts}.png"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+        img.save(filepath, "PNG", optimize=True)
+        del img, draw
+        gc.collect()
+        logger.info("SPK bulten gorseli olusturuldu: %s (%.1f KB)", filepath, os.path.getsize(filepath) / 1024)
+        return filepath
+
+    except Exception as e:
+        logger.error("generate_spk_bulletin_image hatasi: %s", e, exc_info=True)
         return None
