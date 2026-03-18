@@ -124,6 +124,16 @@ class ResmiGazeteScraper:
             if "resmigazete.gov.tr" not in href:
                 continue
 
+            # Header/logo linkleri atla (karar değil)
+            text_lower = text.lower()
+            if any(skip in text_lower for skip in [
+                "resmî gazete", "resmi gazete", "resmîgazete",
+                "t.c.cumhurbaşkanlığı", "t.c. cumhurbaşkanlığı",
+                "başbakanlık mevzuat", "mevzuat bilgi sistemi",
+                "fihrist", "anasayfa", "iletişim",
+            ]):
+                continue
+
             is_pdf = href.lower().endswith(".pdf")
             items.append({
                 "title": text,
@@ -163,7 +173,7 @@ class ResmiGazeteScraper:
                 "ihalenin", "özelleştirme", "ozellestirme",
                 "bddk", "spk", "tcmb", "epdk", "rekabet",
                 "kur", "faiz", "enflasyon",
-                "bakan", "müsteşar", "müdür", "başkan",
+                "bakan", "müsteşar",
                 "atama", "görevden", "gorevden",
                 "katılım", "katilim",
                 "lisans", "ruhsat",
