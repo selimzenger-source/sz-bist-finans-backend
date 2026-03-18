@@ -6728,6 +6728,30 @@ async def admin_test_rg_pdf(request: Request, payload: dict):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     pdf_url = payload.get("url", "https://www.resmigazete.gov.tr/eskiler/2026/03/20260318-3.pdf")
+    diag = {"ocr_available": False, "poppler_available": False, "pymupdf_available": False}
+
+    # Diagnostic: check tools
+    try:
+        import pytesseract
+        ver = pytesseract.get_tesseract_version()
+        diag["ocr_available"] = True
+        diag["tesseract_version"] = str(ver)
+    except Exception as e:
+        diag["tesseract_error"] = str(e)[:200]
+
+    try:
+        from pdf2image import convert_from_bytes
+        diag["poppler_available"] = True
+    except Exception as e:
+        diag["poppler_error"] = str(e)[:200]
+
+    try:
+        import fitz
+        diag["pymupdf_available"] = True
+        diag["pymupdf_version"] = fitz.version[0] if hasattr(fitz, 'version') else "?"
+    except Exception as e:
+        diag["pymupdf_error"] = str(e)[:200]
+
     try:
         from app.scrapers.resmi_gazete_scraper import ResmiGazeteScraper
         scraper = ResmiGazeteScraper()
@@ -6742,11 +6766,12 @@ async def admin_test_rg_pdf(request: Request, payload: dict):
                 "url": pdf_url,
                 "text_length": len(text),
                 "text_preview": text[:1000],
+                "diagnostic": diag,
             }
         else:
-            return {"status": "empty", "url": pdf_url, "message": "PDF text extraction failed"}
+            return {"status": "empty", "url": pdf_url, "message": "PDF text extraction failed", "diagnostic": diag}
     except Exception as e:
-        return {"status": "error", "message": str(e)[:500]}
+        return {"status": "error", "message": str(e)[:500], "diagnostic": diag}
 
 
 # -------------------------------------------------------
