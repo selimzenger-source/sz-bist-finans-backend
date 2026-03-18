@@ -226,7 +226,7 @@ class ResmiGazeteScraper:
                 logger.debug("pdfplumber basarisiz: %s", e)
 
             # Yontem 2: PyMuPDF (fitz) — daha iyi text extraction
-            if not result or len(result.strip()) < 50:
+            if not result or len(result.strip()) < 200:
                 try:
                     import fitz  # PyMuPDF
                     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -245,7 +245,7 @@ class ResmiGazeteScraper:
                     logger.debug("PyMuPDF basarisiz: %s", e)
 
             # Yontem 3: OCR (pdf2image + pytesseract)
-            if not result or len(result.strip()) < 50:
+            if not result or len(result.strip()) < 200:
                 try:
                     from pdf2image import convert_from_bytes
                     import pytesseract
