@@ -404,6 +404,17 @@ async def _check_resmi_gazete_inner():
         analysis = await _ai_analyze_gazette(new_contents, today)
         if not analysis:
             logger.info("Resmi Gazete: AI analize gore borsa etkisi yok")
+            # Debug — AI etki yok dedi, hangi kararlar incelendi bildir
+            try:
+                from app.services.admin_telegram import send_admin_message
+                titles = "\n".join(f"• {c['title'][:60]}" for c in new_contents)
+                await send_admin_message(
+                    f"ℹ️ <b>RG — AI etki yok dedi</b>\n\n"
+                    f"İncelenen {len(new_contents)} karar:\n{titles}",
+                    silent=True,
+                )
+            except Exception:
+                pass
             await _save_state(today_str)
             return
 
