@@ -2545,7 +2545,7 @@ TWEET FORMATI:
 DAHİL ET (önem sırasına göre):
 1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor." yaz.
 2. Bedelli/Bedelsiz sermaye artırımları — SADECE BORSADA İŞLEM GÖREN şirketler için yaz (ticker listesinde olanlar). Borsada işlem görmeyen şirketlerin sermaye artırımlarını ATLÁ.
-3. Şirketlere verilen önemli idari para cezaları (İPC) — şirket adı + ceza tutarı + kısa neden (orn: piyasa bozucu eylem, yanıltıcı bilgi vb.)
+3. İdari para cezaları ve işlem yasakları — şirket/hisse adı + ceza/yaptırım detayı + kısa neden (orn: piyasa manipülasyonu, yapay fiyat oluşturma vb.). Gerçek kişilere verilen cezalar bile olsa, eğer spesifik bir BIST hissesi (ticker) ile ilgiliyse MUTLAKA yaz (orn: "OZSUB hissesinde manipülasyon şüphesiyle X kişiye 6 ay işlem yasağı verildi")
 4. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. SADECE borsada işlem gören şirketler için (birkaç cümle yeterli)
 
 ÖNEMLİ:
@@ -2557,7 +2557,7 @@ KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
 - Borsada işlem görmeyen şirketlerle ilgili kararlar (ticker listesinde yoksa YAZMA)
 - Eurobond ihraçları
 - Site yasakları / borsada işlem yasakları / erişim engelleme kararları
-- Fon yöneticisi veya gerçek kişi bazlı cezalar (sadece ŞİRKET bazlı cezalar dahil)
+- Fon yöneticisi veya gerçek kişi bazlı cezalar — AMA eğer spesifik bir BIST hissesi ile ilgiliyse (manipülasyon, yapay fiyat vb.) O ZAMAN YAZ
 - Borçlanma araçları
 - Gayrimenkul sertifikaları / Kira sertifikaları
 - Varlık kiralama şirketi kuruluş/tadil işlemleri
