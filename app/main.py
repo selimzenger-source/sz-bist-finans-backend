@@ -6698,6 +6698,29 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
 
 
 # -------------------------------------------------------
+# Admin: Resmi Gazete Manuel Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-resmi-gazete")
+@limiter.limit("3/minute")
+async def admin_trigger_resmi_gazete(request: Request, payload: dict):
+    """Admin: Resmi Gazete scraper'ı manuel tetikle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    try:
+        from app.scrapers.resmi_gazete_scraper import check_resmi_gazete
+        await check_resmi_gazete()
+        return {"status": "ok", "message": "Resmi Gazete tarama tamamlandi"}
+    except Exception as e:
+        import traceback
+        resp = {"status": "error", "message": str(e)[:500]}
+        if not settings.is_production:
+            resp["traceback"] = traceback.format_exc()[-1000:]
+        return resp
+
+
+# -------------------------------------------------------
 # Admin: KAP AI Re-Analyze (NULL summary kayitlari)
 # -------------------------------------------------------
 

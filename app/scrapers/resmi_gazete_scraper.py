@@ -435,7 +435,7 @@ HOLDİNG / İŞTİRAK / GRUP BAĞLANTILARI — ÇOK ÖNEMLİ:
 Kararda geçen şirket doğrudan BIST'te olmasa bile, holding/grup bağlantısıyla BIST hissesini etkiler.
 Örnek bağlantılar:
 - Fuzul Holding, Fuzul Yapı, Fuzul GYO → FZLGY (Fuzul GYO)
-- Koç Holding grubu → KCHOL, ARCLK, FROTO, TOASO, TUPRS, YKBNK, TATGD
+- Koç Holding grubu → KCHOL, ARCLK, FROTO, TOASO, TUPRS, YKBNK, AYGAZ, OTKAR
 - Sabancı Holding grubu → SAHOL, AKBNK, KRDMD, CIMSA, ENKAI
 - Zorlu Holding → ZOREN, VESBE, VESTL
 - Anadolu Grubu → AGHOL, AEFES, ANACM, MIGRS
@@ -450,7 +450,7 @@ Kararda geçen şirket doğrudan BIST'te olmasa bile, holding/grup bağlantısı
 - Turkcell → TCELL, Superonline
 - Türk Telekom → TTKOM, TTRAK değil
 - THY → THYAO, TGS, PGSUS (rakip etki)
-- İş Bankası grubu → ISCTR, ISMEN, ISYAT, SISE, AYGAZ
+- İş Bankası grubu → ISCTR, ISMEN, ISYAT, SISE, TSKB
 - Garanti BBVA → GARAN
 - QNB Finansbank → QNBFB (halka açık değil ama sektör etkisi)
 Kararda "Fuzul" geçiyorsa → FZLGY ticker'ını kullan.
