@@ -1,14 +1,15 @@
 # BIST Finans Backend — Production Dockerfile
 FROM python:3.13-slim
 
-# Sistem bağımlılıkları
+# Sistem bağımlılıkları (tesseract OCR + poppler for PDF processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     tesseract-ocr \
     tesseract-ocr-tur \
     poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && tesseract --version
 
 # Çalışma dizini
 WORKDIR /app
