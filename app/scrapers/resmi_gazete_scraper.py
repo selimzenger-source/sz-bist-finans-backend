@@ -193,7 +193,13 @@ class ResmiGazeteScraper:
                     page_text = page.extract_text()
                     if page_text:
                         texts.append(page_text)
-                return "\n\n".join(texts) if texts else None
+                result = "\n\n".join(texts) if texts else None
+                if result:
+                    logger.info("PDF metin OK (%d karakter): %s → %s...",
+                                len(result), url.split("/")[-1], result[:200])
+                else:
+                    logger.warning("PDF metin BOŞ: %s — OCR gerekebilir", url)
+                return result
 
         except Exception as e:
             logger.warning("PDF parse hatasi (%s): %s", url, e)
@@ -297,6 +303,8 @@ async def _check_resmi_gazete_inner():
                 text = await scraper.download_htm_text(item["url"])
 
             if text:
+                logger.info("İçerik alındı [%s]: %d kar → %s...",
+                            item["title"][:40], len(text), text[:150])
                 contents.append({
                     "title": item["title"],
                     "section": item["section"],
@@ -304,6 +312,7 @@ async def _check_resmi_gazete_inner():
                     "text": text[:3000],  # max 3000 char per item
                 })
             else:
+                logger.warning("İçerik alınamadı: %s → sadece başlık ile devam", item["title"][:60])
                 # text alinamamissa bile basligi ekle
                 contents.append({
                     "title": item["title"],
