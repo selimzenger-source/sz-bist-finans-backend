@@ -477,9 +477,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         y += 15
 
         # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        # Sütunlar: Hisse(40) Fiyat(170) Değişim(300) Seri(470) Son30G(580) Neden(695)
-        # Seri sağa kaydırıldı — "10. Gün", "20. Gün" ile Değişim çakışmasın
-        col_x = [padding, 170, 300, 470, 580, 695]
+        # Sütunlar arası boşluk artırıldı — ticker/fiyat/değişim üst üste binmesin
+        col_x = [padding, 190, 330, 470, 570, 680]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
@@ -529,7 +528,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             # Neden (Multi-line) — 16px font, ~9.6px/char, 465px alan → max 44 char/satır
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
-                wrapped = textwrap.wrap(reason_text, width=44)
+                wrapped = textwrap.wrap(reason_text, width=40)
                 if len(wrapped) > 2:
                     r_y = text_y - 16   # 3 satır: row_y+17, +39, +61
                 elif len(wrapped) > 1:
