@@ -275,6 +275,19 @@ async def _check_resmi_gazete_inner():
 
         logger.info("Resmi Gazete: %d ilgili karar bulundu, AI analiz basliyor...", len(relevant))
 
+        # Telegram — tarama durumu (ilk gunlerde kontrol icin)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(
+                f"🔍 <b>RG Tarama</b> ({today_str})\n"
+                f"Toplam: {len(items)} karar\n"
+                f"Filtre sonrası: {len(relevant)} ilgili karar\n"
+                f"AI analiz başlıyor...",
+                silent=True,
+            )
+        except Exception:
+            pass
+
         # İçerikleri indir (max 5 PDF/HTM)
         contents = []
         for item in relevant[:8]:
@@ -330,6 +343,25 @@ async def _check_resmi_gazete_inner():
                         len(analysis), remaining_slots)
             analysis = analysis[:remaining_slots]
 
+        # Telegram bildirim — AI ne buldu, kontrol edelim
+        from app.services.admin_telegram import send_admin_message
+        for dec in analysis:
+            tickers_str = ", ".join(f"#{t}" for t in dec.get("tickers", [])) or "ticker yok"
+            sentiment = dec.get("sentiment", "?")
+            sentiment_emoji = {"pozitif": "🟢", "negatif": "🔴", "nötr": "⚪"}.get(sentiment, "❓")
+            tg_text = (
+                f"📰 <b>Resmi Gazete Karar Yakalandı!</b>\n\n"
+                f"<b>{dec.get('title', '?')}</b>\n\n"
+                f"{dec.get('summary', '')}\n\n"
+                f"{sentiment_emoji} Etki: {dec.get('impact', '?')}\n"
+                f"🏷️ Ticker: {tickers_str}\n"
+                f"🔗 {dec.get('source_url', '')}"
+            )
+            try:
+                await send_admin_message(tg_text, silent=False)
+            except Exception:
+                pass
+
         # Tweet at
         from app.services.twitter_service import tweet_resmi_gazete_decision
         for decision in analysis:
@@ -340,8 +372,23 @@ async def _check_resmi_gazete_inner():
             if success:
                 await _mark_as_tweeted(today_str, decision.get("source_url", ""))
                 logger.info("Resmi Gazete tweet OK: %s", decision.get("title", "")[:60])
+                # Telegram — tweet başarılı
+                try:
+                    await send_admin_message(
+                        f"✅ <b>RG Tweet Atıldı</b>\n{decision.get('title', '')[:80]}",
+                        silent=True,
+                    )
+                except Exception:
+                    pass
             else:
                 logger.warning("Resmi Gazete tweet FAIL: %s", decision.get("title", "")[:60])
+                try:
+                    await send_admin_message(
+                        f"❌ <b>RG Tweet BAŞARISIZ</b>\n{decision.get('title', '')[:80]}",
+                        silent=False,
+                    )
+                except Exception:
+                    pass
 
         await _save_state(today_str)
 
