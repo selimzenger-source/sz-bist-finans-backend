@@ -3691,6 +3691,67 @@ async def trigger_closing_tweet(
         return {"status": "error", "message": str(e)}
 
 
+# -------------------------------------------------------
+# BOT TWEET PROXY — Lokal bot buraya POST yapar, Render tweet atar
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/bot-tweet-proxy")
+@limiter.limit("10/minute")
+async def bot_tweet_proxy(request: Request, payload: dict):
+    """Lokal reply-bot'tan gelen tweet'i Twitter API ile atar.
+
+    Payload:
+        admin_password: str
+        text: str  — tweet metni
+        reply_to_tweet_id: str | None  — reply ise hedef tweet ID
+        image_base64: str | None  — resim (base64 encoded, opsiyonel)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    text = payload.get("text", "").strip()
+    if not text:
+        return {"status": "error", "message": "Tweet metni boş"}
+
+    reply_to = payload.get("reply_to_tweet_id")
+    image_b64 = payload.get("image_base64")
+
+    try:
+        from app.services.twitter_service import _safe_tweet, _safe_reply_tweet, _safe_tweet_with_media
+        import tempfile, base64
+
+        # Resim varsa geçici dosyaya yaz
+        temp_image_path = None
+        if image_b64:
+            try:
+                img_data = base64.b64decode(image_b64)
+                with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                    f.write(img_data)
+                    temp_image_path = f.name
+            except Exception as img_err:
+                logger.warning("Bot proxy: resim decode hatası: %s", img_err)
+
+        # Reply mi yoksa yeni tweet mi?
+        if reply_to:
+            ok = _safe_reply_tweet(text, reply_to)
+            return {"status": "ok" if ok else "error", "message": "Reply gönderildi" if ok else "Reply gönderilemedi"}
+        elif temp_image_path:
+            ok = _safe_tweet_with_media(text, temp_image_path, source="bot_proxy", force_send=True)
+            # Geçici dosyayı temizle
+            try:
+                os.unlink(temp_image_path)
+            except Exception:
+                pass
+            return {"status": "ok" if ok else "error", "message": "Tweet (resimli) gönderildi" if ok else "Tweet gönderilemedi"}
+        else:
+            ok = _safe_tweet(text, source="bot_proxy", force_send=True)
+            return {"status": "ok" if ok else "error", "message": "Tweet gönderildi" if ok else "Tweet gönderilemedi"}
+
+    except Exception as e:
+        logger.error("Bot tweet proxy hatası: %s", e)
+        return {"status": "error", "message": str(e)[:200]}
+
+
 @app.post("/api/v1/admin/trigger-market-close-tweet")
 @limiter.limit("3/minute")
 async def trigger_market_close_tweet(
