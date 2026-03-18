@@ -425,6 +425,9 @@ async def _check_resmi_gazete_inner():
                 )
             except Exception:
                 pass
+            # Analiz edilmiş URL'leri işaretleyerek tekrar tekrar AI'a sorulmasını önle
+            for c in new_contents:
+                await _mark_as_tweeted(today_str, c["url"])
             await _save_state(today_str)
             return
 
