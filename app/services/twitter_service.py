@@ -3408,10 +3408,22 @@ def tweet_resmi_gazete_decision(decision: dict, gazette_date) -> bool:
         if source_url and len(text) + len(source_url) + 5 < 3950:
             text += f"\n\n🔗 {source_url}"
 
-        # 4000 karakter limiti
+        # 4000 karakter limiti — cümle sonundan kes, ortasından değil
         if len(text) > 3950:
-            overflow = len(text) - 3940
-            summary = summary[:len(summary) - overflow] + "..."
+            max_summary = len(summary) - (len(text) - 3940)
+            if max_summary > 50:
+                # Son tam cümleyi bul (. ! ? ile biten)
+                truncated = summary[:max_summary]
+                last_period = max(truncated.rfind(". "), truncated.rfind(".\n"), truncated.rfind(". "))
+                last_excl = truncated.rfind("! ")
+                last_q = truncated.rfind("? ")
+                cut_pos = max(last_period, last_excl, last_q)
+                if cut_pos > max_summary // 2:
+                    summary = truncated[:cut_pos + 1]
+                else:
+                    summary = truncated.rstrip() + "..."
+            else:
+                summary = summary[:max_summary].rstrip() + "..."
             text = f"{emoji} Resmi Gazete | {tarih_str}\n\n"
             text += f"📌 {title}\n\n"
             text += f"{summary}\n\n"

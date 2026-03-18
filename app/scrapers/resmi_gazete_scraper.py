@@ -517,70 +517,66 @@ Sana bugünkü Resmi Gazete'den çıkarılmış kararlar verilecek.
 
 GÖREV: Bu kararlardan SADECE borsa/BIST şirketlerine DOĞRUDAN ve KUVVETLİ etkisi olanları bul.
 
-KUVVETLİ ETKİ ÖRNEKLERİ:
-- Bir BIST şirketinin doğrudan adı geçen kararlar (kuruluş, birleşme, tasfiye, ceza)
-- BIST şirketinin ortağı/ana şirketine yönelik kararlar
-- Sektörel düzenlemeler (bankacılık sermaye yeterlilik oranı değişikliği → banka hisseleri)
-- Vergi/teşvik değişiklikleri (ÖTV, KDV, yatırım teşviki → ilgili sektör)
-- Önemli atama/görevden almalar (TCMB başkanı, BDDK başkanı, ekonomi bakanı)
-- İthalat/ihracat kısıtlamaları veya serbestleştirmeleri
-- Enerji, maden, telekom, ilaç sektörüne yönelik düzenlemeler
+═══ KRİTİK FİLTRE — BU KURALLARI KESİNLİKLE UYGULA ═══
 
-HOLDİNG / İŞTİRAK / GRUP BAĞLANTILARI — ÇOK ÖNEMLİ:
-Kararda geçen şirket doğrudan BIST'te olmasa bile, holding/grup bağlantısıyla BIST hissesini etkiler.
-Örnek bağlantılar:
-- Fuzul Holding, Fuzul Yapı, Fuzul GYO → FZLGY (Fuzul GYO)
+1. DOĞRUDAN ETKİ ŞARTI: Karar, bir BIST şirketinin gelirini, bilançosunu, karlılığını, faaliyetlerini veya hisse fiyatını DOĞRUDAN etkilemeli.
+2. DOLAYLI / UZAK BAĞLANTILAR YASAK: "Sektöre dolaylı etkisi olabilir", "benzer kurumlara yansıyabilir", "genel olarak sektörü etkiler" gibi ZORLAMA bağlantılar kurma. Eğer etki "olabilir", "yansıyabilir", "dolaylı" kelimelerini gerektiriyorsa → ATLA.
+3. TICKER ZORUNLU: Eğer kararla ilişkili NET bir BIST ticker'ı bulamıyorsan → ATLA. Ticker'sız karar ekleme.
+4. HALKA AÇIK OLMAYAN ŞİRKETLER: Kararda geçen şirket halka açık değilse VE doğrudan bir BIST holding/iştirak bağlantısı yoksa → ATLA. (Örn: "Türkiye Kalkınma Bankası" halka açık değil → TSKB'ye dolaylı diye bağlama)
+
+KUVVETLİ ETKİ ÖRNEKLERİ (TWEET AT):
+- BIST şirketinin ADI DOĞRUDAN geçen kararlar (kuruluş, birleşme, tasfiye, ceza, ruhsat)
+- BIST şirketinin ana ortağı/holding'ine yönelik kararlar (Koç Holding → KCHOL)
+- Sektörel düzenlemeler ki GELİR/MALİYET etkisi NET olsun (bankacılık sermaye oranı değişikliği → banka hisseleri, ÖTV artışı → otomotiv)
+- TCMB, BDDK, SPK başkanı atama/görevden alma
+- Vergi/ÖTV/KDV değişiklikleri (hangi sektörü etkilediği NET)
+- Enerji/maden/telekom RUHSAT veya TARİFE değişiklikleri
+
+ZAYIF ETKİ — KESİNLİKLE ATLA:
+- Üniversite yönetmelikleri
+- Mahkeme kararları (ticari davalar hariç)
+- Belediye ilanları, il özel idare kararları
+- Döviz kuru tabloları
+- Genel bütçe teknik değişiklikleri
+- Kişisel atamalar (şube müdürü, genel müdür yardımcısı vs.)
+- Spor federasyonu kararları, askeri atamalar
+- Damping/anti-damping soruşturmaları (BIST şirketi doğrudan taraf değilse)
+- İç yönetmelik/teftiş kurulu değişiklikleri (şirketin gelirini doğrudan etkilemez)
+- Halka açık olmayan şirketlerin iç işleyiş kararları
+- Bir sektöre "dolaylı etkisi OLABİLİR" düzeyindeki kararlar
+- Özelleştirme ilanları (BIST şirketi doğrudan konu değilse)
+
+HOLDİNG / İŞTİRAK BAĞLANTILARI (sadece DOĞRUDAN ilişki varsa kullan):
 - Koç Holding grubu → KCHOL, ARCLK, FROTO, TOASO, TUPRS, YKBNK, AYGAZ, OTKAR
 - Sabancı Holding grubu → SAHOL, AKBNK, KRDMD, CIMSA, ENKAI
 - Zorlu Holding → ZOREN, VESBE, VESTL
 - Anadolu Grubu → AGHOL, AEFES, ANACM, MIGRS
 - Doğuş Holding → DOHOL, GARAN, DOAS
 - Yıldız Holding → ULKER, BIZIM, GODMC
-- Cengiz Holding → ilgili enerji/inşaat şirketleri
-- Kalyon Holding → ilgili enerji/inşaat şirketleri
-- Limak Holding → ilgili enerji/havalimanı şirketleri
 - Eczacıbaşı → ECILC, ECZYT
 - Alarko → ALARK, ALCAR, ALCTL
 - Oyak → OYAKC, EREGL, ISDMR
-- Turkcell → TCELL, Superonline
-- Türk Telekom → TTKOM, TTRAK değil
-- THY → THYAO, TGS, PGSUS (rakip etki)
-- İş Bankası grubu → ISCTR, ISMEN, ISYAT, SISE, TSKB
-- Garanti BBVA → GARAN
-- QNB Finansbank → QNBFB (halka açık değil ama sektör etkisi)
-Kararda "Fuzul" geçiyorsa → FZLGY ticker'ını kullan.
-Kararda "Koç" geçiyorsa → KCHOL + ilgili grup şirketlerini kullan.
-Bu bağlantıları KENDİN KUR — sadece ticker listesine bakma, holding yapılarını biliyorsun.
-
-ZAYIF ETKİ (ATLA):
-- Üniversite yönetmelikleri
-- Mahkeme kararları (ticari davalar hariç)
-- Belediye ilanları
-- Döviz kuru tabloları
-- Genel bütçe teknik değişiklikleri
-- Kişisel atamalar (şube müdürü vs.)
-- Spor federasyonu kararları
-- Askeri atamalar
-- İl özel idare kararları
+- İş Bankası grubu → ISCTR, ISMEN, ISYAT, SISE
+- THY → THYAO
+NOT: Holding bağlantısı KUR ama sadece karar o holding/grubu DOĞRUDAN etkiliyorsa.
 
 FORMAT: JSON dizisi döndür. Eğer kuvvetli etki yoksa boş dizi [] döndür.
 [
   {
     "title": "Karar başlığı (kısa, 80 karakter max)",
-    "summary": "2-3 cümle açıklama. Ne kararı, kimi etkiler, nasıl etkiler. Holding/grup bağlantısını açıkla.",
-    "impact": "Borsa etkisi açıklaması (1 cümle)",
-    "tickers": ["FZLGY", "KCHOL"],
+    "summary": "2-3 cümle açıklama. Cümleleri TAMAMLA, yarıda bırakma. Ne kararı, kimi etkiler, nasıl etkiler.",
+    "impact": "Borsa etkisi açıklaması (1 tam cümle — yarıda kesme)",
+    "tickers": ["KCHOL", "ARCLK"],
     "sentiment": "pozitif" veya "negatif" veya "nötr",
     "source_url": "Kararın PDF/HTM URL'si"
   }
 ]
 
 ÖNEMLİ KURALLAR:
-- SADECE gerçekten kuvvetli etkisi olan kararları dahil et
-- Ticker eşleştirmesinde verilen BIST ticker listesini + holding bilgini kullan
-- Holding/iştirak bağlantısını MUTLAKA summary'de açıkla (örn: "Fuzul Holding'in iştiraki FZLGY etkilenebilir")
-- Eğer bir şirketin ticker'ını bulamıyorsan yine de dahil et (tickers boş bırak)
-- Sektörel etkide birden fazla ticker olabilir
+- KESİNLİKLE sadece kuvvetli ve doğrudan etkisi olan kararları dahil et
+- "Dolaylı etki olabilir" düzeyindeki kararları DAHİL ETME
+- tickers dizisi BOŞ olan karar ekleme — her kararın en az 1 ticker'ı olmalı
+- Cümleleri TAMAMLA, yarıda bırakma — summary ve impact alanları tam cümlelerle bitmeli
 - ASLA karar uydurmayın — sadece verilen içerikten çıkar
 - JSON dışında hiçbir şey yazma"""
 
@@ -687,7 +683,13 @@ Yukarıdaki kararları analiz et. Borsa etkisi olan kararları JSON formatında 
     if len(result_json) == 0:
         return None
 
-    return result_json
+    # Ticker'sız kararları filtrele — ticker yoksa tweet atılmamalı
+    filtered = [d for d in result_json if d.get("tickers") and len(d["tickers"]) > 0]
+    if not filtered:
+        logger.info("Resmi Gazete AI: Tum kararlar ticker'siz, atlanıyor")
+        return None
+
+    return filtered
 
 
 def _extract_json_from_response(text: str) -> list | None:
