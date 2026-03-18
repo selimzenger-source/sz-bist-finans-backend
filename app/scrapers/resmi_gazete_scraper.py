@@ -377,12 +377,38 @@ GÖREV: Bu kararlardan SADECE borsa/BIST şirketlerine DOĞRUDAN ve KUVVETLİ et
 
 KUVVETLİ ETKİ ÖRNEKLERİ:
 - Bir BIST şirketinin doğrudan adı geçen kararlar (kuruluş, birleşme, tasfiye, ceza)
-- BIST şirketinin ortağı/ana şirketine yönelik kararlar (Fuzul Holding → FUZUL hissesi)
+- BIST şirketinin ortağı/ana şirketine yönelik kararlar
 - Sektörel düzenlemeler (bankacılık sermaye yeterlilik oranı değişikliği → banka hisseleri)
 - Vergi/teşvik değişiklikleri (ÖTV, KDV, yatırım teşviki → ilgili sektör)
 - Önemli atama/görevden almalar (TCMB başkanı, BDDK başkanı, ekonomi bakanı)
 - İthalat/ihracat kısıtlamaları veya serbestleştirmeleri
 - Enerji, maden, telekom, ilaç sektörüne yönelik düzenlemeler
+
+HOLDİNG / İŞTİRAK / GRUP BAĞLANTILARI — ÇOK ÖNEMLİ:
+Kararda geçen şirket doğrudan BIST'te olmasa bile, holding/grup bağlantısıyla BIST hissesini etkiler.
+Örnek bağlantılar:
+- Fuzul Holding, Fuzul Yapı, Fuzul GYO → FZLGY (Fuzul GYO)
+- Koç Holding grubu → KCHOL, ARCLK, FROTO, TOASO, TUPRS, YKBNK, TATGD
+- Sabancı Holding grubu → SAHOL, AKBNK, KRDMD, CIMSA, ENKAI
+- Zorlu Holding → ZOREN, VESBE, VESTL
+- Anadolu Grubu → AGHOL, AEFES, ANACM, MIGRS
+- Doğuş Holding → DOHOL, GARAN, DOAS
+- Yıldız Holding → ULKER, BIZIM, GODMC
+- Cengiz Holding → ilgili enerji/inşaat şirketleri
+- Kalyon Holding → ilgili enerji/inşaat şirketleri
+- Limak Holding → ilgili enerji/havalimanı şirketleri
+- Eczacıbaşı → ECILC, ECZYT
+- Alarko → ALARK, ALCAR, ALCTL
+- Oyak → OYAKC, EREGL, ISDMR
+- Turkcell → TCELL, Superonline
+- Türk Telekom → TTKOM, TTRAK değil
+- THY → THYAO, TGS, PGSUS (rakip etki)
+- İş Bankası grubu → ISCTR, ISMEN, ISYAT, SISE, AYGAZ
+- Garanti BBVA → GARAN
+- QNB Finansbank → QNBFB (halka açık değil ama sektör etkisi)
+Kararda "Fuzul" geçiyorsa → FZLGY ticker'ını kullan.
+Kararda "Koç" geçiyorsa → KCHOL + ilgili grup şirketlerini kullan.
+Bu bağlantıları KENDİN KUR — sadece ticker listesine bakma, holding yapılarını biliyorsun.
 
 ZAYIF ETKİ (ATLA):
 - Üniversite yönetmelikleri
@@ -391,14 +417,17 @@ ZAYIF ETKİ (ATLA):
 - Döviz kuru tabloları
 - Genel bütçe teknik değişiklikleri
 - Kişisel atamalar (şube müdürü vs.)
+- Spor federasyonu kararları
+- Askeri atamalar
+- İl özel idare kararları
 
 FORMAT: JSON dizisi döndür. Eğer kuvvetli etki yoksa boş dizi [] döndür.
 [
   {
     "title": "Karar başlığı (kısa, 80 karakter max)",
-    "summary": "2-3 cümle açıklama. Ne kararı, kimi etkiler, nasıl etkiler.",
+    "summary": "2-3 cümle açıklama. Ne kararı, kimi etkiler, nasıl etkiler. Holding/grup bağlantısını açıkla.",
     "impact": "Borsa etkisi açıklaması (1 cümle)",
-    "tickers": ["FUZUL", "GARAN"],
+    "tickers": ["FZLGY", "KCHOL"],
     "sentiment": "pozitif" veya "negatif" veya "nötr",
     "source_url": "Kararın PDF/HTM URL'si"
   }
@@ -406,7 +435,8 @@ FORMAT: JSON dizisi döndür. Eğer kuvvetli etki yoksa boş dizi [] döndür.
 
 ÖNEMLİ KURALLAR:
 - SADECE gerçekten kuvvetli etkisi olan kararları dahil et
-- Ticker eşleştirmesinde verilen BIST ticker listesini kullan
+- Ticker eşleştirmesinde verilen BIST ticker listesini + holding bilgini kullan
+- Holding/iştirak bağlantısını MUTLAKA summary'de açıkla (örn: "Fuzul Holding'in iştiraki FZLGY etkilenebilir")
 - Eğer bir şirketin ticker'ını bulamıyorsan yine de dahil et (tickers boş bırak)
 - Sektörel etkide birden fazla ticker olabilir
 - ASLA karar uydurmayın — sadece verilen içerikten çıkar
