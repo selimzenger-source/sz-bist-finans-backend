@@ -264,11 +264,29 @@ async def _check_resmi_gazete_inner():
         items = await scraper.fetch_fihrist(today)
         if not items:
             logger.info("Resmi Gazete: Bugun (%s) henuz icerik yok", today_str)
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"📰 <b>RG Tarama</b> ({today_str})\nSonuç: Henüz içerik yok",
+                    silent=True,
+                )
+            except Exception:
+                pass
             return
 
         relevant = scraper.filter_relevant_items(items)
         if not relevant:
             logger.info("Resmi Gazete: Bugun (%s) borsa ile ilgili karar yok", today_str)
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"📰 <b>RG Tarama</b> ({today_str})\n"
+                    f"Toplam: {len(items)} karar\n"
+                    f"Sonuç: Borsa ile ilgili karar yok ✓",
+                    silent=True,
+                )
+            except Exception:
+                pass
             # Tarihi islenmis olarak kaydet
             await _save_state(today_str)
             return
