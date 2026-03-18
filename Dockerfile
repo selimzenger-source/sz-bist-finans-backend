@@ -5,6 +5,9 @@ FROM python:3.13-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    tesseract-ocr \
+    tesseract-ocr-tur \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Çalışma dizini

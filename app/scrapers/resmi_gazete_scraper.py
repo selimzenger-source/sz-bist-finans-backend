@@ -29,6 +29,7 @@ HEADERS = {
                   "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "tr-TR,tr;q=0.9",
+    "Referer": "https://www.resmigazete.gov.tr/",
 }
 
 # DB state key
@@ -176,7 +177,12 @@ class ResmiGazeteScraper:
         return relevant
 
     async def download_pdf_text(self, url: str) -> str | None:
-        """PDF indir ve text olarak dondur."""
+        """PDF indir ve text olarak dondur.
+
+        Yontem 1: pdfplumber (metin katmanli PDF'ler)
+        Yontem 2: PyMuPDF/fitz (daha iyi text extraction)
+        Yontem 3: pdf2image + pytesseract OCR (taranmis PDF'ler)
+        """
         try:
             resp = await self.client.get(url)
             if resp.status_code != 200:
@@ -184,22 +190,78 @@ class ResmiGazeteScraper:
                 return None
 
             content_type = resp.headers.get("content-type", "")
-            if "pdf" not in content_type and not url.endswith(".pdf"):
+            # Resmi Gazete bazen text/html dondurur (redirect/hata)
+            if "text/html" in content_type:
+                logger.warning("PDF yerine HTML geldi: %s", url)
                 return None
 
-            with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-                texts = []
-                for page in pdf.pages[:10]:  # Max 10 sayfa
-                    page_text = page.extract_text()
-                    if page_text:
-                        texts.append(page_text)
-                result = "\n\n".join(texts) if texts else None
-                if result:
-                    logger.info("PDF metin OK (%d karakter): %s → %s...",
-                                len(result), url.split("/")[-1], result[:200])
-                else:
-                    logger.warning("PDF metin BOŞ: %s — OCR gerekebilir", url)
-                return result
+            pdf_bytes = resp.content
+            if len(pdf_bytes) < 100:
+                logger.warning("PDF cok kucuk (%d byte): %s", len(pdf_bytes), url)
+                return None
+
+            result = None
+
+            # Yontem 1: pdfplumber
+            try:
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                    texts = []
+                    for page in pdf.pages[:10]:
+                        page_text = page.extract_text()
+                        if page_text:
+                            texts.append(page_text)
+                    if texts:
+                        result = "\n\n".join(texts)
+            except Exception as e:
+                logger.debug("pdfplumber basarisiz: %s", e)
+
+            # Yontem 2: PyMuPDF (fitz) — daha iyi text extraction
+            if not result or len(result.strip()) < 50:
+                try:
+                    import fitz  # PyMuPDF
+                    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                    texts = []
+                    for page_num in range(min(len(doc), 10)):
+                        page_text = doc[page_num].get_text()
+                        if page_text and page_text.strip():
+                            texts.append(page_text.strip())
+                    doc.close()
+                    if texts:
+                        result = "\n\n".join(texts)
+                        logger.info("PyMuPDF basarili: %d karakter", len(result))
+                except ImportError:
+                    logger.debug("PyMuPDF (fitz) yuklu degil, atlandi")
+                except Exception as e:
+                    logger.debug("PyMuPDF basarisiz: %s", e)
+
+            # Yontem 3: OCR (pdf2image + pytesseract)
+            if not result or len(result.strip()) < 50:
+                try:
+                    from pdf2image import convert_from_bytes
+                    import pytesseract
+
+                    images = convert_from_bytes(pdf_bytes, first_page=1, last_page=3, dpi=200)
+                    ocr_texts = []
+                    for img in images:
+                        ocr_text = pytesseract.image_to_string(img, lang="tur")
+                        if ocr_text and ocr_text.strip():
+                            ocr_texts.append(ocr_text.strip())
+                    if ocr_texts:
+                        result = "\n\n".join(ocr_texts)
+                        logger.info("OCR basarili: %d karakter", len(result))
+                except ImportError:
+                    logger.debug("pdf2image/pytesseract yuklu degil, OCR atlandi")
+                except Exception as e:
+                    logger.warning("OCR hatasi: %s", e)
+
+            if result and len(result.strip()) > 20:
+                logger.info("PDF metin OK (%d kar): %s → %s...",
+                            len(result), url.split("/")[-1], result[:200])
+            else:
+                logger.warning("PDF metin BOŞ/yetersiz: %s", url)
+                result = None
+
+            return result
 
         except Exception as e:
             logger.warning("PDF parse hatasi (%s): %s", url, e)
