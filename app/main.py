@@ -6720,6 +6720,35 @@ async def admin_trigger_resmi_gazete(request: Request, payload: dict):
         return resp
 
 
+@app.post("/api/v1/admin/test-rg-pdf")
+@limiter.limit("3/minute")
+async def admin_test_rg_pdf(request: Request, payload: dict):
+    """Admin: Belirli bir RG PDF'ini OCR ile oku — diagnostic."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    pdf_url = payload.get("url", "https://www.resmigazete.gov.tr/eskiler/2026/03/20260318-3.pdf")
+    try:
+        from app.scrapers.resmi_gazete_scraper import ResmiGazeteScraper
+        scraper = ResmiGazeteScraper()
+        try:
+            text = await scraper.download_pdf_text(pdf_url)
+        finally:
+            await scraper.close()
+
+        if text:
+            return {
+                "status": "ok",
+                "url": pdf_url,
+                "text_length": len(text),
+                "text_preview": text[:1000],
+            }
+        else:
+            return {"status": "empty", "url": pdf_url, "message": "PDF text extraction failed"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 # -------------------------------------------------------
 # Admin: KAP AI Re-Analyze (NULL summary kayitlari)
 # -------------------------------------------------------
