@@ -340,22 +340,9 @@ async def _check_resmi_gazete_inner():
             await _save_state(today_str)
             return
 
-        logger.info("Resmi Gazete: %d ilgili karar bulundu, AI analiz basliyor...", len(relevant))
+        logger.info("Resmi Gazete: %d ilgili karar bulundu, icerik indiriliyor...", len(relevant))
 
-        # Telegram — tarama durumu (ilk gunlerde kontrol icin)
-        try:
-            from app.services.admin_telegram import send_admin_message
-            await send_admin_message(
-                f"🔍 <b>RG Tarama</b> ({today_str})\n"
-                f"Toplam: {len(items)} karar\n"
-                f"Filtre sonrası: {len(relevant)} ilgili karar\n"
-                f"AI analiz başlıyor...",
-                silent=True,
-            )
-        except Exception:
-            pass
-
-        # İçerikleri indir (max 5 PDF/HTM)
+        # İçerikleri indir (max 8 PDF/HTM)
         contents = []
         for item in relevant[:8]:
             text = None
@@ -383,13 +370,27 @@ async def _check_resmi_gazete_inner():
                     "text": item["title"],
                 })
 
-        # Daha once tweetlenenleri filtrele
+        # Daha once tweetlenenleri filtrele (DUPLICATE CHECK — Telegram'dan ONCE)
         already_tweeted = await _get_tweeted_urls(today_str)
         new_contents = [c for c in contents if c["url"] not in already_tweeted]
 
         if not new_contents:
             logger.info("Resmi Gazete: Tum ilgili kararlar zaten tweetlendi")
             return
+
+        # Telegram — tarama durumu (sadece yeni icerik varsa gonder, spam onleme)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(
+                f"🔍 <b>RG Tarama</b> ({today_str})\n"
+                f"Toplam: {len(items)} karar\n"
+                f"Filtre sonrası: {len(relevant)} ilgili karar\n"
+                f"Yeni (tweetlenmemiş): {len(new_contents)} karar\n"
+                f"AI analiz başlıyor...",
+                silent=True,
+            )
+        except Exception:
+            pass
 
         # Günlük tweet limiti — spam önleme (max 3 RG tweeti/gün)
         RG_DAILY_TWEET_LIMIT = 3
