@@ -491,6 +491,20 @@ async def check_spk_bulletins_job():
             pass
 
 
+async def check_resmi_gazete_job():
+    """Resmi Gazete monitor — borsa etkili kararları yakalar."""
+    try:
+        from app.scrapers.resmi_gazete_scraper import check_resmi_gazete
+        await check_resmi_gazete()
+    except Exception as e:
+        logger.error(f"Resmi Gazete monitor hatasi: {e}")
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Resmi Gazete Monitor", str(e))
+        except Exception:
+            pass
+
+
 async def scrape_halkarz_gedik():
     """HalkArz.com + Gedik Yatirim scraper — halka arz detay bilgileri.
 
@@ -3529,6 +3543,17 @@ def _setup_scheduler_impl():
         CronTrigger(minute="*/5", hour="0-4"),
         id="spk_bulletin_monitor_night",
         name="SPK Bulten Monitor (Gece)",
+        replace_existing=True,
+    )
+
+    # 3c. Resmi Gazete Monitor — her 30 dakikada bir, 7/24, hafta ici
+    # RG gece 00:00 TR yayinlanir, mukerrer gun ici herhangi bir saat
+    # Gunluk max 3 tweet limiti + URL duplicate korumasi var, spam riski yok
+    scheduler.add_job(
+        check_resmi_gazete_job,
+        IntervalTrigger(minutes=30),
+        id="resmi_gazete_monitor",
+        name="Resmi Gazete Monitor (30dk aralik)",
         replace_existing=True,
     )
 

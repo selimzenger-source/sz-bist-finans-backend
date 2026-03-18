@@ -3342,3 +3342,91 @@ def tweet_spk_application(company_name: str) -> bool:
     except Exception as e:
         logger.error("tweet_spk_application hatasi (%s): %s", company_name, e)
         return False
+
+
+# ================================================================
+# 20. RESMİ GAZETE KARAR TWEETİ
+# ================================================================
+
+# Banner görseli — Gemini'den oluşturulan
+_RG_BANNER = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "static", "img", "resmi_gazete_banner.png",
+)
+
+
+def tweet_resmi_gazete_decision(decision: dict, gazette_date) -> bool:
+    """Resmi Gazete'den yakalanan borsa etkili kararı tweetler.
+
+    decision: {
+        "title": str,
+        "summary": str,
+        "impact": str,
+        "tickers": [str],
+        "sentiment": "pozitif" | "negatif" | "nötr",
+        "source_url": str,
+    }
+    """
+    try:
+        title = decision.get("title", "Resmi Gazete Kararı")
+        summary = decision.get("summary", "")
+        impact = decision.get("impact", "")
+        tickers = decision.get("tickers", [])
+        sentiment = decision.get("sentiment", "nötr")
+        source_url = decision.get("source_url", "")
+
+        # Emoji
+        if sentiment == "pozitif":
+            emoji = "🟢"
+        elif sentiment == "negatif":
+            emoji = "🔴"
+        else:
+            emoji = "📋"
+
+        # Tarih
+        _AYLAR_TR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                     "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        if hasattr(gazette_date, "month"):
+            tarih_str = f"{gazette_date.day} {_AYLAR_TR[gazette_date.month - 1]} {gazette_date.year}"
+        else:
+            tarih_str = str(gazette_date)
+
+        # Ticker hashtag'leri
+        ticker_tags = " ".join(f"#{t}" for t in tickers) if tickers else ""
+
+        # Tweet metni
+        text = f"{emoji} Resmi Gazete | {tarih_str}\n\n"
+        text += f"📌 {title}\n\n"
+        text += f"{summary}\n\n"
+        if impact:
+            text += f"📊 {impact}\n\n"
+        if ticker_tags:
+            text += f"{ticker_tags}\n"
+        text += "#ResmiGazete #Borsa #BIST100"
+
+        # PDF linki — tweet'e sığıyorsa ekle
+        if source_url and len(text) + len(source_url) + 5 < 3950:
+            text += f"\n\n🔗 {source_url}"
+
+        # 4000 karakter limiti
+        if len(text) > 3950:
+            overflow = len(text) - 3940
+            summary = summary[:len(summary) - overflow] + "..."
+            text = f"{emoji} Resmi Gazete | {tarih_str}\n\n"
+            text += f"📌 {title}\n\n"
+            text += f"{summary}\n\n"
+            if impact:
+                text += f"📊 {impact}\n\n"
+            if ticker_tags:
+                text += f"{ticker_tags}\n"
+            text += "#ResmiGazete #Borsa #BIST100"
+
+        # Banner ile tweet at
+        if os.path.exists(_RG_BANNER):
+            return _safe_tweet_with_media(text, _RG_BANNER, source="tweet_resmi_gazete")
+        else:
+            return _safe_tweet(text, source="tweet_resmi_gazete")
+
+    except Exception as e:
+        logger.error("tweet_resmi_gazete hatasi: %s", e)
+        return False
