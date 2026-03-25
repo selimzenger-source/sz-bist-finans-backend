@@ -423,13 +423,13 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         max_rows_in_any_page = max(len(p) for p in pages)
     image_paths = []
 
-    font_title = _load_font(36, bold=True)
-    font_row = _load_font(28)
-    font_change = _load_font(24)              # Değişim sütunu — biraz küçük, çakışma önlenir
-    font_symbol = _load_font(26, bold=True)
-    font_reason = _load_font(16, bold=False)   # 18→16: biraz küçük, daha çok sığsın
-    font_col = _load_font(24, bold=True)
-    font_seri_bold = _load_font(22, bold=True)
+    font_title = _load_font(34, bold=True)
+    font_row = _load_font(24)
+    font_change = _load_font(22)              # Değişim sütunu — biraz küçük, çakışma önlenir
+    font_symbol = _load_font(24, bold=True)   # Ticker — küçültüldü, fiyatla çakışmasın
+    font_reason = _load_font(15, bold=False)
+    font_col = _load_font(22, bold=True)
+    font_seri_bold = _load_font(20, bold=True)
     font_footer_brand = _load_font(16, bold=True)
     font_footer_disclaimer = _load_font(14, bold=False)
     # Ek hisseler icin %25 daha kucuk fontlar
@@ -482,8 +482,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         y += 15
 
         # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        # Sütunlar arası boşluk artırıldı — ticker/fiyat/değişim üst üste binmesin
-        col_x = [padding, 190, 340, 460, 560, 720]
+        # Sütunlar arası boşluk artırıldı — her kolon rahat, çakışma yok
+        col_x = [padding, 175, 320, 440, 550, 680]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
