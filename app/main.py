@@ -3124,6 +3124,8 @@ async def send_realtime_notification(
             )
         )
         all_users = list(all_users_result.scalars().all())
+        # FCM kullanıcılarını önce gönder (gerçek Android/iOS)
+        all_users.sort(key=lambda u: (0 if (u.fcm_token or "").strip() else 1))
         total_target = len(all_users)
 
         logging.info(
@@ -3207,7 +3209,18 @@ async def send_realtime_notification(
             data.ticker, data.notification_type, total_target, ipo.id,
         )
 
-        for sub in active_subs:
+        # FCM kullanıcılarını önce gönder (gerçek Android/iOS),
+        # Expo-only kullanıcıları sonra (test/dev)
+        # Bunun için user'ları önceden çekip sıralıyoruz
+        _sub_user_pairs = []
+        for _s in active_subs:
+            _u_result = await db.execute(select(User).where(User.id == _s.user_id))
+            _u = _u_result.scalar_one_or_none()
+            _sub_user_pairs.append((_s, _u))
+        # FCM token'ı olanlar önce (bool sıralaması: True=0, False=1 → FCM'li önce)
+        _sub_user_pairs.sort(key=lambda x: (0 if (x[1] and (x[1].fcm_token or "").strip()) else 1))
+
+        for sub, _prefetched_user in _sub_user_pairs:
             # Suresi dolmus mu?
             if sub.expires_at:
                 sub_expires = sub.expires_at
@@ -3236,10 +3249,7 @@ async def send_realtime_notification(
             notif_title = data.title
             notif_body = data.body
 
-            user_result = await db.execute(
-                select(User).where(User.id == sub.user_id)
-            )
-            user = user_result.scalar_one_or_none()
+            user = _prefetched_user
             if not user:
                 skip_reasons["no_user"] += 1
                 continue
