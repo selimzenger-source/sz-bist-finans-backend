@@ -2933,10 +2933,15 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
         _now = _dt.now()
         _tarih_str = f"{_now.day} {_AYLAR_TR[_now.month - 1]} {_now.year}"
 
-        # 3. İçerik zenginliği kontrolü — madde sayısına bak
-        _bullet_count = ai_text.count("\n•") + ai_text.count("\n-")
+        # 3. İçerik zenginliği kontrolü — section sayısına bak
+        # Emoji başlıkları say (🚀, 💰, ⚖️ gibi) + bullet point'ler
+        import re as _re
+        _section_emojis = ["🚀", "💰", "💵", "📊", "📈", "⚖️", "🏛", "🔔", "📋", "🏢", "🔍", "⚠️", "🎯"]
+        _section_count = sum(1 for em in _section_emojis if em in ai_text)
+        _bullet_count = ai_text.count("\n•") + ai_text.count("\n-") + ai_text.count("\n#")
+        _richness = max(_section_count, _bullet_count)
 
-        if _bullet_count >= 3:
+        if _richness >= 3:
             # ── ZENGİN BÜLTEN: Görsel üret + kısa tweet ──
             logger.info("SPK bulten analiz: zengin icerik (%d madde) — gorsel + kisa tweet", _bullet_count)
 
