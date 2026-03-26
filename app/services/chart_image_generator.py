@@ -2530,4 +2530,12 @@ def generate_spk_bulletin_image(ai_text: str, bulletin_no: str) -> Optional[str]
 
     except Exception as e:
         logger.error("generate_spk_bulletin_image hatasi: %s", e, exc_info=True)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            import asyncio
+            asyncio.get_event_loop().run_until_complete(
+                send_admin_message(f"⚠️ SPK Bülten Görsel Hatası:\n{str(e)[:300]}")
+            )
+        except Exception:
+            pass
         return None
