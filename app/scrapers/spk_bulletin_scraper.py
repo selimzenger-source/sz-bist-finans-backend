@@ -765,6 +765,18 @@ async def _check_spk_bulletins_inner():
 
                     total_approvals += 1
 
+                # IPO'lar olusturuldu — ARA COMMIT yap ki tweet/bildirim
+                # basarisiz olsa bile IPO kaybi yasanmasin
+                if new_ipos_this_bulletin:
+                    try:
+                        await db.commit()
+                        logger.info(
+                            "SPK bulten %s: %d IPO ara commit OK",
+                            bno_str_val, len(new_ipos_this_bulletin),
+                        )
+                    except Exception as _commit_err:
+                        logger.error("SPK ara commit hatasi: %s", _commit_err)
+
                 # Bultendeki tum onaylar islendi — tek tweet at
                 if new_ipos_this_bulletin:
                     try:
@@ -812,14 +824,13 @@ async def _check_spk_bulletins_inner():
                     except Exception as _ba_err:
                         logger.warning("SPK bulten analiz tweet hatasi: %s", _ba_err)
 
+                # Bulten numarasini HEMEN guncelle — tweet/analiz basarisiz olsa bile
+                # bir sonraki calistirmada ayni bulteni tekrar islemesin
                 if highest_no is None or is_newer(bno, highest_no):
                     highest_no = bno
-
-            # 5. Son numarayi DB'ye kaydet
-            if highest_no and (last_no is None or is_newer(highest_no, last_no)):
-                await _save_last_bulletin_no(db, highest_no)
-
-            await db.commit()
+                    await _save_last_bulletin_no(db, highest_no)
+                    await db.commit()
+                    logger.info("SPK bulten no guncellendi: %s", bulletin_no_str(*highest_no))
 
             logger.info(
                 "SPK Monitor tamamlandi: %d bulten, %d onay, son=%s",
