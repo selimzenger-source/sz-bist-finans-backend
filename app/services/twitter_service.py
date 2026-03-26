@@ -2569,6 +2569,7 @@ KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
 FORMAT KURALLARI:
 - Ticker listesindeki şirket adlarıyla BİREBİR eşleşme arama — ilk 2-3 kelime eşleşiyorsa o ticker'ı #TICKER formatında kullan
 - Ticker listesinde OLMAYAN şirketi YAZMA, ticker'ını UYDURMA
+- YENİ HALKA ARZ ONAYLARININ TICKER'I YOKTUR! "İlk Halka Arzlar" bölümündeki şirketler henüz borsada işlem görmüyor, ticker kodu UYDURMA. Şirket adını düz yaz, # hashtag KOYMA. Örneğin "Ağaoğlu Avrasya GYO" yaz, "#AVGYO" yazma — böyle bir ticker yok!
 - Her bölümü emoji + başlık ile ayır (örn: 💰 Sermaye Artırımları)
 - Bültende ilgili içerik YOKSA o bölümü hiç yazma (boş bölüm olmasın)
 - Cümleleri düzgün kur, madde işareti kullanırken bile anlaşılır ifadeler yaz
