@@ -736,10 +736,25 @@ async def _check_spk_bulletins_inner():
                     except Exception as _spk_err:
                         logger.warning("SPKApplication guncelleme hatasi: %s", _spk_err)
 
-                    if ipo and ipo.created_at and (
-                        datetime.utcnow() - ipo.created_at.replace(tzinfo=None)
-                    ).total_seconds() < 60:
-                        new_ipos_this_bulletin.append(ipo)
+                    if ipo:
+                        # Duplicate tweet kontrolu — bu bulten icin tweet atilmis mi?
+                        _tweet_key = f"spk_onayi_{bno_str_val}_{ipo.id}"
+                        _already_tweeted = False
+                        try:
+                            from app.models.pending_tweet import PendingTweet
+                            _tw_check = await db.execute(
+                                select(PendingTweet).where(
+                                    PendingTweet.source == _tweet_key
+                                ).limit(1)
+                            )
+                            if _tw_check.scalar_one_or_none():
+                                _already_tweeted = True
+                                logger.info("SPK tweet zaten atilmis: %s", _tweet_key)
+                        except Exception:
+                            pass
+
+                        if not _already_tweeted:
+                            new_ipos_this_bulletin.append(ipo)
                         await notif_service.notify_new_ipo(ipo)
                         try:
                             from app.services.admin_telegram import notify_spk_approval
@@ -785,6 +800,21 @@ async def _check_spk_bulletins_inner():
                         tw_ok = tweet_new_ipos_batch(new_ipos_this_bulletin, bno_str_val)
                         tickers = ", ".join(i.ticker or i.company_name for i in new_ipos_this_bulletin)
                         await notify_tweet_sent("spk_onayi_toplu", tickers, tw_ok, f"Bülten: {bno_str_val}")
+
+                        # Tweet atildiysa flag kaydet — retry'da duplicate tweet onlenir
+                        if tw_ok:
+                            try:
+                                from app.models.pending_tweet import PendingTweet
+                                for _tw_ipo in new_ipos_this_bulletin:
+                                    _tw_flag = PendingTweet(
+                                        source=f"spk_onayi_{bno_str_val}_{_tw_ipo.id}",
+                                        status="sent",
+                                        text=f"SPK {bno_str_val} tweet flag",
+                                    )
+                                    db.add(_tw_flag)
+                                await db.commit()
+                            except Exception:
+                                pass
                         logger.info(
                             "SPK toplu tweet atildi: %d IPO, bulten %s",
                             len(new_ipos_this_bulletin), bno_str_val,
