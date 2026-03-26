@@ -2550,7 +2550,8 @@ DAHİL ET (önem sırasına göre):
 
 ÖNEMLİ:
 - Sana verilen BIST ticker listesinde OLMAYAN şirketler borsada işlem görmüyor. Bu şirketleri yazıya DAHİL ETME (örn: kooperatif, tarım kredi, borsada olmayan AŞ'ler).
-- "Halka Açık Ortaklıkların Pay İhraçları" bölümünü AYRICA YAZMA — halka arz onayları bölümünde zaten yer alıyor, tekrar etme.
+- "Halka Açık Ortaklıkların Pay İhraçları" bölümü (2. bölüm) İLK HALKA ARZ DEĞİLDİR! Bu bölümdeki şirketler zaten borsada işlem görüyor ve bedelli sermaye artırımı yapıyor. "Satış Türü: Halka Arz" yazsa bile bu YENİ bir halka arz değil, mevcut halka açık şirketin ek pay satışıdır. Bu şirketleri "Halka Arz Onayları" başlığı altına KESİNLİKLE KOYMA — "Sermaye Artırımları" başlığı altına yaz.
+- SADECE "1. İlk Halka Arzlar" tablosundaki şirketler gerçek halka arz onayıdır.
 - Her şirket sadece 1 kez geçsin, aynı bilgiyi farklı başlıklar altında tekrarlama.
 
 KESİNLİKLE HARİÇ TUT (bunları ASLA YAZMA):
