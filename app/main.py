@@ -2359,6 +2359,52 @@ async def admin_reset_spk_bulletin_no(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/trigger-bulletin-analysis-tweet")
+@limiter.limit("3/minute")
+async def admin_trigger_bulletin_analysis_tweet(request: Request, payload: dict):
+    """Admin: Belirtilen bültenin AI analiz tweetini manuel tetikle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    bulletin_no = payload.get("bulletin_no")  # orn: "2026/18"
+    if not bulletin_no:
+        raise HTTPException(status_code=400, detail="bulletin_no gerekli (orn: 2026/18)")
+
+    try:
+        from app.scrapers.spk_bulletin_scraper import SPKBulletinScraper, parse_bulletin_no
+        from app.scrapers.spk_bulletin_scraper import extract_text_from_pdf, extract_tables_from_pdf
+        from app.scrapers.spk_bulletin_scraper import format_tables_for_analysis
+
+        bno = parse_bulletin_no(bulletin_no)
+        if not bno:
+            raise HTTPException(status_code=400, detail="Gecersiz bulten no formati")
+
+        scraper = SPKBulletinScraper()
+        try:
+            bulletins = await scraper.fetch_bulletin_list(year=bno[0])
+            target = next((b for b in bulletins if b["bulletin_no"] == bno), None)
+            if not target:
+                return {"status": "error", "message": f"Bulten {bulletin_no} sayfada bulunamadi"}
+
+            pdf_bytes = await scraper.download_pdf(target["pdf_url"])
+            if not pdf_bytes:
+                return {"status": "error", "message": "PDF indirilemedi"}
+
+            full_text = extract_text_from_pdf(pdf_bytes)
+            tables = extract_tables_from_pdf(pdf_bytes)
+            bulletin_text = format_tables_for_analysis(tables, full_text)
+
+            from app.services.twitter_service import tweet_spk_bulletin_analysis
+            ok = tweet_spk_bulletin_analysis(bulletin_text, bulletin_no)
+            return {"status": "ok" if ok else "error", "tweet_sent": ok}
+        finally:
+            await scraper.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 # -------------------------------------------------------
 # CUZDAN (WALLET) ENDPOINTS
 # -------------------------------------------------------
