@@ -1319,6 +1319,46 @@ def tweet_trading_date_detected(ipo) -> bool:
 
 
 # ================================================================
+# 6c. HALKA ARZ KODU TESPIT (scraper'dan — ticker ilk set)
+# ================================================================
+def tweet_ticker_assigned(ipo) -> bool:
+    """Halka arz kodu (ticker) belli oldu tweeti — HalkArz scraper'dan hemen."""
+    try:
+        ticker = ipo.ticker or ""
+
+        # Pazar bilgisi
+        pazar_map = {
+            "yildiz_pazar": "Yıldız Pazar",
+            "ana_pazar": "Ana Pazar",
+            "alt_pazar": "Alt Pazar",
+        }
+        pazar = pazar_map.get(ipo.market_segment or "", "")
+        pazar_line = f"\n\U0001F4CD {pazar}'da işlem görecek" if pazar else ""
+
+        # Tarih varsa ekle
+        _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+        tarih_line = ""
+        if ipo.trading_start:
+            d = ipo.trading_start
+            tarih_line = f"\n\U0001F4C5 İlk işlem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
+
+        text = (
+            f"\U0001F4B9 Halka Arz Kodu Belli Oldu!\n\n"
+            f"{ipo.company_name} (#{ticker})"
+            f"{tarih_line}"
+            f"{pazar_line}\n\n"
+            f"Borsa kodu #{ticker} olarak belirlendi \U0001F514\n"
+            f"#HalkaArz #BIST100 #borsa #{ticker}"
+        )
+
+        return _safe_tweet_with_media(text, BANNER_TRADING_DATE_TESPIT, source="tweet_ticker_assigned")
+    except Exception as e:
+        logger.error(f"tweet_ticker_assigned hatasi: {e}")
+        return False
+
+
+# ================================================================
 # 7. ACILIS FIYATI (09:56 — sadece ilk islem gunu)
 # ================================================================
 def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:

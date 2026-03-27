@@ -767,6 +767,37 @@ class NotificationService:
             category="ipo",
         )
 
+    async def notify_ticker_assigned(self, ipo) -> int:
+        """Halka arz kodu (ticker) belli oldu bildirimi — notify_first_trading_day = True olanlara."""
+        ticker = ipo.ticker or ""
+        pazar_map = {
+            "yildiz_pazar": "Yıldız Pazar",
+            "ana_pazar": "Ana Pazar",
+            "alt_pazar": "Alt Pazar",
+        }
+        pazar = pazar_map.get(ipo.market_segment or "", "")
+        pazar_text = f" ({pazar})" if pazar else ""
+
+        title = "💹 Halka Arz Kodu Belli Oldu"
+        body = f"{ipo.company_name}{pazar_text} borsa kodu: {ticker}"
+        if ipo.trading_start:
+            body += f" | İlk işlem: {ipo.trading_start.strftime('%d.%m.%Y')}"
+
+        data = {
+            "type": "ticker_assigned",
+            "ipo_id": str(ipo.id),
+            "ticker": ticker,
+            "screen": "halka-arz-detay",
+        }
+
+        return await self._send_filtered(
+            "notify_first_trading_day",   # Ayni filtre: halka arz haberleri isteyenler
+            title, body, data,
+            f"Ticker tespit: {ipo.company_name} → {ticker}",
+            channel_id="ipo_alerts_v2",
+            category="ipo",
+        )
+
     # NOTE: notify_ceiling_broken() kaldirildi — kullanilmiyordu.
     # Tavan/taban/dusus bildirimleri artik /api/v1/realtime-notification
     # endpoint'i uzerinden StockNotificationSubscription bazli gonderiliyor.

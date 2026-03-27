@@ -6815,6 +6815,59 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
 
 
 # -------------------------------------------------------
+# Admin: Ticker / Trading Date Bildirim + Tweet Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-ipo-event")
+@limiter.limit("5/minute")
+async def admin_trigger_ipo_event(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Belirli bir IPO icin ticker_assigned veya trading_date_detected tweet + bildirim gonder."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    event_type = payload.get("event_type")  # "ticker_assigned" veya "trading_date_detected"
+
+    if not ipo_id or event_type not in ("ticker_assigned", "trading_date_detected"):
+        raise HTTPException(status_code=400, detail="ipo_id ve event_type (ticker_assigned|trading_date_detected) gerekli")
+
+    from app.models.ipo import IPO
+    result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    results = {"tweet": False, "notification": 0}
+
+    if event_type == "ticker_assigned":
+        try:
+            from app.services.twitter_service import tweet_ticker_assigned
+            results["tweet"] = tweet_ticker_assigned(ipo)
+        except Exception as e:
+            results["tweet_error"] = str(e)
+        try:
+            from app.services.notification import NotificationService
+            notif_svc = NotificationService(db)
+            results["notification"] = await notif_svc.notify_ticker_assigned(ipo)
+        except Exception as e:
+            results["notif_error"] = str(e)
+    elif event_type == "trading_date_detected":
+        try:
+            from app.services.twitter_service import tweet_trading_date_detected
+            results["tweet"] = tweet_trading_date_detected(ipo)
+        except Exception as e:
+            results["tweet_error"] = str(e)
+        try:
+            from app.services.notification import NotificationService
+            notif_svc = NotificationService(db)
+            results["notification"] = await notif_svc.notify_trading_date_detected(ipo)
+        except Exception as e:
+            results["notif_error"] = str(e)
+
+    return {"status": "ok", "ipo": ipo.company_name, "ticker": ipo.ticker, "event": event_type, "results": results}
+
+
+# -------------------------------------------------------
 # Admin: Resmi Gazete Manuel Trigger
 # -------------------------------------------------------
 

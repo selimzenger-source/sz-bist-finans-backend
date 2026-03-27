@@ -423,6 +423,7 @@ async def update_ipo(
     try:
         # Temel bilgiler
         ipo.company_name = form.get("company_name", ipo.company_name).strip()
+        _old_ticker = ipo.ticker  # Bildirim tetiklemesi icin eski degeri sakla
         ipo.ticker = form.get("ticker", "").strip().upper() or None
         ipo.logo_url = form.get("logo_url", "").strip() or None
         ipo.status = form.get("status", ipo.status)
@@ -558,6 +559,30 @@ async def update_ipo(
                 logger.info(f"Admin: {ipo.ticker or ipo.company_name} — trading date bildirim {sent} kisi")
             except Exception as notif_err:
                 logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — trading date bildirim hatasi: {notif_err}")
+
+        # ─── ticker yeni ayarlandıysa → bildirim + tweet gönder ───
+        _ticker_newly_set = (_old_ticker is None and ipo.ticker is not None)
+        if _ticker_newly_set:
+            logger.info(f"Admin: ticker yeni ayarlandı — {ipo.company_name} → {ipo.ticker} — bildirim + tweet tetikleniyor")
+
+            # Tweet gönder
+            try:
+                from app.services.twitter_service import tweet_ticker_assigned
+                from app.services.admin_telegram import notify_tweet_sent
+                tw_ok = tweet_ticker_assigned(ipo)
+                await notify_tweet_sent("ticker_tespit", ipo.ticker or ipo.company_name, tw_ok)
+                logger.info(f"Admin: {ipo.ticker} — ticker tweet {'basarili' if tw_ok else 'basarisiz'}")
+            except Exception as tw_err:
+                logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — ticker tweet hatasi: {tw_err}")
+
+            # Push bildirim gönder
+            try:
+                from app.services.notification import NotificationService
+                notif_svc = NotificationService(db)
+                sent = await notif_svc.notify_ticker_assigned(ipo)
+                logger.info(f"Admin: {ipo.ticker} — ticker bildirim {sent} kisi")
+            except Exception as notif_err:
+                logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — ticker bildirim hatasi: {notif_err}")
 
         return RedirectResponse(url=f"/admin/ipo/{ipo.id}/edit?success=updated", status_code=303)
 
