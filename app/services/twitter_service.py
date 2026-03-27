@@ -1322,9 +1322,12 @@ def tweet_trading_date_detected(ipo) -> bool:
 # 6c. HALKA ARZ KODU TESPIT (scraper'dan — ticker ilk set)
 # ================================================================
 def tweet_ticker_assigned(ipo) -> bool:
-    """Halka arz kodu (ticker) belli oldu tweeti — HalkArz scraper'dan hemen."""
+    """Halka arz kodu + talep tarihi belli oldu tweeti — HalkArz scraper'dan hemen."""
     try:
         ticker = ipo.ticker or ""
+
+        _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
 
         # Pazar bilgisi
         pazar_map = {
@@ -1335,18 +1338,37 @@ def tweet_ticker_assigned(ipo) -> bool:
         pazar = pazar_map.get(ipo.market_segment or "", "")
         pazar_line = f"\n\U0001F4CD {pazar}'da işlem görecek" if pazar else ""
 
-        # Tarih varsa ekle
-        _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
-                  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
-        tarih_line = ""
+        # Talep toplama tarihleri
+        talep_line = ""
+        if ipo.subscription_start and ipo.subscription_end:
+            s = ipo.subscription_start
+            e = ipo.subscription_end
+            if s.month == e.month:
+                talep_line = f"\n\U0001F4C5 {s.day}-{e.day} {_AYLAR[s.month - 1]} tarihleri arasında talep toplanacak"
+            else:
+                talep_line = f"\n\U0001F4C5 {s.day} {_AYLAR[s.month - 1]} - {e.day} {_AYLAR[e.month - 1]} tarihleri arasında talep toplanacak"
+        elif ipo.subscription_start:
+            s = ipo.subscription_start
+            talep_line = f"\n\U0001F4C5 Talep başlangıcı: {s.day} {_AYLAR[s.month - 1]}"
+
+        # İşlem tarihi varsa ekle
+        islem_line = ""
         if ipo.trading_start:
             d = ipo.trading_start
-            tarih_line = f"\n\U0001F4C5 İlk işlem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
+            islem_line = f"\n\U0001F4CA İlk işlem: {d.day} {_AYLAR[d.month - 1]} {d.year}"
+
+        # Baslik: ikisi de varsa birlesik, sadece ticker varsa tek
+        has_dates = bool(ipo.subscription_start)
+        if has_dates:
+            baslik = "\U0001F4B9 Halka Arz Kodu ve Talep Tarihi Belli Oldu!"
+        else:
+            baslik = "\U0001F4B9 Halka Arz Kodu Belli Oldu!"
 
         text = (
-            f"\U0001F4B9 Halka Arz Kodu Belli Oldu!\n\n"
+            f"{baslik}\n\n"
             f"{ipo.company_name} (#{ticker})"
-            f"{tarih_line}"
+            f"{talep_line}"
+            f"{islem_line}"
             f"{pazar_line}\n\n"
             f"Borsa kodu #{ticker} olarak belirlendi \U0001F514\n"
             f"#HalkaArz #BIST100 #borsa #{ticker}"

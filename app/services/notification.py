@@ -768,18 +768,26 @@ class NotificationService:
         )
 
     async def notify_ticker_assigned(self, ipo) -> int:
-        """Halka arz kodu (ticker) belli oldu bildirimi — notify_first_trading_day = True olanlara."""
+        """Halka arz kodu + talep tarihi belli oldu bildirimi — notify_first_trading_day = True olanlara."""
         ticker = ipo.ticker or ""
-        pazar_map = {
-            "yildiz_pazar": "Yıldız Pazar",
-            "ana_pazar": "Ana Pazar",
-            "alt_pazar": "Alt Pazar",
-        }
-        pazar = pazar_map.get(ipo.market_segment or "", "")
-        pazar_text = f" ({pazar})" if pazar else ""
 
-        title = "💹 Halka Arz Kodu Belli Oldu"
-        body = f"{ipo.company_name}{pazar_text} borsa kodu: {ticker}"
+        _AYLAR = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                  "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+
+        has_dates = bool(ipo.subscription_start)
+        if has_dates:
+            title = "💹 Halka Arz Kodu ve Talep Tarihi Belli Oldu"
+        else:
+            title = "💹 Halka Arz Kodu Belli Oldu"
+
+        body = f"{ipo.company_name} borsa kodu: {ticker}"
+        if ipo.subscription_start and ipo.subscription_end:
+            s = ipo.subscription_start
+            e = ipo.subscription_end
+            if s.month == e.month:
+                body += f" | {s.day}-{e.day} {_AYLAR[s.month - 1]} talep toplanacak"
+            else:
+                body += f" | {s.day} {_AYLAR[s.month - 1]} - {e.day} {_AYLAR[e.month - 1]} talep toplanacak"
         if ipo.trading_start:
             body += f" | İlk işlem: {ipo.trading_start.strftime('%d.%m.%Y')}"
 
