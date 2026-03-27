@@ -4665,6 +4665,9 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
         "bist_finans_yildiz_annual": "yildiz_pazar",
         "bist_finans_ana_yildiz_monthly": "ana_yildiz",
         "bist_finans_ana_yildiz_annual": "ana_yildiz",
+        # iOS App Store product ID'leri (underscore format)
+        "ana_yildiz_aylik": "ana_yildiz",
+        "ana_yildiz_yillik": "ana_yildiz",
         # Eski paketler (geriye donuk uyumluluk)
         "bist_finans_bist100_monthly": "yildiz_pazar",
         "bist_finans_bist100_annual": "yildiz_pazar",
@@ -4678,6 +4681,16 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
         "bist_finans_notif_taban": "taban_acilma",
         "bist_finans_notif_acilis": "gunluk_acilis_kapanis",
         "bist_finans_notif_yuzde_dusus": "yuzde_dusus",
+        # iOS App Store tek seferlik bildirim ürünleri (aynı ID, platform farkı yok)
+        "notif_tavan_15": "tavan_bozulma",
+        "notif_taban_10": "taban_acilma",
+        "notif_acilis_5": "gunluk_acilis_kapanis",
+        "notif_yuzde_dusus_20": "yuzde_dusus",
+        "notif_edo_10": "edo",
+        "notif_combo_44": "combo",
+        # iOS App Store abonelik ürünleri (underscore format)
+        "notif_bundle_3aylik": "quarterly",
+        "notif_bundle_yillik": "all",
         # Eski urunler (geriye donuk uyumluluk)
         "bist_finans_notif_yuzde4": "yuzde_dusus",
         "bist_finans_notif_yuzde7": "yuzde_dusus",
@@ -4900,6 +4913,8 @@ async def sync_subscription(
     KNOWN_NEWS_PRODUCTS = {
         "bist_finans_yildiz_monthly", "bist_finans_yildiz_annual",
         "bist_finans_ana_yildiz_monthly", "bist_finans_ana_yildiz_annual",
+        # iOS App Store product ID'leri (underscore format)
+        "ana_yildiz_aylik", "ana_yildiz_yillik",
         # Eski paketler (geriye donuk uyumluluk)
         "bist_finans_bist100_monthly", "bist_finans_bist100_annual",
         "bist_finans_bist30_monthly", "bist_finans_bist50_monthly",
