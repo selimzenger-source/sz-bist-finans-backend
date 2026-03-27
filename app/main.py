@@ -6828,8 +6828,8 @@ async def admin_trigger_ipo_event(request: Request, payload: dict, db: AsyncSess
     ipo_id = payload.get("ipo_id")
     event_type = payload.get("event_type")  # "ticker_assigned" veya "trading_date_detected"
 
-    if not ipo_id or event_type not in ("ticker_assigned", "trading_date_detected"):
-        raise HTTPException(status_code=400, detail="ipo_id ve event_type (ticker_assigned|trading_date_detected) gerekli")
+    if not ipo_id or event_type not in ("ticker_assigned", "trading_date_detected", "update_field"):
+        raise HTTPException(status_code=400, detail="ipo_id ve event_type (ticker_assigned|trading_date_detected|update_field) gerekli")
 
     from app.models.ipo import IPO
     result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
@@ -6863,6 +6863,17 @@ async def admin_trigger_ipo_event(request: Request, payload: dict, db: AsyncSess
             results["notification"] = await notif_svc.notify_trading_date_detected(ipo)
         except Exception as e:
             results["notif_error"] = str(e)
+
+    if event_type == "update_field":
+        field = payload.get("field")
+        value = payload.get("value")
+        _ALLOWED = {"prospectus_url", "ticker", "trading_start", "subscription_start", "subscription_end", "ipo_price", "market_segment"}
+        if field not in _ALLOWED:
+            raise HTTPException(status_code=400, detail=f"field {_ALLOWED} icinden olmali")
+        setattr(ipo, field, value)
+        ipo.updated_at = __import__("datetime").datetime.utcnow()
+        await db.commit()
+        results["updated"] = {field: value}
 
     return {"status": "ok", "ipo": ipo.company_name, "ticker": ipo.ticker, "event": event_type, "results": results}
 
