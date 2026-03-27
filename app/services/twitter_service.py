@@ -222,6 +222,7 @@ BANNER_SPK_ONAYI = os.path.join(_IMG_DIR, "spk_onayi_banner.png")
 BANNER_AY_SONU_RAPOR = os.path.join(_IMG_DIR, "ay_sonu_rapor_banner.png")
 BANNER_OGLE_ARASI = os.path.join(_IMG_DIR, "ogle_arasi_banner.png")
 BANNER_TRADING_DATE_TESPIT = os.path.join(_IMG_DIR, "trading_date_tespit_banner.png")
+BANNER_TICKER_TALEP = os.path.join(_IMG_DIR, "ticker_talep_banner.png")
 
 # Credentials cache — lazy init
 _credentials = None
@@ -1374,7 +1375,7 @@ def tweet_ticker_assigned(ipo) -> bool:
             f"#HalkaArz #BIST100 #borsa #{ticker}"
         )
 
-        return _safe_tweet_with_media(text, BANNER_TRADING_DATE_TESPIT, source="tweet_ticker_assigned")
+        return _safe_tweet_with_media(text, BANNER_TICKER_TALEP, source="tweet_ticker_assigned")
     except Exception as e:
         logger.error(f"tweet_ticker_assigned hatasi: {e}")
         return False
