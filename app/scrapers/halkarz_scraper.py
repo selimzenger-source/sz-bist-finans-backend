@@ -420,14 +420,31 @@ class HalkArzDetailParser:
 
     # --- PDF Linkleri ---
     def _parse_pdf_links(self):
-        """Izahname ve diger PDF linklerini cikar."""
+        """Izahname PDF linkini cikar — 'izahname' iceren linke oncelik ver."""
+        izahname_url = None
+        fallback_url = None
+
         for a in self.soup.find_all("a", href=True):
             href = a.get("href", "")
             text = a.get_text(strip=True).lower()
-            if href.endswith(".pdf") or "izahname" in text or "prospekt" in text:
-                full_url = href if href.startswith("http") else HALKARZ_BASE + href
-                self.data["prospectus_url"] = full_url
+            href_lower = href.lower()
+
+            if not (href.endswith(".pdf") or "izahname" in text or "prospekt" in text):
+                continue
+
+            full_url = href if href.startswith("http") else HALKARZ_BASE + href
+
+            # "izahname" iceren linke oncelik ver
+            if "izahname" in text or "izahname" in href_lower or "izah" in href_lower:
+                izahname_url = full_url
                 break
+            elif "prospekt" in text or "prospekt" in href_lower:
+                izahname_url = full_url
+                break
+            elif not fallback_url:
+                fallback_url = full_url
+
+        self.data["prospectus_url"] = izahname_url or fallback_url
 
     # --- Basvuru Yerleri (Sadece REJECTED broker listesi) ---
     def _parse_brokers(self):

@@ -1609,6 +1609,17 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
         pdf_path = await download_pdf(pdf_url)
         if not pdf_path:
             logger.error("PDF indirilemedi: %s", pdf_url)
+            # Telegram'a bildir
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"⚠️ İzahname PDF Bulunamadı!\n"
+                    f"Şirket: {company_name}\n"
+                    f"URL: {pdf_url}\n"
+                    f"PDF indirilemedi veya 404 döndü. Manuel kontrol gerekli."
+                )
+            except Exception:
+                pass
             return False
 
         # Metin çıkar (sync — run in executor) → (text, pages_count) tuple
@@ -1619,6 +1630,16 @@ async def analyze_prospectus(ipo_id: int, pdf_url: str, delay_seconds: int = 0) 
         if not pdf_text or len(pdf_text) < 200:
             logger.error("PDF metni çok kısa veya boş (%d karakter): %s",
                          len(pdf_text) if pdf_text else 0, pdf_url)
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"⚠️ İzahname PDF Okunamadı!\n"
+                    f"Şirket: {company_name}\n"
+                    f"URL: {pdf_url}\n"
+                    f"PDF metni çok kısa ({len(pdf_text) if pdf_text else 0} karakter). Dosya bozuk olabilir."
+                )
+            except Exception:
+                pass
             return False
         logger.info("PDF metin çıkarıldı: %d karakter, %d sayfa — ipo_id=%d",
                     len(pdf_text), pages_analyzed, ipo_id)
