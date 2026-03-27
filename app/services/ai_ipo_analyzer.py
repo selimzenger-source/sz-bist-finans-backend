@@ -1065,6 +1065,24 @@ async def generate_and_save_ipo_report(ipo_id: int, force: bool = False) -> bool
                 ipo.ai_report_generated_at = None
                 await session.flush()
 
+            # ── İzahname analizi yoksa rapor üretme (hayali bilgi basmasın) ──
+            if not ipo.prospectus_analysis:
+                logger.warning(
+                    "IPO izahname analizi yok — AI rapor üretilMİYOR (hayali veri riski): %s (id=%d)",
+                    ipo.ticker or ipo.company_name, ipo_id,
+                )
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        f"⚠️ AI Rapor Üretilemedi\n"
+                        f"Şirket: {ipo.ticker or ipo.company_name}\n"
+                        f"Sebep: İzahname analizi (prospectus_analysis) henüz yok.\n"
+                        f"Önce doğru izahname PDF URL'ini girin, analiz tamamlansın, sonra AI rapor tetikleyin."
+                    )
+                except Exception:
+                    pass
+                return False
+
             # ── Ek kontekstleri topla ──
             historical_ctx = await _build_historical_allocation_context(session, ipo)
             scenario_ctx = _build_lot_scenario_table(ipo)
