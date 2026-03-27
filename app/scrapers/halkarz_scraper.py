@@ -1143,42 +1143,41 @@ async def scrape_halkarz():
                         list(update_fields.keys()),
                     )
 
-                # ticker veya trading_start yeni tespit: TEK tweet + TEK bildirim
-                # ticker varsa ticker tweeti gider (icinde tarihler de var), yoksa sadece trading_start
-                if ticker_newly_detected or trading_start_newly_detected:
+                # trading_start yeni tespit: tweet + bildirim
+                if trading_start_newly_detected:
                     await db.flush()
-                    if ticker_newly_detected:
-                        # Ticker tweeti — icinde talep tarihi + islem tarihi de var
-                        try:
-                            from app.services.twitter_service import tweet_ticker_assigned
-                            from app.services.admin_telegram import notify_tweet_sent
-                            tw_ok = tweet_ticker_assigned(ipo)
-                            await notify_tweet_sent("ticker_tespit", ipo.ticker or ipo.company_name, tw_ok)
-                        except Exception as tw_err:
-                            logger.warning("HalkArz: %s — ticker tweet hatasi: %s", ipo.ticker or ipo.company_name, tw_err)
-                        try:
-                            from app.services.notification import NotificationService
-                            notif_svc = NotificationService(db)
-                            sent = await notif_svc.notify_ticker_assigned(ipo)
-                            logger.info("HalkArz: %s — ticker bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
-                        except Exception as notif_err:
-                            logger.warning("HalkArz: %s — ticker bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
-                    else:
-                        # Sadece trading_start (ticker zaten vardi veya yok)
-                        try:
-                            from app.services.twitter_service import tweet_trading_date_detected
-                            from app.services.admin_telegram import notify_tweet_sent
-                            tw_ok = tweet_trading_date_detected(ipo)
-                            await notify_tweet_sent("trading_date_tespit", ipo.ticker or ipo.company_name, tw_ok)
-                        except Exception as tw_err:
-                            logger.warning("HalkArz: %s — trading date tweet hatasi: %s", ipo.ticker or ipo.company_name, tw_err)
-                        try:
-                            from app.services.notification import NotificationService
-                            notif_svc = NotificationService(db)
-                            sent = await notif_svc.notify_trading_date_detected(ipo)
-                            logger.info("HalkArz: %s — trading date bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
-                        except Exception as notif_err:
-                            logger.warning("HalkArz: %s — trading date bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
+                    try:
+                        from app.services.twitter_service import tweet_trading_date_detected
+                        from app.services.admin_telegram import notify_tweet_sent
+                        tw_ok = tweet_trading_date_detected(ipo)
+                        await notify_tweet_sent("trading_date_tespit", ipo.ticker or ipo.company_name, tw_ok)
+                    except Exception as tw_err:
+                        logger.warning("HalkArz: %s — trading date tweet hatasi: %s", ipo.ticker or ipo.company_name, tw_err)
+                    try:
+                        from app.services.notification import NotificationService
+                        notif_svc = NotificationService(db)
+                        sent = await notif_svc.notify_trading_date_detected(ipo)
+                        logger.info("HalkArz: %s — trading date bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
+                    except Exception as notif_err:
+                        logger.warning("HalkArz: %s — trading date bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
+
+                # ticker yeni tespit: tweet + bildirim
+                if ticker_newly_detected:
+                    await db.flush()
+                    try:
+                        from app.services.twitter_service import tweet_ticker_assigned
+                        from app.services.admin_telegram import notify_tweet_sent
+                        tw_ok = tweet_ticker_assigned(ipo)
+                        await notify_tweet_sent("ticker_tespit", ipo.ticker or ipo.company_name, tw_ok)
+                    except Exception as tw_err:
+                        logger.warning("HalkArz: %s — ticker tweet hatasi: %s", ipo.ticker or ipo.company_name, tw_err)
+                    try:
+                        from app.services.notification import NotificationService
+                        notif_svc = NotificationService(db)
+                        sent = await notif_svc.notify_ticker_assigned(ipo)
+                        logger.info("HalkArz: %s — ticker bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
+                    except Exception as notif_err:
+                        logger.warning("HalkArz: %s — ticker bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
 
                 # prospectus_url yeni tespit: arkaplanda AI izahname analizi baslat
                 if prospectus_url_newly_detected and ipo.prospectus_url:
