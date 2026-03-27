@@ -560,10 +560,10 @@ async def update_ipo(
             except Exception as notif_err:
                 logger.warning(f"Admin: {ipo.ticker or ipo.company_name} — trading date bildirim hatasi: {notif_err}")
 
-        # ─── ticker yeni ayarlandıysa → bildirim + tweet gönder ───
+        # ─── ticker + talep tarihi ikisi de doluysa → bildirim + tweet gönder ───
         _ticker_newly_set = (_old_ticker is None and ipo.ticker is not None)
-        if _ticker_newly_set:
-            logger.info(f"Admin: ticker yeni ayarlandı — {ipo.company_name} → {ipo.ticker} — bildirim + tweet tetikleniyor")
+        if _ticker_newly_set and ipo.subscription_start is not None:
+            logger.info(f"Admin: ticker+talep tarihi tamam — {ipo.company_name} → {ipo.ticker} — bildirim + tweet tetikleniyor")
 
             # Tweet gönder
             try:

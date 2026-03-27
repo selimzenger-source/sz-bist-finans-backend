@@ -981,8 +981,10 @@ async def scrape_halkarz():
 
                 # trading_start ilk kez set ediliyorsa tweet + bildirim icin flag
                 trading_start_newly_detected = False
-                # ticker ilk kez set ediliyorsa tweet + bildirim icin flag
+                # ticker ilk kez set ediliyorsa flag
                 ticker_newly_detected = False
+                # subscription_start ilk kez set ediliyorsa flag
+                subscription_start_newly_detected = False
                 # prospectus_url ilk kez set ediliyorsa AI analiz icin flag
                 prospectus_url_newly_detected = False
 
@@ -1012,6 +1014,9 @@ async def scrape_halkarz():
                             # ticker ilk kez set ediliyorsa isaretle
                             if db_field == "ticker" and current_val is None:
                                 ticker_newly_detected = True
+                            # subscription_start ilk kez set ediliyorsa isaretle
+                            if db_field == "subscription_start" and current_val is None:
+                                subscription_start_newly_detected = True
                             # prospectus_url ilk kez set ediliyorsa isaretle
                             if db_field == "prospectus_url" and current_val is None:
                                 prospectus_url_newly_detected = True
@@ -1161,8 +1166,12 @@ async def scrape_halkarz():
                     except Exception as notif_err:
                         logger.warning("HalkArz: %s — trading date bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
 
-                # ticker yeni tespit: tweet + bildirim
-                if ticker_newly_detected:
+                # ticker + talep tarihi: ikisi de doluysa TEK tweet + bildirim
+                # Biri yeni geldiyse ve digeri zaten varsa → tetikle
+                _ticker_ready = ipo.ticker is not None
+                _sub_ready = ipo.subscription_start is not None
+                _either_new = ticker_newly_detected or subscription_start_newly_detected
+                if _either_new and _ticker_ready and _sub_ready:
                     await db.flush()
                     try:
                         from app.services.twitter_service import tweet_ticker_assigned
@@ -1175,7 +1184,7 @@ async def scrape_halkarz():
                         from app.services.notification import NotificationService
                         notif_svc = NotificationService(db)
                         sent = await notif_svc.notify_ticker_assigned(ipo)
-                        logger.info("HalkArz: %s — ticker bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
+                        logger.info("HalkArz: %s — ticker+talep bildirim %d kisi", ipo.ticker or ipo.company_name, sent)
                     except Exception as notif_err:
                         logger.warning("HalkArz: %s — ticker bildirim hatasi: %s", ipo.ticker or ipo.company_name, notif_err)
 
