@@ -6867,7 +6867,7 @@ async def admin_trigger_ipo_event(request: Request, payload: dict, db: AsyncSess
     if event_type == "update_field":
         field = payload.get("field")
         value = payload.get("value")
-        _ALLOWED = {"prospectus_url", "ticker", "trading_start", "subscription_start", "subscription_end", "ipo_price", "market_segment"}
+        _ALLOWED = {"prospectus_url", "ticker", "trading_start", "subscription_start", "subscription_end", "ipo_price", "market_segment", "trading_day_count"}
         if field not in _ALLOWED:
             raise HTTPException(status_code=400, detail=f"field {_ALLOWED} icinden olmali")
         setattr(ipo, field, value)
@@ -6910,12 +6910,20 @@ async def admin_fix_missing_day(request: Request, payload: dict, db: AsyncSessio
         track.trading_day = track.trading_day - 1
         updated += 1
 
-    # IPO trading_day_count da guncelle
+    # IPO trading_day_count = kayitli max trading_day ile esitle
     from app.models.ipo import IPO
     ipo_result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
     ipo = ipo_result.scalar_one_or_none()
-    if ipo and ipo.trading_day_count:
-        ipo.trading_day_count = ipo.trading_day_count - 1
+    if ipo:
+        # Guncellenmis kayitlardaki max trading_day'i bul
+        max_result = await db.execute(
+            select(IPOCeilingTrack.trading_day)
+            .where(IPOCeilingTrack.ipo_id == int(ipo_id))
+            .order_by(IPOCeilingTrack.trading_day.desc())
+            .limit(1)
+        )
+        max_day = max_result.scalar_one_or_none() or 0
+        ipo.trading_day_count = max_day
 
     await db.commit()
 
