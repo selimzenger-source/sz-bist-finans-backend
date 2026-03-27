@@ -207,8 +207,27 @@ def parse_date_cell(val):
     return None
 
 
+# Borsa Istanbul resmi tatil gunleri (2026)
+# Hafta sonlarina denk gelenler zaten weekday filtresinde elenecek
+BORSA_TATIL_2026 = {
+    date(2026, 1, 1),   # Yilbasi
+    date(2026, 3, 20),  # Nevruz Bayrami (Cuma) — borsa kapali
+    date(2026, 4, 23),  # Ulusal Egemenlik ve Cocuk Bayrami
+    date(2026, 5, 1),   # Emek ve Dayanisma Gunu
+    date(2026, 5, 19),  # Ataturk'u Anma, Genclik ve Spor Bayrami
+    date(2026, 6, 5),   # Kurban Bayrami Arefesi (yarim gun — tam tatil say)
+    date(2026, 6, 6),   # Kurban Bayrami 1. gun (Cumartesi zaten)
+    date(2026, 6, 7),   # Kurban Bayrami 2. gun (Pazar zaten)
+    date(2026, 6, 8),   # Kurban Bayrami 3. gun (Pazartesi)
+    date(2026, 6, 9),   # Kurban Bayrami 4. gun (Sali)
+    date(2026, 7, 15),  # Demokrasi ve Milli Birlik Gunu
+    date(2026, 8, 30),  # Zafer Bayrami (Pazar zaten)
+    date(2026, 10, 29), # Cumhuriyet Bayrami
+}
+
+
 def _count_business_days(start_date, end_date):
-    """Iki tarih arasindaki is gunu sayisini hesapla (her ikisi dahil)."""
+    """Iki tarih arasindaki is gunu sayisini hesapla (tatiller haric, her ikisi dahil)."""
     if isinstance(start_date, str):
         start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
     if isinstance(end_date, str):
@@ -217,7 +236,7 @@ def _count_business_days(start_date, end_date):
     current = start_date
     from datetime import timedelta as td
     while current <= end_date:
-        if current.weekday() < 5:  # Pazartesi=0 ... Cuma=4
+        if current.weekday() < 5 and current not in BORSA_TATIL_2026:
             count += 1
         current += td(days=1)
     return count

@@ -6879,6 +6879,50 @@ async def admin_trigger_ipo_event(request: Request, payload: dict, db: AsyncSess
 
 
 # -------------------------------------------------------
+# Admin: Eksik Gün Düzeltme (ceiling_tracks gün numarası kaydırma)
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/fix-missing-day")
+@limiter.limit("10/minute")
+async def admin_fix_missing_day(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Atlanmis gun numarasini duzelt — missing_day'den sonraki gunleri 1 geri kaydir."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    missing_day = payload.get("missing_day")  # Atlanmis gun numarasi
+
+    if not ipo_id or not missing_day:
+        raise HTTPException(status_code=400, detail="ipo_id ve missing_day gerekli")
+
+    from app.models.ipo import IPOCeilingTrack
+    # missing_day'den buyuk tum gunleri 1 azalt
+    result = await db.execute(
+        select(IPOCeilingTrack).where(
+            IPOCeilingTrack.ipo_id == int(ipo_id),
+            IPOCeilingTrack.trading_day > int(missing_day),
+        ).order_by(IPOCeilingTrack.trading_day.desc())
+    )
+    tracks = result.scalars().all()
+
+    updated = 0
+    for track in tracks:
+        track.trading_day = track.trading_day - 1
+        updated += 1
+
+    # IPO trading_day_count da guncelle
+    from app.models.ipo import IPO
+    ipo_result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
+    ipo = ipo_result.scalar_one_or_none()
+    if ipo and ipo.trading_day_count:
+        ipo.trading_day_count = ipo.trading_day_count - 1
+
+    await db.commit()
+
+    return {"status": "ok", "ipo_id": ipo_id, "missing_day": missing_day, "tracks_updated": updated}
+
+
+# -------------------------------------------------------
 # Admin: Resmi Gazete Manuel Trigger
 # -------------------------------------------------------
 
