@@ -4938,6 +4938,8 @@ async def sync_subscription(
     KNOWN_NEWS_PRODUCTS = {
         "bist_finans_yildiz_monthly", "bist_finans_yildiz_annual",
         "bist_finans_ana_yildiz_monthly", "bist_finans_ana_yildiz_annual",
+        # Google Play product ID'leri (colon format)
+        "ana_yildiz:aylik", "ana_yildiz:yillik",
         # iOS App Store product ID'leri (underscore format)
         "ana_yildiz_aylik", "ana_yildiz_yillik",
         # Eski paketler (geriye donuk uyumluluk)
