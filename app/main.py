@@ -4948,10 +4948,11 @@ async def sync_subscription(
         "bist_finans_all_monthly",
     }
     if body.is_active and package != "free":
-        if body.store not in ("play_store", "app_store"):
+        if body.store and body.store not in ("play_store", "app_store"):
             raise HTTPException(status_code=400, detail="Gecerli store gerekli (play_store veya app_store)")
-        if not body.product_id or body.product_id not in KNOWN_NEWS_PRODUCTS:
-            raise HTTPException(status_code=400, detail="Gecersiz veya eksik product_id")
+        # product_id opsiyonel — eski client'lar göndermeyebilir
+        if body.product_id and body.product_id not in KNOWN_NEWS_PRODUCTS:
+            logger.warning("Sync: bilinmeyen product_id=%s, device=%s — kabul ediliyor", body.product_id, device_id)
         if not body.expiration_date:
             raise HTTPException(status_code=400, detail="expiration_date gerekli")
         try:
