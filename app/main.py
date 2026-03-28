@@ -1236,6 +1236,17 @@ async def create_stock_notification(
 
     # Yillik paket
     if data.is_annual_bundle:
+        # KORUMA: Bundle oluşturmak için geçerli store/product_id veya wallet gerekli
+        # Frontend'den gelen "boş" bundle oluşturma isteklerini engelle
+        # (purchase transfer veya stale cache sonucu oluşan kısır döngü önlenir)
+        valid_bundle_stores = {"play_store", "app_store", "wallet"}
+        if not data.store or data.store not in valid_bundle_stores:
+            raise HTTPException(status_code=400, detail="Bundle olusturmak icin gecerli store gerekli")
+
+        # Store play_store/app_store ise product_id zorunlu (webhook/sync zaten gönderiyor)
+        if data.store in ("play_store", "app_store") and not data.product_id:
+            raise HTTPException(status_code=400, detail="Bundle olusturmak icin product_id gerekli")
+
         existing = await db.execute(
             select(StockNotificationSubscription).where(
                 and_(
