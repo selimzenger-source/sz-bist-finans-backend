@@ -1015,8 +1015,8 @@ async def list_telegram_news(
 ):
     """Telegram kanalindan gelen AI haberler.
 
-    - Abone DEGiL: BIST 50 hisselerinin son 20 haberi (ucretsiz tanitim)
-    - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 30 haberi
+    - Abone DEGiL: BIST 50 hisselerinin son 30 haberi (ucretsiz tanitim)
+    - Abone (ana_yildiz): Ana + Yildiz Pazar — tum hisselerin son 50 haberi
     """
     from app.services.news_service import get_bist50_tickers_sync
     BIST50_TICKERS = get_bist50_tickers_sync()
@@ -1094,7 +1094,7 @@ async def list_telegram_news(
         if sentiment:
             query = query.where(TelegramNews.sentiment == sentiment)
 
-        query = query.limit(min(limit, 20)).offset(offset)
+        query = query.limit(min(limit, 30)).offset(offset)
 
     result = await db.execute(query)
     return list(result.scalars().all())
