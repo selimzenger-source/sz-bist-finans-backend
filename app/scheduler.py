@@ -3413,8 +3413,35 @@ async def daily_subscription_report():
                 )
             )).scalar() or 0
 
+            # ── PLATFORM BAZLI KULLANICI SAYILARI ──
+            platform_breakdown = (await db.execute(
+                select(
+                    User.platform,
+                    func.count(User.id),
+                ).where(User.deleted == False)
+                .group_by(User.platform)
+            )).all()
+
+            platform_today = (await db.execute(
+                select(
+                    User.platform,
+                    func.count(User.id),
+                ).where(
+                    and_(User.created_at >= today_start, User.deleted == False)
+                ).group_by(User.platform)
+            )).all()
+
             # ── MESAJ OLUSTUR ──
             tr_time = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
+
+            # Platform sayilari
+            p_map = {p: c for p, c in platform_breakdown}
+            pt_map = {p: c for p, c in platform_today}
+            ios_total = p_map.get("ios", 0)
+            android_total = p_map.get("android", 0)
+            other_total = total_users - ios_total - android_total
+            ios_today = pt_map.get("ios", 0)
+            android_today = pt_map.get("android", 0)
 
             store_text = ""
             for store, count in news_by_store:
@@ -3432,6 +3459,7 @@ async def daily_subscription_report():
             type_labels = {
                 "tavan_bozulma": "Tavan", "taban_acilma": "Taban",
                 "gunluk_acilis_kapanis": "Acilis/Kapanis", "yuzde_dusus": "% Dusus",
+                "el_degistirme": "E.D.O",
             }
             for ntype, cnt in type_breakdown:
                 type_text += f"  \u2022 {type_labels.get(ntype, ntype)}: {cnt}\n"
@@ -3441,7 +3469,8 @@ async def daily_subscription_report():
                 f"\U0001f4c5 {tr_time}\n"
                 f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\n"
                 f"\U0001f465 <b>Kullanicilar</b>\n"
-                f"  Toplam: {total_users}  |  Bugun: +{new_users_today}\n\n"
+                f"  Toplam: {total_users}  |  Bugun: +{new_users_today}\n"
+                f"  \U0001f4f1 Android: {android_total} (+{android_today})  |  \U0001f34f iOS: {ios_total} (+{ios_today})\n\n"
                 f"\U0001f4f0 <b>KAP Haber Aboneligi (Ana+Yildiz)</b>\n"
                 f"  Aktif: {active_news}  |  Bugun: +{new_news_today}\n"
                 f"{store_text}\n"
