@@ -1011,6 +1011,7 @@ async def list_telegram_news(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     device_id: Optional[str] = Query(None, description="Abonelik kontrolu icin device_id"),
+    package: Optional[str] = Query(None, description="Frontend'den gelen aktif paket (ana_yildiz)"),
     db: AsyncSession = Depends(get_db),
 ):
     """Telegram kanalindan gelen AI haberler.
@@ -1048,6 +1049,28 @@ async def list_telegram_news(
             if sub:
                 has_paid_sub = True
                 active_package = sub.package
+
+            # FALLBACK: DB'de henüz kayıt yoksa ama frontend ana_yildiz gönderiyorsa
+            # (sync henüz tamamlanmamış — race condition)
+            # Frontend RC entitlement'ı doğruladıktan sonra package gönderir
+            if not has_paid_sub and package == "ana_yildiz":
+                has_paid_sub = True
+                active_package = "ana_yildiz"
+                # Arka planda sync'i tetikle — DB'yi güncelle
+                if user:
+                    try:
+                        existing_sub = await db.execute(
+                            select(UserSubscription).where(UserSubscription.user_id == user.id)
+                        )
+                        s = existing_sub.scalar_one_or_none()
+                        if s:
+                            s.package = "ana_yildiz"
+                            s.is_active = True
+                        else:
+                            db.add(UserSubscription(user_id=user.id, package="ana_yildiz", is_active=True))
+                        await db.commit()
+                    except Exception:
+                        pass  # Sessizce devam — haber gösterilsin
 
     # Tarih filtresi
     since = datetime.utcnow() - timedelta(days=days)
