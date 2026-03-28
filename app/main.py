@@ -4755,6 +4755,9 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
                 "bist_finans_notif_annual",
                 "bist_finans_notif_quarterly",
                 "bist_finans_notif_semiannual",  # Eski, geriye donuk uyumluluk
+                # iOS App Store product ID'leri
+                "notif_bundle_yillik",
+                "notif_bundle_3aylik",
             )
 
             ipo_id = event.get("metadata", {}).get("ipo_id")
@@ -4764,6 +4767,10 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
                 "bist_finans_notif_annual": ANNUAL_BUNDLE_PRICE,
                 "bist_finans_notif_quarterly": QUARTERLY_PRICE,
                 "bist_finans_notif_combo": COMBO_PRICE,
+                # iOS App Store
+                "notif_bundle_yillik": ANNUAL_BUNDLE_PRICE,
+                "notif_bundle_3aylik": QUARTERLY_PRICE,
+                "notif_combo_44": COMBO_PRICE,
             }
             price = bundle_prices.get(product_id) or NOTIFICATION_TIER_PRICES.get(notif_type, {}).get("price_tl", 0)
 
@@ -4801,7 +4808,7 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
             if expiration_ms:
                 rc_expires_at = datetime.fromtimestamp(expiration_ms / 1000, tz=timezone.utc)
             elif is_bundle:
-                bundle_days = 365 if "annual" in product_id else 90
+                bundle_days = 365 if ("annual" in product_id or "yillik" in product_id) else 90
                 rc_expires_at = _now_rc + timedelta(days=bundle_days)
             else:
                 rc_expires_at = None  # Tekil abonelik — 25 gun trading day bazli
