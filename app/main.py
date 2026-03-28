@@ -1757,13 +1757,9 @@ async def delete_user_account(
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
-    # Abonelik kaydini da sil (cascade ile gitmeyebilir — ayri tablo)
-    sub_result = await db.execute(
-        select(UserSubscription).where(UserSubscription.user_id == user.id)
-    )
-    sub = sub_result.scalar_one_or_none()
-    if sub:
-        await db.delete(sub)
+    # ÖNEMLİ: Ücretli abonelik ve bildirim kayıtları SİLİNMEZ — kullanıcı para ödemiş.
+    # "Geri Yükle" ile tekrar aktif edilebilir olmalı.
+    # Sadece kişisel tercihler ve loglar silinir.
 
     # device_id ile bagli tablolar (FK degil, cascade calismaz)
     from app.models.notification_log import NotificationLog
@@ -1780,13 +1776,24 @@ async def delete_user_account(
         delete(FeatureInterest).where(FeatureInterest.device_id == device_id)
     )
 
-    # Kullaniciyi sil — cascade ile tum iliskili veriler silinir
-    await db.delete(user)
+    # IPO alert tercihlerini sil (kullanıcı tercihi, ücretli değil)
+    from app.models import UserIPOAlert
+    await db.execute(
+        delete(UserIPOAlert).where(UserIPOAlert.user_id == user.id)
+    )
+
+    # Kullanıcı profilini sıfırla (silme yerine — abonelik FK bağlı)
+    user.push_token = None
+    user.reminder_30min = True
+    user.reminder_1h = True
+    user.reminder_2h = False
+    user.reminder_4h = False
+
     await db.commit()
 
     return {
         "status": "ok",
-        "message": "Hesabiniz ve tum verileriniz kalici olarak silindi.",
+        "message": "Kisisel verileriniz silindi. Ucretli abonelikleriniz korundu — Geri Yukle ile erisebilirsiniz.",
     }
 
 
