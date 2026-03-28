@@ -1775,6 +1775,35 @@ async def reject_tweet(
     return RedirectResponse(url="/admin/tweets", status_code=303)
 
 
+@router.post("/spk/set-last-bulletin")
+async def set_last_bulletin_no(request: Request):
+    """SPK last_bulletin_no'yu manuel set et. Body: {"bulletin_no": "2026/18"}"""
+    api_key = request.headers.get("X-Admin-Key", "")
+    from app.config import get_settings as _gs
+    is_api = bool(api_key and _gs().ADMIN_PASSWORD and api_key == _gs().ADMIN_PASSWORD)
+    is_session = bool(get_current_admin(request))
+    if not is_api and not is_session:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from fastapi.responses import JSONResponse
+    try:
+        body = await request.json()
+        bno = body.get("bulletin_no", "")
+        if "/" not in bno:
+            return JSONResponse({"error": "bulletin_no format: 2026/18"}, status_code=400)
+        yr, no = bno.split("/")
+        from app.scrapers.spk_bulletin_scraper import _save_last_bulletin_no
+        from app.database import get_db
+        async for db in get_db():
+            await _save_last_bulletin_no(db, (int(yr), int(no)))
+            await db.commit()
+            break
+        return JSONResponse({"ok": True, "last_bulletin_no": bno})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @router.post("/tweets/trigger-spk-analysis")
 async def trigger_spk_analysis_from_admin(
     request: Request,
