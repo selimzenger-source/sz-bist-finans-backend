@@ -830,14 +830,29 @@ async def _check_spk_bulletins_inner():
                         logger.warning("Scraper boost aktivasyon hatasi: %s", _boost_err)
 
                 # ────────────────────────────────────────────
-                # SPK Bulten Analiz Tweeti — 30dk sonra arka planda
-                # Ana akisi BLOKLAMAZ, asyncio.create_task ile ayri calisir
+                # Telegram: Yeni SPK Bülteni Tespit Bildirimi
+                # ────────────────────────────────────────────
+                try:
+                    from app.services.admin_telegram import send_admin_telegram
+                    _bulten_msg = (
+                        f"📋 <b>Yeni SPK Bülteni Tespit Edildi</b>\n\n"
+                        f"Bülten No: <b>{bno_str_val}</b>\n"
+                        f"Halka Arz Onayı: <b>{'Var (%d adet)' % len(approvals) if approvals else 'Yok'}</b>\n"
+                        f"İçerik: {full_bulletin_text[:300]}..."
+                    )
+                    await send_admin_telegram(_bulten_msg)
+                except Exception as _tg_err:
+                    logger.warning("SPK bulten telegram bildirimi hatasi: %s", _tg_err)
+
+                # ────────────────────────────────────────────
+                # SPK Bulten Analiz Tweeti — 5dk sonra arka planda
+                # (IPO tweeti ile cakismamasi icin kisa gecikme)
                 # ────────────────────────────────────────────
                 if full_bulletin_text:
                     async def _delayed_bulletin_analysis(_text, _bno_str):
-                        """30dk sonra AI bulten analiz tweeti at."""
+                        """5dk sonra AI bulten analiz tweeti at."""
                         try:
-                            await asyncio.sleep(1800)  # 30 dakika
+                            await asyncio.sleep(300)  # 5 dakika
                             from app.services.twitter_service import tweet_spk_bulletin_analysis
                             from app.services.admin_telegram import notify_tweet_sent as _notify_tw
                             _ba_ok = tweet_spk_bulletin_analysis(_text, _bno_str)
@@ -845,12 +860,12 @@ async def _check_spk_bulletins_inner():
                                 "spk_bulten_analiz", f"Bülten {_bno_str}", _ba_ok,
                                 f"AI analiz tweeti ({'basarili' if _ba_ok else 'basarisiz'})",
                             )
-                            logger.info("SPK bulten analiz tweeti (30dk sonra): %s, sonuc=%s", _bno_str, _ba_ok)
+                            logger.info("SPK bulten analiz tweeti (5dk sonra): %s, sonuc=%s", _bno_str, _ba_ok)
                         except Exception as _ba_err:
                             logger.warning("SPK bulten analiz tweet hatasi: %s", _ba_err)
 
                     asyncio.create_task(_delayed_bulletin_analysis(full_bulletin_text, bno_str_val))
-                    logger.info("SPK bulten analiz: 30dk sonra arka planda atilacak (%s)", bno_str_val)
+                    logger.info("SPK bulten analiz: 5dk sonra arka planda atilacak (%s)", bno_str_val)
 
                 # Bulten numarasini HEMEN guncelle — tweet/analiz basarisiz olsa bile
                 # bir sonraki calistirmada ayni bulteni tekrar islemesin
