@@ -4698,7 +4698,7 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
             user = user_result.scalar_one_or_none()
         if not user:
             logger.warning(f"RevenueCat webhook: kullanici bulunamadi — app_user_id={app_user_id}")
-            raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+            return {"status": "skipped", "reason": "user_not_found"}
 
     # Haber abonelikleri
     news_package_map = {
