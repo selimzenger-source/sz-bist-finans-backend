@@ -3849,6 +3849,30 @@ async def bot_tweet_proxy(request: Request, payload: dict):
         return {"status": "error", "message": str(e)[:200]}
 
 
+@app.get("/api/v1/admin/search-mentions")
+@limiter.limit("10/minute")
+async def search_mentions(
+    request: Request,
+    admin_password: str = Query(...),
+    since_id: str = Query(None, description="Bu ID'den sonraki mention'ları getir"),
+    max_results: int = Query(10, ge=10, le=100),
+):
+    """Bot için @BorsaCebimde mention araması — search/recent API.
+
+    Free tier'da çalışır. since_id ile sadece yeni mention'lar alınır.
+    """
+    if not _verify_admin_password(admin_password):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.twitter_service import search_recent_tweets
+    result = search_recent_tweets(
+        query="@BorsaCebimde -is:retweet",
+        since_id=since_id,
+        max_results=max_results,
+    )
+    return result
+
+
 @app.post("/api/v1/admin/trigger-market-close-tweet")
 @limiter.limit("3/minute")
 async def trigger_market_close_tweet(

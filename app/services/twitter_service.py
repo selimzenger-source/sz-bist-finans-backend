@@ -457,6 +457,92 @@ def _build_oauth_header(creds: dict) -> str:
     return f"OAuth {header_parts}"
 
 
+def _build_oauth_header_generic(creds: dict, method: str, url: str, query_params: dict = None) -> str:
+    """Herhangi bir Twitter API endpoint için OAuth 1.0a header oluşturur."""
+    oauth_params = {
+        "oauth_consumer_key": creds["api_key"],
+        "oauth_nonce": uuid.uuid4().hex,
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": str(int(time.time())),
+        "oauth_token": creds["access_token"],
+        "oauth_version": "1.0",
+    }
+
+    # Query params'ı da imzaya dahil et
+    sign_params = {**oauth_params}
+    if query_params:
+        sign_params.update(query_params)
+
+    signature = _generate_oauth_signature(
+        method=method,
+        url=url,
+        oauth_params=sign_params,
+        consumer_secret=creds["api_secret"],
+        token_secret=creds["access_token_secret"],
+    )
+    oauth_params["oauth_signature"] = signature
+
+    header_parts = ", ".join(
+        f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
+        for k, v in sorted(oauth_params.items())
+    )
+    return f"OAuth {header_parts}"
+
+
+def search_recent_tweets(query: str, since_id: str = None, max_results: int = 10) -> dict:
+    """Twitter API v2 search/recent — @mention araması için.
+
+    Free tier'da kullanılabilir. OAuth 1.0a ile çalışır.
+
+    Returns:
+        {"tweets": [...], "newest_id": "...", "error": None} veya {"tweets": [], "error": "..."}
+    """
+    creds = _load_credentials()
+    if not creds:
+        return {"tweets": [], "newest_id": None, "error": "Twitter credentials eksik"}
+
+    url = "https://api.twitter.com/2/tweets/search/recent"
+    params = {
+        "query": query,
+        "max_results": str(max(10, min(max_results, 100))),
+        "tweet.fields": "created_at,author_id,conversation_id,in_reply_to_user_id",
+        "expansions": "author_id",
+        "user.fields": "username",
+    }
+    if since_id:
+        params["since_id"] = since_id
+
+    try:
+        auth_header = _build_oauth_header_generic(creds, "GET", url, params)
+        resp = httpx.get(
+            url,
+            params=params,
+            headers={"Authorization": auth_header},
+            timeout=15.0,
+        )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            tweets = data.get("data", [])
+            # User bilgilerini eşleştir
+            users = {u["id"]: u["username"] for u in data.get("includes", {}).get("users", [])}
+            for t in tweets:
+                t["author_username"] = users.get(t.get("author_id"), "unknown")
+
+            newest_id = data.get("meta", {}).get("newest_id")
+            return {"tweets": tweets, "newest_id": newest_id, "error": None}
+        elif resp.status_code == 429:
+            logger.warning("Twitter search rate limit — 15dk bekle")
+            return {"tweets": [], "newest_id": None, "error": "rate_limit"}
+        else:
+            logger.error("Twitter search hatası HTTP %d: %s", resp.status_code, resp.text[:200])
+            return {"tweets": [], "newest_id": None, "error": f"HTTP {resp.status_code}"}
+
+    except Exception as e:
+        logger.error("Twitter search hatası: %s", str(e)[:200])
+        return {"tweets": [], "newest_id": None, "error": str(e)[:200]}
+
+
 def _notify_tweet_failure(text: str, error_detail: str):
     """Tweet basarisiz olunca Telegram'a bildirim gonder."""
     try:
