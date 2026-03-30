@@ -15,6 +15,10 @@ from app.models.kap_all_disclosure import KapAllDisclosure
 from app.models.ipo import IPO
 from app.config import get_settings
 
+# Store linkleri — tweet metinlerinde kullanılır
+HALKAARZ_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
+APP_STORE_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
+
 # Gemini SDK kaldırıldı — diğer servisler REST API kullanıyor, bu dosyada artık gerek yok
 
 logger = logging.getLogger(__name__)
@@ -1044,12 +1048,18 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"📈 Günün TAVAN Yapan Hisseleri ve Sebepleri!\n\n"
                         f"Hangi şirketler neden uçuşa geçti? Yapay zeka modelimizin "
                         f"derlediği haber analizleri görsellerde! 🚀👇\n\n"
-                        f"{tickers_str}"
+                        f"📌 {tickers_str}\n\n"
+                        f"⚠️ Günsonu analizidir.\n"
+                        f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
+                        f"📲 Android: {HALKAARZ_LINK}\n"
+                        f"🍏 iOS: {APP_STORE_LINK}"
                     )
                 else:
                     tweet_text = (
                         f"📈 Bugün TAVAN yapan hisse yok!\n\n"
-                        f"En çok yükselen hisseler görselde! 📊👇"
+                        f"En çok yükselen hisseler görselde! 📊👇\n\n"
+                        f"📲 Android: {HALKAARZ_LINK}\n"
+                        f"🍏 iOS: {APP_STORE_LINK}"
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=tavan_images,
@@ -1094,12 +1104,18 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
                         f"Şirketler neden kan kaybetti? Yapay zeka modelimizin "
                         f"derlediği haber analizleri görsellerde! 📊👇\n\n"
-                        f"{tickers_str}"
+                        f"📌 {tickers_str}\n\n"
+                        f"⚠️ Günsonu analizidir.\n"
+                        f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
+                        f"📲 Android: {HALKAARZ_LINK}\n"
+                        f"🍏 iOS: {APP_STORE_LINK}"
                     )
                 else:
                     tweet_text = (
                         f"📉 Bugün TABAN yapan hisse yok!\n\n"
-                        f"En çok düşen hisseler görselde! 📊👇"
+                        f"En çok düşen hisseler görselde! 📊👇\n\n"
+                        f"📲 Android: {HALKAARZ_LINK}\n"
+                        f"🍏 iOS: {APP_STORE_LINK}"
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=taban_images,
