@@ -448,7 +448,7 @@ async def get_public_news_feed(
     days: int = Query(15, le=60),
     limit: int = Query(100, le=200),
 ):
-    """Son N gunun gonderilmis tweetlerini blog formatta doner."""
+    """Son N gunun gonderilmis tweetlerini blog formatta doner (VIOP haric)."""
     import re
     cutoff = datetime.utcnow() - timedelta(days=days)
     stmt = (
@@ -456,6 +456,8 @@ async def get_public_news_feed(
         .where(
             PendingTweet.status == "sent",
             PendingTweet.sent_at >= cutoff,
+            ~PendingTweet.text.ilike("%VİOP%"),
+            ~PendingTweet.text.ilike("%VIOP%"),
         )
         .order_by(desc(PendingTweet.sent_at))
         .limit(limit)
@@ -466,8 +468,14 @@ async def get_public_news_feed(
     def clean_text(text: str) -> str:
         # Remove hashtags
         text = re.sub(r'#\w+', '', text)
+        # Remove URLs (store links, t.co links, etc.)
+        text = re.sub(r'https?://\S+', '', text)
+        # Remove Android/iOS store references
+        text = re.sub(r'📲?\s*Android:?\s*', '', text)
+        text = re.sub(r'🍏?\s*iOS:?\s*', '', text)
         # Remove multiple spaces/newlines
         text = re.sub(r'\n{3,}', '\n\n', text.strip())
+        text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
     return [
@@ -530,10 +538,42 @@ async def get_public_daily_market_stats(
 @limiter.limit("30/minute")
 async def get_public_viop_night_session(
     request: Request,
-    days: int = Query(15, le=30),
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(5, le=30),
+    limit: int = Query(100, le=200),
 ):
-    """VIOP gece seansi verileri — yakinda aktif olacak."""
-    return {"days": days, "sessions": [], "message": "VIOP gece seansi verileri yakinda aktif olacak."}
+    """VIOP tweetlerini son N gun icin doner (pending_tweets tablosundan)."""
+    import re
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    stmt = (
+        select(PendingTweet)
+        .where(
+            PendingTweet.status == "sent",
+            PendingTweet.sent_at >= cutoff,
+            PendingTweet.text.ilike("%VİOP%"),
+        )
+        .order_by(desc(PendingTweet.sent_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    tweets = result.scalars().all()
+
+    def clean_text(text: str) -> str:
+        text = re.sub(r'#\w+', '', text)
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'\n{3,}', '\n\n', text.strip())
+        return text.strip()
+
+    return [
+        {
+            "id": t.id,
+            "text": clean_text(t.text),
+            "image_url": f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None,
+            "source": t.source,
+            "sent_at": t.sent_at.isoformat() if t.sent_at else None,
+        }
+        for t in tweets
+    ]
 
 
 @app.get("/api/v1/public/spk-bulletin-analyses")
