@@ -599,7 +599,13 @@ async def get_spk_bulletin_analyses(
 
     def clean_text(text: str) -> str:
         text = re.sub(r'#\w+', '', text)
+        text = re.sub(r'https?://\S+', '', text)
+        text = re.sub(r'📲?\s*(Detaylar\s*görselde|Android|szalgo)[^\n]*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'🍏?\s*iOS:?[^\n]*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'szalgo\.net\.tr', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'👇', '', text)
         text = re.sub(r'\n{3,}', '\n\n', text.strip())
+        text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
     # Bulten numarasini tweet metninden cikarmaya calis
