@@ -43,6 +43,8 @@ from app.models import (
     Dividend, DividendHistory,
     KapAllDisclosure, UserWatchlist,
     FeatureInterest,
+    DailyStockMarketStat,
+    PendingTweet,
 )
 from app.schemas import (
     IPOListOut, IPODetailOut, IPOSectionsOut,
@@ -431,6 +433,154 @@ if os.path.isdir(_static_dir):
 
 # Admin Panel
 app.include_router(admin_router)
+
+
+# -------------------------------------------------------
+# Public Endpoints — Herkese acik veri endpoint'leri
+# -------------------------------------------------------
+
+
+@app.get("/api/v1/public/news-feed")
+@limiter.limit("30/minute")
+async def get_public_news_feed(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(15, le=60),
+    limit: int = Query(100, le=200),
+):
+    """Son N gunun gonderilmis tweetlerini blog formatta doner."""
+    import re
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    stmt = (
+        select(PendingTweet)
+        .where(
+            PendingTweet.status == "sent",
+            PendingTweet.sent_at >= cutoff,
+        )
+        .order_by(desc(PendingTweet.sent_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    tweets = result.scalars().all()
+
+    def clean_text(text: str) -> str:
+        # Remove hashtags
+        text = re.sub(r'#\w+', '', text)
+        # Remove multiple spaces/newlines
+        text = re.sub(r'\n{3,}', '\n\n', text.strip())
+        return text.strip()
+
+    return [
+        {
+            "id": t.id,
+            "text": clean_text(t.text),
+            "image_url": f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None,
+            "source": t.source,
+            "sent_at": t.sent_at.isoformat() if t.sent_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tweets
+    ]
+
+
+@app.get("/api/v1/public/daily-market-stats")
+@limiter.limit("30/minute")
+async def get_public_daily_market_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, le=90),
+):
+    """Son N gunun tavan/taban istatistiklerini tarih bazli doner."""
+    from datetime import date as date_type
+    cutoff = date_type.today() - timedelta(days=days)
+    stmt = (
+        select(DailyStockMarketStat)
+        .where(
+            DailyStockMarketStat.date >= cutoff,
+            or_(
+                DailyStockMarketStat.is_ceiling == True,
+                DailyStockMarketStat.is_floor == True,
+            ),
+        )
+        .order_by(desc(DailyStockMarketStat.date), desc(DailyStockMarketStat.percent_change))
+    )
+    result = await db.execute(stmt)
+    stats = result.scalars().all()
+
+    return [
+        {
+            "id": s.id,
+            "ticker": s.ticker,
+            "date": s.date.isoformat(),
+            "close_price": float(s.close_price),
+            "percent_change": float(s.percent_change),
+            "is_ceiling": s.is_ceiling,
+            "is_floor": s.is_floor,
+            "consecutive_ceiling_count": s.consecutive_ceiling_count,
+            "monthly_ceiling_count": s.monthly_ceiling_count,
+            "consecutive_floor_count": s.consecutive_floor_count,
+            "monthly_floor_count": s.monthly_floor_count,
+            "reason": s.reason,
+        }
+        for s in stats
+    ]
+
+
+@app.get("/api/v1/public/viop-night-session")
+@limiter.limit("30/minute")
+async def get_public_viop_night_session(
+    request: Request,
+    days: int = Query(15, le=30),
+):
+    """VIOP gece seansi verileri — yakinda aktif olacak."""
+    return {"days": days, "sessions": [], "message": "VIOP gece seansi verileri yakinda aktif olacak."}
+
+
+@app.get("/api/v1/public/spk-bulletin-analyses")
+@limiter.limit("30/minute")
+async def get_spk_bulletin_analyses(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    limit: int = Query(20, le=50),
+):
+    """SPK bulten analizlerini doner — bulten numarasina gore gruplu."""
+    import re
+    stmt = (
+        select(PendingTweet)
+        .where(
+            PendingTweet.status == "sent",
+            PendingTweet.source.in_(["tweet_spk_bulletin_analysis", "tweet_spk_pending_visual", "tweet_spk_application"]),
+        )
+        .order_by(desc(PendingTweet.sent_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    tweets = result.scalars().all()
+
+    def clean_text(text: str) -> str:
+        text = re.sub(r'#\w+', '', text)
+        text = re.sub(r'\n{3,}', '\n\n', text.strip())
+        return text.strip()
+
+    # Bulten numarasini tweet metninden cikarmaya calis
+    def extract_bulletin_no(text: str) -> str | None:
+        # "2026/5", "Bülten No: 2026/5", "SPK 2026/5" gibi kaliplari ara
+        match = re.search(r'(\d{4})/(\d{1,3})', text)
+        if match:
+            return f"{match.group(1)}/{match.group(2)}"
+        return None
+
+    return [
+        {
+            "id": t.id,
+            "text": clean_text(t.text),
+            "image_url": f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None,
+            "source": t.source,
+            "bulletin_no": extract_bulletin_no(t.text),
+            "sent_at": t.sent_at.isoformat() if t.sent_at else None,
+        }
+        for t in tweets
+    ]
 
 
 # -------------------------------------------------------
