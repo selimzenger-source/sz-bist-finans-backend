@@ -1,8 +1,6 @@
-"""BIST 50 endeks bilesen scraper.
+"""BIST 30/50/100 endeks bilesen scraper.
 
-Kaynak: https://infoyatirim.com/canli-borsa/xu050-bist-50-hisseleri
-HTML tablosundaki data-symbol attribute'larindan hisse kodlarini ceker.
-
+Kaynak: https://infoyatirim.com/canli-borsa/
 Her ayin 1'inde scheduler tarafindan calistirilir.
 """
 
@@ -12,8 +10,6 @@ import httpx
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
-
-BIST50_URL = "https://infoyatirim.com/canli-borsa/xu050-bist-50-hisseleri"
 
 HEADERS = {
     "User-Agent": (
@@ -25,23 +21,27 @@ HEADERS = {
     "Accept-Language": "tr-TR,tr;q=0.9",
 }
 
+INDEX_URLS = {
+    "BIST 30": "https://infoyatirim.com/canli-borsa/xu030-bist-30-hisseleri",
+    "BIST 50": "https://infoyatirim.com/canli-borsa/xu050-bist-50-hisseleri",
+    "BIST 100": "https://infoyatirim.com/canli-borsa/xu100-bist-100-hisseleri",
+}
 
-async def fetch_bist50_tickers() -> set[str]:
-    """infoyatirim.com'dan guncel BIST 50 hisselerini cek.
+INDEX_MIN_COUNTS = {
+    "BIST 30": 25,
+    "BIST 50": 40,
+    "BIST 100": 80,
+}
 
-    Returns:
-        50 elemanli set[str] — hisse kodlari (ornek: {"AKBNK", "THYAO", ...})
 
-    Raises:
-        ValueError: Sayfa parse edilemezse veya 50 hisse bulunamazsa
-    """
+async def _fetch_index_tickers(url: str, index_name: str, min_count: int) -> set[str]:
+    """infoyatirim.com'dan endeks hisselerini cek."""
     async with httpx.AsyncClient(timeout=30.0, headers=HEADERS, follow_redirects=True) as client:
-        resp = await client.get(BIST50_URL)
+        resp = await client.get(url)
         resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, "lxml")
 
-    # Yontem 1: data-symbol attribute'lari
     tickers: set[str] = set()
     rows = soup.select("tr[data-symbol]")
     for row in rows:
@@ -50,7 +50,6 @@ async def fetch_bist50_tickers() -> set[str]:
             tickers.add(symbol)
 
     if not tickers:
-        # Yontem 2: Tablo icerisinden ilk sutun (hisse kodu)
         tbody = soup.find("tbody", id="tableBody")
         if tbody:
             for tr in tbody.find_all("tr"):
@@ -60,11 +59,34 @@ async def fetch_bist50_tickers() -> set[str]:
                     if code and code.isalpha() and len(code) <= 6:
                         tickers.add(code)
 
-    if len(tickers) < 40:
+    if len(tickers) < min_count:
         raise ValueError(
-            f"BIST 50 scrape basarisiz: sadece {len(tickers)} hisse bulundu "
-            f"(minimum 40 bekleniyor). URL: {BIST50_URL}"
+            f"{index_name} scrape basarisiz: sadece {len(tickers)} hisse bulundu "
+            f"(minimum {min_count} bekleniyor). URL: {url}"
         )
 
-    logger.info("BIST 50 scrape basarili: %d hisse", len(tickers))
+    logger.info("%s scrape basarili: %d hisse", index_name, len(tickers))
     return tickers
+
+
+async def fetch_bist30_tickers() -> set[str]:
+    return await _fetch_index_tickers(INDEX_URLS["BIST 30"], "BIST 30", INDEX_MIN_COUNTS["BIST 30"])
+
+
+async def fetch_bist50_tickers() -> set[str]:
+    return await _fetch_index_tickers(INDEX_URLS["BIST 50"], "BIST 50", INDEX_MIN_COUNTS["BIST 50"])
+
+
+async def fetch_bist100_tickers() -> set[str]:
+    return await _fetch_index_tickers(INDEX_URLS["BIST 100"], "BIST 100", INDEX_MIN_COUNTS["BIST 100"])
+
+
+async def fetch_all_indices() -> dict[str, set[str]]:
+    """Tum endeksleri tek seferde cek."""
+    results = {}
+    for name, url in INDEX_URLS.items():
+        try:
+            results[name] = await _fetch_index_tickers(url, name, INDEX_MIN_COUNTS[name])
+        except Exception as e:
+            logger.error("%s scrape hatasi: %s", name, e)
+    return results

@@ -2980,53 +2980,234 @@ async def monthly_yearly_summary_tweet():
         logger.error("Ay sonu rapor tweet hatasi: %s", e)
 
 
-async def update_bist50_index_job():
-    """Her ayin 1'inde BIST 50 listesini infoyatirim.com'dan guncelle.
-
-    Mevcut liste ile karsilastirir, degisiklik varsa DB'ye kaydeder
-    ve admin Telegram'a bildirim gonderir.
-    """
+async def _generate_index_cover_image(index_name: str, added: set[str], removed: set[str], total: int) -> str | None:
+    """Gemini Imagen ile endeks degisiklik kapak resmi uret."""
+    import os
+    import tempfile
+    import base64
     try:
-        from app.scrapers.bist_index_scraper import fetch_bist50_tickers
-        from app.services.news_service import (
-            get_bist50_tickers_sync, save_bist50_to_db, set_bist50_cache,
+        from app.config import settings
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            logger.warning("GEMINI_API_KEY yok, kapak resmi uretilemedi")
+            return None
+
+        prompt = (
+            f"Create a professional, modern financial infographic banner image for Turkish stock market index update. "
+            f"Dark navy blue gradient background (#0D1B2A to #1B2838). "
+            f"Title: '{index_name} ENDEKS GUNCELLEME' in bold white text at top. "
+            f"Show green upward arrows with ticker codes {', '.join(sorted(added)[:5])} labeled 'EKLENEN' on left side. "
+            f"Show red downward arrows with ticker codes {', '.join(sorted(removed)[:5])} labeled 'CIKAN' on right side. "
+            f"Bottom text: 'Toplam {total} hisse'. "
+            f"Style: Clean, corporate, fintech aesthetic with subtle grid lines. "
+            f"Aspect ratio 16:9, 1200x675 pixels. No watermark."
         )
-        from app.services.admin_telegram import send_admin_message
 
-        new_tickers = await fetch_bist50_tickers()
-        old_tickers = get_bist50_tickers_sync()
+        import httpx
+        resp = httpx.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}",
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseModalities": ["TEXT", "IMAGE"],
+                    "responseMimeType": "text/plain",
+                },
+            },
+            timeout=60.0,
+        )
 
-        added = new_tickers - old_tickers
-        removed = old_tickers - new_tickers
-
-        if added or removed:
-            async with async_session() as db:
-                await save_bist50_to_db(db, new_tickers)
-
-            # Admin Telegram bildirimi
-            parts = [f"📊 <b>BIST 50 Guncellendi</b> ({len(new_tickers)} hisse)"]
-            if added:
-                parts.append(f"\n✅ Eklenen: {', '.join(sorted(added))}")
-            if removed:
-                parts.append(f"\n❌ Çıkan: {', '.join(sorted(removed))}")
-            await send_admin_message("\n".join(parts))
-            logger.info(
-                "BIST50 guncellendi: +%d -%d (toplam %d)",
-                len(added), len(removed), len(new_tickers),
-            )
+        if resp.status_code == 200:
+            data = resp.json()
+            for candidate in data.get("candidates", []):
+                for part in candidate.get("content", {}).get("parts", []):
+                    if "inlineData" in part:
+                        img_b64 = part["inlineData"]["data"]
+                        img_bytes = base64.b64decode(img_b64)
+                        static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app", "static", "img")
+                        os.makedirs(static_dir, exist_ok=True)
+                        fname = f"index_update_{index_name.replace(' ', '_').lower()}_{int(__import__('time').time())}.png"
+                        fpath = os.path.join(static_dir, fname)
+                        with open(fpath, "wb") as f:
+                            f.write(img_bytes)
+                        logger.info("Gemini kapak resmi olusturuldu: %s", fpath)
+                        return fpath
         else:
-            logger.info("BIST50 degisiklik yok (%d hisse)", len(new_tickers))
-            await send_admin_message(
-                f"📊 BIST 50 kontrol edildi — değişiklik yok ({len(new_tickers)} hisse)"
-            )
+            logger.warning("Gemini image hatasi HTTP %d: %s", resp.status_code, resp.text[:200])
 
     except Exception as e:
-        logger.error("BIST50 guncelleme hatasi: %s", e)
+        logger.error("Gemini kapak resmi hatasi: %s", e)
+    return None
+
+
+async def _save_index_to_db(index_key: str, tickers: set[str]):
+    """Endeks listesini DB'ye kaydet (ScraperState key-value)."""
+    import json
+    from datetime import datetime
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(ScraperState).where(ScraperState.key == index_key)
+        )
+        state = result.scalar_one_or_none()
+        tickers_json = json.dumps(sorted(tickers))
+
+        if state:
+            state.value = tickers_json
+            state.updated_at = datetime.utcnow()
+        else:
+            db.add(ScraperState(key=index_key, value=tickers_json))
+        await db.commit()
+
+
+async def _load_index_from_db(index_key: str) -> set[str]:
+    """DB'den endeks listesini yukle."""
+    import json
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(ScraperState).where(ScraperState.key == index_key)
+        )
+        state = result.scalar_one_or_none()
+        if state and state.value:
+            try:
+                return set(json.loads(state.value))
+            except Exception:
+                pass
+    return set()
+
+
+async def update_bist_indices_job():
+    """Her ayin 1'inde BIST 30/50/100 listelerini guncelle ve tweet at.
+
+    Her endeks icin: scrape → karsilastir → DB kaydet → tweet at (degisiklik varsa)
+    """
+    from app.scrapers.bist_index_scraper import fetch_bist30_tickers, fetch_bist50_tickers, fetch_bist100_tickers
+    from app.services.news_service import (
+        get_bist50_tickers_sync, save_bist50_to_db, set_bist50_cache,
+    )
+    from app.services.admin_telegram import send_admin_message
+    from app.services.twitter_service import _safe_tweet_with_media, _safe_tweet
+
+    indices = [
+        ("BIST 30", "bist30_tickers", fetch_bist30_tickers),
+        ("BIST 50", "bist50_tickers", fetch_bist50_tickers),
+        ("BIST 100", "bist100_tickers", fetch_bist100_tickers),
+    ]
+
+    all_results = []
+
+    for index_name, db_key, fetch_fn in indices:
         try:
-            from app.services.admin_telegram import notify_scraper_error
-            await notify_scraper_error("bist50_index_update", str(e))
-        except Exception:
-            pass
+            new_tickers = await fetch_fn()
+
+            # Mevcut listeyi DB'den al
+            if db_key == "bist50_tickers":
+                old_tickers = get_bist50_tickers_sync()
+            else:
+                old_tickers = await _load_index_from_db(db_key)
+
+            added = new_tickers - old_tickers if old_tickers else set()
+            removed = old_tickers - new_tickers if old_tickers else set()
+
+            # DB kaydet
+            if db_key == "bist50_tickers":
+                async with async_session() as db:
+                    await save_bist50_to_db(db, new_tickers)
+                set_bist50_cache(new_tickers)
+            else:
+                await _save_index_to_db(db_key, new_tickers)
+
+            if added or removed:
+                all_results.append({
+                    "name": index_name,
+                    "total": len(new_tickers),
+                    "added": added,
+                    "removed": removed,
+                })
+
+                # Admin Telegram bildirimi
+                parts = [f"📊 <b>{index_name} Guncellendi</b> ({len(new_tickers)} hisse)"]
+                if added:
+                    parts.append(f"\n✅ Eklenen: {', '.join(sorted(added))}")
+                if removed:
+                    parts.append(f"\n❌ Çıkan: {', '.join(sorted(removed))}")
+                await send_admin_message("\n".join(parts))
+
+                logger.info(
+                    "%s guncellendi: +%d -%d (toplam %d)",
+                    index_name, len(added), len(removed), len(new_tickers),
+                )
+            else:
+                if not old_tickers:
+                    logger.info("%s ilk kayit: %d hisse DB'ye kaydedildi", index_name, len(new_tickers))
+                    await send_admin_message(f"📊 {index_name} ilk kayit: {len(new_tickers)} hisse kaydedildi")
+                else:
+                    logger.info("%s degisiklik yok (%d hisse)", index_name, len(new_tickers))
+
+        except Exception as e:
+            logger.error("%s guncelleme hatasi: %s", index_name, e)
+            try:
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error(f"{db_key}_update", str(e))
+            except Exception:
+                pass
+
+    # Degisiklik olan endeksler icin tweet at
+    if all_results:
+        for result in all_results:
+            try:
+                name = result["name"]
+                added = result["added"]
+                removed = result["removed"]
+                total = result["total"]
+
+                tweet_parts = [f"📊 {name} ENDEKSİ GÜNCELLENDİ! ({total} hisse)\n"]
+                if added:
+                    tweet_parts.append(f"✅ Eklenen: {', '.join(sorted(added))}")
+                if removed:
+                    tweet_parts.append(f"❌ Çıkan: {', '.join(sorted(removed))}")
+                tweet_parts.append("")
+                tweet_parts.append(f"Detaylar ve güncel liste 📲 uygulamamızdan takip edebilirsiniz.")
+                tweet_parts.append("")
+
+                # Hashtag'ler
+                hashtags = ["#Borsa", "#BIST100"]
+                for t in sorted(added)[:3]:
+                    hashtags.append(f"#{t}")
+                for t in sorted(removed)[:2]:
+                    hashtags.append(f"#{t}")
+                if "30" in name:
+                    hashtags.append("#BIST30")
+                elif "50" in name:
+                    hashtags.append("#BIST50")
+                tweet_parts.append(" ".join(hashtags[:8]))
+
+                tweet_text = "\n".join(tweet_parts)
+
+                # Gemini kapak resmi
+                cover = await _generate_index_cover_image(name, added, removed, total)
+                if cover:
+                    _safe_tweet_with_media(tweet_text, cover, source=f"tweet_{name.replace(' ', '_').lower()}_update")
+                else:
+                    _safe_tweet(tweet_text, source=f"tweet_{name.replace(' ', '_').lower()}_update")
+
+                logger.info("%s tweet atildi", name)
+            except Exception as e:
+                logger.error("%s tweet hatasi: %s", name, e)
+
+    # Hic degisiklik yoksa admin bilgilendir
+    if not all_results:
+        await send_admin_message("📊 BIST 30/50/100 kontrol edildi — hiçbir endekste değişiklik yok")
+
+
+# Eski uyumluluk
+async def update_bist50_index_job():
+    """Geriye uyumluluk — artik update_bist_indices_job kullanilir."""
+    await update_bist_indices_job()
 
 
 async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
@@ -3875,12 +4056,12 @@ def _setup_scheduler_impl():
     #     replace_existing=True,
     # )
 
-    # 24. BIST 50 Endeks Guncelleme — her ayin 1'i 09:00 TR (UTC 06:00)
+    # 24. BIST 30/50/100 Endeks Guncelleme — her ayin 1'i 09:00 TR (UTC 06:00)
     scheduler.add_job(
-        update_bist50_index_job,
+        update_bist_indices_job,
         CronTrigger(day=1, hour=6, minute=0),
-        id="bist50_index_update",
-        name="BIST 50 Endeks Guncelleme (Ayin 1'i 09:00 TR)",
+        id="bist_indices_update",
+        name="BIST 30/50/100 Endeks Guncelleme (Ayin 1'i 09:00 TR)",
         replace_existing=True,
     )
 

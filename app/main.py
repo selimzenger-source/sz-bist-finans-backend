@@ -6446,7 +6446,7 @@ async def admin_generate_ai_report(request: Request, ipo_id: int, payload: dict,
 
 
 # -------------------------------------------------------
-# Admin: BIST 50 Endeks Yonetimi
+# Admin: BIST 30/50/100 Endeks Yonetimi
 # -------------------------------------------------------
 
 @app.post("/api/v1/admin/bist50-update")
@@ -6477,6 +6477,22 @@ async def admin_bist50_update(request: Request, payload: dict, db: AsyncSession 
         "added": sorted(added) if added else [],
         "removed": sorted(removed) if removed else [],
     }
+
+
+@app.post("/api/v1/admin/bist-indices-update")
+@limiter.limit("3/minute")
+async def admin_bist_indices_update(request: Request, payload: dict):
+    """BIST 30/50/100 hepsini guncelle + degisiklik varsa tweet at.
+
+    {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.scheduler import update_bist_indices_job
+    await update_bist_indices_job()
+
+    return {"success": True, "message": "BIST 30/50/100 guncelleme ve tweet islemi tamamlandi"}
 
 
 # -------------------------------------------------------
