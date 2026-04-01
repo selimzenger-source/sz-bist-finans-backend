@@ -502,7 +502,7 @@ async def _send_telegram_photo(image_path: str, caption: str) -> bool:
         return False
 
 
-async def _send_telegram_message(text: str) -> bool:
+async def _send_telegram_message(text: str, disable_preview: bool = False) -> bool:
     """Telegram'a mesaj gonder."""
     settings = get_settings()
     bot_token = settings.ADMIN_TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
@@ -512,13 +512,16 @@ async def _send_telegram_message(text: str) -> bool:
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload: dict = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+    if disable_preview:
+        payload["disable_web_page_preview"] = True
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-            })
+            resp = await client.post(url, json=payload)
             return resp.status_code == 200
     except Exception as e:
         logger.error("Telegram mesaj hatasi: %s", e)
@@ -795,10 +798,24 @@ async def _send_news_to_telegram(tweet_data: dict):
     else:
         await _send_telegram_message(caption)
 
-    # Tweet metnini ayri mesaj — normal formatta (code blogu degil)
+    # Tweet onizleme — eski format (baslik + metin + bilgiler)
     tweet_text = tweet_data.get("tweet_text", "")
-    if tweet_text:
-        await _send_telegram_message(tweet_text[:4000])
+    cover_url = tweet_data.get("cover_url")
+    cover_path = tweet_data.get("cover_path")
+    has_cover = bool(cover_url or (cover_path and os.path.exists(cover_path)))
+
+    queue_pos = len(_pending_news)
+    preview_lines = [
+        f"<b>\U0001f4cb Haber Tweet Onizleme [{queue_pos}/{_MAX_QUEUE_SIZE}]</b>\n",
+        tweet_text[:3800] if tweet_text else "(metin yok)",
+        f"\n({text_len} karakter)",
+        f"\u2705 Kapak resmi hazir" if has_cover else "\u274c Kapak resmi yok",
+        "",
+        "\u2705 <code>/onay {0}</code> — Tweet'i gonder".format(queue_pos),
+        "\u274c <code>/iptal {0}</code> — Atla".format(queue_pos),
+        "\U0001f4dd Duzeltme yazmak istersen direkt yaz",
+    ]
+    await _send_telegram_message("\n".join(preview_lines), disable_preview=True)
 
     # Kuyruk ozeti gonder
     await _send_queue_summary()
