@@ -448,16 +448,17 @@ async def get_public_news_feed(
     days: int = Query(15, le=60),
     limit: int = Query(100, le=200),
 ):
-    """Son N gunun gonderilmis tweetlerini blog formatta doner (VIOP haric)."""
+    """Son N gunun haber tweetlerini blog formatta doner (sadece news sources)."""
     import re
+    # Sadece haber kaynaklari — tavan/taban, EDO, snapshot, IPO operasyonel tweetleri haric
+    NEWS_SOURCES = {"bot_proxy", "news_scanner", "tweet_bist30_news", "tweet_kap_news"}
     cutoff = datetime.utcnow() - timedelta(days=days)
     stmt = (
         select(PendingTweet)
         .where(
             PendingTweet.status == "sent",
             PendingTweet.sent_at >= cutoff,
-            ~PendingTweet.text.ilike("%VİOP%"),
-            ~PendingTweet.text.ilike("%VIOP%"),
+            PendingTweet.source.in_(NEWS_SOURCES),
         )
         .order_by(desc(PendingTweet.sent_at))
         .limit(limit)
