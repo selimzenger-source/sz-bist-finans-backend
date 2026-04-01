@@ -3130,7 +3130,7 @@ async def update_bist_indices_job():
                 })
 
                 # Admin Telegram bildirimi
-                parts = [f"📊 <b>{index_name} Guncellendi</b> ({len(new_tickers)} hisse)"]
+                parts = [f"📊 <b>{index_name} Guncellendi</b>"]
                 if added:
                     parts.append(f"\n✅ Eklenen: {', '.join(sorted(added))}")
                 if removed:
@@ -3165,7 +3165,7 @@ async def update_bist_indices_job():
                 removed = result["removed"]
                 total = result["total"]
 
-                tweet_parts = [f"📊 {name} ENDEKSİ GÜNCELLENDİ! ({total} hisse)\n"]
+                tweet_parts = [f"📊 {name} ENDEKSİ GÜNCELLENDİ!\n"]
                 if added:
                     tweet_parts.append(f"✅ Eklenen: {', '.join(sorted(added))}")
                 if removed:
