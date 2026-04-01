@@ -1161,6 +1161,23 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
             except Exception:
                 pass
 
+            # Push bildirim — tavan/taban listesi hazir
+            try:
+                from app.services.notification import NotificationService
+                c_count = len(c_stats) if c_stats else 0
+                f_count = len(fl_stats) if fl_stats else 0
+                if c_count > 0 or f_count > 0:
+                    date_label = today.strftime("%-d %B %A").replace(
+                        "Monday", "Pazartesi").replace("Tuesday", "Salı").replace(
+                        "Wednesday", "Çarşamba").replace("Thursday", "Perşembe").replace(
+                        "Friday", "Cuma")
+                    async with async_session() as notif_session:
+                        notif_svc = NotificationService(notif_session)
+                        await notif_svc.notify_tavan_taban(c_count, f_count, date_label)
+                        await notif_session.commit()
+            except Exception as e:
+                logger.error("Tavan/taban push bildirim hatasi: %s", e)
+
             logger.info("Market close analysis completed (tweet_ok=%s).", tweet_ok)
             return # DB kaydedildi, tweet denendi
 

@@ -528,6 +528,87 @@ async def scrape_halkarz_gedik():
             pass
 
 
+# ── VİOP tweetleri icin push bildirim ──
+# Son kontrol zamanini tut — duplicate onleme
+_viop_last_check: float = 0
+_viop_notified_ids: set = set()
+
+
+async def check_viop_notifications():
+    """Son 5 dk icinde gonderilen VİOP tweetlerini kontrol edip bildirim gonder.
+
+    Sadece acilis, kapanis ve flash tweetleri icin bildirim gider.
+    """
+    global _viop_last_check, _viop_notified_ids
+    import time as _time
+    now = _time.time()
+
+    # Ilk calismada sadece zamani kaydet
+    if _viop_last_check == 0:
+        _viop_last_check = now
+        return
+
+    try:
+        from sqlalchemy import select, desc
+        from app.models.pending_tweet import PendingTweet
+        from datetime import datetime, timedelta
+
+        cutoff = datetime.utcnow() - timedelta(minutes=6)
+
+        async with async_session() as session:
+            stmt = (
+                select(PendingTweet)
+                .where(
+                    PendingTweet.status == "sent",
+                    PendingTweet.sent_at >= cutoff,
+                    PendingTweet.text.ilike("%VİOP%"),
+                )
+                .order_by(desc(PendingTweet.sent_at))
+                .limit(10)
+            )
+            result = await session.execute(stmt)
+            tweets = result.scalars().all()
+
+            if not tweets:
+                _viop_last_check = now
+                return
+
+            from app.services.notification import NotificationService
+            notif_svc = NotificationService(session)
+
+            for tw in tweets:
+                if tw.id in _viop_notified_ids:
+                    continue
+
+                text_lower = tw.text.lower()
+
+                # Acilis
+                if "açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower:
+                    await notif_svc.notify_viop_session("opening")
+                    _viop_notified_ids.add(tw.id)
+                # Kapanis
+                elif "kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower:
+                    await notif_svc.notify_viop_session("closing")
+                    _viop_notified_ids.add(tw.id)
+                # Flash
+                elif "flash" in text_lower or "flaş" in text_lower:
+                    # Flash iceriginden ozet cikar
+                    summary = tw.text[:120].replace("\n", " ").strip()
+                    await notif_svc.notify_viop_session("flash", summary)
+                    _viop_notified_ids.add(tw.id)
+
+            await session.commit()
+
+        # Eski ID'leri temizle (memory leak onleme)
+        if len(_viop_notified_ids) > 200:
+            _viop_notified_ids = set(list(_viop_notified_ids)[-50:])
+
+        _viop_last_check = now
+
+    except Exception as e:
+        logger.error("VİOP bildirim kontrol hatasi: %s", e)
+
+
 async def poll_telegram_job():
     """Telegram kanalindan mesajlari ceker ve DB'ye yazar."""
     try:
@@ -4141,6 +4222,17 @@ def _setup_scheduler_impl():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=7200, # 2 saat grace — Render uyku koruması
+    )
+
+    # ─── VİOP Bildirim Kontrol — Her 5 dk ───
+    scheduler.add_job(
+        check_viop_notifications,
+        IntervalTrigger(minutes=5),
+        id="viop_notification_check",
+        name="VİOP Bildirim Kontrol (5dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
 
     # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───

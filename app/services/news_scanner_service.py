@@ -873,6 +873,19 @@ async def approve_news(index: int) -> dict:
         # DB'ye kaydet
         await _save_news_to_db(tweet_data)
 
+        # Push bildirim — onemli haber
+        try:
+            from app.database import async_session
+            from app.services.notification import NotificationService
+            headline = tweet_data.get("headline", "Önemli gelişme")
+            async with async_session() as notif_session:
+                notif_svc = NotificationService(notif_session)
+                await notif_svc.notify_market_news(headline)
+                await notif_session.commit()
+            logger.info("Piyasa haberi push bildirim gonderildi: %s", headline[:50])
+        except Exception as e:
+            logger.error("Piyasa haberi push bildirim hatasi: %s", e)
+
         # Kuyruktan cikar
         _pending_news.pop(idx)
 

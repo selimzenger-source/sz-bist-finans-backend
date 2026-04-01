@@ -830,6 +830,16 @@ async def _check_spk_bulletins_inner():
                         logger.warning("Scraper boost aktivasyon hatasi: %s", _boost_err)
 
                 # ────────────────────────────────────────────
+                # Push Bildirim: Yeni SPK Bülteni
+                # ────────────────────────────────────────────
+                try:
+                    await notif_service.notify_spk_bulletin(bno_str_val)
+                    await session.commit()
+                    logger.info("SPK bulten push bildirim gonderildi: %s", bno_str_val)
+                except Exception as _push_err:
+                    logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
+
+                # ────────────────────────────────────────────
                 # Telegram: Yeni SPK Bülteni Tespit Bildirimi
                 # ────────────────────────────────────────────
                 try:

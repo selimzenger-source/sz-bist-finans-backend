@@ -1363,3 +1363,77 @@ class NotificationService:
             pass
 
         return sent_count
+
+    # -------------------------------------------------------
+    # Genel Piyasa Bildirimleri (Tavan/Taban, Haberler, SPK, VİOP)
+    # -------------------------------------------------------
+
+    async def notify_tavan_taban(self, ceiling_count: int, floor_count: int, date_label: str) -> int:
+        """Gunluk tavan/taban listesi hazir bildirimi — gunde 1 kez."""
+        title = "📊 Günün Tavan/Taban Hisseleri"
+        body = f"{date_label} kapanış: {ceiling_count} tavan, {floor_count} taban hisse"
+
+        data = {
+            "type": "tavan_taban",
+            "screen": "tavan-taban-gunluk",
+        }
+
+        return await self._send_filtered(
+            "notify_daily_open_close", title, body, data,
+            f"Tavan/Taban: {ceiling_count}T/{floor_count}Tb",
+        )
+
+    async def notify_market_news(self, headline: str) -> int:
+        """Onemli piyasa haberi bildirimi."""
+        title = "📰 Piyasa Haberi"
+        body = headline[:150]
+
+        data = {
+            "type": "market_news",
+            "screen": "haberler-genel",
+        }
+
+        return await self._send_filtered(
+            "notify_daily_open_close", title, body, data,
+            f"Piyasa haberi: {headline[:50]}",
+        )
+
+    async def notify_spk_bulletin(self, bulletin_no: str) -> int:
+        """Yeni SPK bulteni tespit edildi bildirimi."""
+        title = "📋 Yeni SPK Bülteni"
+        body = f"SPK Bülten {bulletin_no} yayınlandı — halka arz kararları ve düzenleyici gelişmeler"
+
+        data = {
+            "type": "spk_bulletin",
+            "bulletin_no": bulletin_no,
+            "screen": "spk-bulten-analiz",
+        }
+
+        return await self._send_filtered(
+            "notify_new_ipo", title, body, data,
+            f"SPK Bülten: {bulletin_no}",
+        )
+
+    async def notify_viop_session(self, session_type: str, summary: str = "") -> int:
+        """VİOP seans bildirimi — acilis, kapanis veya flash.
+
+        session_type: 'opening', 'closing', 'flash'
+        """
+        type_labels = {
+            "opening": ("🔔 VİOP Gece Seansı Açıldı", "Vadeli işlem piyasası gece seansı başladı"),
+            "closing": ("🔕 VİOP Gece Seansı Kapandı", "Gece seansı kapandı"),
+            "flash": ("⚡ VİOP Flash", summary or "Önemli VİOP hareketi tespit edildi"),
+        }
+        title, default_body = type_labels.get(session_type, ("VİOP", "VİOP güncelleme"))
+        body = summary or default_body
+
+        data = {
+            "type": "viop_session",
+            "session_type": session_type,
+            "screen": "viop-gece-seansi",
+        }
+
+        return await self._send_filtered(
+            "notify_daily_open_close", title, body, data,
+            f"VİOP {session_type}",
+        )
