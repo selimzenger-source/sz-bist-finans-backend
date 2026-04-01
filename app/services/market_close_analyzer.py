@@ -18,6 +18,7 @@ from app.config import get_settings
 # Store linkleri — tweet metinlerinde kullanılır
 HALKAARZ_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 APP_STORE_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
+WEB_LINK = "https://borsacebimde.app/"
 
 # Gemini SDK kaldırıldı — diğer servisler REST API kullanıyor, bu dosyada artık gerek yok
 
@@ -1052,14 +1053,16 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"⚠️ Günsonu analizidir.\n"
                         f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}"
+                        f"🍏 iOS: {APP_STORE_LINK}\n"
+                        f"🌐 Web: {WEB_LINK}"
                     )
                 else:
                     tweet_text = (
                         f"📈 Bugün TAVAN yapan hisse yok!\n\n"
                         f"En çok yükselen hisseler görselde! 📊👇\n\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}"
+                        f"🍏 iOS: {APP_STORE_LINK}\n"
+                        f"🌐 Web: {WEB_LINK}"
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=tavan_images,
@@ -1108,14 +1111,16 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"⚠️ Günsonu analizidir.\n"
                         f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}"
+                        f"🍏 iOS: {APP_STORE_LINK}\n"
+                        f"🌐 Web: {WEB_LINK}"
                     )
                 else:
                     tweet_text = (
                         f"📉 Bugün TABAN yapan hisse yok!\n\n"
                         f"En çok düşen hisseler görselde! 📊👇\n\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}"
+                        f"🍏 iOS: {APP_STORE_LINK}\n"
+                        f"🌐 Web: {WEB_LINK}"
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=taban_images,
