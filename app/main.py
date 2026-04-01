@@ -450,16 +450,38 @@ async def get_public_news_feed(
 ):
     """Son N gunun haber tweetlerini blog formatta doner (sadece news sources)."""
     import re
-    # Sadece haber kaynaklari — tavan/taban, EDO, snapshot, IPO operasyonel tweetleri haric
-    NEWS_SOURCES = {"bot_proxy", "news_scanner", "tweet_bist30_news", "tweet_kap_news"}
+    # Sadece haber kaynaklari — VİOP, tavan/taban, EDO, snapshot, IPO haric
+    NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news"}
+    # bot_proxy kaynaginda VİOP olmayan haberleri de al
+    _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
+    _TAVAN_KEYWORDS = ["%tavan yap%", "%taban yap%", "%Günün Tavan%", "%Günün Taban%", "%EDO eşiğ%"]
     cutoff = datetime.utcnow() - timedelta(days=days)
-    stmt = (
+
+    # 1) Bilinen haber source'lari
+    stmt1 = (
         select(PendingTweet)
         .where(
             PendingTweet.status == "sent",
             PendingTweet.sent_at >= cutoff,
             PendingTweet.source.in_(NEWS_SOURCES),
         )
+    )
+    # 2) bot_proxy'den sadece haber olanlar (VİOP + tavan/taban haric)
+    bot_proxy_filter = [
+        PendingTweet.status == "sent",
+        PendingTweet.sent_at >= cutoff,
+        PendingTweet.source == "bot_proxy",
+    ]
+    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS:
+        bot_proxy_filter.append(~PendingTweet.text.ilike(kw))
+
+    stmt2 = select(PendingTweet).where(*bot_proxy_filter)
+
+    from sqlalchemy import union_all
+    combined = union_all(stmt1, stmt2).subquery()
+    stmt = (
+        select(PendingTweet)
+        .join(combined, PendingTweet.id == combined.c.id)
         .order_by(desc(PendingTweet.sent_at))
         .limit(limit)
     )
