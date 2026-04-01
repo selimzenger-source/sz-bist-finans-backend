@@ -798,24 +798,10 @@ async def _send_news_to_telegram(tweet_data: dict):
     else:
         await _send_telegram_message(caption)
 
-    # Tweet onizleme — eski format (baslik + metin + bilgiler)
+    # Tweet metnini ayri mesaj — code blogu ile (link preview onlenir)
     tweet_text = tweet_data.get("tweet_text", "")
-    cover_url = tweet_data.get("cover_url")
-    cover_path = tweet_data.get("cover_path")
-    has_cover = bool(cover_url or (cover_path and os.path.exists(cover_path)))
-
-    queue_pos = len(_pending_news)
-    preview_lines = [
-        f"<b>\U0001f4cb Haber Tweet Onizleme [{queue_pos}/{_MAX_QUEUE_SIZE}]</b>\n",
-        tweet_text[:3800] if tweet_text else "(metin yok)",
-        f"\n({text_len} karakter)",
-        f"\u2705 Kapak resmi hazir" if has_cover else "\u274c Kapak resmi yok",
-        "",
-        "\u2705 <code>/onay {0}</code> — Tweet'i gonder".format(queue_pos),
-        "\u274c <code>/iptal {0}</code> — Atla".format(queue_pos),
-        "\U0001f4dd Duzeltme yazmak istersen direkt yaz",
-    ]
-    await _send_telegram_message("\n".join(preview_lines), disable_preview=True)
+    if tweet_text:
+        await _send_telegram_message(f"<code>{tweet_text[:4000]}</code>", disable_preview=True)
 
     # Kuyruk ozeti gonder
     await _send_queue_summary()
