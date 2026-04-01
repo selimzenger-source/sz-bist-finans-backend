@@ -250,10 +250,14 @@ async def _fetch_all_rss() -> list[dict]:
 _IMPORTANCE_PROMPT = """Sen bir finans haberi analizcisisin. Haberin BIST borsa yatirimcilari icin onemini 1-10 arasi puanla.
 
 PUANLAMA KRITERLERI:
-- 8+: Piyasa hareketlendirecek haber (BIST sirketleri, TCMB, BDDK, buyuk halka arz, sert doviz/endeks hareketi)
-- 9+: Global flas (savas, surpriz faiz, finansal kriz) — gunde max 1
-- 5-7: Orta onem, rutin kararlar, kucuk sirket haberleri
+- 9-10: BIST sirket haberi (kar/zarar, ortaklik, satin alma, halka arz), TCMB faiz karari, buyuk regülasyon
+- 8-9: Sektor haberleri (enerji, banka, otomotiv vb.), Turkiye ekonomisi (enflasyon, buyume, ihracat), sert kur hareketi
+- 8+: Global flas (savas, surpriz faiz, finansal kriz) — gunde max 1
+- 5-7: Orta onem, rutin kararlar, kucuk sirket haberleri, genel ekonomi
 - 1-4: Kapsam disi (spor, magazin, yabanci sirket, rutin diplomasi, genel siyaset)
+
+ONCELIK: Sirket haberleri ve Turkiye ekonomisi haberleri EN YUKSEK oncelikli.
+Global haberler sadece piyasayi dogrudan etkileyecekse yuksek puan al.
 
 DIKKAT: Eger ozet kismi cerez politikasi, gizlilik politikasi, KVKK veya site kullanim kosullari ile ilgiliyse
 bu bir HABER DEGILDIR — PUAN 0 ver. RSS feed bazen site yasal metinlerini icerir, bunlari yoksay.
@@ -329,21 +333,27 @@ async def _ai_evaluate(news: dict) -> dict | None:
 
 # ── Tweet Metin + Kapak Resmi ───────────────────────────
 
-_TWEET_PROMPT = """Sen bir finans haber editosusin. Asagidaki haberi kisa ve etkili bir tweet haline getir.
+_TWEET_PROMPT = """Sen bir BIST borsa analizcisi ve finans haber editorusun. Asagidaki haberi Turk borsasi yatirimcilari icin YORUMLAYARAK tweet haline getir.
 
 Haber:
 Baslik: {title}
 Ozet: {summary}
 Kaynak: {source}
 Kategori: {category}
+Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 5-7 cumle, sade ve bilgilendirici. Yatirimci perspektifi. Neden onemli, ne etkisi olabilir.
-  ONEMLI: Tweet icerigini SADECE baslik ve ozetten yaz. Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
+- OZET: 5-7 cumle. Sadece ozetleme — YORUM KAT, BAGLAM KUR:
+  * Haberin BIST'teki hangi sektoru/sirketleri etkileyecegini yaz
+  * "Bu gelisme ... sektorunu olumlu/olumsuz etkileyebilir" gibi yorumlar ekle
+  * Sirket haberi ise: sirketin BIST performansi, sektor pozisyonu hakkinda kisa baglam ver
+  * Turkiye ekonomisi haberi ise: TCMB, faiz, enflasyon, kur etkisi baglami kur
+  * Sektor haberi ise: sektordeki BIST sirketlerini (THYAO, GARAN vb.) yorumla
+  * ISTISNA: Cok buyuk global olaylar (savas, deprem, finansal kriz) icin sadece ozetle, sektor baglami zorlama
+  ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz. Bunlar haber degildir.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
-  Haberde sirket gecmiyorsa "YOK" yaz.
-  Tahmin etme, uydurma — sadece haberde acikca gecen sirketleri yaz.
+  Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
 
 Format:
@@ -364,6 +374,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         summary=news.get("summary", "")[:500],
         source=news["source"],
         category=ai_result["category"],
+        sector=ai_result.get("sector", "YOK"),
     )
 
     try:
