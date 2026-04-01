@@ -4189,6 +4189,28 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Haber Tarama — her 10 dakikada bir (Pzt-Cum 08:00-23:00 TR) ───
+    scheduler.add_job(
+        news_scanner_job,
+        IntervalTrigger(minutes=10),
+        id="news_scanner",
+        name="Haber Tarama (10dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── Haber State Temizligi — her gun 03:00 TR (UTC 00:00) ───
+    scheduler.add_job(
+        news_cleanup_job,
+        CronTrigger(hour=0, minute=0),
+        id="news_cleanup",
+        name="Haber State Temizligi (03:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
@@ -4203,6 +4225,54 @@ def _setup_scheduler_impl():
     # Eksik raporlar günlük 10:00 TR cron ile üretilecek (MAX_PER_CYCLE=2)
     # asyncio.get_event_loop().create_task(_delayed_ai_catchup())
 
+
+
+async def news_scanner_job():
+    """Haber tarama job — 10 dakikada bir calisir.
+
+    RSS kaynaklarini tarar, AI ile puanlar, onemli haberleri Telegram'a gonderir.
+    TWITTER_AUTO_SEND True ise direkt tweet atar.
+    """
+    try:
+        settings = get_settings()
+
+        # Saat kontrolu: sadece 08:00-23:00 TR arasi (hafta ici + hafta sonu)
+        now_tr = datetime.now(_TR_TZ)
+        if now_tr.hour < 8 or now_tr.hour >= 23:
+            logger.debug("Haber tarama: saat %02d, atlanıyor (08-23 arasi calisir)", now_tr.hour)
+            return
+
+        from app.services.news_scanner_service import scan_news, process_important_news
+
+        important = await scan_news()
+        if not important:
+            return
+
+        auto_tweet = settings.TWITTER_AUTO_SEND
+        processed = await process_important_news(important, auto_tweet=auto_tweet)
+
+        if processed:
+            logger.info(
+                "Haber tarama: %d onemli, %d islendi (auto=%s)",
+                len(important), len(processed), auto_tweet,
+            )
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(
+                f"📰 Haber tarama: {len(processed)} haber islendi"
+                f" ({'otomatik tweet' if auto_tweet else 'onay bekliyor'})",
+                silent=True,
+            )
+    except Exception as e:
+        logger.error("Haber tarama job hatasi: %s", e)
+
+
+async def news_cleanup_job():
+    """Haber state temizligi — gunde 1 calisir."""
+    try:
+        from app.services.news_scanner_service import cleanup_old_state
+        cleanup_old_state()
+    except Exception as e:
+        logger.error("Haber cleanup hatasi: %s", e)
 
 
 def shutdown_scheduler():

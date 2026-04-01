@@ -470,19 +470,33 @@ async def get_public_news_feed(
         text = re.sub(r'#\w+', '', text)
         # Remove URLs (store links, t.co links, etc.)
         text = re.sub(r'https?://\S+', '', text)
-        # Remove Android/iOS store references
+        # Remove Android/iOS/Web store references
         text = re.sub(r'📲?\s*Android:?\s*', '', text)
         text = re.sub(r'🍏?\s*iOS:?\s*', '', text)
+        text = re.sub(r'🌐?\s*Web:?\s*', '', text)
         # Remove multiple spaces/newlines
         text = re.sub(r'\n{3,}', '\n\n', text.strip())
         text = re.sub(r'[ \t]+', ' ', text)
         return text.strip()
 
+    def _image_url(path: str | None) -> str | None:
+        if not path:
+            return None
+        # Cloudinary veya diger HTTP URL
+        if path.startswith("http"):
+            return path
+        # Zaten relative path (/static/img/...)
+        if path.startswith("/static/"):
+            return path
+        # Eski format: mutlak yol veya sadece dosya adi
+        filename = path.replace("\\", "/").split("/")[-1]
+        return f"/static/img/{filename}"
+
     return [
         {
             "id": t.id,
             "text": clean_text(t.text),
-            "image_url": f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None,
+            "image_url": _image_url(t.image_path),
             "source": t.source,
             "sent_at": t.sent_at.isoformat() if t.sent_at else None,
             "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -7474,3 +7488,69 @@ async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)
         if not settings.is_production:
             resp["traceback"] = traceback.format_exc()[-1000:]
         return resp
+
+
+# ================================================================
+# HABER TARAMA ADMIN ENDPOINTLERI
+# ================================================================
+
+@app.post("/api/v1/admin/news-scan")
+async def admin_trigger_news_scan(body: dict):
+    """Manuel haber tarama tetikle."""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.news_scanner_service import scan_news, process_important_news
+
+    important = await scan_news()
+    auto_tweet = body.get("auto_tweet", False)
+    processed = await process_important_news(important, auto_tweet=auto_tweet)
+
+    return {
+        "status": "ok",
+        "scanned": True,
+        "important_count": len(important),
+        "processed_count": len(processed),
+        "auto_tweet": auto_tweet,
+        "headlines": [p.get("headline", "?") for p in processed],
+    }
+
+
+@app.post("/api/v1/admin/news-approve")
+async def admin_approve_news(body: dict):
+    """Telegram'dan onay bekleyen haberi tweet at."""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    index = body.get("index", 0)
+
+    from app.services.news_scanner_service import approve_news
+    result = await approve_news(index)
+    return result
+
+
+@app.post("/api/v1/admin/news-reject")
+async def admin_reject_news(body: dict):
+    """Haberi kuyruktan cikar."""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    index = body.get("index", 0)
+
+    from app.services.news_scanner_service import reject_news
+    result = await reject_news(index)
+    return result
+
+
+@app.get("/api/v1/admin/news-queue")
+async def admin_news_queue(admin_password: str = ""):
+    """Bekleyen haber kuyrugunu goster."""
+    settings = get_settings()
+    if admin_password != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.news_scanner_service import get_queue
+    return {"queue": get_queue()}
