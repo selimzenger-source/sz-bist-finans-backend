@@ -27,6 +27,13 @@ _WATCHLIST_NOTIF_COOLDOWN = 300  # 5 dakika — ayni ticker icin minimum bekleme
 _WATCHLIST_CACHE_CLEANUP_INTERVAL = 3600  # 1 saat — cache temizleme araligi
 _watchlist_cache_last_cleanup: float = 0
 
+# ─── FCM Token Dedup (Çift Bildirim Önleme) ───
+# Aynı FCM token'a aynı başlıkla kısa süre içinde tekrar push göndermeyi engeller.
+# Sorun: Aynı cihazın birden fazla user kaydı olabilir (reinstall, veri silme vb.)
+# Key: "fcm_token:title_hash" → Value: son gönderim zamanı (epoch)
+_fcm_dedup_cache: dict[str, float] = {}
+_FCM_DEDUP_SECONDS = 60  # 60 saniye — aynı token+başlık için minimum bekleme
+
 
 def _cleanup_watchlist_cache():
     """Eski cache girdilerini temizle (memory leak onleme)."""
@@ -290,6 +297,28 @@ class NotificationService:
 
         fcm = (user.fcm_token or "").strip()
         expo = (user.expo_push_token or "").strip()
+
+        # ─── FCM Token Dedup — aynı token+başlık çift gönderim önleme ───
+        # Aynı cihazın birden fazla user kaydı olabilir (reinstall/veri silme)
+        # Bu durumda aynı FCM token'a aynı bildirimi tekrar gönderme
+        token_for_dedup = fcm or expo
+        if token_for_dedup:
+            dedup_key = f"{token_for_dedup}:{hash(title)}"
+            now = time.time()
+            last_sent = _fcm_dedup_cache.get(dedup_key, 0)
+            if now - last_sent < _FCM_DEDUP_SECONDS:
+                logger.info(
+                    "[FCM DEDUP] Çift bildirim engellendi: %s → user_id=%s (%.0fs önce gönderildi)",
+                    title[:40], getattr(user, 'id', '?'), now - last_sent,
+                )
+                return False
+            _fcm_dedup_cache[dedup_key] = now
+            # Eski girdileri temizle (memory leak önleme)
+            if len(_fcm_dedup_cache) > 5000:
+                cutoff = now - _FCM_DEDUP_SECONDS * 2
+                expired = [k for k, v in _fcm_dedup_cache.items() if v < cutoff]
+                for k in expired:
+                    del _fcm_dedup_cache[k]
 
         success = False
         if fcm:

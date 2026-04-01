@@ -3313,6 +3313,7 @@ async def update_ceiling_track(
     }
 
 
+
 @app.post("/api/v1/realtime-notification")
 @limiter.limit("20/minute")
 async def send_realtime_notification(
@@ -3334,6 +3335,7 @@ async def send_realtime_notification(
     Bildirim mesajlarinda fiyat bilgisi YOKTUR.
     """
     import json as _json
+    import time as _time
     from app.services.ipo_service import IPOService
     from app.services.notification import NotificationService
 
