@@ -206,6 +206,15 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
             # HTML tag temizle
             summary = re.sub(r"<[^>]+>", "", summary).strip()
 
+            # Cerez/cookie/veri politikasi metni RSS summary'ye siziyorsa temizle
+            _junk_patterns = [
+                r"çerez", r"cookie", r"veri politika", r"gizlilik politika",
+                r"kişisel veri", r"kvkk", r"aydınlatma metni", r"çerez konumlandır",
+            ]
+            if summary and any(re.search(p, summary, re.IGNORECASE) for p in _junk_patterns):
+                logger.info("RSS junk summary temizlendi (%s): %s", source_name, title[:60])
+                summary = ""
+
             if not title or not link:
                 continue
 
@@ -245,6 +254,9 @@ PUANLAMA KRITERLERI:
 - 9+: Global flas (savas, surpriz faiz, finansal kriz) — gunde max 1
 - 5-7: Orta onem, rutin kararlar, kucuk sirket haberleri
 - 1-4: Kapsam disi (spor, magazin, yabanci sirket, rutin diplomasi, genel siyaset)
+
+DIKKAT: Eger ozet kismi cerez politikasi, gizlilik politikasi, KVKK veya site kullanim kosullari ile ilgiliyse
+bu bir HABER DEGILDIR — PUAN 0 ver. RSS feed bazen site yasal metinlerini icerir, bunlari yoksay.
 
 Asagidaki haberi puanla:
 Baslik: {title}
@@ -328,6 +340,7 @@ Kategori: {category}
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
 - OZET: 5-7 cumle, sade ve bilgilendirici. Yatirimci perspektifi. Neden onemli, ne etkisi olabilir.
+  ONEMLI: Tweet icerigini SADECE baslik ve ozetten yaz. Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa "YOK" yaz.
   Tahmin etme, uydurma — sadece haberde acikca gecen sirketleri yaz.
