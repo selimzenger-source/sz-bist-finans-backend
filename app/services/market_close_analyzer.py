@@ -1167,10 +1167,10 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                 c_count = len(c_stats) if c_stats else 0
                 f_count = len(fl_stats) if fl_stats else 0
                 if c_count > 0 or f_count > 0:
-                    date_label = today.strftime("%-d %B %A").replace(
-                        "Monday", "Pazartesi").replace("Tuesday", "Salı").replace(
-                        "Wednesday", "Çarşamba").replace("Thursday", "Perşembe").replace(
-                        "Friday", "Cuma")
+                    _TR_DAYS = {0: "Pazartesi", 1: "Salı", 2: "Çarşamba", 3: "Perşembe", 4: "Cuma", 5: "Cumartesi", 6: "Pazar"}
+                    _TR_MONTHS = {1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
+                                  7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"}
+                    date_label = f"{today.day} {_TR_MONTHS[today.month]} {_TR_DAYS[today.weekday()]}"
                     async with async_session() as notif_session:
                         notif_svc = NotificationService(notif_session)
                         await notif_svc.notify_tavan_taban(c_count, f_count, date_label)

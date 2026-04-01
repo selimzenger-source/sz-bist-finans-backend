@@ -1366,12 +1366,35 @@ class NotificationService:
 
     # -------------------------------------------------------
     # Genel Piyasa Bildirimleri (Tavan/Taban, Haberler, SPK, VİOP)
+    # Spam korumasi: Her bildirim tipi icin cooldown suresi
     # -------------------------------------------------------
 
+    # Tip bazli son gonderim zamani — duplicate/spam onleme
+    _general_notif_cooldowns: dict[str, float] = {}
+
+    def _check_cooldown(self, notif_key: str, cooldown_seconds: int) -> bool:
+        """Spam korumasi — ayni tip bildirim cooldown suresi icinde tekrar gonderilmez.
+
+        Returns True if OK to send, False if in cooldown.
+        """
+        now = time.time()
+        last_sent = self._general_notif_cooldowns.get(notif_key, 0)
+        if now - last_sent < cooldown_seconds:
+            logger.info("Spam koruma: %s icin %ds cooldown aktif, atlaniyor", notif_key, cooldown_seconds)
+            return False
+        self._general_notif_cooldowns[notif_key] = now
+        return True
+
     async def notify_tavan_taban(self, ceiling_count: int, floor_count: int, date_label: str) -> int:
-        """Gunluk tavan/taban listesi hazir bildirimi — gunde 1 kez."""
-        title = "📊 Günün Tavan/Taban Hisseleri"
-        body = f"{date_label} kapanış: {ceiling_count} tavan, {floor_count} taban hisse"
+        """Gunluk tavan/taban listesi hazir bildirimi — gunde 1 kez.
+
+        Spam koruma: 6 saat cooldown (ayni gun icinde tekrar gonderilmez)
+        """
+        if not self._check_cooldown("tavan_taban", 21600):  # 6 saat
+            return 0
+
+        title = "Günün Tavan/Taban Hisseleri"
+        body = f"{date_label} kapanış: {ceiling_count} tavan, {floor_count} taban hisse tespit edildi."
 
         data = {
             "type": "tavan_taban",
@@ -1384,8 +1407,14 @@ class NotificationService:
         )
 
     async def notify_market_news(self, headline: str) -> int:
-        """Onemli piyasa haberi bildirimi."""
-        title = "📰 Piyasa Haberi"
+        """Onemli piyasa haberi bildirimi.
+
+        Spam koruma: 10 dakika cooldown (arka arkaya haber onaylanirsa)
+        """
+        if not self._check_cooldown("market_news", 600):  # 10 dk
+            return 0
+
+        title = "Önemli Piyasa Gelişmesi"
         body = headline[:150]
 
         data = {
@@ -1399,9 +1428,15 @@ class NotificationService:
         )
 
     async def notify_spk_bulletin(self, bulletin_no: str) -> int:
-        """Yeni SPK bulteni tespit edildi bildirimi."""
-        title = "📋 Yeni SPK Bülteni"
-        body = f"SPK Bülten {bulletin_no} yayınlandı — halka arz kararları ve düzenleyici gelişmeler"
+        """Yeni SPK bulteni tespit edildi bildirimi.
+
+        Spam koruma: 1 saat cooldown
+        """
+        if not self._check_cooldown("spk_bulletin", 3600):  # 1 saat
+            return 0
+
+        title = "Yeni SPK Bülteni Yayınlandı"
+        body = f"SPK Haftalık Bülten {bulletin_no} — Halka arz kararları ve düzenleyici gelişmeler için inceleyin."
 
         data = {
             "type": "spk_bulletin",
@@ -1417,14 +1452,18 @@ class NotificationService:
     async def notify_viop_session(self, session_type: str, summary: str = "") -> int:
         """VİOP seans bildirimi — acilis, kapanis veya flash.
 
-        session_type: 'opening', 'closing', 'flash'
+        Spam koruma: acilis/kapanis 4 saat, flash 30 dakika cooldown
         """
+        cooldown = 1800 if session_type == "flash" else 14400  # flash: 30dk, diger: 4 saat
+        if not self._check_cooldown(f"viop_{session_type}", cooldown):
+            return 0
+
         type_labels = {
-            "opening": ("🔔 VİOP Gece Seansı Açıldı", "Vadeli işlem piyasası gece seansı başladı"),
-            "closing": ("🔕 VİOP Gece Seansı Kapandı", "Gece seansı kapandı"),
-            "flash": ("⚡ VİOP Flash", summary or "Önemli VİOP hareketi tespit edildi"),
+            "opening": ("VİOP Gece Seansı Açıldı", "Vadeli işlem piyasası gece seansı başladı."),
+            "closing": ("VİOP Gece Seansı Kapandı", "Gece seansı sona erdi, veriler güncellendi."),
+            "flash": ("VİOP Flaş Haber", summary or "Önemli VİOP hareketi tespit edildi."),
         }
-        title, default_body = type_labels.get(session_type, ("VİOP", "VİOP güncelleme"))
+        title, default_body = type_labels.get(session_type, ("VİOP Güncelleme", "VİOP güncelleme"))
         body = summary or default_body
 
         data = {
