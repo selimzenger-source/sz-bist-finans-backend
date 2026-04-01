@@ -455,6 +455,16 @@ async def get_public_news_feed(
     # bot_proxy kaynaginda VİOP olmayan haberleri de al
     _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
     _TAVAN_KEYWORDS = ["%tavan yap%", "%taban yap%", "%Günün Tavan%", "%Günün Taban%", "%EDO eşiğ%"]
+    _JUNK_KEYWORDS = [
+        "%Kapanış Raporu%", "%kapanış raporu%", "%Piyasa Kapanış%",
+        "%Günlük Takip%", "%günlük takip%",
+        "%Dağıtım Sonuç%", "%dağıtım sonuç%",
+        "%Açılış Fiyat%", "%açılış fiyat%",
+        "%25 Gün Performans%", "%25 gün performans%",
+        "%Piyasa Özet%", "%piyasa özet%",
+        "%SPK Bülten%", "%spk bülten%",
+        "%Halka arz takip%", "%İşlem Görmeye Başla%",
+    ]
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     # 1) Bilinen haber source'lari
@@ -472,7 +482,7 @@ async def get_public_news_feed(
         PendingTweet.sent_at >= cutoff,
         PendingTweet.source == "bot_proxy",
     ]
-    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS:
+    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS + _JUNK_KEYWORDS:
         bot_proxy_filter.append(~PendingTweet.text.ilike(kw))
 
     stmt2 = select(PendingTweet).where(*bot_proxy_filter)
