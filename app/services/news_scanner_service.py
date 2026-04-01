@@ -779,12 +779,14 @@ async def _send_news_to_telegram(tweet_data: dict):
     score = tweet_data.get("score", 0)
     source = tweet_data.get("source", "?")
     text_len = len(tweet_data.get("tweet_text", ""))
+    now_str = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
 
     caption = (
         f"<b>\U0001f4f0 Yeni Haber Kuyruga Eklendi</b>\n\n"
         f"<b>{headline}</b>\n"
         f"Kategori: {category} | Puan: {score}/10\n"
         f"Kaynak: {source} | {text_len} karakter\n"
+        f"\U0001f4c5 {now_str}\n"
     )
 
     cover = tweet_data.get("cover_path")
@@ -793,10 +795,10 @@ async def _send_news_to_telegram(tweet_data: dict):
     else:
         await _send_telegram_message(caption)
 
-    # Tweet metnini ayri mesaj
+    # Tweet metnini ayri mesaj — normal formatta (code blogu degil)
     tweet_text = tweet_data.get("tweet_text", "")
     if tweet_text:
-        await _send_telegram_message(f"<code>{tweet_text[:4000]}</code>")
+        await _send_telegram_message(tweet_text[:4000])
 
     # Kuyruk ozeti gonder
     await _send_queue_summary()
@@ -977,3 +979,102 @@ def cleanup_old_state():
         "State temizligi: %d baslik, %d topic, %d url",
         len(_recent_titles), len(_seen_topic_hashes), len(_seen_url_hashes),
     )
+
+
+# ── Admin Telegram Komut Handler ───────────────────────
+# /haber_at N, /haber_sil N, /haber_liste, /onay, /iptal komutlarini dinler
+
+_admin_cmd_last_update_id: Optional[int] = None
+
+
+async def poll_admin_commands():
+    """Admin Telegram chat'ten komutlari okur ve isler.
+
+    Scheduler tarafindan 5 saniyede bir cagrilir.
+    Admin bot token ile getUpdates yapar.
+    """
+    global _admin_cmd_last_update_id
+
+    settings = get_settings()
+    bot_token = settings.ADMIN_TELEGRAM_BOT_TOKEN
+    chat_id = settings.ADMIN_TELEGRAM_CHAT_ID
+
+    if not bot_token or not chat_id:
+        return
+
+    url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+    params: dict = {"timeout": 0, "allowed_updates": ["message"]}
+    if _admin_cmd_last_update_id is not None:
+        params["offset"] = _admin_cmd_last_update_id
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, params=params)
+            if resp.status_code != 200:
+                return
+            data = resp.json()
+    except Exception as e:
+        logger.error("Admin komut poll hatasi: %s", e)
+        return
+
+    updates = data.get("result", [])
+    if not updates:
+        return
+
+    for update in updates:
+        update_id = update.get("update_id", 0)
+        _admin_cmd_last_update_id = update_id + 1
+
+        message = update.get("message")
+        if not message:
+            continue
+
+        msg_chat_id = str(message.get("chat", {}).get("id", ""))
+        if msg_chat_id != str(chat_id):
+            continue
+
+        text = (message.get("text") or "").strip()
+        if not text.startswith("/"):
+            continue
+
+        try:
+            await _handle_admin_command(text)
+        except Exception as e:
+            logger.error("Admin komut isleme hatasi: %s — komut: %s", e, text)
+
+
+async def _handle_admin_command(text: str):
+    """Tek bir admin komutunu isler."""
+    parts = text.split()
+    cmd = parts[0].lower()
+
+    if cmd == "/haber_at" or cmd == "/onay":
+        if len(parts) < 2:
+            await _send_telegram_message("⚠️ Kullanim: /haber_at <numara>")
+            return
+        try:
+            index = int(parts[1])
+        except ValueError:
+            await _send_telegram_message("⚠️ Gecersiz numara")
+            return
+        result = await approve_news(index)
+        if "error" in result:
+            await _send_telegram_message(f"⚠️ {result['error']}")
+
+    elif cmd == "/haber_sil" or cmd == "/iptal":
+        if len(parts) < 2:
+            await _send_telegram_message("⚠️ Kullanim: /haber_sil <numara>")
+            return
+        try:
+            index = int(parts[1])
+        except ValueError:
+            await _send_telegram_message("⚠️ Gecersiz numara")
+            return
+        result = await reject_news(index)
+        if "error" in result:
+            await _send_telegram_message(f"⚠️ {result['error']}")
+
+    elif cmd == "/haber_liste":
+        await show_queue()
+
+    # Bilinmeyen komutlari sessizce atla

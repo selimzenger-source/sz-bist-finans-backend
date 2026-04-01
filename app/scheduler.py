@@ -4303,6 +4303,18 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Admin Telegram Komut Poller — her 5 saniyede bir ───
+    # /haber_at, /haber_sil, /haber_liste, /onay, /iptal komutlarini dinler
+    scheduler.add_job(
+        admin_command_poll_job,
+        IntervalTrigger(seconds=5),
+        id="admin_command_poller",
+        name="Admin Komut Poller (5sn)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.start()
     logger.info(
         "Scheduler baslatildi — %d gorev ayarlandi",
@@ -4365,6 +4377,15 @@ async def news_cleanup_job():
         cleanup_old_state()
     except Exception as e:
         logger.error("Haber cleanup hatasi: %s", e)
+
+
+async def admin_command_poll_job():
+    """Admin Telegram'dan komutlari dinler (/haber_at, /haber_sil, /haber_liste)."""
+    try:
+        from app.services.news_scanner_service import poll_admin_commands
+        await poll_admin_commands()
+    except Exception as e:
+        logger.error("Admin komut poll hatasi: %s", e)
 
 
 def shutdown_scheduler():
