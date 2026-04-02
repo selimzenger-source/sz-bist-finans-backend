@@ -909,9 +909,14 @@ async def approve_news(index: int) -> dict:
             from app.database import async_session
             from app.services.notification import NotificationService
             headline = tweet_data.get("headline", "Önemli gelişme")
+            # Tweet metninden AI özetini çıkar (emoji prefix ve linkler hariç)
+            tweet_text = tweet_data.get("tweet_text", "")
+            # İlk satırı (emoji prefix) atla, özet kısmını al
+            lines = tweet_text.split("\n\n")
+            ai_summary = lines[1] if len(lines) > 1 else ""
             async with async_session() as notif_session:
                 notif_svc = NotificationService(notif_session)
-                await notif_svc.notify_market_news(headline)
+                await notif_svc.notify_market_news(headline, summary=ai_summary[:300])
                 await notif_session.commit()
             logger.info("Piyasa haberi push bildirim gonderildi: %s", headline[:50])
         except Exception as e:

@@ -1435,7 +1435,7 @@ class NotificationService:
             f"Tavan/Taban: {ceiling_count}T/{floor_count}Tb",
         )
 
-    async def notify_market_news(self, headline: str) -> int:
+    async def notify_market_news(self, headline: str, summary: str = "") -> int:
         """Onemli piyasa haberi bildirimi.
 
         Spam koruma: 10 dakika cooldown (arka arkaya haber onaylanirsa)
@@ -1444,7 +1444,11 @@ class NotificationService:
             return 0
 
         title = "Önemli Piyasa Gelişmesi"
-        body = headline[:150]
+        # Headline + AI ozet varsa ekle
+        if summary:
+            body = f"{headline[:100]}\n{summary[:300]}"
+        else:
+            body = headline[:200]
 
         data = {
             "type": "market_news",
@@ -1456,7 +1460,7 @@ class NotificationService:
             f"Piyasa haberi: {headline[:50]}",
         )
 
-    async def notify_spk_bulletin(self, bulletin_no: str) -> int:
+    async def notify_spk_bulletin(self, bulletin_no: str, summary: str = "") -> int:
         """Yeni SPK bulteni tespit edildi bildirimi.
 
         Spam koruma: 1 saat cooldown
@@ -1465,7 +1469,10 @@ class NotificationService:
             return 0
 
         title = "Yeni SPK Bülteni Yayınlandı"
-        body = f"SPK Haftalık Bülten {bulletin_no} — Halka arz kararları ve düzenleyici gelişmeler için inceleyin."
+        if summary:
+            body = f"SPK Haftalık Bülten {bulletin_no}\n{summary[:300]}"
+        else:
+            body = f"SPK Haftalık Bülten {bulletin_no} — Halka arz kararları ve düzenleyici gelişmeler için inceleyin."
 
         data = {
             "type": "spk_bulletin",

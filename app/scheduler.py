@@ -586,9 +586,10 @@ async def check_viop_notifications():
                 if "açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower:
                     await notif_svc.notify_viop_session("opening")
                     _viop_notified_ids.add(tw.id)
-                # Kapanis
+                # Kapanis — tweet metninden ozet cikar
                 elif "kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower:
-                    await notif_svc.notify_viop_session("closing")
+                    closing_summary = tw.text[:300].replace("\n", " ").strip()
+                    await notif_svc.notify_viop_session("closing", closing_summary)
                     _viop_notified_ids.add(tw.id)
                 # Flash
                 elif "flash" in text_lower or "flaş" in text_lower:
