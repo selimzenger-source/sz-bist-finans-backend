@@ -952,11 +952,14 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         m = re.search(r"Son\s+g[üu]ncelleme\s+tarihi[:\s]*(\d{2})\.(\d{2})\.(\d{4})", res.text)
                         if m:
                             update_date = date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
-                            if update_date != today:
+                            if update_date != today and not force:
                                 logger.info(f"Uzmanpara son güncelleme: {update_date}, bugün: {today}. Piyasa kapalı, atlanıyor.")
                                 return # Graceful exit: Hafta sonu/tatil
+                            if update_date != today and force:
+                                logger.info(f"Uzmanpara son güncelleme: {update_date}, bugün: {today}. Force mode — devam ediliyor, tarih olarak {update_date} kullanılacak.")
+                                today = update_date  # Force modda Uzmanpara tarihini kullan
                             market_is_open = True
-                            logger.info(f"Uzmanpara güncelleme tarihi bugün ({update_date}) — piyasa açık ✅")
+                            logger.info(f"Uzmanpara güncelleme tarihi: {update_date} — piyasa açık ✅")
             except Exception as e:
                 logger.warning(f"Güncelleme tarihi kontrol hatası (Deneme {attempt + 1}): {e}")
 

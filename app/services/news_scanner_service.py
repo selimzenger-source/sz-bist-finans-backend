@@ -86,6 +86,31 @@ _SECTOR_STOCKS = {
     "MADENCILIK": ["KOZAL", "IPEKE", "KOZAA"],
 }
 
+# ── Gecerli BIST Ticker Seti (AI hallucination filtresi) ──
+# _SECTOR_STOCKS'taki tum ticker'lar + ek yaygin hisseler
+_VALID_BIST_TICKERS: set[str] = set()
+for _stocks in _SECTOR_STOCKS.values():
+    _VALID_BIST_TICKERS.update(_stocks)
+_VALID_BIST_TICKERS.update([
+    # BIST30 + BIST100 yaygin hisseler
+    "THYAO", "GARAN", "AKBNK", "YKBNK", "ISCTR", "SAHOL", "KCHOL",
+    "TUPRS", "EREGL", "BIMAS", "ASELS", "TOASO", "FROTO", "SISE",
+    "PGSUS", "TCELL", "TTKOM", "EKGYO", "HEKTS", "SASA", "PETKM",
+    "ISGYO", "VESTL", "VESBE", "ARCLK", "KONTR", "OYAKC", "ALARK",
+    "AEFES", "ISMEN", "TSKB", "SKBNK", "ALGYO", "AGHOL", "BOYP",
+    "BRISA", "CIMSA", "CEMAS", "DOHOL", "EGEEN", "ENJSA", "GESAN",
+    "GUBRF", "HALKB", "IPEKE", "KARTN", "KORDS", "MGROS", "OTKAR",
+    "PRKME", "QUAGR", "RGYAS", "SARKY", "SNGYO", "SOKM", "TAVHL",
+    "TKFEN", "TMSN", "TTRAK", "TURSG", "VAKBN", "VERUS", "YATAS",
+    "ZOREN", "KLSER", "MPARK", "EUPWR", "ODAS", "AKSA", "AYGAZ",
+    "BTCIM", "BUCIM", "CEMTS", "COSMO", "DOAS", "ENKAI", "GLYHO",
+    "GSDHO", "GUBRF", "HALKB", "INDES", "KAREL", "KLRHO", "KOZAA",
+    "LOGO", "MAVI", "NETAS", "NUGYO", "PARSN", "PENTA", "PRKAB",
+    "RYSAS", "SELEC", "SISEB", "TRGYO", "TRILC", "TURSG", "ULKER",
+    "VAKKO", "YUNSA", "ZRGYO", "AHGAZ", "ALTNY", "BMSTL", "ISDMR",
+    "KLNMA", "KMPUR", "KOZAL", "MIATK", "ARDYZ", "PAPIL", "SMART",
+])
+
 # Kategori → emoji + etiket
 _CATEGORY_PREFIX = {
     "HALKA_ARZ": "HALKA ARZ",
@@ -421,7 +446,8 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         if sirketler and sirketler.upper() != "YOK":
             for s in sirketler.split(","):
                 s = s.strip().upper()
-                if s and len(s) <= 6 and s.isalpha():
+                # Sadece gecerli BIST ticker kodlarini kabul et (AI hallucination filtresi)
+                if s and s in _VALID_BIST_TICKERS:
                     ticker_tags.append(f"#{s}")
 
         # Sektor bazli hisse ekle
@@ -539,9 +565,9 @@ async def _post_tweet(tweet_data: dict) -> bool:
         cover_path = tweet_data.get("cover_path")
 
         if cover_path and os.path.exists(cover_path):
-            success = _safe_tweet_with_media(text, cover_path, source="news_scanner")
+            success = _safe_tweet_with_media(text, cover_path, source="news_scanner", force_send=True)
         else:
-            success = _safe_tweet(text, source="news_scanner")
+            success = _safe_tweet(text, source="news_scanner", force_send=True)
 
         if success:
             logger.info("Haber tweeti atildi: %s", tweet_data.get("headline", "?")[:50])
