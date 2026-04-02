@@ -1456,8 +1456,9 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notify_daily_open_close", title, body, data,
+            "notifications_enabled", title, body, data,
             f"Piyasa haberi: {headline[:50]}",
+            category="system",
         )
 
     async def notify_spk_bulletin(self, bulletin_no: str, summary: str = "") -> int:
@@ -1509,6 +1510,7 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notify_daily_open_close", title, body, data,
+            "notifications_enabled", title, body, data,
             f"VİOP {session_type}",
+            category="system",
         )
