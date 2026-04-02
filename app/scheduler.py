@@ -4224,6 +4224,53 @@ def _setup_scheduler_impl():
         misfire_grace_time=7200, # 2 saat grace — Render uyku koruması
     )
 
+    # ─── Tavan/Taban Yedek Tetiklemeler (ana job kaçarsa) ───
+    async def _tavan_taban_retry():
+        """Bugünün verisi yoksa tavan/taban analizini tekrar dene."""
+        from app.services.market_close_analyzer import scrape_and_analyze_market_close
+        try:
+            from app.database import async_session_maker
+            from sqlalchemy import text as sa_text
+            now_tr = datetime.now(_TR_TZ)
+            if now_tr.weekday() >= 5:  # Hafta sonu
+                return
+            today = now_tr.date()
+            async with async_session_maker() as session:
+                res = await session.execute(
+                    sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
+                    {"today": today}
+                )
+                count = res.scalar() or 0
+            if count == 0:
+                logger.warning("Tavan/taban yedek tetikleme: bugün verisi yok, tekrar deneniyor...")
+                await scrape_and_analyze_market_close()
+            else:
+                logger.debug("Tavan/taban yedek: bugün %d kayıt var, atlanıyor.", count)
+        except Exception as e:
+            logger.error("Tavan/taban yedek tetikleme hatası: %s", e)
+
+    scheduler.add_job(
+        _tavan_taban_retry,
+        CronTrigger(hour=16, minute=30, day_of_week="mon-fri"),  # UTC 16:30 = TR 19:30
+        id="market_close_retry_1",
+        name="Tavan/Taban Yedek 1 (19:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
+    scheduler.add_job(
+        _tavan_taban_retry,
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri"),  # UTC 17:30 = TR 20:30
+        id="market_close_retry_2",
+        name="Tavan/Taban Yedek 2 (20:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # ─── VİOP Bildirim Kontrol — Her 5 dk ───
     scheduler.add_job(
         check_viop_notifications,
