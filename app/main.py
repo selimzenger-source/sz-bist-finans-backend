@@ -463,7 +463,7 @@ async def get_public_news_feed(
     """Son N gunun haber tweetlerini blog formatta doner (sadece news sources)."""
     import re
     # Sadece haber kaynaklari — VİOP, tavan/taban, EDO, snapshot, IPO haric
-    NEWS_SOURCES = {"news_scanner", "tweet_bist30_news"}
+    NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news", "kap_news"}
     # bot_proxy kaynaginda VİOP olmayan haberleri de al
     _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
     _TAVAN_KEYWORDS = ["%tavan yap%", "%taban yap%", "%Günün Tavan%", "%Günün Taban%", "%EDO eşiğ%"]

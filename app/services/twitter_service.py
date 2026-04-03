@@ -2213,8 +2213,10 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         text = (
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
-            f"Güncel listeyi 📲 {HALKAARZ_BEKLEYENLER_LINK}\n"
-            f"sitesinden ve uygulamamızdan takip edebilirsiniz.\n"
+            f"Güncel listeyi uygulamamızdan ve sitemizden takip edebilirsiniz:\n\n"
+            f"📲 Android: https://play.google.com/store/apps/details?id=com.bistfinans.app\n"
+            f"🍏 iOS: https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr\n"
+            f"🌐 Web: https://borsacebimde.app/spk-basvurular\n\n"
             f"#HalkaArz #SPK #BIST100 #borsa #yatırım"
         )
 
