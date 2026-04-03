@@ -7597,13 +7597,13 @@ async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSess
     import re as _re
     from app.models.pending_tweet import PendingTweet
 
-    # pending_tweets tablosundaki bozuk kayitlar
+    # pending_tweets tablosundaki bozuk kayitlar — genis arama
     result = await db.execute(
         select(PendingTweet).where(
             PendingTweet.text.contains("&amp;") |
             PendingTweet.text.contains("&lt;") |
             PendingTweet.text.contains("&gt;") |
-            PendingTweet.text.contains("&;")
+            PendingTweet.text.like("%&;%")
         )
     )
     tweets = result.scalars().all()
