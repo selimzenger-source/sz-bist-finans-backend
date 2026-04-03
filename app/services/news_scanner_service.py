@@ -585,6 +585,23 @@ async def _post_tweet(tweet_data: dict) -> bool:
         text = tweet_data["tweet_text"]
         cover_path = tweet_data.get("cover_path")
 
+        # Cover dosyası silinmişse yeniden üret
+        if cover_path and not os.path.exists(cover_path):
+            logger.warning("Cover dosyasi bulunamadi, yeniden uretiliyor: %s", cover_path)
+            try:
+                new_cover = await generate_news_cover(
+                    headline=tweet_data.get("headline", "Haber"),
+                    category=tweet_data.get("category", "PIYASA"),
+                    source=tweet_data.get("source", ""),
+                    banner=tweet_data.get("banner"),
+                )
+                if new_cover:
+                    cover_path = new_cover
+                    tweet_data["cover_path"] = new_cover
+                    logger.info("Cover yeniden uretildi: %s", new_cover)
+            except Exception as e:
+                logger.warning("Cover yeniden uretme hatasi: %s", e)
+
         if cover_path and os.path.exists(cover_path):
             success = _safe_tweet_with_media(text, cover_path, source="news_scanner", force_send=True)
         else:
@@ -811,13 +828,15 @@ async def process_important_news(news_list: list[dict], auto_tweet: bool = False
 
         processed.append(tweet_data)
 
-        # Temizlik: gecici dosya
-        cover_path = tweet_data.get("cover_path")
-        if cover_path and os.path.exists(cover_path):
-            try:
-                os.unlink(cover_path)
-            except Exception:
-                pass
+        # Temizlik: auto_tweet modunda gecici dosyayi sil
+        # Kuyruk modunda (Telegram onay) dosyayi KORU — tweet atilinca silinecek
+        if auto_tweet:
+            cover_path = tweet_data.get("cover_path")
+            if cover_path and os.path.exists(cover_path):
+                try:
+                    os.unlink(cover_path)
+                except Exception:
+                    pass
 
     return processed
 
@@ -945,6 +964,14 @@ async def approve_news(index: int) -> dict:
 
         # Kuyruktan cikar
         _pending_news.pop(idx)
+
+        # Gecici cover dosyasini temizle
+        cover_path = tweet_data.get("cover_path")
+        if cover_path and os.path.exists(cover_path):
+            try:
+                os.unlink(cover_path)
+            except Exception:
+                pass
 
         await _send_telegram_message(
             f"\u2705 Haber tweeti atildi: {tweet_data.get('headline', '?')[:50]}"
