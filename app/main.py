@@ -7594,18 +7594,27 @@ async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSess
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
     import html as _html
+    import re as _re
     from app.models.pending_tweet import PendingTweet
 
     # pending_tweets tablosundaki bozuk kayitlar
     result = await db.execute(
         select(PendingTweet).where(
-            PendingTweet.text.contains("&amp;") | PendingTweet.text.contains("&lt;") | PendingTweet.text.contains("&gt;")
+            PendingTweet.text.contains("&amp;") |
+            PendingTweet.text.contains("&lt;") |
+            PendingTweet.text.contains("&gt;") |
+            PendingTweet.text.contains("&;")
         )
     )
     tweets = result.scalars().all()
     fixed_count = 0
     for tw in tweets:
         cleaned = _html.unescape(tw.text)
+        # &; gibi bozuk kalintilari temizle
+        cleaned = cleaned.replace("&;", "&")
+        # Tekrar eden && düzelt
+        while "&&" in cleaned:
+            cleaned = cleaned.replace("&&", "&")
         if cleaned != tw.text:
             tw.text = cleaned
             fixed_count += 1
