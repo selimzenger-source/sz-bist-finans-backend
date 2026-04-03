@@ -7623,3 +7623,17 @@ async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSess
 
     await db.commit()
     return {"status": "ok", "fixed_tweets": fixed_count}
+
+
+@app.post("/api/v1/admin/debug-env")
+async def debug_env(body: dict):
+    """Cloudinary ve diger env var durumunu kontrol et."""
+    pw = body.get("admin_password", "")
+    if pw != os.environ.get("ADMIN_PASSWORD", "zenger7245175"):
+        raise HTTPException(403, "Yetkisiz")
+    cloud = os.environ.get("CLOUDINARY_URL", "")
+    return {
+        "cloudinary_set": bool(cloud),
+        "cloudinary_prefix": cloud[:30] + "..." if len(cloud) > 30 else cloud,
+        "gemini_set": bool(os.environ.get("GEMINI_API_KEY", "")),
+    }
