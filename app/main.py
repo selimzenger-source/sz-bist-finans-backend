@@ -7612,7 +7612,10 @@ async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSess
     fixed_count = 0
     for tw in tweets:
         cleaned = _html.unescape(tw.text)
-        # &; gibi bozuk kalintilari temizle
+        # &; gibi bozuk kalintilari temizle — context'e gore duzelt
+        # "doğu&;da" gibi kelime icindeki &; → apostrof (')
+        cleaned = _re.sub(r'(\w)&;(\w)', r"\1'\2", cleaned)
+        # Kalan &; → &
         cleaned = cleaned.replace("&;", "&")
         # Tekrar eden && düzelt
         while "&&" in cleaned:
