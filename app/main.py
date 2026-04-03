@@ -658,6 +658,7 @@ async def get_spk_bulletin_analyses(
         text = re.sub(r'https?://\S+', '', text)
         text = re.sub(r'📲?\s*(Detaylar\s*görselde|Android|szalgo)[^\n]*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'🍏?\s*iOS:?[^\n]*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'🌐?\s*Web:?[^\n]*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'szalgo\.net\.tr', '', text, flags=re.IGNORECASE)
         text = re.sub(r'👇', '', text)
         text = re.sub(r'\n{3,}', '\n\n', text.strip())
