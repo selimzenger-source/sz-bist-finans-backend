@@ -247,7 +247,7 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
             entries.append({
                 "title": title,
                 "link": link,
-                "summary": summary[:500],
+                "summary": summary[:3000],
                 "source": source_name,
                 "published": pub_date,
             })
@@ -370,14 +370,17 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 8-12 cumle (en az 80 kelime). Sadece ozetleme — YORUM KAT, BAGLAM KUR:
-  * Haberin BIST'teki hangi sektoru/sirketleri etkileyecegini yaz
-  * "Bu gelisme ... sektorunu olumlu/olumsuz etkileyebilir" gibi yorumlar ekle
-  * Sirket haberi ise: sirketin BIST performansi, sektor pozisyonu hakkinda kisa baglam ver
+- OZET: MINIMUM 150 kelime, 8-15 cumle. Bu cok onemli — KISA YAZMA, DETAYLI YAZ. Sadece ozetleme degil — YORUM KAT, BAGLAM KUR, ANALİZ YAP:
+  * Haberin ana konusunu acikla (3-4 cumle)
+  * Haberin BIST'teki hangi sektoru/sirketleri etkileyecegini DETAYLI yaz (3-4 cumle)
+  * "Bu gelisme ... sektorunu olumlu/olumsuz etkileyebilir" gibi analizler ekle
+  * Sirket haberi ise: sirketin BIST performansi, sektor pozisyonu, finansal durum baglami ver
   * Turkiye ekonomisi haberi ise: TCMB, faiz, enflasyon, kur etkisi baglami kur
   * Sektor haberi ise: sektordeki BIST sirketlerini (THYAO, GARAN vb.) yorumla
   * ISTISNA: Cok buyuk global olaylar (savas, deprem, finansal kriz) icin sadece ozetle, sektor baglami zorlama
+  * SON CUMLE: Yatirimcilarin bu haberi nasil degerlendirmesi gerektigi hakkinda kisa bir yorum yaz
   ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz. Bunlar haber degildir.
+  UYARI: 150 kelimeden kisa ozet KABUL EDILMEZ. Detayli ve kapsamli yaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -414,7 +417,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 json={
                     "model": "gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 1500,
+                    "max_tokens": 2500,
                     "temperature": 0.3,
                 },
             )
@@ -422,6 +425,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
             data = resp.json()
 
         text = data["choices"][0]["message"]["content"].strip()
+        logger.info("AI tweet yanit uzunlugu: %d karakter", len(text))
 
         baslik_match = re.search(r"BASLIK:\s*(.+)", text)
         ozet_match = re.search(r"OZET:\s*(.+)", text, re.DOTALL)
@@ -437,6 +441,13 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
             if sirket_pos > ozet_pos:
                 ozet_raw = text[ozet_pos + 5:sirket_pos].strip()
                 ozet = ozet_raw
+
+        # KATEGORI/PUAN satırlarını temizle (bazen AI bunları da ekliyor)
+        ozet = re.sub(r'\n*KATEGORI:.*', '', ozet).strip()
+        ozet = re.sub(r'\n*PUAN:.*', '', ozet).strip()
+        ozet = re.sub(r'\n*BANNER:.*', '', ozet).strip()
+
+        logger.info("Parsed ozet uzunlugu: %d karakter, %d kelime", len(ozet), len(ozet.split()))
 
         # Sirket hashtag'leri
         sirketler = ""
@@ -917,7 +928,7 @@ async def approve_news(index: int) -> dict:
             ai_summary = lines[1] if len(lines) > 1 else ""
             async with async_session() as notif_session:
                 notif_svc = NotificationService(notif_session)
-                await notif_svc.notify_market_news(headline, summary=ai_summary[:300])
+                await notif_svc.notify_market_news(headline, summary=ai_summary[:800])
                 await notif_session.commit()
             logger.info("Piyasa haberi push bildirim gonderildi: %s", headline[:50])
         except Exception as e:
