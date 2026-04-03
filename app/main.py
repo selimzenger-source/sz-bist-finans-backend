@@ -7584,3 +7584,31 @@ async def admin_news_queue(admin_password: str = ""):
 
     from app.services.news_scanner_service import get_queue
     return {"queue": get_queue()}
+
+
+@app.post("/api/v1/admin/fix-html-entities")
+@limiter.limit("5/minute")
+async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Veritabanindaki HTML entity'leri duzelt (&amp; -> & vb.)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    import html as _html
+    from app.models.pending_tweet import PendingTweet
+
+    # pending_tweets tablosundaki bozuk kayitlar
+    result = await db.execute(
+        select(PendingTweet).where(
+            PendingTweet.text.contains("&amp;") | PendingTweet.text.contains("&lt;") | PendingTweet.text.contains("&gt;")
+        )
+    )
+    tweets = result.scalars().all()
+    fixed_count = 0
+    for tw in tweets:
+        cleaned = _html.unescape(tw.text)
+        if cleaned != tw.text:
+            tw.text = cleaned
+            fixed_count += 1
+
+    await db.commit()
+    return {"status": "ok", "fixed_tweets": fixed_count}
