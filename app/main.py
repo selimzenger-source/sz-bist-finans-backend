@@ -7367,6 +7367,35 @@ async def admin_test_rg_pdf(request: Request, payload: dict):
 # Admin: KAP AI Re-Analyze (NULL summary kayitlari)
 # -------------------------------------------------------
 
+# -------------------------------------------------------
+# Admin: VİOP Seans Bildirim Trigger
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-viop-notification")
+@limiter.limit("10/minute")
+async def admin_trigger_viop_notification(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: VİOP seans bildirimi gonder.
+
+    Body:
+        admin_password: str
+        session_type: str  (opening, closing, flash)
+        summary: str  (bildirim mesaji)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    session_type = payload.get("session_type", "opening")
+    summary = payload.get("summary", "")
+
+    if session_type not in ("opening", "closing", "flash"):
+        raise HTTPException(status_code=400, detail="Gecersiz session_type. Gecerli: opening, closing, flash")
+
+    from app.services.notification import NotificationService
+    notif_svc = NotificationService(db)
+    sent = await notif_svc.notify_viop_session(session_type, summary)
+    return {"status": "ok", "sent": sent, "session_type": session_type}
+
+
 @app.post("/api/v1/admin/kap-reanalyze")
 @limiter.limit("3/minute")
 async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
