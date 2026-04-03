@@ -829,15 +829,8 @@ async def _check_spk_bulletins_inner():
                     except Exception as _boost_err:
                         logger.warning("Scraper boost aktivasyon hatasi: %s", _boost_err)
 
-                # ────────────────────────────────────────────
-                # Push Bildirim: Yeni SPK Bülteni
-                # ────────────────────────────────────────────
-                try:
-                    await notif_service.notify_spk_bulletin(bno_str_val)
-                    await session.commit()
-                    logger.info("SPK bulten push bildirim gonderildi: %s", bno_str_val)
-                except Exception as _push_err:
-                    logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
+                # Push bildirim AI analizden sonra gonderilecek (konu basliklarini icermesi icin)
+                _bulletin_notif_summary = ""  # AI analizden sonra doldurulacak
 
                 # ────────────────────────────────────────────
                 # Telegram: Yeni SPK Bülteni Tespit Bildirimi
@@ -868,7 +861,24 @@ async def _check_spk_bulletins_inner():
                         from app.services.twitter_service import tweet_spk_bulletin_analysis
                         from app.services.admin_telegram import notify_tweet_sent as _notify_tw
                         logger.info("SPK bulten analiz tweeti baslatiliyor: %s", bno_str_val)
-                        _ba_ok = tweet_spk_bulletin_analysis(full_bulletin_text, bno_str_val)
+
+                        # tweet_spk_bulletin_analysis basarili olursa AI text doner (str), basarisiz olursa False
+                        _ba_result = tweet_spk_bulletin_analysis(full_bulletin_text, bno_str_val)
+                        _ba_ok = bool(_ba_result)
+
+                        # AI text'ten konu basliklarini cikar (bildirim icin)
+                        if isinstance(_ba_result, str) and _ba_result:
+                            _topic_lines = []
+                            for _line in _ba_result.split("\n"):
+                                _stripped = _line.strip()
+                                if _stripped and any(_stripped.startswith(e) for e in ["🚀","💰","💵","📊","📈","⚖️","🏛","🔔","📋","🏢","🔍","⚠️","🎯","🚫"]):
+                                    _topic_lines.append(_stripped[:80])
+                            if _topic_lines:
+                                _bulletin_notif_summary = " | ".join(_topic_lines[:4])
+                            else:
+                                _meaningful = [l.strip() for l in _ba_result.split("\n") if l.strip() and len(l.strip()) > 15]
+                                _bulletin_notif_summary = _meaningful[0][:200] if _meaningful else ""
+
                         await _notify_tw(
                             "spk_bulten_analiz", f"Bülten {bno_str_val}", _ba_ok,
                             f"AI analiz tweeti ({'basarili' if _ba_ok else 'basarisiz'})",
@@ -876,6 +886,16 @@ async def _check_spk_bulletins_inner():
                         logger.info("SPK bulten analiz tweeti: %s, sonuc=%s", bno_str_val, _ba_ok)
                     except Exception as _ba_err:
                         logger.error("SPK bulten analiz tweet HATASI: %s", _ba_err, exc_info=True)
+
+                # ────────────────────────────────────────────
+                # Push Bildirim: Yeni SPK Bülteni (AI analizden sonra)
+                # ────────────────────────────────────────────
+                try:
+                    await notif_service.notify_spk_bulletin(bno_str_val, _bulletin_notif_summary)
+                    await session.commit()
+                    logger.info("SPK bulten push bildirim gonderildi: %s (ozet: %s)", bno_str_val, _bulletin_notif_summary[:80] if _bulletin_notif_summary else "yok")
+                except Exception as _push_err:
+                    logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
 
                 # Bulten numarasini HEMEN guncelle — tweet/analiz basarisiz olsa bile
                 # bir sonraki calistirmada ayni bulteni tekrar islemesin

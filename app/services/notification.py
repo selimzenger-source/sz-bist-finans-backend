@@ -1464,16 +1464,17 @@ class NotificationService:
     async def notify_spk_bulletin(self, bulletin_no: str, summary: str = "") -> int:
         """Yeni SPK bulteni tespit edildi bildirimi.
 
+        summary: AI analiz metninin konu basliklarini icerir.
         Spam koruma: 1 saat cooldown
         """
         if not self._check_cooldown("spk_bulletin", 3600):  # 1 saat
             return 0
 
-        title = "Yeni SPK Bülteni Yayınlandı"
+        title = f"SPK Bülteni {bulletin_no}"
         if summary:
-            body = f"SPK Haftalık Bülten {bulletin_no}\n{summary[:300]}"
+            body = f"{summary[:280]}\nDetaylar icin tiklayin."
         else:
-            body = f"SPK Haftalık Bülten {bulletin_no} — Halka arz kararları ve düzenleyici gelişmeler için inceleyin."
+            body = f"Yeni SPK bülteni yayınlandı. Detaylar SPK Bülten sayfamızda."
 
         data = {
             "type": "spk_bulletin",

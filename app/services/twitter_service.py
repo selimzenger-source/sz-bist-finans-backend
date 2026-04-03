@@ -1041,7 +1041,8 @@ HALKAARZ_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.ap
 HALKAARZ_BEKLEYENLER_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 KAP_HABER_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 APP_STORE_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
-WEB_LINK = "https://borsacebimde.app/"
+WEB_LINK = "https://borsacebimde.app"
+WEB_SPK_BULTEN_LINK = "https://borsacebimde.app/spk-bulten"
 SLOGAN = _DynSetting("SLOGAN")
 DISCLAIMER = _DynSetting("DISCLAIMER")
 DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")
@@ -2763,7 +2764,7 @@ TWEET FORMATI:
 DAHİL ET (önem sırasına göre):
 1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor." yaz.
 2. Bedelli/Bedelsiz sermaye artırımları — SADECE BORSADA İŞLEM GÖREN şirketler için yaz (ticker listesinde olanlar). Borsada işlem görmeyen şirketlerin sermaye artırımlarını ATLÁ.
-3. İdari para cezaları ve işlem yasakları — şirket/hisse adı + ceza/yaptırım detayı + kısa neden (orn: piyasa manipülasyonu, yapay fiyat oluşturma vb.). Gerçek kişilere verilen cezalar bile olsa, eğer spesifik bir BIST hissesi (ticker) ile ilgiliyse MUTLAKA yaz (orn: "OZSUB hissesinde manipülasyon şüphesiyle X kişiye 6 ay işlem yasağı verildi")
+3. İdari para cezaları ve işlem yasakları — şirket/hisse adı + ceza/yaptırım detayı + kısa neden (orn: piyasa manipülasyonu, yapay fiyat oluşturma vb.). Gerçek kişilere verilen cezalar bile olsa, eğer bültende spesifik bir BIST hissesi ADI AÇIKÇA GEÇİYORSA yaz (orn: "OZSUB hissesinde manipülasyon şüphesiyle X kişiye 6 ay işlem yasağı verildi"). AMA bültende hisse adı geçmiyorsa TICKER UYDURMA — sadece kişi adı ve ceza detayını yaz, hashtag KOYMA. Örneğin bültende "pay piyasasında yapay piyasa oluşturma şüphesiyle X kişiye ceza" yazıyorsa, hangi hissede olduğu belirtilmemişse ticker EKLEME.
 4. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. SADECE borsada işlem gören şirketler için (birkaç cümle yeterli)
 
 ÖNEMLİ:
@@ -3125,7 +3126,7 @@ def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
     return "\n".join(highlights)
 
 
-def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
+def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | str:
     """SPK bulten analiz tweetini atar.
 
     Zengin bülten (3+ madde): Dinamik görsel üret + kısa tweet metni
@@ -3173,7 +3174,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                     f"{ai_text}\n\n"
-                    f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                    f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
                     f"#SPK #BultenAnaliz #BIST100 #borsa"
                 )
                 # 4000 karakter Twitter limiti
@@ -3197,7 +3198,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                     os.remove(report_image)
                 except OSError:
                     pass
-                return success
+                return ai_text if success else False
             else:
                 logger.warning("SPK bulten gorsel uretilemedi — metin ile devam")
                 # Görsel üretilemezse metin olarak at (aşağıya düş)
@@ -3207,7 +3208,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
         text = (
             f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
             f"{ai_text}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
             f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
         )
 
@@ -3218,11 +3219,13 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
             text = (
                 f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                 f"{ai_text}\n\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
             )
 
-        return _safe_tweet(text, source="tweet_spk_bulletin_analysis")
+        if _safe_tweet(text, source="tweet_spk_bulletin_analysis"):
+            return ai_text
+        return False
 
     except Exception as e:
         logger.error("tweet_spk_bulletin_analysis hatasi: %s", e)
