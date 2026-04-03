@@ -7600,12 +7600,15 @@ async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSess
     from app.models.pending_tweet import PendingTweet
 
     # pending_tweets tablosundaki bozuk kayitlar — genis arama
+    from sqlalchemy import or_, text as sa_text
     result = await db.execute(
         select(PendingTweet).where(
-            PendingTweet.text.contains("&amp;") |
-            PendingTweet.text.contains("&lt;") |
-            PendingTweet.text.contains("&gt;") |
-            PendingTweet.text.like("%&;%")
+            or_(
+                PendingTweet.text.contains("&amp;"),
+                PendingTweet.text.contains("&lt;"),
+                PendingTweet.text.contains("&gt;"),
+                PendingTweet.text.contains("&;"),
+            )
         )
     )
     tweets = result.scalars().all()
