@@ -400,7 +400,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
 
     prompt = _TWEET_PROMPT.format(
         title=news["title"],
-        summary=news.get("summary", "")[:1500],
+        summary=news.get("summary", "")[:3000],
         source=news["source"],
         category=ai_result["category"],
         sector=ai_result.get("sector", "YOK"),
@@ -417,7 +417,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 json={
                     "model": "gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2500,
+                    "max_tokens": 4096,
                     "temperature": 0.3,
                 },
             )
@@ -446,6 +446,15 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         ozet = re.sub(r'\n*KATEGORI:.*', '', ozet).strip()
         ozet = re.sub(r'\n*PUAN:.*', '', ozet).strip()
         ozet = re.sub(r'\n*BANNER:.*', '', ozet).strip()
+
+        # Yarım cümle temizleme — AI token limiti bitince cümle ortasında kesilir
+        # Son karakter nokta/ünlem/soru işareti değilse, son tamamlanmamış cümleyi sil
+        if ozet and ozet[-1] not in '.!?"':
+            # Son noktalama işaretini bul
+            last_period = max(ozet.rfind('.'), ozet.rfind('!'), ozet.rfind('?'))
+            if last_period > len(ozet) * 0.5:  # En az metnin yarısı korunsun
+                ozet = ozet[:last_period + 1]
+                logger.info("Yarim cumle temizlendi, yeni uzunluk: %d karakter", len(ozet))
 
         logger.info("Parsed ozet uzunlugu: %d karakter, %d kelime", len(ozet), len(ozet.split()))
 
