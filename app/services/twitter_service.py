@@ -166,6 +166,71 @@ def _record_tweet_sent():
         _tweet_timestamps.append(time.time())
 
 
+def _upload_image_to_cloudinary(image_path: str, folder: str = "news_covers") -> str | None:
+    """Görseli Cloudinary'ye yükler, URL döner. Env yoksa None."""
+    try:
+        cloudinary_url = os.environ.get("CLOUDINARY_URL", "")
+        if not cloudinary_url or not os.path.exists(image_path):
+            return None
+
+        import re as _re
+        import hashlib as _hl
+        match = _re.match(r"cloudinary://(\d+):([^@]+)@(.+)", cloudinary_url)
+        if not match:
+            return None
+
+        api_key, api_secret, cloud_name = match.groups()
+        upload_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
+
+        with open(image_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+
+        timestamp = str(int(time.time()))
+        params_to_sign = f"folder={folder}&timestamp={timestamp}{api_secret}"
+        signature = _hl.sha1(params_to_sign.encode()).hexdigest()
+
+        import httpx
+        resp = httpx.post(upload_url, data={
+            "file": f"data:image/png;base64,{img_b64}",
+            "api_key": api_key,
+            "timestamp": timestamp,
+            "signature": signature,
+            "folder": folder,
+        }, timeout=30)
+        resp.raise_for_status()
+        url = resp.json().get("secure_url")
+        logger.info("Cloudinary upload OK: %s", url)
+        return url
+    except Exception as e:
+        logger.error("Cloudinary upload hatası: %s", e)
+        return None
+
+
+def _update_tweet_image_path(text: str, cloud_url: str):
+    """En son kaydedilen tweet'in image_path'ini Cloudinary URL ile güncelle."""
+    try:
+        from app.config import get_settings
+        from app.models.pending_tweet import PendingTweet
+        settings = get_settings()
+        db_url = str(settings.DATABASE_URL).replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
+
+        from sqlalchemy import create_engine, desc
+        from sqlalchemy.orm import Session
+
+        engine = create_engine(db_url, pool_pre_ping=True)
+        with Session(engine) as db:
+            tweet = db.query(PendingTweet).filter(
+                PendingTweet.text.contains(text[:80])
+            ).order_by(desc(PendingTweet.id)).first()
+            if tweet:
+                tweet.image_path = cloud_url
+                db.commit()
+                logger.info("Tweet image_path güncellendi: id=%d url=%s", tweet.id, cloud_url[:60])
+        engine.dispose()
+    except Exception as e:
+        logger.error("Tweet image_path güncelleme hatası: %s", e)
+
+
 def _queue_tweet(text: str, image_path: str | None = None, source: str = "unknown") -> bool:
     """Tweet'i kuyruğa ekler (DB'ye PendingTweet kaydeder).
 
@@ -3099,6 +3164,9 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
             report_image = generate_spk_bulletin_image(ai_text, bulletin_no)
 
             if report_image:
+                # Görseli Cloudinary'ye yükle — uygulama ve web için kalıcı URL
+                cloud_url = _upload_image_to_cloudinary(report_image, folder="spk_bulletins")
+
                 # Tweet metni — tam AI analiz metni (görsel de eklenir)
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
@@ -3117,6 +3185,11 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
                         f"#SPK #BultenAnaliz #BIST100 #borsa"
                     )
                 success = _safe_tweet_with_media(text, report_image, source="tweet_spk_bulletin_analysis")
+
+                # DB'deki image_path'i Cloudinary URL ile güncelle
+                if success and cloud_url:
+                    _update_tweet_image_path(text, cloud_url)
+
                 # Temp dosyayı temizle
                 try:
                     os.remove(report_image)

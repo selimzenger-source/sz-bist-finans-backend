@@ -664,7 +664,7 @@ async def get_spk_bulletin_analyses(
         {
             "id": t.id,
             "text": clean_text(t.text),
-            "image_url": f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None,
+            "image_url": t.image_path if t.image_path and t.image_path.startswith("http") else (f"/static/img/{t.image_path.split('/')[-1]}" if t.image_path else None),
             "source": t.source,
             "bulletin_no": extract_bulletin_no(t.text),
             "sent_at": t.sent_at.isoformat() if t.sent_at else None,
@@ -7643,3 +7643,30 @@ async def debug_env(body: dict):
         "cloudinary_prefix": cloud[:30] + "..." if len(cloud) > 30 else cloud,
         "gemini_set": bool(os.environ.get("GEMINI_API_KEY", "")),
     }
+
+
+@app.post("/api/v1/admin/fix-tweet-text/{tweet_id}")
+async def fix_tweet_text(tweet_id: int, body: dict, db: AsyncSession = Depends(get_db)):
+    """Tweet metnini dogrudan guncelle."""
+    pw = body.get("admin_password", "")
+    if not _verify_admin_password(pw):
+        raise HTTPException(403, "Yetkisiz")
+
+    new_text = body.get("text", "")
+    if not new_text:
+        raise HTTPException(400, "text alani gerekli")
+
+    from app.models.pending_tweet import PendingTweet
+    result = await db.execute(select(PendingTweet).where(PendingTweet.id == tweet_id))
+    tweet = result.scalar_one_or_none()
+    if not tweet:
+        raise HTTPException(404, "Tweet bulunamadi")
+
+    old_len = len(tweet.text)
+    tweet.text = new_text
+    # image_url de guncelle (opsiyonel)
+    if body.get("image_url"):
+        tweet.image_path = body["image_url"]
+    await db.commit()
+
+    return {"status": "ok", "id": tweet_id, "old_len": old_len, "new_len": len(new_text)}
