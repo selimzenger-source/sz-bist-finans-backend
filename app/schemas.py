@@ -359,6 +359,12 @@ class UserUpdate(BaseModel):
     reminder_4h: Optional[bool] = None
     # KAP Takip Listesi bildirimi
     notify_kap_watchlist: Optional[bool] = None
+    # Yeni ücretsiz bildirim tercihleri
+    notify_news: Optional[bool] = None
+    notify_viop: Optional[bool] = None
+    notify_tavan_taban: Optional[bool] = None
+    notify_spk_bulten: Optional[bool] = None
+    notify_edo_paid: Optional[bool] = None
     # Hesap silme
     deleted: Optional[bool] = None
 
@@ -393,6 +399,11 @@ class UserOut(BaseModel):
     reminder_2h: bool = False
     reminder_4h: bool = False
     notify_kap_watchlist: bool = True
+    notify_news: bool = True
+    notify_viop: bool = True
+    notify_tavan_taban: bool = True
+    notify_spk_bulten: bool = True
+    notify_edo_paid: bool = True
     deleted: bool = False
     subscription_package: Optional[str] = None
 

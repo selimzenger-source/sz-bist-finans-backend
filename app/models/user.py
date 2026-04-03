@@ -42,6 +42,13 @@ class User(Base):
     notify_edo_free: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretsiz EDO %1 bildirimi")
     notify_kap_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, comment="KAP takip listesi bildirimleri")
 
+    # Yeni ucretsiz bildirim tercihleri
+    notify_news: Mapped[bool] = mapped_column(Boolean, default=True, comment="Piyasa haberleri bildirimi")
+    notify_viop: Mapped[bool] = mapped_column(Boolean, default=True, comment="VIOP seans bildirimi")
+    notify_tavan_taban: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunun tavan taban hisseleri bildirimi")
+    notify_spk_bulten: Mapped[bool] = mapped_column(Boolean, default=True, comment="SPK bulten analizi bildirimi")
+    notify_edo_paid: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretli EDO bildirimi")
+
     # Hatirlatma zamanlari (son gun icin)
     reminder_30min: Mapped[bool] = mapped_column(Boolean, default=True, comment="Son gune 30 dk kala")
     reminder_1h: Mapped[bool] = mapped_column(Boolean, default=False, comment="Son gune 1 saat kala")

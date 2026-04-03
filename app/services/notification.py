@@ -1431,7 +1431,7 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notify_daily_open_close", title, body, data,
+            "notify_tavan_taban", title, body, data,
             f"Tavan/Taban: {ceiling_count}T/{floor_count}Tb",
         )
 
@@ -1456,7 +1456,7 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notifications_enabled", title, body, data,
+            "notify_news", title, body, data,
             f"Piyasa haberi: {headline[:50]}",
             category="system",
         )
@@ -1482,7 +1482,7 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notify_new_ipo", title, body, data,
+            "notify_spk_bulten", title, body, data,
             f"SPK Bülten: {bulletin_no}",
         )
 
@@ -1521,7 +1521,7 @@ class NotificationService:
         }
 
         return await self._send_filtered(
-            "notifications_enabled", title, body, data,
+            "notify_viop", title, body, data,
             f"VİOP {session_type}",
             category="system",
         )

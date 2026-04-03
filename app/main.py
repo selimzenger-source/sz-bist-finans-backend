@@ -154,6 +154,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("IPO last_day kolonlari eklenemedi (muhtemelen zaten var): %s", e)
 
+    # Bildirim tercihi yeni kolonları ekle (notify_news, notify_viop, notify_tavan_taban, notify_spk_bulten, notify_edo_paid)
+    try:
+        async with async_session() as db:
+            for col in ["notify_news", "notify_viop", "notify_tavan_taban", "notify_spk_bulten", "notify_edo_paid"]:
+                await db.execute(sa_text(
+                    f'ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} BOOLEAN DEFAULT TRUE'
+                ))
+            await db.commit()
+            logger.info("Bildirim tercihi yeni kolonlari OK (notify_news/viop/tavan_taban/spk_bulten/edo_paid)")
+    except Exception as e:
+        logger.warning("Bildirim tercihi kolonlari eklenemedi (muhtemelen zaten var): %s", e)
+
     # E.D.O: trading_start backfill — NULL olan trading IPO'lar icin ilk track tarihinden set et
     try:
         async with async_session() as db:
@@ -1995,13 +2007,9 @@ async def update_user(
         if hasattr(user, key):
             setattr(user, key, value)
 
-    # Guvenlik agi: FCM token guncellendiyse ve gecerliyse,
-    # notifications_enabled acik degilse otomatik ac
-    # (kullanici izin verdiyse token gelir — bildirimleri de acik olmali)
-    new_fcm = update_data.get("fcm_token")
-    if new_fcm and "notifications_enabled" not in update_data:
-        if not user.notifications_enabled:
-            user.notifications_enabled = True
+    # NOT: Artık FCM token güncellemesinde notifications_enabled otomatik açılmıyor.
+    # Kullanıcı bildirimleri kapattıysa, token yenilemesi bunu sıfırlamamalı.
+    # Kullanıcı bildirimleri açmak isterse bunu bildirim ayarlarından yapar.
 
     await db.flush()
     return user
