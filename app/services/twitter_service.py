@@ -3099,14 +3099,23 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool:
             report_image = generate_spk_bulletin_image(ai_text, bulletin_no)
 
             if report_image:
-                # Kısa tweet metni — sadece ticker hashtag'li başlıklar
-                short_summary = _extract_spk_short_summary(ai_text, bulletin_no)
+                # Tweet metni — tam AI analiz metni (görsel de eklenir)
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
-                    f"{short_summary}\n\n"
-                    f"📲 Detaylar görselde 👇\n"
+                    f"{ai_text}\n\n"
+                    f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
                     f"#SPK #BultenAnaliz #BIST100 #borsa"
                 )
+                # 4000 karakter Twitter limiti
+                if len(text) > 3950:
+                    max_ai = 3950 - len(text) + len(ai_text) - 10
+                    ai_trimmed = ai_text[:max_ai] + "..."
+                    text = (
+                        f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
+                        f"{ai_trimmed}\n\n"
+                        f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                        f"#SPK #BultenAnaliz #BIST100 #borsa"
+                    )
                 success = _safe_tweet_with_media(text, report_image, source="tweet_spk_bulletin_analysis")
                 # Temp dosyayı temizle
                 try:
