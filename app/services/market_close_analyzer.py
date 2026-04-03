@@ -618,6 +618,17 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
         t = raw.strip().replace('"', '').replace("'", "")
         if not t or t.upper() == "EMPTY" or len(t) < 5:
             return ""
+        # Chain-of-thought sızıntısı filtresi — AI düşünce adımlarını çıktıya sızdırırsa temizle
+        cot_patterns = ["ADIM", "adım", "İNCELEME", "inceleme", "inceliyorum",
+                        "kontrol et", "doğrula", "DİKKATLİCE", "dikkatli bir şekilde",
+                        "VERİ İNCELEME", "SIRAYLA", "**ADIM"]
+        if any(p in t for p in cot_patterns):
+            logger.info(f"[COT FİLTRE] {ticker}: chain-of-thought sızıntısı elendi → '{t[:80]}'")
+            return ""
+        # 50 karakterden uzun yanıtlar da muhtemelen prompt sızıntısı
+        if len(t) > 60:
+            logger.info(f"[UZUNLUK FİLTRE] {ticker}: çok uzun yanıt elendi ({len(t)} kar) → '{t[:80]}'")
+            return ""
         if any(x in t.lower() for x in bad):
             return ""
         # Halka arz filtresi — 15 günü geçmiş IPO hisselerde "halka arz" ifadesi yasak
@@ -1050,11 +1061,11 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                     tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
                     tweet_text = (
                         f"📈 Günün TAVAN Yapan Hisseleri ve Sebepleri!\n\n"
-                        f"Hangi şirketler neden uçuşa geçti? Yapay zeka modelimizin "
-                        f"derlediği haber analizleri görsellerde! 🚀👇\n\n"
+                        f"Bugün {len(c_stats)} hisse tavan yaptı! Hangi şirketler neden uçuşa geçti? "
+                        f"Yapay zeka modelimizin derlediği analizler görsellerde! 🚀👇\n\n"
                         f"📌 {tickers_str}\n\n"
+                        f"🔍 Detaylar için: {WEB_LINK}tavan-taban\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
                         f"🍏 iOS: {APP_STORE_LINK}\n"
                         f"🌐 Web: {WEB_LINK}"
@@ -1108,11 +1119,11 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                     tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
                     tweet_text = (
                         f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
-                        f"Şirketler neden kan kaybetti? Yapay zeka modelimizin "
-                        f"derlediği haber analizleri görsellerde! 📊👇\n\n"
+                        f"Bugün {len(fl_stats)} hisse taban yaptı! Şirketler neden kan kaybetti? "
+                        f"Yapay zeka modelimizin derlediği analizler görsellerde! 📊👇\n\n"
                         f"📌 {tickers_str}\n\n"
+                        f"🔍 Detaylar için: {WEB_LINK}tavan-taban\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"Anlık tüm hisselerin KAP bildirimlerini almak için:\n"
                         f"📲 Android: {HALKAARZ_LINK}\n"
                         f"🍏 iOS: {APP_STORE_LINK}\n"
                         f"🌐 Web: {WEB_LINK}"

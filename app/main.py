@@ -7670,3 +7670,25 @@ async def fix_tweet_text(tweet_id: int, body: dict, db: AsyncSession = Depends(g
     await db.commit()
 
     return {"status": "ok", "id": tweet_id, "old_len": old_len, "new_len": len(new_text)}
+
+
+@app.post("/api/v1/admin/fix-market-reason")
+async def fix_market_reason(body: dict, db: AsyncSession = Depends(get_db)):
+    """Tavan/taban hisse sebebini (reason) dogrudan guncelle."""
+    pw = body.get("admin_password", "")
+    if not _verify_admin_password(pw):
+        raise HTTPException(403, "Yetkisiz")
+
+    ticker = body.get("ticker", "").upper()
+    date_str = body.get("date", "")
+    new_reason = body.get("reason", "")
+    if not ticker or not date_str or not new_reason:
+        raise HTTPException(400, "ticker, date, reason alanlari gerekli")
+
+    from sqlalchemy import text as sa_text
+    result = await db.execute(
+        sa_text('UPDATE daily_stock_market_stats SET reason = :reason WHERE ticker = :ticker AND "date" = :dt'),
+        {"reason": new_reason, "ticker": ticker, "dt": date_str}
+    )
+    await db.commit()
+    return {"status": "ok", "ticker": ticker, "date": date_str, "rows_updated": result.rowcount}
