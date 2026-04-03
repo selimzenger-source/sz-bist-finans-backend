@@ -515,8 +515,10 @@ async def get_public_news_feed(
     def _image_url(path: str | None) -> str | None:
         if not path:
             return None
-        # Sadece Cloudinary/HTTP URL'leri gecerli — local /static/ artik yok
         if path.startswith("http"):
+            return path
+        # Local /static/ path'leri de dondur
+        if path.startswith("/static/"):
             return path
         return None
 

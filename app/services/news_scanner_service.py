@@ -45,16 +45,16 @@ RSS_FEEDS = [
 ]
 
 # ── Sabitler ────────────────────────────────────────────
-_MIN_IMPORTANCE_SCORE = 8.5
-_MAX_DAILY_LOCAL_TWEETS = 5
-_MAX_DAILY_GLOBAL_TWEETS = 2
+_MIN_IMPORTANCE_SCORE = 7.5
+_MAX_DAILY_LOCAL_TWEETS = 8
+_MAX_DAILY_GLOBAL_TWEETS = 4
 
 # Kategori bazli tweet aralik limitleri (dakika)
 _CATEGORY_COOLDOWNS = {
     "TURKIYE_GUNDEM": 120,
     "GLOBAL": 180,
 }
-_DEFAULT_COOLDOWN = 40
+_DEFAULT_COOLDOWN = 25
 
 # ── Dedup State (memory-based, Render restart'ta sifirlanir) ──
 _seen_url_hashes: set[str] = set()
@@ -397,7 +397,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
 
     prompt = _TWEET_PROMPT.format(
         title=news["title"],
-        summary=news.get("summary", "")[:500],
+        summary=news.get("summary", "")[:1500],
         source=news["source"],
         category=ai_result["category"],
         sector=ai_result.get("sector", "YOK"),
@@ -414,7 +414,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 json={
                     "model": "gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 800,
+                    "max_tokens": 1500,
                     "temperature": 0.3,
                 },
             )
