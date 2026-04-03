@@ -1491,7 +1491,7 @@ class NotificationService:
 
         Seans türü saate göre belirlenir:
         - 06:00-18:00 arası → Gündüz Seansı
-        - 18:00-06:00 arası → Gece Seansı
+        - 18:00-06:00 arası → Akşam Seansı
 
         Spam koruma: acilis/kapanis 4 saat, flash 30 dakika cooldown
         """
@@ -1503,8 +1503,8 @@ class NotificationService:
         from datetime import datetime, timezone, timedelta
         tr_now = datetime.now(timezone(timedelta(hours=3)))
         hour = tr_now.hour
-        is_night = hour >= 18 or hour < 6
-        seans_adi = "Gece Seansı" if is_night else "Gündüz Seansı"
+        is_evening = hour >= 18 or hour < 6
+        seans_adi = "Akşam Seansı" if is_evening else "Gündüz Seansı"
 
         type_labels = {
             "opening": (f"VİOP {seans_adi} Açıldı", f"Vadeli işlem piyasası {seans_adi.lower()} başladı."),
