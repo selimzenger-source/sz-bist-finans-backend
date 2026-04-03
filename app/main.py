@@ -7694,9 +7694,14 @@ async def fix_market_reason(body: dict, db: AsyncSession = Depends(get_db)):
         raise HTTPException(400, "ticker, date, reason alanlari gerekli")
 
     from sqlalchemy import text as sa_text
+    from datetime import date as date_type
+    try:
+        dt = date_type.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(400, "date formati: YYYY-MM-DD")
     result = await db.execute(
         sa_text('UPDATE daily_stock_market_stats SET reason = :reason WHERE ticker = :ticker AND "date" = :dt'),
-        {"reason": new_reason, "ticker": ticker, "dt": date_str}
+        {"reason": new_reason, "ticker": ticker, "dt": dt}
     )
     await db.commit()
     return {"status": "ok", "ticker": ticker, "date": date_str, "rows_updated": result.rowcount}
