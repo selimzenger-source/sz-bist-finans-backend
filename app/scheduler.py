@@ -582,9 +582,10 @@ async def check_viop_notifications():
 
                 text_lower = tw.text.lower()
 
-                # Acilis
+                # Acilis — tweet metninden ozet cikar
                 if "açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower:
-                    await notif_svc.notify_viop_session("opening")
+                    opening_summary = tw.text[:300].replace("\n", " ").strip()
+                    await notif_svc.notify_viop_session("opening", opening_summary)
                     _viop_notified_ids.add(tw.id)
                 # Kapanis — tweet metninden ozet cikar
                 elif "kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower:

@@ -1489,15 +1489,26 @@ class NotificationService:
     async def notify_viop_session(self, session_type: str, summary: str = "") -> int:
         """VİOP seans bildirimi — acilis, kapanis veya flash.
 
+        Seans türü saate göre belirlenir:
+        - 06:00-18:00 arası → Gündüz Seansı
+        - 18:00-06:00 arası → Gece Seansı
+
         Spam koruma: acilis/kapanis 4 saat, flash 30 dakika cooldown
         """
         cooldown = 1800 if session_type == "flash" else 14400  # flash: 30dk, diger: 4 saat
         if not self._check_cooldown(f"viop_{session_type}", cooldown):
             return 0
 
+        # Saat bazlı seans türü belirleme (TR saati UTC+3)
+        from datetime import datetime, timezone, timedelta
+        tr_now = datetime.now(timezone(timedelta(hours=3)))
+        hour = tr_now.hour
+        is_night = hour >= 18 or hour < 6
+        seans_adi = "Gece Seansı" if is_night else "Gündüz Seansı"
+
         type_labels = {
-            "opening": ("VİOP Gece Seansı Açıldı", "Vadeli işlem piyasası gece seansı başladı."),
-            "closing": ("VİOP Gece Seansı Kapandı", "Gece seansı sona erdi, veriler güncellendi."),
+            "opening": (f"VİOP {seans_adi} Açıldı", f"Vadeli işlem piyasası {seans_adi.lower()} başladı."),
+            "closing": (f"VİOP {seans_adi} Kapandı", f"{seans_adi} sona erdi, veriler güncellendi."),
             "flash": ("VİOP Flaş Haber", summary or "Önemli VİOP hareketi tespit edildi."),
         }
         title, default_body = type_labels.get(session_type, ("VİOP Güncelleme", "VİOP güncelleme"))

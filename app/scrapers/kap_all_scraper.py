@@ -364,10 +364,11 @@ async def fetch_mynet_detail_content(detail_url: str) -> str:
             for tag in content_div(["script", "style"]):
                 tag.decompose()
 
-            text = content_div.get_text(" ", strip=True)
+            import html as _html
+            text = _html.unescape(content_div.get_text(" ", strip=True))
             if text and len(text) > 30:
                 logger.info("Mynet detay icerigi: %d karakter", len(text))
-                return text[:4000]
+                return text[:5000]
 
     except Exception as exc:
         logger.debug("Mynet detay hatasi: %s", exc)

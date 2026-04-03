@@ -225,9 +225,10 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
             if pub_date and pub_date < cutoff:
                 continue
 
-            title = getattr(entry, "title", "").strip()
+            import html as _html
+            title = _html.unescape(getattr(entry, "title", "").strip())
             link = getattr(entry, "link", "").strip()
-            summary = getattr(entry, "summary", "").strip()
+            summary = _html.unescape(getattr(entry, "summary", "").strip())
             # HTML tag temizle
             summary = re.sub(r"<[^>]+>", "", summary).strip()
 
@@ -369,7 +370,7 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 5-7 cumle. Sadece ozetleme — YORUM KAT, BAGLAM KUR:
+- OZET: 8-12 cumle (en az 80 kelime). Sadece ozetleme — YORUM KAT, BAGLAM KUR:
   * Haberin BIST'teki hangi sektoru/sirketleri etkileyecegini yaz
   * "Bu gelisme ... sektorunu olumlu/olumsuz etkileyebilir" gibi yorumlar ekle
   * Sirket haberi ise: sirketin BIST performansi, sektor pozisyonu hakkinda kisa baglam ver

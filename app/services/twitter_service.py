@@ -3031,7 +3031,7 @@ def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
             continue
 
         ticker = ticker_match.group(1)
-        # Maddeyi kısalt — ticker + özet (max 60 char)
+        # Maddeyi temizle — ticker + tam açıklama
         clean = stripped.lstrip("•- ").replace("**", "").strip()
         clean = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', clean).strip()
 
@@ -3045,14 +3045,14 @@ def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
             after_ticker = re.sub(r'^#[A-Z]{3,6}\s*', '', clean)
             short_desc = after_ticker
 
-        # Max 70 karakter
-        if len(short_desc) > 70:
-            short_desc = short_desc[:67] + "..."
+        # Max 140 karakter — tam şirket ismi ve detay sığsın
+        if len(short_desc) > 140:
+            short_desc = short_desc[:137] + "..."
 
         if short_desc:
             highlights.append(f"• #{ticker} {short_desc}")
 
-        if len(highlights) >= 5:
+        if len(highlights) >= 8:
             break
 
     return "\n".join(highlights)
