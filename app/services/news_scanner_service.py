@@ -371,12 +371,13 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 100-130 kelime, 5-8 cumle. Onemli: KISA ve OZ yaz, gereksiz uzatma!
-  * Haberin ana konusunu acikla (2-3 cumle)
-  * BIST'teki hangi sektoru/sirketleri etkileyecegini yaz (2-3 cumle)
+- OZET: 80-110 kelime, 4-6 cumle. KISA ve OZ yaz, gereksiz uzatma!
+  * Paragraf 1: Haberin ana konusunu acikla (2-3 cumle)
+  * Paragraf 2: BIST etkisi — hangi sektoru/sirketleri etkileyecegini yaz (2-3 cumle)
+  * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir). PARAGRAF YAPISI ONEMLI!
   * SON CUMLE: Yatirimcilar icin kisa bir yorum
   ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
-  UYARI: 130 kelimeden uzun ozet KABUL EDILMEZ. Kisa ve etkili yaz.
+  UYARI: 110 kelimeden uzun ozet KABUL EDILMEZ. Gereksiz detay verme, ozlu yaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -452,15 +453,15 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 ozet = ozet[:last_period + 1]
                 logger.info("Yarim cumle temizlendi, yeni uzunluk: %d karakter", len(ozet))
 
-        # Hard limit: 1500 karakter — cümle sınırında kes
-        if len(ozet) > 1500:
-            truncated = ozet[:1500]
+        # Hard limit: 1200 karakter — cümle sınırında kes
+        if len(ozet) > 1200:
+            truncated = ozet[:1200]
             last_period = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
-            if last_period > 1000:
+            if last_period > 800:
                 ozet = truncated[:last_period + 1]
             else:
                 ozet = truncated
-            logger.info("1500 karakter limitine kesildi: %d karakter", len(ozet))
+            logger.info("1200 karakter limitine kesildi: %d karakter", len(ozet))
 
         logger.info("Parsed ozet uzunlugu: %d karakter, %d kelime", len(ozet), len(ozet.split()))
 
