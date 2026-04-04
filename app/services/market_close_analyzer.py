@@ -575,6 +575,7 @@ Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
 Sebep yönü hissenin hareketiyle UYUŞMUYORSA → EMPTY yaz.
 
 ━━━ ADIM 4 — ÇIKTI ━━━
+⚠️ KRİTİK: SADECE nihai sonucu yaz! Düşünme sürecini, adım başlıklarını, "Verilen bilgileri inceliyorum" gibi ifadeleri ASLA yazma!
 Yukarıda A-G'den birinde somut bulgu varsa VE sebebin yönü hissenin hareketiyle uyuşuyorsa → 4-6 kelime ile Türkçe yaz.
 Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
 
@@ -621,7 +622,8 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
         # Chain-of-thought sızıntısı filtresi — AI düşünce adımlarını çıktıya sızdırırsa temizle
         cot_patterns = ["ADIM", "adım", "İNCELEME", "inceleme", "inceliyorum",
                         "kontrol et", "doğrula", "DİKKATLİCE", "dikkatli bir şekilde",
-                        "VERİ İNCELEME", "SIRAYLA", "**ADIM"]
+                        "VERİ İNCELEME", "SIRAYLA", "**ADIM",
+                        "Verilen bilgileri", "bilgileri dikkatli", "dikkatle incel"]
         if any(p in t for p in cot_patterns):
             logger.info(f"[COT FİLTRE] {ticker}: chain-of-thought sızıntısı elendi → '{t[:80]}'")
             return ""
