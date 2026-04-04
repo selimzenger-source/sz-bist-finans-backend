@@ -2488,6 +2488,30 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
     }
 
 
+@app.post("/api/v1/admin/reset-spk-flags")
+@limiter.limit("10/minute")
+async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Son 48 saatteki SPK başvurularının tweet/bildirim flag'lerini sıfırla."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(hours=48)
+    result = await db.execute(
+        select(SPKApplication).where(
+            SPKApplication.status == "pending",
+            SPKApplication.created_at >= cutoff,
+        )
+    )
+    reset_count = 0
+    for app in result.scalars().all():
+        app.notified = False
+        app.tweeted = False
+        reset_count += 1
+    await db.commit()
+    return {"status": "ok", "reset_count": reset_count}
+
+
 @app.post("/api/v1/admin/trigger-spk-check")
 @limiter.limit("30/minute")
 async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
