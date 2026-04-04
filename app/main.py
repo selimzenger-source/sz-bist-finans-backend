@@ -459,11 +459,17 @@ async def get_public_news_feed(
     db: AsyncSession = Depends(get_db),
     days: int = Query(15, le=60),
     limit: int = Query(100, le=200),
+    source: str = Query(None, description="Kaynak filtresi: news_scanner, kap_news, tweet_kap_news vb."),
 ):
     """Son N gunun haber tweetlerini blog formatta doner (sadece news sources)."""
     import re
     # Sadece haber kaynaklari — VİOP, tavan/taban, EDO, snapshot, IPO haric
-    NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news", "kap_news"}
+    ALL_NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news", "kap_news"}
+    # source parametresi verilmişse sadece o kaynağı filtrele
+    if source and source in ALL_NEWS_SOURCES:
+        NEWS_SOURCES = {source}
+    else:
+        NEWS_SOURCES = ALL_NEWS_SOURCES
     # bot_proxy kaynaginda VİOP olmayan haberleri de al
     _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
     _TAVAN_KEYWORDS = ["%tavan yap%", "%taban yap%", "%Günün Tavan%", "%Günün Taban%", "%EDO eşiğ%"]
