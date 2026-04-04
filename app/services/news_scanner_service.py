@@ -832,6 +832,11 @@ async def process_important_news(news_list: list[dict], auto_tweet: bool = False
                 # DB'ye kaydet
                 await _save_news_to_db(tweet_data)
         else:
+            # Kuyruk zaten doluysa ekleme — döngüyü kır
+            if len(_pending_news) >= _MAX_QUEUE_SIZE:
+                logger.info("Kuyruk dolu (%d/%d), yeni haber eklenmedi: %s", len(_pending_news), _MAX_QUEUE_SIZE, tweet_data.get("headline", "?")[:40])
+                break
+
             # FIFO kuyruga ekle
             _pending_news.insert(0, tweet_data)
 
