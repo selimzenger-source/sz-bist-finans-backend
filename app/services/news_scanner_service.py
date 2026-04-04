@@ -487,10 +487,12 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         hashtags = _CATEGORY_HASHTAGS.get(category, "#Borsa #BIST100")
         ticker_str = " ".join(ticker_tags[:6])
 
+        news_link = news.get("link", "")
         tweet_text = (
             f"{prefix}\n\n"
             f"{ozet}\n\n"
-            f"Kaynak: {news['source']}\n\n"
+            f"Kaynak: {news['source']}\n"
+            f"{news_link}\n\n"
             f"\U0001f4f2 Android: {_ANDROID_LINK}\n"
             f"\U0001f34f iOS: {_IOS_LINK}\n"
             f"\U0001f310 Web: {_WEB_LINK}\n\n"
@@ -931,6 +933,11 @@ async def approve_news(index: int) -> dict:
         return {"error": f"Gecersiz numara: {index}, kuyrukta {len(_pending_news)} haber var"}
 
     tweet_data = _pending_news[idx]
+
+    # Cloudinary upload (approve modunda burada yapılır)
+    if not tweet_data.get("cover_url"):
+        cover_url = await _upload_cover_image(tweet_data.get("cover_path"))
+        tweet_data["cover_url"] = cover_url
 
     # Tweet at
     success = await _post_tweet(tweet_data)

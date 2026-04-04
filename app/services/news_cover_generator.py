@@ -138,17 +138,57 @@ async def _generate_gemini_background(headline: str, category: str) -> bytes | N
         return None
 
 
-def _create_fallback_background() -> Image.Image:
-    """Gemini basarisizsa koyu gradient arka plan."""
+def _create_fallback_background(category: str = "PIYASA") -> Image.Image:
+    """Gemini basarisizsa yaratici gradient arka plan + dekoratif elementler."""
+    import random
+    import math
+
+    cat_color = CATEGORY_COLORS.get(category, (106, 27, 154))
+
     img = Image.new("RGB", (W, H), (13, 27, 42))
     draw = ImageDraw.Draw(img)
+
+    # Koyu gradient arka plan
     for y in range(H):
         ratio = y / H
-        r = int(13 + (8 - 13) * ratio)
-        g = int(27 + (16 - 27) * ratio)
-        b = int(42 + (28 - 42) * ratio)
+        r = int(13 + (27 - 13) * ratio * 0.5)
+        g = int(27 + (40 - 27) * ratio * 0.3)
+        b = int(42 + (56 - 42) * ratio * 0.8)
         draw.line([(0, y), (W, y)], fill=(r, g, b))
-    return img
+
+    # Dekoratif daireler (bokeh efekti)
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ov_draw = ImageDraw.Draw(overlay)
+    random.seed(hash(category) % 10000)  # Deterministic ama kategoriye ozel
+    for _ in range(12):
+        cx = random.randint(0, W)
+        cy = random.randint(0, H)
+        radius = random.randint(30, 120)
+        alpha = random.randint(8, 25)
+        color = (*cat_color, alpha)
+        ov_draw.ellipse(
+            [(cx - radius, cy - radius), (cx + radius, cy + radius)],
+            fill=color,
+        )
+
+    # Grid cizgileri (subtle)
+    for x in range(0, W, 80):
+        ov_draw.line([(x, 0), (x, H)], fill=(41, 121, 255, 8), width=1)
+    for y in range(0, H, 80):
+        ov_draw.line([(0, y), (W, y)], fill=(41, 121, 255, 8), width=1)
+
+    # Koselerde parlama efekti
+    for cx, cy in [(W - 100, 100), (150, H - 150)]:
+        for r in range(150, 0, -2):
+            a = int(15 * (1 - r / 150))
+            ov_draw.ellipse(
+                [(cx - r, cy - r), (cx + r, cy + r)],
+                fill=(*cat_color, a),
+            )
+
+    img_rgba = img.convert("RGBA")
+    img_rgba = Image.alpha_composite(img_rgba, overlay)
+    return img_rgba.convert("RGB")
 
 
 def _overlay_text(
@@ -251,7 +291,7 @@ async def generate_news_cover(
             bg_img = Image.open(io.BytesIO(bg_bytes)).convert("RGB")
             bg_img = bg_img.resize((W, H), Image.LANCZOS)
         else:
-            bg_img = _create_fallback_background()
+            bg_img = _create_fallback_background(category)
 
         # 2. Pillow ile text overlay
         final = _overlay_text(bg_img, headline, category, source, banner)
