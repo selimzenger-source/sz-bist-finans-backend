@@ -409,6 +409,27 @@ async def scrape_spk():
 
                 await db.commit()
 
+                # ── Eski kayitlarin flag'lerini duzelt (her cycle) ──
+                _spk_cutoff = datetime.now(_TR_TZ) - timedelta(hours=48)
+                try:
+                    old_unnotified = await db.execute(
+                        select(SPKApplication).where(
+                            SPKApplication.status == "pending",
+                            SPKApplication.notified == False,
+                            SPKApplication.created_at < _spk_cutoff,
+                        )
+                    )
+                    _old_fixed = 0
+                    for old_app in old_unnotified.scalars().all():
+                        old_app.notified = True
+                        old_app.tweeted = True
+                        _old_fixed += 1
+                    if _old_fixed > 0:
+                        await db.commit()
+                        logger.info("SPK eski kayit flag duzeltildi: %d adet", _old_fixed)
+                except Exception as _flag_err:
+                    logger.error("SPK flag duzeltme hatasi: %s", _flag_err)
+
                 # ── Yeni basvurular icin bildirim + tweet ──
                 if new_count > 0:
                     try:
@@ -417,7 +438,6 @@ async def scrape_spk():
 
                         # Henuz bildirim gonderilmemis yeni basvurulari cek
                         # SPAM KORUMASI: sadece son 48 saat icinde olusturulanlari al
-                        _spk_cutoff = datetime.now(_TR_TZ) - timedelta(hours=48)
                         unnotified_result = await db.execute(
                             select(SPKApplication).where(
                                 SPKApplication.status == "pending",
@@ -426,18 +446,6 @@ async def scrape_spk():
                             )
                         )
                         unnotified = list(unnotified_result.scalars().all())
-
-                        # Eski kayitlarin flag'lerini toplu True yap (bir daha tweet atilmasin)
-                        old_unnotified = await db.execute(
-                            select(SPKApplication).where(
-                                SPKApplication.status == "pending",
-                                SPKApplication.notified == False,
-                                SPKApplication.created_at < _spk_cutoff,
-                            )
-                        )
-                        for old_app in old_unnotified.scalars().all():
-                            old_app.notified = True
-                            old_app.tweeted = True
 
                         if unnotified:
                             # SPAM KORUMASI: max 5 bildirim/tweet per cycle
