@@ -7632,6 +7632,28 @@ async def admin_news_queue(admin_password: str = ""):
     return {"queue": get_queue()}
 
 
+@app.post("/api/v1/admin/news-resume")
+async def admin_news_resume(body: dict):
+    """/devam — kuyruk duraklatmasini kaldir, tarama devam etsin."""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.news_scanner_service import resume_queue
+    return await resume_queue()
+
+
+@app.post("/api/v1/admin/news-clear")
+async def admin_news_clear(body: dict):
+    """/temizle — kuyrugu tamamen sifirla."""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.services.news_scanner_service import clear_queue
+    return await clear_queue()
+
+
 @app.post("/api/v1/admin/fix-html-entities")
 @limiter.limit("5/minute")
 async def admin_fix_html_entities(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):

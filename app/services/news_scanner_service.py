@@ -64,9 +64,10 @@ _daily_counts: dict[str, int] = {}  # category -> count
 _daily_counts_date: str = ""  # YYYY-MM-DD
 _last_tweet_times: dict[str, datetime] = {}  # category -> last_tweet_time
 
-# ── Pending news — FIFO kuyruk (max 5 haber) ──
-_MAX_QUEUE_SIZE = 5
+# ── Pending news — FIFO kuyruk (max 4 haber, dolunca durur) ──
+_MAX_QUEUE_SIZE = 4
 _pending_news: list[dict] = []  # En yeni basta, en eski sonda
+_queue_paused: bool = False  # Kuyruk dolunca True olur, /devam ile False olur
 
 # ── Sektor → Hisse Mapping ──────────────────────────────
 _SECTOR_STOCKS = {
@@ -370,17 +371,12 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: MINIMUM 150 kelime, 8-15 cumle. Bu cok onemli — KISA YAZMA, DETAYLI YAZ. Sadece ozetleme degil — YORUM KAT, BAGLAM KUR, ANALİZ YAP:
-  * Haberin ana konusunu acikla (3-4 cumle)
-  * Haberin BIST'teki hangi sektoru/sirketleri etkileyecegini DETAYLI yaz (3-4 cumle)
-  * "Bu gelisme ... sektorunu olumlu/olumsuz etkileyebilir" gibi analizler ekle
-  * Sirket haberi ise: sirketin BIST performansi, sektor pozisyonu, finansal durum baglami ver
-  * Turkiye ekonomisi haberi ise: TCMB, faiz, enflasyon, kur etkisi baglami kur
-  * Sektor haberi ise: sektordeki BIST sirketlerini (THYAO, GARAN vb.) yorumla
-  * ISTISNA: Cok buyuk global olaylar (savas, deprem, finansal kriz) icin sadece ozetle, sektor baglami zorlama
-  * SON CUMLE: Yatirimcilarin bu haberi nasil degerlendirmesi gerektigi hakkinda kisa bir yorum yaz
-  ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz. Bunlar haber degildir.
-  UYARI: 150 kelimeden kisa ozet KABUL EDILMEZ. Detayli ve kapsamli yaz.
+- OZET: 100-130 kelime, 5-8 cumle. Onemli: KISA ve OZ yaz, gereksiz uzatma!
+  * Haberin ana konusunu acikla (2-3 cumle)
+  * BIST'teki hangi sektoru/sirketleri etkileyecegini yaz (2-3 cumle)
+  * SON CUMLE: Yatirimcilar icin kisa bir yorum
+  ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
+  UYARI: 130 kelimeden uzun ozet KABUL EDILMEZ. Kisa ve etkili yaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -417,7 +413,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 json={
                     "model": "gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 4096,
+                    "max_tokens": 2000,
                     "temperature": 0.3,
                 },
             )
@@ -455,6 +451,16 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
             if last_period > len(ozet) * 0.5:  # En az metnin yarısı korunsun
                 ozet = ozet[:last_period + 1]
                 logger.info("Yarim cumle temizlendi, yeni uzunluk: %d karakter", len(ozet))
+
+        # Hard limit: 1500 karakter — cümle sınırında kes
+        if len(ozet) > 1500:
+            truncated = ozet[:1500]
+            last_period = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
+            if last_period > 1000:
+                ozet = truncated[:last_period + 1]
+            else:
+                ozet = truncated
+            logger.info("1500 karakter limitine kesildi: %d karakter", len(ozet))
 
         logger.info("Parsed ozet uzunlugu: %d karakter, %d kelime", len(ozet), len(ozet.split()))
 
@@ -820,11 +826,25 @@ async def process_important_news(news_list: list[dict], auto_tweet: bool = False
                 # DB'ye kaydet
                 await _save_news_to_db(tweet_data)
         else:
-            # FIFO kuyruga ekle (max 5, en eski duser)
+            # Kuyruk dolu ve duraklatılmışsa yeni haber ekleme
+            if _queue_paused:
+                logger.info("Kuyruk duraklatildi, yeni haber eklenmedi: %s", tweet_data.get("headline", "?")[:40])
+                continue
+
+            # FIFO kuyruga ekle
             _pending_news.insert(0, tweet_data)
-            if len(_pending_news) > _MAX_QUEUE_SIZE:
-                dropped = _pending_news.pop()
-                logger.info("Kuyruk dolu, en eski haber dustu: %s", dropped.get("headline", "?")[:40])
+
+            # Kuyruk doluysa duraklat (eski haber düşürmek yerine)
+            if len(_pending_news) >= _MAX_QUEUE_SIZE:
+                _queue_paused = True
+                logger.info("Kuyruk doldu (%d), tarama duraklatildi. /devam ile devam edin.", _MAX_QUEUE_SIZE)
+                await _send_telegram_message(
+                    f"\u26a0\ufe0f <b>Kuyruk doldu ({_MAX_QUEUE_SIZE} haber)</b>\n"
+                    f"Yeni haber eklenmeyecek.\n"
+                    f"\U0001f449 /devam — kuyruğu temizle ve taramaya devam et\n"
+                    f"\U0001f449 /temizle — kuyruğu sıfırla"
+                )
+
             # Telegram'a kuyruk bilgisi gonder
             await _send_news_to_telegram(tweet_data)
 
@@ -892,11 +912,8 @@ async def _send_queue_summary():
         lines.append(f"  {i+1}. {emoji} {headline} ({score})")
 
     lines.append("")
-    lines.append("<b>Komutlar:</b>")
-    lines.append("<code>/haber_at 1</code> — 1. haberi tweetle")
-    lines.append("<code>/haber_at 3</code> — 3. haberi tweetle")
-    lines.append("<code>/haber_sil 2</code> — 2. haberi kuyruktan cikar")
-    lines.append("<code>/haber_liste</code> — kuyrugu goster")
+    lines.append("<code>/at 1</code> tweetle | <code>/sil 2</code> cikar")
+    lines.append("<code>/liste</code> kuyruk | <code>/devam</code> devam | <code>/temizle</code> sifirla")
 
     await _send_telegram_message("\n".join(lines))
 
@@ -926,7 +943,7 @@ async def _save_news_to_db(tweet_data: dict):
 
 async def approve_news(index: int) -> dict:
     """Haberi tweetle. index 1-based (Telegram: /haber_at 1)."""
-    global _pending_news
+    global _pending_news, _queue_paused
 
     idx = index - 1  # 1-based -> 0-based
     if idx < 0 or idx >= len(_pending_news):
@@ -972,6 +989,11 @@ async def approve_news(index: int) -> dict:
         # Kuyruktan cikar
         _pending_news.pop(idx)
 
+        # Kuyrukta yer açıldı, duraklatmayı kaldır
+        if _queue_paused and len(_pending_news) < _MAX_QUEUE_SIZE:
+            _queue_paused = False
+            logger.info("Kuyrukta yer acildi, tarama devam ediyor")
+
         # Gecici cover dosyasini temizle
         cover_path = tweet_data.get("cover_path")
         if cover_path and os.path.exists(cover_path):
@@ -998,13 +1020,19 @@ async def approve_news(index: int) -> dict:
 
 async def reject_news(index: int) -> dict:
     """Haberi kuyruktan cikar. index 1-based."""
-    global _pending_news
+    global _pending_news, _queue_paused
 
     idx = index - 1
     if idx < 0 or idx >= len(_pending_news):
         return {"error": f"Gecersiz numara: {index}, kuyrukta {len(_pending_news)} haber var"}
 
     removed = _pending_news.pop(idx)
+
+    # Kuyrukta yer açıldı, duraklatmayı kaldır
+    if _queue_paused and len(_pending_news) < _MAX_QUEUE_SIZE:
+        _queue_paused = False
+        logger.info("Kuyrukta yer acildi, tarama devam ediyor")
+
     await _send_telegram_message(
         f"\u274c Haber silindi: {removed.get('headline', '?')[:50]}"
     )
@@ -1015,6 +1043,41 @@ async def reject_news(index: int) -> dict:
         await _send_telegram_message("\U0001f4cb Kuyruk bos.")
 
     return {"status": "rejected", "headline": removed.get("headline")}
+
+
+async def resume_queue() -> dict:
+    """/devam komutu — kuyruk duraklatmasını kaldır, tarama devam etsin."""
+    global _queue_paused
+    _queue_paused = False
+    count = len(_pending_news)
+    await _send_telegram_message(
+        f"\u25b6\ufe0f Kuyruk devam ettiriliyor. Kuyrukta {count} haber var.\n"
+        f"Yeni haberler tekrar eklenecek."
+    )
+    logger.info("Kuyruk devam ettiriliyor (mevcut: %d)", count)
+    return {"status": "resumed", "queue_size": count}
+
+
+async def clear_queue() -> dict:
+    """/temizle komutu — kuyruğu tamamen sıfırla."""
+    global _pending_news, _queue_paused
+    count = len(_pending_news)
+    # Cover dosyalarını temizle
+    for td in _pending_news:
+        cp = td.get("cover_path")
+        if cp and os.path.exists(cp):
+            try:
+                os.unlink(cp)
+            except Exception:
+                pass
+    _pending_news = []
+    _queue_paused = False
+    await _send_telegram_message(
+        f"\U0001f5d1\ufe0f Kuyruk temizlendi ({count} haber silindi).\n"
+        f"Tarama devam ediyor."
+    )
+    logger.info("Kuyruk temizlendi (%d haber)", count)
+    return {"status": "cleared", "removed": count}
 
 
 async def show_queue() -> dict:
@@ -1137,9 +1200,9 @@ async def _handle_admin_command(text: str):
     parts = text.split()
     cmd = parts[0].lower()
 
-    if cmd == "/haber_at" or cmd == "/onay":
+    if cmd in ("/haber_at", "/onay", "/at"):
         if len(parts) < 2:
-            await _send_telegram_message("⚠️ Kullanim: /haber_at <numara>")
+            await _send_telegram_message("⚠️ /at <numara>")
             return
         try:
             index = int(parts[1])
@@ -1150,9 +1213,9 @@ async def _handle_admin_command(text: str):
         if "error" in result:
             await _send_telegram_message(f"⚠️ {result['error']}")
 
-    elif cmd == "/haber_sil" or cmd == "/iptal":
+    elif cmd in ("/haber_sil", "/iptal", "/sil"):
         if len(parts) < 2:
-            await _send_telegram_message("⚠️ Kullanim: /haber_sil <numara>")
+            await _send_telegram_message("⚠️ /sil <numara>")
             return
         try:
             index = int(parts[1])
@@ -1163,7 +1226,13 @@ async def _handle_admin_command(text: str):
         if "error" in result:
             await _send_telegram_message(f"⚠️ {result['error']}")
 
-    elif cmd == "/haber_liste":
+    elif cmd in ("/haber_liste", "/liste"):
         await show_queue()
+
+    elif cmd == "/devam":
+        await resume_queue()
+
+    elif cmd == "/temizle":
+        await clear_queue()
 
     # Bilinmeyen komutlari sessizce atla
