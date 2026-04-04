@@ -69,6 +69,11 @@ _MAX_QUEUE_SIZE = 4
 _pending_news: list[dict] = []  # En yeni basta, en eski sonda
 _queue_paused: bool = False  # Kuyruk dolunca True olur, /devam ile False olur
 
+
+def is_queue_paused() -> bool:
+    """Kuyruk duraklatılmış mı? Scheduler tarafından kontrol edilir."""
+    return _queue_paused
+
 # ── Sektor → Hisse Mapping ──────────────────────────────
 _SECTOR_STOCKS = {
     "ILAC": ["ECILC", "DEVA", "TRILC", "SELEC", "GENIL", "RTALB"],
@@ -827,27 +832,22 @@ async def process_important_news(news_list: list[dict], auto_tweet: bool = False
                 # DB'ye kaydet
                 await _save_news_to_db(tweet_data)
         else:
-            # Kuyruk dolu ve duraklatılmışsa yeni haber ekleme
-            if _queue_paused:
-                logger.info("Kuyruk duraklatildi, yeni haber eklenmedi: %s", tweet_data.get("headline", "?")[:40])
-                continue
-
             # FIFO kuyruga ekle
             _pending_news.insert(0, tweet_data)
 
-            # Kuyruk doluysa duraklat (eski haber düşürmek yerine)
+            # Telegram'a kuyruk bilgisi gonder
+            await _send_news_to_telegram(tweet_data)
+
+            # Kuyruk doluysa taramayı duraklat
             if len(_pending_news) >= _MAX_QUEUE_SIZE:
                 _queue_paused = True
                 logger.info("Kuyruk doldu (%d), tarama duraklatildi. /devam ile devam edin.", _MAX_QUEUE_SIZE)
                 await _send_telegram_message(
                     f"\u26a0\ufe0f <b>Kuyruk doldu ({_MAX_QUEUE_SIZE} haber)</b>\n"
-                    f"Yeni haber eklenmeyecek.\n"
+                    f"Tarama duraklatıldı.\n"
                     f"\U0001f449 /devam — kuyruğu temizle ve taramaya devam et\n"
                     f"\U0001f449 /temizle — kuyruğu sıfırla"
                 )
-
-            # Telegram'a kuyruk bilgisi gonder
-            await _send_news_to_telegram(tweet_data)
 
         processed.append(tweet_data)
 

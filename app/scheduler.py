@@ -4395,7 +4395,12 @@ async def news_scanner_job():
             logger.debug("Haber tarama: saat %02d, atlanıyor (08-23 arasi calisir)", now_tr.hour)
             return
 
-        from app.services.news_scanner_service import scan_news, process_important_news
+        from app.services.news_scanner_service import scan_news, process_important_news, is_queue_paused
+
+        # Kuyruk doluysa tarama yapma — haberler seen'e eklenmeden kalsın
+        if is_queue_paused():
+            logger.debug("Haber tarama: kuyruk dolu, tarama atlanıyor. /devam ile devam edin.")
+            return
 
         important = await scan_news()
         if not important:
