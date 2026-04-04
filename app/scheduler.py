@@ -416,21 +416,38 @@ async def scrape_spk():
                         from app.services.twitter_service import tweet_spk_application
 
                         # Henuz bildirim gonderilmemis yeni basvurulari cek
+                        # SPAM KORUMASI: sadece son 48 saat icinde olusturulanlari al
+                        _spk_cutoff = datetime.now(_TR_TZ) - timedelta(hours=48)
                         unnotified_result = await db.execute(
                             select(SPKApplication).where(
                                 SPKApplication.status == "pending",
                                 SPKApplication.notified == False,
+                                SPKApplication.created_at >= _spk_cutoff,
                             )
                         )
                         unnotified = list(unnotified_result.scalars().all())
 
+                        # Eski kayitlarin flag'lerini toplu True yap (bir daha tweet atilmasin)
+                        old_unnotified = await db.execute(
+                            select(SPKApplication).where(
+                                SPKApplication.status == "pending",
+                                SPKApplication.notified == False,
+                                SPKApplication.created_at < _spk_cutoff,
+                            )
+                        )
+                        for old_app in old_unnotified.scalars().all():
+                            old_app.notified = True
+                            old_app.tweeted = True
+
                         if unnotified:
+                            # SPAM KORUMASI: max 5 bildirim/tweet per cycle
+                            _MAX_SPK_TWEETS_PER_CYCLE = 5
+                            unnotified = unnotified[:_MAX_SPK_TWEETS_PER_CYCLE]
+
                             # 1. Toplu push bildirim gonder
                             company_names = [app.company_name for app in unnotified]
-                            # Sirket adlarini kisalt (bildirimde cok uzun olmasin)
                             short_names = []
                             for name in company_names:
-                                # "... Sanayi ve Ticaret AŞ" kısmını kes
                                 parts = name.split()
                                 short = " ".join(parts[:3]) if len(parts) > 4 else name
                                 short_names.append(short)
@@ -443,11 +460,11 @@ async def scrape_spk():
                             for app in unnotified:
                                 app.notified = True
 
-                            # 2. Her sirket icin ayri tweet at (senkron, arada 5 sn bekleme)
+                            # 2. Her sirket icin ayri tweet at (max 5, arada 10 sn bekleme)
                             untweeted = [app for app in unnotified if not app.tweeted]
                             for i, app in enumerate(untweeted):
                                 if i > 0:
-                                    await asyncio.sleep(5)  # Rate limit korumasi — event loop bloklamasin
+                                    await asyncio.sleep(10)  # Rate limit korumasi
                                 success = tweet_spk_application(app.company_name)
                                 if success:
                                     app.tweeted = True
