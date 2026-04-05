@@ -2512,6 +2512,47 @@ async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSessio
     return {"status": "ok", "reset_count": reset_count}
 
 
+@app.post("/api/v1/admin/retweet-spk-apps")
+@limiter.limit("5/minute")
+async def admin_retweet_spk_apps(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Belirli SPK başvurularını sil ve scraper'ı tetikle — yeniden tweet atılır."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    company_names = payload.get("company_names", [])
+    if not company_names:
+        # Son 48 saatteki tüm kayıtları sil
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(hours=48)
+        result = await db.execute(
+            select(SPKApplication).where(
+                SPKApplication.created_at >= cutoff,
+                SPKApplication.status == "pending",
+            )
+        )
+        company_names = [app.company_name for app in result.scalars().all()]
+
+    deleted = 0
+    for name in company_names:
+        result = await db.execute(
+            select(SPKApplication).where(SPKApplication.company_name == name)
+        )
+        app = result.scalar_one_or_none()
+        if app:
+            await db.delete(app)
+            deleted += 1
+    await db.commit()
+
+    # Scraper'ı tetikle — silinen kayıtlar yeniden eklenecek ve tweet atılacak
+    try:
+        from app.scheduler import scrape_spk
+        await scrape_spk()
+    except Exception as e:
+        return {"status": "partial", "deleted": deleted, "scraper_error": str(e)[:200]}
+
+    return {"status": "ok", "deleted": deleted, "message": f"{deleted} kayıt silindi ve scraper tetiklendi"}
+
+
 @app.post("/api/v1/admin/trigger-spk-scraper")
 @limiter.limit("5/minute")
 async def admin_trigger_spk_scraper(request: Request, payload: dict):

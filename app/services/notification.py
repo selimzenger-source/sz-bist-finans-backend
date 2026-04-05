@@ -873,7 +873,7 @@ class NotificationService:
         data = {
             "type": "spk_application",
             "count": str(count),
-            "screen": "halka-arz",
+            "screen": "spk-basvurular",
         }
 
         return await self._send_filtered(
