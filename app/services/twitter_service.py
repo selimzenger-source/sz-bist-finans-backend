@@ -2374,7 +2374,25 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
         if tweet_resp.status_code in (200, 201):
             tweet_id = tweet_resp.json().get("data", {}).get("id", "?")
             logger.info(f"Gorselli tweet basarili (id={tweet_id}): {text[:60]}...")
-            _mark_tweet_sent(text, image_path=image_path, source=source,
+
+            # Twitter'dan tweet detayini al — media URL'ini cek
+            _media_url = None
+            try:
+                _tweet_detail_auth = _build_oauth_header(creds)
+                _detail_resp = httpx.get(
+                    f"https://api.twitter.com/2/tweets/{tweet_id}?expansions=attachments.media_keys&media.fields=url,preview_image_url",
+                    headers={"Authorization": _tweet_detail_auth},
+                    timeout=10.0,
+                )
+                if _detail_resp.status_code == 200:
+                    _media_list = _detail_resp.json().get("includes", {}).get("media", [])
+                    if _media_list:
+                        _media_url = _media_list[0].get("url") or _media_list[0].get("preview_image_url")
+                        logger.info(f"Twitter media URL alindi: {_media_url}")
+            except Exception as _media_err:
+                logger.warning(f"Twitter media URL alinamadi: {_media_err}")
+
+            _mark_tweet_sent(text, image_path=_media_url or image_path, source=source,
                              twitter_tweet_id=str(tweet_id))
             _record_tweet_sent()
             global _last_tweet_id
