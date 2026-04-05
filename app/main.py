@@ -2511,6 +2511,28 @@ async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSessio
     return {"status": "ok", "reset_count": reset_count}
 
 
+@app.post("/api/v1/admin/delete-tweets")
+@limiter.limit("10/minute")
+async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Tweet'leri ID ile sil."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ids = payload.get("ids", [])
+    if not ids:
+        return {"status": "error", "message": "ids listesi gerekli"}
+
+    deleted = 0
+    for tid in ids:
+        result = await db.execute(select(PendingTweet).where(PendingTweet.id == tid))
+        tweet = result.scalar_one_or_none()
+        if tweet:
+            await db.delete(tweet)
+            deleted += 1
+    await db.commit()
+    return {"status": "ok", "deleted": deleted}
+
+
 @app.post("/api/v1/admin/cleanup-spk-spam")
 @limiter.limit("5/minute")
 async def admin_cleanup_spk_spam(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
