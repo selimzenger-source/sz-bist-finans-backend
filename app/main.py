@@ -2511,6 +2511,29 @@ async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSessio
     return {"status": "ok", "reset_count": reset_count}
 
 
+@app.post("/api/v1/admin/cleanup-spk-spam")
+@limiter.limit("5/minute")
+async def admin_cleanup_spk_spam(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Eski SPK başvuru spam tweet'lerini DB'den sil (son 6 saat hariç)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    hours = payload.get("keep_hours", 6)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    result = await db.execute(
+        select(PendingTweet).where(
+            PendingTweet.source == "tweet_spk_application",
+            PendingTweet.sent_at < cutoff,
+        )
+    )
+    deleted = 0
+    for tweet in result.scalars().all():
+        await db.delete(tweet)
+        deleted += 1
+    await db.commit()
+    return {"status": "ok", "deleted": deleted}
+
+
 @app.post("/api/v1/admin/retweet-spk-apps")
 @limiter.limit("5/minute")
 async def admin_retweet_spk_apps(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
