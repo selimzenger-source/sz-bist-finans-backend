@@ -198,6 +198,93 @@ def _is_similar_to_recent(title: str, threshold: float = 0.5) -> bool:
     return False
 
 
+# ── Haber Tam Metin Scraping ──────────────────────────────
+
+async def _fetch_article_full_text(url: str) -> str:
+    """Haber URL'sinden tam metni ceker.
+
+    Desteklenen kaynaklar: paraanaliz, bloomberght, bigpara, uzmanpara,
+    sozcu, hurriyet, milliyet, dunya, dw, aa (anadolu ajansi), ntv, cnnturk.
+    """
+    if not url or not url.startswith("http"):
+        return ""
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=15,
+            headers=HEADERS,
+            follow_redirects=True,
+        ) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+
+        html = resp.text
+
+        # HTML'den metin cikar — basit ama etkili yontem
+        # <script> ve <style> bloklarini sil
+        html_clean = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<style[^>]*>.*?</style>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<nav[^>]*>.*?</nav>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<footer[^>]*>.*?</footer>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<header[^>]*>.*?</header>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+
+        # Article veya icerik blogunu bul
+        article_match = re.search(
+            r'<article[^>]*>(.*?)</article>',
+            html_clean, flags=re.DOTALL | re.IGNORECASE
+        )
+        if article_match:
+            content_html = article_match.group(1)
+        else:
+            # class="content" veya class="article-body" vb. ara
+            content_match = re.search(
+                r'<div[^>]*class="[^"]*(?:article[_-]?body|entry[_-]?content|post[_-]?content|news[_-]?content|content[_-]?body|detay|detail|icerik|text|story)[^"]*"[^>]*>(.*?)</div>',
+                html_clean, flags=re.DOTALL | re.IGNORECASE
+            )
+            if content_match:
+                content_html = content_match.group(1)
+            else:
+                # <p> etiketlerinden olusan en uzun blogu al
+                paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', html_clean, flags=re.DOTALL | re.IGNORECASE)
+                content_html = "\n".join(paragraphs)
+
+        # HTML etiketlerini temizle
+        text = re.sub(r'<[^>]+>', ' ', content_html)
+        # Fazla bosluk temizle
+        text = re.sub(r'\s+', ' ', text).strip()
+        # HTML entities decode
+        import html as _html
+        text = _html.unescape(text)
+
+        # Cerez/gizlilik metni filtreleme
+        _junk_patterns = [
+            r"çerez", r"cookie", r"veri politika", r"gizlilik politika",
+            r"kişisel veri", r"kvkk", r"aydınlatma metni",
+        ]
+        # Junk iceren cumleleri sil
+        sentences = text.split('. ')
+        clean_sentences = []
+        for s in sentences:
+            if not any(re.search(p, s, re.IGNORECASE) for p in _junk_patterns):
+                clean_sentences.append(s)
+        text = '. '.join(clean_sentences)
+
+        # Min uzunluk kontrolu — cok kisa ise bos don
+        if len(text) < 100:
+            logger.info("Article text cok kisa (%d karakter), atlaniyor: %s", len(text), url[:60])
+            return ""
+
+        # Max uzunluk: 8000 karakter (AI'ya yetecek kadar)
+        text = text[:8000]
+
+        logger.info("Article full text cekildi: %d karakter — %s", len(text), url[:60])
+        return text
+
+    except Exception as e:
+        logger.warning("Article full text cekme hatasi (%s): %s", url[:60], e)
+        return ""
+
+
 # ── RSS Parsing ─────────────────────────────────────────
 
 HEADERS = {
@@ -376,13 +463,13 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 80-110 kelime, 4-6 cumle. KISA ve OZ yaz, gereksiz uzatma!
-  * Paragraf 1: Haberin ana konusunu acikla (2-3 cumle)
+- OZET: 120-200 kelime, 5-8 cumle. Haberin TAM icerigi hakkinda detayli ve bilgilendirici yaz.
+  * Paragraf 1: Haberin ana konusunu DETAYLI acikla (3-4 cumle). Rakamlari, tarihleri, isimleri dahil et.
   * Paragraf 2: BIST etkisi — hangi sektoru/sirketleri etkileyecegini yaz (2-3 cumle)
   * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir). PARAGRAF YAPISI ONEMLI!
   * SON CUMLE: Yatirimcilar icin kisa bir yorum
   ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
-  UYARI: 110 kelimeden uzun ozet KABUL EDILMEZ. Gereksiz detay verme, ozlu yaz.
+  UYARI: Haberi YARIM birakma, tum onemli detaylari icerigi yansitacak sekilde yaz. KISALTMA!
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -400,9 +487,14 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
     if not api_key:
         return None
 
+    # Haberin tam metnini cek (RSS ozeti yetersiz kalabilir)
+    full_text = await _fetch_article_full_text(news.get("link", ""))
+    # Tam metin varsa onu kullan, yoksa RSS ozetini
+    article_content = full_text if len(full_text) > 200 else news.get("summary", "")[:3000]
+
     prompt = _TWEET_PROMPT.format(
         title=news["title"],
-        summary=news.get("summary", "")[:3000],
+        summary=article_content[:6000],
         source=news["source"],
         category=ai_result["category"],
         sector=ai_result.get("sector", "YOK"),
@@ -458,15 +550,15 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 ozet = ozet[:last_period + 1]
                 logger.info("Yarim cumle temizlendi, yeni uzunluk: %d karakter", len(ozet))
 
-        # Hard limit: 1200 karakter — cümle sınırında kes
-        if len(ozet) > 1200:
-            truncated = ozet[:1200]
+        # Hard limit: 2500 karakter — cümle sınırında kes
+        if len(ozet) > 2500:
+            truncated = ozet[:2500]
             last_period = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
-            if last_period > 800:
+            if last_period > 1500:
                 ozet = truncated[:last_period + 1]
             else:
                 ozet = truncated
-            logger.info("1200 karakter limitine kesildi: %d karakter", len(ozet))
+            logger.info("2500 karakter limitine kesildi: %d karakter", len(ozet))
 
         logger.info("Parsed ozet uzunlugu: %d karakter, %d kelime", len(ozet), len(ozet.split()))
 
@@ -895,7 +987,7 @@ async def _send_news_to_telegram(tweet_data: dict):
     # Tweet metnini ayri mesaj — code blogu ile (link preview onlenir)
     tweet_text = tweet_data.get("tweet_text", "")
     if tweet_text:
-        await _send_telegram_message(f"<code>{tweet_text[:4000]}</code>", disable_preview=True)
+        await _send_telegram_message(f"<code>{tweet_text[:4090]}</code>", disable_preview=True)
 
     # Kuyruk ozeti gonder
     await _send_queue_summary()
