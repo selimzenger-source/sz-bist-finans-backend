@@ -2512,6 +2512,20 @@ async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSessio
     return {"status": "ok", "reset_count": reset_count}
 
 
+@app.post("/api/v1/admin/trigger-spk-scraper")
+@limiter.limit("5/minute")
+async def admin_trigger_spk_scraper(request: Request, payload: dict):
+    """Admin: SPK onay listesi scraper'ını manuel tetikle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scheduler import scrape_spk
+        await scrape_spk()
+        return {"status": "ok", "message": "SPK onay scraper tamamlandi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 @app.post("/api/v1/admin/trigger-spk-check")
 @limiter.limit("30/minute")
 async def admin_trigger_spk_check(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):

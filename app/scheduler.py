@@ -339,6 +339,7 @@ async def scrape_spk():
                         deleted_names_normalized.add(_normalize(name))
 
                 skipped_deleted = 0
+                _newly_added_names: list[str] = []  # Bu cycle'da eklenen şirket adları
 
                 # 1. Yeni ekle + mevcut guncelle
                 for app_data in applications:
@@ -389,6 +390,7 @@ async def scrape_spk():
                             status="pending",
                         ))
                         new_count += 1
+                        _newly_added_names.append(company_name)
 
                 # 2. SPK listesinden kalkmis olanlari sil ve blokla
                 # Ilk 2 kelime fuzzy eslesmesi kullanilir — nokta/format farki gormezden gelinir
@@ -431,48 +433,45 @@ async def scrape_spk():
                     logger.error("SPK flag duzeltme hatasi: %s", _flag_err)
 
                 # ── Yeni basvurular icin bildirim + tweet ──
-                if new_count > 0:
+                # SADECE bu cycle'da eklenen kayitlar — eski kayitlara ASLA dokunma
+                if _newly_added_names:
                     try:
                         from app.services.notification import NotificationService
                         from app.services.twitter_service import tweet_spk_application
 
-                        # Henuz bildirim gonderilmemis yeni basvurulari cek
-                        # SPAM KORUMASI: sadece son 48 saat icinde olusturulanlari al
-                        unnotified_result = await db.execute(
+                        # Bu cycle'da eklenen kayitlari DB'den cek (notified/tweeted flag icin)
+                        new_apps_result = await db.execute(
                             select(SPKApplication).where(
+                                SPKApplication.company_name.in_(_newly_added_names),
                                 SPKApplication.status == "pending",
-                                SPKApplication.notified == False,
-                                SPKApplication.created_at >= _spk_cutoff,
                             )
                         )
-                        unnotified = list(unnotified_result.scalars().all())
+                        new_apps = list(new_apps_result.scalars().all())
 
-                        if unnotified:
-                            # SPAM KORUMASI: max 5 bildirim/tweet per cycle
-                            _MAX_SPK_TWEETS_PER_CYCLE = 5
-                            unnotified = unnotified[:_MAX_SPK_TWEETS_PER_CYCLE]
+                        # Max 5 tweet per cycle
+                        new_apps = new_apps[:5]
 
+                        if new_apps:
                             # 1. Toplu push bildirim gonder
-                            company_names = [app.company_name for app in unnotified]
                             short_names = []
-                            for name in company_names:
-                                parts = name.split()
-                                short = " ".join(parts[:3]) if len(parts) > 4 else name
+                            for app in new_apps:
+                                parts = app.company_name.split()
+                                short = " ".join(parts[:3]) if len(parts) > 4 else app.company_name
                                 short_names.append(short)
 
                             notif_service = NotificationService(db)
                             sent = await notif_service.notify_spk_applications(short_names)
-                            logger.info("SPK basvuru bildirimi: %d kullaniciya gonderildi (%d sirket)", sent, len(unnotified))
+                            logger.info("SPK basvuru bildirimi: %d kullaniciya gonderildi (%d sirket)", sent, len(new_apps))
 
                             # notified flag'lerini set et
-                            for app in unnotified:
+                            for app in new_apps:
                                 app.notified = True
 
                             # 2. Her sirket icin ayri tweet at (max 5, arada 10 sn bekleme)
-                            untweeted = [app for app in unnotified if not app.tweeted]
+                            untweeted = [app for app in new_apps if not app.tweeted]
                             for i, app in enumerate(untweeted):
                                 if i > 0:
-                                    await asyncio.sleep(10)  # Rate limit korumasi
+                                    await asyncio.sleep(10)
                                 success = tweet_spk_application(app.company_name)
                                 if success:
                                     app.tweeted = True
