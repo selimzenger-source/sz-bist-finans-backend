@@ -1444,20 +1444,8 @@ class NotificationService:
             return 0
 
         title = "Önemli Piyasa Gelişmesi"
-        # Headline + AI ozet varsa ekle — cumle sinirinda kes
-        if summary:
-            max_body = 500
-            raw = f"{headline[:120]}\n{summary}"
-            if len(raw) > max_body:
-                truncated = raw[:max_body]
-                last_period = max(truncated.rfind('.'), truncated.rfind('!'), truncated.rfind('?'))
-                if last_period > max_body * 0.5:
-                    raw = truncated[:last_period + 1]
-                else:
-                    raw = truncated + "..."
-            body = raw
-        else:
-            body = headline[:200]
+        # Sadece baslik goster — push bildirimde kisa ve net olsun
+        body = headline[:150]
 
         data = {
             "type": "market_news",
