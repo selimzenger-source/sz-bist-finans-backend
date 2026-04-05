@@ -591,12 +591,22 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         hashtags = _CATEGORY_HASHTAGS.get(category, "#Borsa #BIST100")
         ticker_str = " ".join(ticker_tags[:6])
 
+        # Kaynak domain'i cikar (sadece site adi gosterilecek)
         news_link = news.get("link", "")
+        import urllib.parse as _urlparse
+        source_domain = ""
+        if news_link:
+            parsed = _urlparse.urlparse(news_link)
+            source_domain = parsed.netloc.replace("www.", "")
+
+        source_line = f"Kaynak: {news['source']}"
+        if source_domain:
+            source_line += f" | {source_domain}"
+
         tweet_text = (
             f"{prefix}\n\n"
             f"{ozet}\n\n"
-            f"Kaynak: {news['source']}\n"
-            f"{news_link}\n\n"
+            f"{source_line}\n\n"
             f"\U0001f4f2 Android: {_ANDROID_LINK}\n"
             f"\U0001f34f iOS: {_IOS_LINK}\n"
             f"\U0001f310 Web: {_WEB_LINK}\n\n"
