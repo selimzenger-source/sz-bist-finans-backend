@@ -1438,9 +1438,9 @@ class NotificationService:
     async def notify_market_news(self, headline: str, summary: str = "") -> int:
         """Onemli piyasa haberi bildirimi.
 
-        Spam koruma: 10 dakika cooldown (arka arkaya haber onaylanirsa)
+        Spam koruma: 2 dakika cooldown (arka arkaya haber onaylanirsa)
         """
-        if not self._check_cooldown("market_news", 600):  # 10 dk
+        if not self._check_cooldown("market_news", 120):  # 2 dk
             return 0
 
         title = "Önemli Piyasa Gelişmesi"
