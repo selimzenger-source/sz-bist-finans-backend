@@ -3569,12 +3569,8 @@ def tweet_spk_application(company_name: str) -> bool:
                 f"{clean_name}, SPK'ya halka arz onay başvurusunda bulundu."
             )
 
-        # Hashtag + linkler ekle
-        suffix = (
-            f"\n\n📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}"
-            f"\n#HalkaArz #SPK #Borsa"
-        )
-        text = text + suffix
+        # Sadece hashtag ekle — linkler yok (daha temiz görünüm)
+        text = text + "\n\n#HalkaArz #SPK #Borsa"
 
         # Banner gorseli varsa media'li tweet
         if os.path.exists(_SPK_APP_BANNER):

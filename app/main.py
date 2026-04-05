@@ -464,7 +464,7 @@ async def get_public_news_feed(
     """Son N gunun haber tweetlerini blog formatta doner (sadece news sources)."""
     import re
     # Sadece haber kaynaklari — VİOP, tavan/taban, EDO, snapshot, IPO haric
-    ALL_NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news", "kap_news"}
+    ALL_NEWS_SOURCES = {"news_scanner", "tweet_bist30_news", "tweet_kap_news", "kap_news", "tweet_spk_application", "tweet_spk_bulletin"}
     # source parametresi verilmişse sadece o kaynağı filtrele
     if source and source in ALL_NEWS_SOURCES:
         NEWS_SOURCES = {source}
@@ -480,7 +480,6 @@ async def get_public_news_feed(
         "%Açılış Fiyat%", "%açılış fiyat%",
         "%25 Gün Performans%", "%25 gün performans%",
         "%Piyasa Özet%", "%piyasa özet%",
-        "%SPK Bülten%", "%spk bülten%",
         "%Halka arz takip%", "%İşlem Görmeye Başla%",
     ]
     cutoff = datetime.utcnow() - timedelta(days=days)
