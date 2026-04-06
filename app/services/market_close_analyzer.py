@@ -1066,19 +1066,14 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"Bugün {len(c_stats)} hisse tavan yaptı! Hangi şirketler neden uçuşa geçti? "
                         f"Yapay zeka modelimizin derlediği analizler görsellerde! 🚀👇\n\n"
                         f"📌 {tickers_str}\n\n"
-                        f"🔍 Detaylar için: {WEB_LINK}tavan-taban\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}\n"
-                        f"🌐 Web: {WEB_LINK}"
+                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 else:
                     tweet_text = (
                         f"📈 Bugün TAVAN yapan hisse yok!\n\n"
                         f"En çok yükselen hisseler görselde! 📊👇\n\n"
-                        f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}\n"
-                        f"🌐 Web: {WEB_LINK}"
+                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=tavan_images,
@@ -1124,19 +1119,15 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"Bugün {len(fl_stats)} hisse taban yaptı! Şirketler neden kan kaybetti? "
                         f"Yapay zeka modelimizin derlediği analizler görsellerde! 📊👇\n\n"
                         f"📌 {tickers_str}\n\n"
-                        f"🔍 Detaylar için: {WEB_LINK}tavan-taban\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}\n"
-                        f"🌐 Web: {WEB_LINK}"
+                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 else:
                     tweet_text = (
                         f"📉 Bugün TABAN yapan hisse yok!\n\n"
                         f"En çok düşen hisseler görselde! 📊👇\n\n"
-                        f"📲 Android: {HALKAARZ_LINK}\n"
-                        f"🍏 iOS: {APP_STORE_LINK}\n"
-                        f"🌐 Web: {WEB_LINK}"
+                        f"⚠️ Günsonu analizidir.\n"
+                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=taban_images,

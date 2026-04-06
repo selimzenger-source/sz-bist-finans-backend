@@ -821,14 +821,14 @@ KESINLIKLE YASAK olan ornekler:
   ✗ "halkarz.com verilerine gore"
   ✗ "KAP.gov.tr'ye gore"
   ✗ "doviz.com, Bloomberg HT, Foreks" gibi site/platform adlari
-  ✗ Herhangi bir URL veya web adresi (szalgo.net.tr HARIC)
+  ✗ Herhangi bir URL veya web adresi (borsacebimde.app HARIC)
 
 KABUL EDILEBILIR ifadeler:
   ✓ "Piyasa verilerine gore..."
   ✓ "Aciklanan verilere gore..."
   ✓ "Borsada islem verileri..."
   ✓ "SPK onay sinyali aldiktan sonra..."  (site adi degil eylem bazli)
-  ✓ szalgo.net.tr (sadece sondaki link satirinda)
+  ✓ borsacebimde.app (sadece sondaki link satirinda)
 
 BU KURALI IHLAL EDEN CIKTI KABUL EDILMEZ.
 """
@@ -892,8 +892,8 @@ KURAL:
 7. Rapor 2000-3000 karakter arasi olmali (gorsel PNG'ye cevrildigi icin 3000'i ASMA!)
 8. Yapilandirilmis format kullan: emoji basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
-10. Sonda mutlaka szalgo.net.tr linki olmali
-11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
+10. Sonda mutlaka borsacebimde.app linki olmali
+11. Dis site adi veya URL YAZMA — sadece borsacebimde.app kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
 HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
@@ -916,7 +916,7 @@ Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun g
 7. Haber bullet'lari: mumkunse "#TICKER — haber ozeti" veya "Konu: kisa aciklama" formatinda
 8. Toplam rapor 2000-3000 karakter arasi olmali — COZUNURLUK SINIRI: 3000 karakteri ASMA!
 9. Sondaki hashtag satirini EN FAZLA 8-10 hashtag ile sinirla — fazlasi gorselde tasma yapar
-10. ⚠️ Tavsiye notu ve szalgo.net.tr AYRI SATIRLARDA ve EN SONDA olmali
+10. ⚠️ Tavsiye notu ve borsacebimde.app AYRI SATIRLARDA ve EN SONDA olmali
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -1007,7 +1007,7 @@ KURALLARI:
 
 ⚠️ Yatirim tavsiyesi degildir.
 
-📲 szalgo.net.tr
+Daha detaylı veriler için profilimizdeki linkten BorsaCebimde uygulamasını ücretsiz indirebilirsiniz.
 
 #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
@@ -1070,8 +1070,8 @@ KURAL:
 7. Rapor 2000-3000 karakter arasi olmali (gorsel PNG'ye cevrildigi icin 3000'i ASMA!)
 8. Yapilandirilmis format kullan: basliklar ve maddeler ile
 9. Rapor EN AZ 150 kelime olmali — detayli ve icerikli yaz
-10. Sonda mutlaka szalgo.net.tr linki olmali
-11. Dis site adi veya URL YAZMA — sadece szalgo.net.tr kullan
+10. Sonda mutlaka borsacebimde.app linki olmali
+11. Dis site adi veya URL YAZMA — sadece borsacebimde.app kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
 HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
@@ -1093,7 +1093,7 @@ Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun g
 7. Haber bullet'lari: mumkunse "#TICKER — haber ozeti" veya "Konu: kisa aciklama" formatinda
 8. Toplam rapor 2000-3000 karakter arasi olmali — COZUNURLUK SINIRI: 3000 karakteri ASMA!
 9. Sondaki hashtag satirini EN FAZLA 8-10 hashtag ile sinirla — fazlasi gorselde tasma yapar
-10. ⚠️ Tavsiye notu ve szalgo.net.tr AYRI SATIRLARDA ve EN SONDA olmali
+10. ⚠️ Tavsiye notu ve borsacebimde.app AYRI SATIRLARDA ve EN SONDA olmali
 
 AKILLI ANALIZ KURALLARI (FEW-SHOT ORNEKLER):
 Asagidaki iyi/kotu ornek cifti, beklenen analiz kalitesini gostermektedir.
@@ -1141,7 +1141,7 @@ FORMAT:
 
 ⚠️ Yatirim tavsiyesi degildir.
 
-📲 szalgo.net.tr
+Daha detaylı veriler için profilimizdeki linkten BorsaCebimde uygulamasını ücretsiz indirebilirsiniz.
 
 #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
@@ -1430,7 +1430,7 @@ async def _generate_report(
         "Asagidaki GERCEK verileri kullanarak rapor yaz.\n"
         "SADECE verilen verilere dayan — hicbir bilgiyi UYDURMA.\n"
         "Halka arz tavan serisi bilgisini SADECE daily_tracks verilerinden oku.\n"
-        "Dis site adi veya URL kullanma, sadece szalgo.net.tr.\n\n"
+        "Dis site adi veya URL kullanma, sadece borsacebimde.app.\n\n"
         f"{context}"
     )
 
@@ -1668,7 +1668,7 @@ def _extract_short_summary(report_text: str, report_type: str = "morning") -> st
         • #TICKER — kisa bilgi
         ⏰ Ekonomik takvim bilgisi
         ⚠️ Yatirim tavsiyesi degildir.
-        szalgo.net.tr
+        borsacebimde.app
         #HalkaArz #borsa #BIST100
     """
     import re
@@ -1887,7 +1887,7 @@ def _extract_short_summary(report_text: str, report_type: str = "morning") -> st
         parts.append(f"\u23f0 {takvim_text}")  # ⏰
 
     parts.append("\u26a0\ufe0f Yatirim tavsiyesi degildir.")  # ⚠️
-    parts.append("szalgo.net.tr")
+    parts.append("borsacebimde.app")
     parts.append(f"#HalkaArz #borsa #BIST100 {ticker_tags}".strip())
 
     result = "\n".join(parts)
