@@ -378,6 +378,9 @@ async def lifespan(app: FastAPI):
 # FastAPI Uygulamasi
 # -------------------------------------------------------
 
+import time as _time_startup
+_APP_START_TIME = _time_startup.time()
+
 app = FastAPI(
     title="BIST Finans API",
     description="Halka Arz Takip + Hisse Bildirim + AI Haber Takibi",
@@ -3481,6 +3484,23 @@ async def send_realtime_notification(
 
     if not _verify_admin_password(data.admin_password):
         raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    # ── Warmup koruması: servis yeni başladıysa ilk 5 dk bildirim gönderme ──
+    # Excel geç açılınca biriken eski veriler spam yapar
+    import time as _time_mod
+    _uptime = _time_mod.time() - _APP_START_TIME
+    if _uptime < 300:  # 5 dakika
+        logging.info(
+            "[REALTIME-NOTIF] WARMUP: %s %s atlandı (uptime=%.0fs, 300s bekleniyor)",
+            data.ticker, data.notification_type, _uptime,
+        )
+        return {
+            "status": "skipped",
+            "reason": "warmup",
+            "ticker": data.ticker,
+            "uptime_seconds": round(_uptime),
+            "notifications_sent": 0,
+        }
 
     valid_types = [
         "tavan_bozulma", "taban_acilma", "el_degistirme",
