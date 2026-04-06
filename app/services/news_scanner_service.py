@@ -203,8 +203,7 @@ def _is_similar_to_recent(title: str, threshold: float = 0.5) -> bool:
 async def _fetch_article_full_text(url: str) -> str:
     """Haber URL'sinden tam metni ceker.
 
-    Desteklenen kaynaklar: paraanaliz, bloomberght, bigpara, uzmanpara,
-    sozcu, hurriyet, milliyet, dunya, dw, aa (anadolu ajansi), ntv, cnnturk.
+    Site-specific content class'lari ile hassas icerik cikarma.
     """
     if not url or not url.startswith("http"):
         return ""
@@ -219,64 +218,96 @@ async def _fetch_article_full_text(url: str) -> str:
             resp.raise_for_status()
 
         html = resp.text
+        import html as _html
 
-        # HTML'den metin cikar — basit ama etkili yontem
-        # <script> ve <style> bloklarini sil
+        # HTML temizleme — script, style, nav, footer, sidebar, reklam
         html_clean = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
         html_clean = re.sub(r'<style[^>]*>.*?</style>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
         html_clean = re.sub(r'<nav[^>]*>.*?</nav>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
         html_clean = re.sub(r'<footer[^>]*>.*?</footer>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
         html_clean = re.sub(r'<header[^>]*>.*?</header>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<aside[^>]*>.*?</aside>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
+        html_clean = re.sub(r'<div[^>]*class="[^"]*(?:sidebar|widget|advert|banner|social|share|comment|related)[^"]*"[^>]*>.*?</div>', '', html_clean, flags=re.DOTALL | re.IGNORECASE)
 
-        # Article veya icerik blogunu bul
-        article_match = re.search(
-            r'<article[^>]*>(.*?)</article>',
-            html_clean, flags=re.DOTALL | re.IGNORECASE
-        )
-        if article_match:
-            content_html = article_match.group(1)
-        else:
-            # class="content" veya class="article-body" vb. ara
-            content_match = re.search(
-                r'<div[^>]*class="[^"]*(?:article[_-]?body|entry[_-]?content|post[_-]?content|news[_-]?content|content[_-]?body|detay|detail|icerik|text|story)[^"]*"[^>]*>(.*?)</div>',
-                html_clean, flags=re.DOTALL | re.IGNORECASE
-            )
-            if content_match:
-                content_html = content_match.group(1)
-            else:
-                # <p> etiketlerinden olusan en uzun blogu al
-                paragraphs = re.findall(r'<p[^>]*>(.*?)</p>', html_clean, flags=re.DOTALL | re.IGNORECASE)
-                content_html = "\n".join(paragraphs)
+        content_html = ""
+
+        # ── Site-specific content selectors ──
+        # Her site farkli class kullaniyor, en spesifik olandan basla
+        _SITE_SELECTORS = [
+            # ParaAnaliz: mvp-content-body veya mvp-post-content
+            r'<div[^>]*class="[^"]*mvp-content-body[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*mvp-post-content[^"]*"[^>]*>(.*?)</div>',
+            # Bigpara: haberMetin, newsDetailText
+            r'<div[^>]*class="[^"]*haberMetin[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*newsDetailText[^"]*"[^>]*>(.*?)</div>',
+            # Ekonomim / Dunya: article-content, news-body
+            r'<div[^>]*class="[^"]*article-content[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*news-body[^"]*"[^>]*>(.*?)</div>',
+            # Bloomberg HT: content-text
+            r'<div[^>]*class="[^"]*content-text[^"]*"[^>]*>(.*?)</div>',
+            # AA (Anadolu Ajansi): detay-icerik, story-body
+            r'<div[^>]*class="[^"]*detay-icerik[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*story-body[^"]*"[^>]*>(.*?)</div>',
+            # Sozcu: article-body
+            r'<div[^>]*class="[^"]*article-body[^"]*"[^>]*>(.*?)</div>',
+            # Finans Gundem / NTV: entry-content, post-content
+            r'<div[^>]*class="[^"]*entry-content[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*post-content[^"]*"[^>]*>(.*?)</div>',
+            # Genel: article-detail, news-content, content-body, text-content
+            r'<div[^>]*class="[^"]*article[_-]?detail[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*news[_-]?content[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*content[_-]?body[^"]*"[^>]*>(.*?)</div>',
+            r'<div[^>]*class="[^"]*text[_-]?content[^"]*"[^>]*>(.*?)</div>',
+        ]
+
+        for selector in _SITE_SELECTORS:
+            match = re.search(selector, html_clean, flags=re.DOTALL | re.IGNORECASE)
+            if match and len(match.group(1).strip()) > 200:
+                content_html = match.group(1)
+                break
+
+        # Fallback 1: <article> icindeki <p> etiketlerini al (tum article degil)
+        if not content_html:
+            article_match = re.search(r'<article[^>]*>(.*?)</article>', html_clean, flags=re.DOTALL | re.IGNORECASE)
+            if article_match:
+                article_inner = article_match.group(1)
+                paras = re.findall(r'<p[^>]*>(.*?)</p>', article_inner, flags=re.DOTALL | re.IGNORECASE)
+                if paras:
+                    content_html = "\n".join(paras)
+
+        # Fallback 2: Tum sayfadaki <p> etiketlerini topla, en uzun 10 tanesini al
+        if not content_html:
+            all_paras = re.findall(r'<p[^>]*>(.*?)</p>', html_clean, flags=re.DOTALL | re.IGNORECASE)
+            # Sadece 50+ karakter olan paragraflar (kisa olanlar genelde menu/footer)
+            long_paras = [p for p in all_paras if len(re.sub(r'<[^>]+>', '', p).strip()) > 50]
+            if long_paras:
+                content_html = "\n".join(long_paras)
+
+        if not content_html:
+            logger.info("Article content bulunamadi: %s", url[:80])
+            return ""
 
         # HTML etiketlerini temizle
         text = re.sub(r'<[^>]+>', ' ', content_html)
-        # Fazla bosluk temizle
         text = re.sub(r'\s+', ' ', text).strip()
-        # HTML entities decode
-        import html as _html
         text = _html.unescape(text)
 
-        # Cerez/gizlilik metni filtreleme
+        # Cerez/gizlilik/reklam metni filtreleme
         _junk_patterns = [
             r"çerez", r"cookie", r"veri politika", r"gizlilik politika",
             r"kişisel veri", r"kvkk", r"aydınlatma metni",
+            r"reklam", r"sponsored", r"advertisement",
+            r"sosyal medya", r"takip et", r"paylaş",
         ]
-        # Junk iceren cumleleri sil
         sentences = text.split('. ')
-        clean_sentences = []
-        for s in sentences:
-            if not any(re.search(p, s, re.IGNORECASE) for p in _junk_patterns):
-                clean_sentences.append(s)
+        clean_sentences = [s for s in sentences if not any(re.search(p, s, re.IGNORECASE) for p in _junk_patterns)]
         text = '. '.join(clean_sentences)
 
-        # Min uzunluk kontrolu — cok kisa ise bos don
         if len(text) < 100:
-            logger.info("Article text cok kisa (%d karakter), atlaniyor: %s", len(text), url[:60])
+            logger.info("Article text cok kisa (%d karakter): %s", len(text), url[:60])
             return ""
 
-        # Max uzunluk: 8000 karakter (AI'ya yetecek kadar)
         text = text[:8000]
-
         logger.info("Article full text cekildi: %d karakter — %s", len(text), url[:60])
         return text
 
