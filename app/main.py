@@ -7184,7 +7184,7 @@ async def get_notification_log(
             "title": log.title,
             "body": log.body,
             "category": log.category,
-            "data": log.data_json,
+            "data_json": log.data_json,
             "is_read": log.is_read,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         }
