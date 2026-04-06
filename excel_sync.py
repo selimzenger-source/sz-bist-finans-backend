@@ -530,8 +530,14 @@ def upload_tracks(tracks):
         return None
 
 
+_WARMUP_ACTIVE = True  # live_sync() tarafindan False yapilir
+
 def _send_realtime_notification(ticker, notif_type, title, body, sub_event=None):
     """Render API'ye anlik bildirim gonder (tavan bozulma, taban acilma, yuzde dusus)."""
+    global _WARMUP_ACTIVE
+    if _WARMUP_ACTIVE:
+        log(f"  ⏳ WARMUP SKIP: {ticker} {notif_type} — bildirim gönderilmedi")
+        return
     try:
         payload = {
             "admin_password": ADMIN_PASSWORD,
@@ -653,11 +659,26 @@ def live_sync(filepath, interval=15):
     else:
         log("  ℹ State dosyasi yok/baska gun — temiz basliyor")
 
+    # ── Warmup: ilk 5 döngü sadece state topla, bildirim gönderme ──
+    global _WARMUP_ACTIVE
+    _WARMUP_ACTIVE = True
+    WARMUP_CYCLES = 5  # 5 x 15sn = 75sn
+    _warmup_done = False
+
     try:
         while True:
             cycle += 1
             now_dt = datetime.now()
             now = now_dt.strftime("%H:%M:%S")
+
+            if not _warmup_done and cycle <= WARMUP_CYCLES:
+                # Warmup modunda: state topla ama bildirim gönderme
+                if cycle == 1:
+                    log(f"[{now}] ⏳ WARMUP: ilk {WARMUP_CYCLES} döngü state toplanıyor, bildirim gönderilmeyecek...")
+            elif not _warmup_done and cycle > WARMUP_CYCLES:
+                _warmup_done = True
+                _WARMUP_ACTIVE = False
+                log(f"[{now}] ✅ WARMUP tamamlandı — bildirimler aktif")
 
             # ── Seans disi calismayi engelle ──
             # Hafta ici: 09:54 - 18:20 arasi calis
