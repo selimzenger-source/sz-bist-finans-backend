@@ -42,6 +42,7 @@ RSS_FEEDS = [
     ("Hurriyet Ekonomi", "https://www.hurriyet.com.tr/rss/ekonomi"),
     ("NTV Ekonomi", "https://www.ntv.com.tr/ekonomi.rss"),
     ("Milliyet Ekonomi", "https://www.milliyet.com.tr/rss/rssnew/ekonomiall.xml"),
+    ("EnSonHaber Ekonomi", "https://www.ensonhaber.com/rss/ekonomi.xml"),
 ]
 
 # ── Sabitler ────────────────────────────────────────────
