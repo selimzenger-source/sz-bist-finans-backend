@@ -495,13 +495,13 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: 120-200 kelime, 5-8 cumle. Haberin TAM icerigi hakkinda detayli ve bilgilendirici yaz.
-  * Paragraf 1: Haberin ana konusunu DETAYLI acikla (3-4 cumle). Rakamlari, tarihleri, isimleri dahil et.
-  * Paragraf 2: BIST etkisi — hangi sektoru/sirketleri etkileyecegini yaz (2-3 cumle)
-  * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir). PARAGRAF YAPISI ONEMLI!
-  * SON CUMLE: Yatirimcilar icin kisa bir yorum
+- OZET: MINIMUM 150 kelime, MAKSIMUM 250 kelime. 6-10 cumle yaz. KISA YAZMA, DETAYLI YAZ!
+  * Paragraf 1 (EN AZ 4 cumle): Haberin ana konusunu DETAYLI acikla. Rakamlari, tarihleri, isimleri, tutarlari mutlaka dahil et. Ne oldu, kim yapti, ne zaman, neden onemli — hepsini yaz.
+  * Paragraf 2 (EN AZ 3 cumle): BIST etkisi — hangi sektoru/sirketleri etkileyecegini, yatirimcilar icin ne anlama geldigini yaz.
+  * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir).
+  * SON CUMLE: Yatirimcilar icin kisa bir yorum/oneri.
+  UYARI: 150 kelimeden KISA ozet KABUL EDILMEZ. Haberi YARIM birakma. Tek cumlelik ozet YASAK.
   ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
-  UYARI: Haberi YARIM birakma, tum onemli detaylari icerigi yansitacak sekilde yaz. KISALTMA!
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -543,7 +543,7 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
                 json={
                     "model": "gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 2000,
+                    "max_tokens": 4096,
                     "temperature": 0.3,
                 },
             )
