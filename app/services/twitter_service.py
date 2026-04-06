@@ -1092,7 +1092,7 @@ def tweet_new_ipo(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T1_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
         # Özel görsel oluştur
@@ -1134,7 +1134,7 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             f"{bulletin_no} Bülteninde {len(ipos)} adet halka arz başvurusu SPK tarafından onaylandı.\n\n"
             + "\n".join(lines) + "\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #borsa #yatırım"
         )
         # Özel görsel oluştur
@@ -1219,7 +1219,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"{_get_setting('T2_BASLIK')}\n\n"
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
             f"{price_text}{end_date}{lot_text}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             f"{rejected_section}\n\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
@@ -1320,7 +1320,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"{table_text}"
             f"{bireysel_text}"
             f"{applicant_text}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
 
@@ -1358,7 +1358,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"{_get_setting('T4_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"⏳ Başvurular saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor.\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
         return _safe_tweet_with_media(text, BANNER_SON_4_SAAT, source="tweet_last_4_hours")
@@ -1394,7 +1394,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"Saat {end_hour}{_saat_eki(end_hour, 'bulunma')} başvurular kapanıyor, acele edin!\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
         return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA, source="tweet_last_30_min")
@@ -1421,7 +1421,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T6_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T6_CTA')}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
         return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR, source="tweet_first_trading_day")
@@ -1559,7 +1559,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"\u2022 Halka arz fiyatı: {ipo_price:.2f} TL\n"
             f"\u2022 Açılış fiyatı: {open_price:.2f} TL\n"
             f"\u2022 {durum}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
         )
         return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI, source="tweet_opening_price")
@@ -1622,7 +1622,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
                 f"Kümülatif: %{cum_pct:+.1f}\n\n"
                 f"{edo_line}Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                 f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
             )
             banner = image_path
@@ -1653,7 +1653,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"Kümülatif Toplam:\n"
                 f"{table_text}"
                 f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                 f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
             )
             banner = BANNER_GUNLUK_TAKIP
@@ -1708,7 +1708,7 @@ def tweet_edo_threshold(ipo, threshold: int, edo_pct: float, trading_day: int) -
             f"{trading_day}. İşlem Günü\n"
             f"{desc}\n\n"
             f"Güncel el değiştirme oranları ve 8 farklı el değiştirme oranı bildirimi için uygulamamızı indirebilirsiniz! 📲\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n\n"
             f"#HalkaArz #{ticker} #BorsaIstanbul #ElDeğiştirme"
         )
 
@@ -1774,7 +1774,7 @@ def tweet_25_day_performance(
         text += lot_text
         text += (
             f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ticker} #hisse"
         )
 
@@ -1876,7 +1876,7 @@ def tweet_yearly_summary(
                 f"• Medyan: %{median_return_pct:+.1f}\n"
                 f"{rank_sec}\n"
                 f"⚠️ İlk 25 işlem günü baz alınmıştır.\n\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                 f"#HalkaArz #BIST100 #borsa #yatırım{t_hashtags}"
             )
 
@@ -1985,7 +1985,7 @@ def tweet_kap_news(
         # CTA: uygulama indirme yonlendirmesi
         cta_text = (
             "Her 3 haberden 1'i gönderilmektedir.\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
         )
 
         text = (
@@ -2083,7 +2083,7 @@ def tweet_last_day_morning(ipo) -> bool:
             f" bugün saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor."
             f"{price_text}\n\n"
             f"{_get_setting('T12_CTA')}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
         return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU, source="tweet_last_day_morning")
@@ -2191,7 +2191,7 @@ def tweet_company_intro(ipo) -> bool:
             f"{spk_text}{sector_text}{price_text}"
             f"{fund_usage_text}"
             f"{desc_text}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
         )
 
@@ -2214,10 +2214,7 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         text = (
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
-            f"Güncel listeyi uygulamamızdan ve sitemizden takip edebilirsiniz:\n\n"
-            f"📲 Android: https://play.google.com/store/apps/details?id=com.bistfinans.app\n"
-            f"🍏 iOS: https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr\n"
-            f"🌐 Web: https://borsacebimde.app/spk-basvurular\n\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n\n"
             f"#HalkaArz #SPK #BIST100 #borsa #yatırım"
         )
 
@@ -2592,7 +2589,7 @@ def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str
         f"{price_line}\n\n"
         f"📋 Bülten No: {bulletin_no}\n\n"
         f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
-        f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
         f"#HalkaArz #BIST100 #borsa #yatırım"
     )
 
@@ -2630,7 +2627,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
             f"{hisse_satiri}\n\n"
             f"Tavan: {tavan_count} | Taban: {taban_count} | Normal: {normal_count}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #borsa #hisse"
         )
 
@@ -2707,7 +2704,7 @@ def tweet_opening_summary(stocks: list) -> bool:
         text = (
             f"{_get_setting('T16_BASLIK')}\n\n"
             + "\n".join(lines) + "\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#HalkaArz #BIST100 #borsa #hisse"
         )
 
@@ -3192,7 +3189,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                     f"{ai_text}\n\n"
-                    f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
+                    f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                     f"#SPK #BultenAnaliz #BIST100 #borsa"
                 )
                 # 4000 karakter Twitter limiti
@@ -3202,7 +3199,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                     text = (
                         f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                         f"{ai_trimmed}\n\n"
-                        f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n"
+                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                         f"#SPK #BultenAnaliz #BIST100 #borsa"
                     )
                 success = _safe_tweet_with_media(text, report_image, source="tweet_spk_bulletin_analysis")
@@ -3226,7 +3223,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
         text = (
             f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
             f"{ai_text}\n\n"
-            f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
+            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
             f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
         )
 
@@ -3237,7 +3234,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
             text = (
                 f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                 f"{ai_text}\n\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_SPK_BULTEN_LINK}\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
             )
 
@@ -3317,7 +3314,7 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
                 f"{details_line}\n"
                 f"{brief_str}\n\n"
                 f"⚠️ Yatırım tavsiyesi değildir.\n"
-                f"📲 Android: {HALKAARZ_LINK}\n🍏 iOS: {APP_STORE_LINK}\n🌐 Web: {WEB_LINK}\n\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n\n"
                 f"#HalkaArz {ticker_hashtag} #borsa #BIST #yatırım #hisse"
             )
 
