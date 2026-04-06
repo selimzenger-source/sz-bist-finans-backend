@@ -633,13 +633,13 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
             return ""
         if any(x in t.lower() for x in bad):
             return ""
-        # Halka arz filtresi — 15 günü geçmiş IPO hisselerde "halka arz" ifadesi yasak
+        # Halka arz filtresi — yeni IPO olmayan veya 15 günü geçmiş hisselerde "halka arz" yasak
         t_lower_check = t.lower()
-        if is_recent_ipo and ipo_days > 15:
-            halka_arz_phrases = ["halka arz", "halka arza", "ipo sonrası", "ipo talep",
-                                  "yoğun talep", "ilk işlem", "ilk gün"]
+        halka_arz_phrases = ["halka arz", "halka arza", "ipo sonrası", "ipo talep",
+                              "yoğun talep", "ilk işlem", "ilk gün"]
+        if not is_recent_ipo or (is_recent_ipo and ipo_days > 15):
             if any(phrase in t_lower_check for phrase in halka_arz_phrases):
-                logger.info(f"[HALKA ARZ FİLTRE] {ticker}: {ipo_days} gün geçmiş, halka arz sebebi elendi → '{t[:60]}'")
+                logger.info(f"[HALKA ARZ FİLTRE] {ticker}: is_recent_ipo={is_recent_ipo}, ipo_days={ipo_days}, halka arz sebebi elendi → '{t[:60]}'")
                 return ""
         # Yön filtresi — tavan=olumlu, taban=olumsuz olmalı
         t_lower = t.lower()
