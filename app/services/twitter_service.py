@@ -1995,7 +1995,7 @@ def tweet_kap_news(
             f"{ai_section}"
             f"{kap_section}\n"
             f"{cta_text}\n"
-            f"⚠️ Yatırım tavsiyesi değildir\n"
+            f"\n"
             f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
         )
 
@@ -2015,7 +2015,7 @@ def tweet_kap_news(
                 f"{ai_section_mid}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
-                f"⚠️ Yatırım tavsiyesi değildir\n"
+                f"\n"
                 f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
@@ -2031,7 +2031,7 @@ def tweet_kap_news(
                 f"{ai_section_short}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
-                f"⚠️ Yatırım tavsiyesi değildir\n"
+                f"\n"
                 f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
@@ -3313,7 +3313,7 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
                 f"{risk_emoji} Risk: {risk_level.title()}\n"
                 f"{details_line}\n"
                 f"{brief_str}\n\n"
-                f"⚠️ Yatırım tavsiyesi değildir.\n"
+                f".\n"
                 f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n\n"
                 f"#HalkaArz {ticker_hashtag} #borsa #BIST #yatırım #hisse"
             )
