@@ -496,12 +496,13 @@ async def get_public_news_feed(
         )
     )
     # 2) bot_proxy'den sadece haber olanlar (VİOP + tavan/taban haric)
+    _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
     bot_proxy_filter = [
         PendingTweet.status == "sent",
         PendingTweet.sent_at >= cutoff,
         PendingTweet.source == "bot_proxy",
     ]
-    for kw in _TAVAN_KEYWORDS + _JUNK_KEYWORDS:
+    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS + _JUNK_KEYWORDS:
         bot_proxy_filter.append(~PendingTweet.text.ilike(kw))
 
     stmt2 = select(PendingTweet).where(*bot_proxy_filter)
