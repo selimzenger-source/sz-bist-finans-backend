@@ -93,9 +93,30 @@ _SECTOR_STOCKS = {
     "MADENCILIK": ["KOZAL", "IPEKE", "KOZAA"],
 }
 
-# ── Gecerli BIST Ticker Seti (AI hallucination filtresi) ──
-# _SECTOR_STOCKS'taki tum ticker'lar + ek yaygin hisseler
-_VALID_BIST_TICKERS: set[str] = set()
+# ── Gecerli BIST Ticker Seti + Sirket Adi Eslestirme ──
+# ticker_names.json'dan 648 hisse yukle
+import json as _json
+import pathlib as _pathlib
+
+_TICKER_NAMES_PATH = _pathlib.Path(__file__).parent.parent / "data" / "ticker_names.json"
+_TICKER_TO_COMPANY: dict[str, str] = {}
+_COMPANY_TO_TICKER: dict[str, str] = {}  # sirket adi (lowercase) → ticker
+
+try:
+    with open(_TICKER_NAMES_PATH, "r", encoding="utf-8") as _f:
+        _TICKER_TO_COMPANY = _json.load(_f)
+    for _t, _c in _TICKER_TO_COMPANY.items():
+        _COMPANY_TO_TICKER[_c.lower()] = _t
+        # Kisa versiyonlar da ekle (orn: "Polisan Holding" → "polisan" da eslessin)
+        for _word in _c.lower().split():
+            if len(_word) >= 4 and _word not in ("holding", "sanayi", "enerji", "gmyo", "yatirim"):
+                _COMPANY_TO_TICKER[_word] = _t
+    logger.info("Ticker names yuklendi: %d hisse", len(_TICKER_TO_COMPANY))
+except Exception as _e:
+    logger.warning("Ticker names yuklenemedi: %s", _e)
+
+_VALID_BIST_TICKERS: set[str] = set(_TICKER_TO_COMPANY.keys())
+# Ek olarak sektor stoklari da ekle
 for _stocks in _SECTOR_STOCKS.values():
     _VALID_BIST_TICKERS.update(_stocks)
 _VALID_BIST_TICKERS.update([
@@ -505,6 +526,12 @@ KURALLAR:
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
+  KRITIK TICKER ORNEKLERI — bunlari ezberle:
+  Polisan Holding → POLHO (PSHOL degil!)
+  Kardemir → KRDMD (KRDMR degil!)
+  Aselsan → ASELS, Turkcell → TCELL, Pegasus → PGSUS, Tofas → TOASO
+  Eregli Demir Celik → EREGL, Ford Otosan → FROTO, Bim → BIMAS
+  UYARI: Ticker kodunu bilmiyorsan sirket adini yaz, UYDURMAK YASAK!
 
 Format:
 BASLIK: [baslik]
@@ -573,6 +600,22 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         ozet = re.sub(r'\n*PUAN:.*', '', ozet).strip()
         ozet = re.sub(r'\n*BANNER:.*', '', ozet).strip()
 
+        # AI'nin uydurdugu yanlis ticker kodlarini duzelt (orn: PSHOL → POLHO)
+        def _fix_ticker_in_text(text: str) -> str:
+            """Metindeki yanlis ticker kodlarini dogru olanlariyla degistirir."""
+            # Buyuk harfli 3-6 karakter kelimeleri bul (potansiyel ticker)
+            potential_tickers = re.findall(r'\b([A-Z]{3,6})\b', text)
+            for pt in potential_tickers:
+                if pt not in _VALID_BIST_TICKERS and pt not in ("BIST", "KAP", "SPK", "TCMB", "EDO", "VIOP"):
+                    # Sirket adi ile eslesmeyi dene
+                    resolved = _COMPANY_TO_TICKER.get(pt.lower())
+                    if resolved and resolved != pt:
+                        text = text.replace(pt, resolved)
+                        logger.info("Ozet ticker duzeltildi: %s → %s", pt, resolved)
+            return text
+
+        ozet = _fix_ticker_in_text(ozet)
+
         # Yarım cümle temizleme — AI token limiti bitince cümle ortasında kesilir
         # Son karakter nokta/ünlem/soru işareti değilse, son tamamlanmamış cümleyi sil
         if ozet and ozet[-1] not in '.!?"':
@@ -603,9 +646,16 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         if sirketler and sirketler.upper() != "YOK":
             for s in sirketler.split(","):
                 s = s.strip().upper()
-                # Sadece gecerli BIST ticker kodlarini kabul et (AI hallucination filtresi)
+                # Gecerli BIST ticker mi kontrol et
                 if s and s in _VALID_BIST_TICKERS:
                     ticker_tags.append(f"#{s}")
+                elif s:
+                    # AI yanlis ticker uretmis olabilir — sirket adiyla eslesmeyi dene
+                    # Ornek: PSHOL → Polisan → POLHO
+                    resolved = _COMPANY_TO_TICKER.get(s.lower())
+                    if resolved:
+                        ticker_tags.append(f"#{resolved}")
+                        logger.info("Ticker duzeltildi: %s → %s", s, resolved)
 
         # Sektor bazli hisse ekle
         sector = ai_result.get("sector", "YOK")
