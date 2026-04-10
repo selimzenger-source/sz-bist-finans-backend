@@ -1216,6 +1216,19 @@ async def api_generate_blog(
     await db.flush()
     await db.commit()
 
+    # Push bildirim
+    try:
+        import asyncio
+        from app.services.broadcast import broadcast_background_task
+        asyncio.create_task(broadcast_background_task(
+            title=f"📚 {new_blog.title}",
+            body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
+            audience="all",
+            deep_link_target="rehber",
+        ))
+    except Exception:
+        pass
+
     return {"id": new_blog.id, "title": new_blog.title, "slug": new_blog.slug}
 
 

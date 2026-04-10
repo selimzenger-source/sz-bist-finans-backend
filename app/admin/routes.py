@@ -3794,6 +3794,20 @@ async def generate_blog(
 
     logger.info(f"Admin: Blog yazisi uretildi — {new_blog.title} (id={new_blog.id})")
 
+    # Push bildirim gonder — "Yeni rehber yayinlandi"
+    try:
+        import asyncio
+        from app.services.broadcast import broadcast_background_task
+        asyncio.create_task(broadcast_background_task(
+            title=f"📚 {new_blog.title}",
+            body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
+            audience="all",
+            deep_link_target="rehber",
+        ))
+        logger.info(f"Blog bildirim gorevi baslat: {new_blog.title}")
+    except Exception as e:
+        logger.warning(f"Blog bildirim gonderilemedi: {e}")
+
     return RedirectResponse(
         url="/admin/blog?success=Blog+yazisi+basariyla+uretildi",
         status_code=303,
@@ -3873,6 +3887,19 @@ async def generate_blog_from_source_route(
     await db.flush()
 
     logger.info(f"Admin: Blog from source uretildi — {new_blog.title} (id={new_blog.id})")
+
+    # Push bildirim
+    try:
+        import asyncio
+        from app.services.broadcast import broadcast_background_task
+        asyncio.create_task(broadcast_background_task(
+            title=f"📚 {new_blog.title}",
+            body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
+            audience="all",
+            deep_link_target="rehber",
+        ))
+    except Exception as e:
+        logger.warning(f"Blog bildirim gonderilemedi: {e}")
 
     return RedirectResponse(
         url="/admin/blog?success=Resimden+blog+basariyla+uretildi",
