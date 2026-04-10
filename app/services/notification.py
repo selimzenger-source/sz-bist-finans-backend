@@ -15,7 +15,7 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Bildirimler arasi bekleme suresi (saniye) — seri bildirim onleme
-NOTIFICATION_DELAY_SECONDS = 2
+NOTIFICATION_DELAY_SECONDS = 0.3
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ _watchlist_cache_last_cleanup: float = 0
 # Key: "fcm_token:title_hash" → Value: son gönderim zamanı (epoch)
 _fcm_dedup_cache: dict[str, float] = {}
 _FCM_DEDUP_SECONDS = 60  # 60 saniye — aynı token+başlık için minimum bekleme
+_stale_token_notified: set[int] = set()  # Telegram'a stale bildirimi gönderilmiş user_id'ler (session bazlı)
 
 
 def _cleanup_watchlist_cache():
@@ -412,14 +413,19 @@ class NotificationService:
                     f"device_id={user.device_id[:8]}..."
                 )
                 user.fcm_token = None
+                # Expo token da stale ise onu da temizle
+                if user.expo_push_token and not user.expo_push_token.startswith("ExponentPushToken"):
+                    user.expo_push_token = None
                 await self.db.commit()
 
-                # Telegram admin bildirimi
-                try:
-                    from app.services.admin_telegram import notify_stale_token_cleaned
-                    await notify_stale_token_cleaned(user.id, user.device_id)
-                except Exception:
-                    pass
+                # Telegram admin bildirimi — aynı user için sadece 1 kez
+                if user.id not in _stale_token_notified:
+                    _stale_token_notified.add(user.id)
+                    try:
+                        from app.services.admin_telegram import notify_stale_token_cleaned
+                        await notify_stale_token_cleaned(user.id, user.device_id)
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"Stale token temizleme hatasi: {e}")
 
@@ -646,17 +652,17 @@ class NotificationService:
                 if fcm:
                     result = await self.send_to_device(
                         fcm_token=fcm, title=title, body=push_body,
-                        data=data, channel_id=channel_id,
+                        data=data, channel_id=channel_id, delay=False,
                     )
                     if result:
                         success = True
                     elif expo and expo.startswith("ExponentPushToken"):
                         success = await self.send_to_expo_device(
-                            expo_token=expo, title=title, body=push_body, data=data,
+                            expo_token=expo, title=title, body=push_body, data=data, delay=False,
                         )
                 elif expo and expo.startswith("ExponentPushToken"):
                     success = await self.send_to_expo_device(
-                        expo_token=expo, title=title, body=push_body, data=data,
+                        expo_token=expo, title=title, body=push_body, data=data, delay=False,
                     )
 
                 if success:
