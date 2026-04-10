@@ -3800,6 +3800,86 @@ async def generate_blog(
     )
 
 
+@router.post("/blog/generate-from-source")
+async def generate_blog_from_source_route(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Resim/screenshot'tan AI ile blog yazisi uret."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    import base64
+    from app.models.blog_post import BlogPost
+    from app.services.blog_generator_service import generate_blog_from_source
+
+    form = await request.form()
+    category = form.get("source_category", "borsa_rehberi")
+    additional_text = form.get("source_text", "").strip() or None
+
+    # Resimleri al
+    images_base64 = []
+    for key in form:
+        if key.startswith("source_image"):
+            upload_file = form[key]
+            if hasattr(upload_file, 'read'):
+                content = await upload_file.read()
+                if content and len(content) > 100:
+                    b64 = base64.b64encode(content).decode("utf-8")
+                    content_type = getattr(upload_file, 'content_type', 'image/jpeg') or 'image/jpeg'
+                    images_base64.append(f"data:{content_type};base64,{b64}")
+
+    if not images_base64:
+        return RedirectResponse(
+            url="/admin/blog?error=En+az+bir+resim+yukleyin",
+            status_code=303,
+        )
+
+    # Mevcut basliklari al
+    result = await db.execute(select(BlogPost.title))
+    existing_titles = [row[0] for row in result.all()]
+
+    try:
+        blog_data = await generate_blog_from_source(
+            images_base64=images_base64,
+            additional_text=additional_text,
+            category=category,
+            existing_titles=existing_titles,
+        )
+    except Exception as e:
+        logger.error(f"Blog from source hatasi: {e}")
+        return RedirectResponse(
+            url="/admin/blog?error=Resimden+blog+uretilemedi:+" + str(e)[:80],
+            status_code=303,
+        )
+
+    if not blog_data:
+        return RedirectResponse(
+            url="/admin/blog?error=AI+resimden+blog+uretemedi,+tekrar+deneyin",
+            status_code=303,
+        )
+
+    now = datetime.now(timezone.utc)
+    new_blog = BlogPost(
+        slug=blog_data["slug"],
+        title=blog_data["title"],
+        content=blog_data["content"],
+        meta_description=blog_data.get("meta_description"),
+        category=blog_data.get("category", category),
+        is_published=True,
+        published_at=now,
+    )
+    db.add(new_blog)
+    await db.flush()
+
+    logger.info(f"Admin: Blog from source uretildi — {new_blog.title} (id={new_blog.id})")
+
+    return RedirectResponse(
+        url="/admin/blog?success=Resimden+blog+basariyla+uretildi",
+        status_code=303,
+    )
+
+
 @router.post("/blog/{blog_id}/toggle-publish")
 async def toggle_blog_publish(
     request: Request,

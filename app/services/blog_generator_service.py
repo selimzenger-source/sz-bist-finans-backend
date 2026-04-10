@@ -223,3 +223,134 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
             logger.warning(f"Abacus failed: {e}")
 
     return None
+
+
+# ────────────────────────────────────────────────────────────
+# Resimden Blog Uretimi (Vision)
+# ────────────────────────────────────────────────────────────
+
+_SOURCE_SYSTEM_PROMPT = """Sen Türkiye borsası (BIST) konusunda uzman bir finans eğitimcisisin. "Borsa Cebimde" platformu için blog yazıları yazıyorsun.
+
+Sana bir veya birden fazla resim/screenshot verilecek. Bu görsellerdeki bilgileri oku, analiz et ve bunlardan özgün bir Türkçe blog yazısı oluştur.
+
+KURALLAR:
+1. Görseldeki bilgileri KAYNAK olarak kullan ama tamamen yeniden yaz — kopyala-yapıştır YAPMA.
+2. Minimum 800 kelime, detaylı ve eğitici olsun.
+3. Sadece HTML kullan: <h2>, <h3>, <p>, <strong>, <ul>, <li>, <ol> etiketleri.
+4. <h1> KULLANMA.
+5. Türkçe yaz, doğru Türkçe karakterler kullan (ş, ç, ğ, ı, ö, ü, İ).
+6. Bilgilendirici ve eğitici ton kullan.
+7. "Borsa Cebimde" platformunu doğal olarak 1-2 kez referans ver.
+8. Her yazının sonunda "Yatırım Uyarısı" paragrafı ekle.
+9. SEO uyumlu yaz.
+10. Emoji KULLANMA.
+11. Görseldeki dolar fiyatlarını TL'ye, inch'leri cm'ye çevir (finans bağlamına uyarla).
+
+ÇIKTI FORMATI (kesinlikle JSON):
+{
+  "title": "SEO uyumlu, 6-10 kelimelik başlık",
+  "content": "<h2>...</h2><p>...</p>... sadece HTML",
+  "meta_description": "150-160 karakter SEO açıklaması"
+}"""
+
+
+async def generate_blog_from_source(
+    images_base64: list[str],
+    additional_text: str | None = None,
+    category: str | None = None,
+    existing_titles: list[str] | None = None,
+) -> dict | None:
+    """Resim/screenshot'lardan blog yazisi uretir (Vision API).
+
+    Args:
+        images_base64: Base64 encoded resimler listesi
+        additional_text: Opsiyonel ek metin/aciklama
+        category: Blog kategorisi
+        existing_titles: Mevcut basliklar (tekrar onleme)
+
+    Returns:
+        {"title": str, "content": str, "meta_description": str, "slug": str, "category": str}
+    """
+    settings = get_settings()
+    if not category:
+        category = "borsa_rehberi"
+
+    # User message — resimler + ek metin
+    user_content: list[dict] = []
+
+    for img_b64 in images_base64:
+        # Base64 formatini duzelt
+        if not img_b64.startswith("data:"):
+            img_b64 = f"data:image/jpeg;base64,{img_b64}"
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": img_b64}
+        })
+
+    text_parts = []
+    if additional_text:
+        text_parts.append(f"Ek bilgi: {additional_text}")
+    if existing_titles:
+        text_parts.append("Daha önce yazılmış başlıklar (TEKRARLAMA):\n" + "\n".join(f"- {t}" for t in existing_titles[:30]))
+    text_parts.append("Bu görsellerdeki bilgileri kullanarak özgün bir Türkçe finans blog yazısı oluştur. JSON formatında döndür.")
+
+    user_content.append({"type": "text", "text": "\n\n".join(text_parts)})
+
+    # Gemini Vision API
+    gemini_key = getattr(settings, "GEMINI_API_KEY", "")
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=180) as client:
+                resp = await client.post(
+                    _GEMINI_URL,
+                    headers={"Authorization": f"Bearer {gemini_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": _GEMINI_MODEL,
+                        "messages": [
+                            {"role": "system", "content": _SOURCE_SYSTEM_PROMPT},
+                            {"role": "user", "content": user_content},
+                        ],
+                        "max_tokens": 4000,
+                        "temperature": 0.7,
+                    },
+                )
+                if resp.status_code == 200:
+                    result_text = resp.json()["choices"][0]["message"]["content"]
+                    logger.info(f"Blog from source generated via Gemini ({len(result_text)} chars)")
+                else:
+                    logger.warning(f"Gemini Vision error {resp.status_code}: {resp.text[:200]}")
+                    return None
+        except Exception as e:
+            logger.error(f"Gemini Vision failed: {e}")
+            return None
+    else:
+        logger.error("No Gemini API key for Vision blog generation")
+        return None
+
+    # JSON parse
+    try:
+        json_match = re.search(r'\{[\s\S]*\}', result_text)
+        if not json_match:
+            logger.error("Blog from source: JSON not found")
+            return None
+
+        data = json.loads(json_match.group())
+        title = data.get("title", "").strip()
+        content = data.get("content", "").strip()
+        meta_desc = data.get("meta_description", "").strip()
+
+        if not title or not content:
+            logger.error("Blog from source: Empty title or content")
+            return None
+
+        return {
+            "title": title,
+            "content": content,
+            "meta_description": meta_desc,
+            "slug": _slugify(title),
+            "category": category,
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Blog from source JSON parse error: {e}")
+        return None

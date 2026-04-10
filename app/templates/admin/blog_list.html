@@ -24,10 +24,16 @@
             Taslak: <span class="text-yellow-400 font-medium">{{ blogs|rejectattr('is_published')|list|length }}</span>
         </p>
     </div>
-    <button onclick="document.getElementById('generateModal').classList.remove('hidden')"
-            class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap">
-        &#129302; AI Blog Uret
-    </button>
+    <div class="flex gap-2">
+        <button onclick="document.getElementById('sourceModal').classList.remove('hidden')"
+                class="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap">
+            &#128247; Resimden Uret
+        </button>
+        <button onclick="document.getElementById('generateModal').classList.remove('hidden')"
+                class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap">
+            &#129302; AI Blog Uret
+        </button>
+    </div>
 </div>
 
 <!-- Search -->
@@ -183,7 +189,91 @@
     </div>
 </div>
 
+<!-- Source/Image Generate Modal -->
+<div id="sourceModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+     onclick="if(event.target===this) this.classList.add('hidden')">
+    <div class="bg-gray-800 rounded-xl border border-gray-700 shadow-2xl w-full max-w-md" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+            <h2 class="text-lg font-bold text-white">&#128247; Resimden Blog Uret</h2>
+            <button onclick="document.getElementById('sourceModal').classList.add('hidden')"
+                    class="text-gray-400 hover:text-white transition text-xl leading-none">&times;</button>
+        </div>
+        <form method="POST" action="/admin/blog/generate-from-source" enctype="multipart/form-data" id="sourceForm" onsubmit="handleSourceGenerate(event)">
+            <div class="px-6 py-5 space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1.5">Resim(ler) <span class="text-red-400">*</span></label>
+                    <input type="file" name="source_image" accept="image/*" multiple required
+                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 file:mr-3 file:px-3 file:py-1 file:rounded-lg file:border-0 file:bg-emerald-600 file:text-white file:text-xs file:font-medium file:cursor-pointer focus:outline-none focus:border-emerald-500 transition"
+                           onchange="previewImages(this)">
+                    <div id="imagePreview" class="mt-2 flex gap-2 flex-wrap"></div>
+                    <p class="text-gray-500 text-xs mt-1">Haber screenshot'i, grafik veya infografik yukleyin. Birden fazla resim secebilirsiniz.</p>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1.5">Ek Aciklama <span class="text-gray-500">(opsiyonel)</span></label>
+                    <textarea name="source_text" rows="3" placeholder="Resim hakkinda ek bilgi veya vurgulamak istediginiz noktalar..."
+                              class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition resize-none"></textarea>
+                </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1.5">Kategori</label>
+                    <select name="source_category"
+                            class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-emerald-500 transition">
+                        <option value="halka_arz">Halka Arz</option>
+                        <option value="kap">KAP</option>
+                        <option value="tavan_taban">Tavan Taban</option>
+                        <option value="viop">VIOP</option>
+                        <option value="spk">SPK</option>
+                        <option value="borsa_rehberi" selected>Borsa Rehberi</option>
+                        <option value="teknoloji">Teknoloji</option>
+                        <option value="temel_analiz">Temel Analiz</option>
+                    </select>
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-end gap-3">
+                <button type="button" onclick="document.getElementById('sourceModal').classList.add('hidden')"
+                        class="px-4 py-2 rounded-lg text-sm text-gray-400 hover:text-white transition">
+                    Iptal
+                </button>
+                <button type="submit" id="sourceBtn"
+                        class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2">
+                    <span id="sourceBtnText">Uret</span>
+                    <svg id="sourceSpinner" class="hidden animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
+function previewImages(input) {
+    const preview = document.getElementById('imagePreview');
+    preview.innerHTML = '';
+    if (input.files) {
+        Array.from(input.files).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.className = 'w-16 h-16 object-cover rounded-lg border border-gray-600';
+                preview.appendChild(img);
+            };
+            reader.readAsDataURL(file);
+        });
+    }
+}
+
+function handleSourceGenerate(e) {
+    const btn = document.getElementById('sourceBtn');
+    const btnText = document.getElementById('sourceBtnText');
+    const spinner = document.getElementById('sourceSpinner');
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'cursor-not-allowed');
+    btnText.textContent = 'Resim analiz ediliyor...';
+    spinner.classList.remove('hidden');
+}
+
 function handleGenerate(e) {
     const btn = document.getElementById('generateBtn');
     const btnText = document.getElementById('generateBtnText');
