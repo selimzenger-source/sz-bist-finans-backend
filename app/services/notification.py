@@ -578,6 +578,122 @@ class NotificationService:
 
         return sent_count
 
+    async def _send_viop_filtered(
+        self,
+        preference_field: str,
+        title: str,
+        push_body: str,
+        log_body: str,
+        data: dict,
+        log_label: str,
+        channel_id: str = "default_v2",
+        category: str = "system",
+    ) -> int:
+        """VİOP bildirimi — push'a kısa body, bildirim merkezine detaylı body.
+
+        Push notification: sadece veri (fiyat, değişim)
+        Bildirim Merkezi: veri + AI yorumu
+        """
+        from app.models.user import User
+
+        pref_col = getattr(User, preference_field, None)
+        if pref_col is None:
+            logger.error("Gecersiz preference_field: %s", preference_field)
+            return 0
+
+        users_result = await self.db.execute(
+            select(User).where(
+                and_(
+                    User.notifications_enabled == True,
+                    User.deleted == False,
+                    pref_col == True,
+                    or_(
+                        and_(User.fcm_token.isnot(None), User.fcm_token != ""),
+                        and_(User.expo_push_token.isnot(None), User.expo_push_token != ""),
+                    ),
+                )
+            )
+        )
+        users = list(users_result.scalars().all())
+
+        sent_count = 0
+        failed_count = 0
+        for user in users:
+            try:
+                # Push bildirimini kısa body ile gönder
+                fcm = (user.fcm_token or "").strip()
+                expo = (user.expo_push_token or "").strip()
+
+                # Dedup kontrolü
+                token_for_dedup = fcm or expo
+                if token_for_dedup:
+                    dedup_key = f"{token_for_dedup}:{hash(title)}"
+                    now = time.time()
+                    last_sent = _fcm_dedup_cache.get(dedup_key, 0)
+                    if now - last_sent < _FCM_DEDUP_SECONDS:
+                        continue
+                    _fcm_dedup_cache[dedup_key] = now
+
+                # KILL SWITCH kontrolü
+                try:
+                    from app.services.twitter_service import is_notifications_killed
+                    if is_notifications_killed():
+                        continue
+                except Exception:
+                    pass
+
+                success = False
+                if fcm:
+                    result = await self.send_to_device(
+                        fcm_token=fcm, title=title, body=push_body,
+                        data=data, channel_id=channel_id,
+                    )
+                    if result:
+                        success = True
+                    elif expo and expo.startswith("ExponentPushToken"):
+                        success = await self.send_to_expo_device(
+                            expo_token=expo, title=title, body=push_body, data=data,
+                        )
+                elif expo and expo.startswith("ExponentPushToken"):
+                    success = await self.send_to_expo_device(
+                        expo_token=expo, title=title, body=push_body, data=data,
+                    )
+
+                if success:
+                    sent_count += 1
+                    # Bildirim merkezine DETAYLI body ile kaydet
+                    try:
+                        await self._log_notification(
+                            device_id=user.device_id,
+                            title=title,
+                            body=log_body,
+                            category=category,
+                            data=data,
+                        )
+                    except Exception as e:
+                        logger.warning("NotificationLog kayit hatasi: %s", e)
+                else:
+                    failed_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.warning("_send_viop_filtered bildirim hatasi (user=%s): %s", user.id, e)
+
+        logger.info(
+            "%s — %d kullaniciya gonderildi, %d basarisiz (filtre: %s)",
+            log_label, sent_count, failed_count, preference_field,
+        )
+
+        try:
+            from app.services.admin_telegram import notify_push_sent
+            await notify_push_sent(
+                notification_type=log_label, title=title,
+                sent_count=sent_count, failed_count=failed_count,
+            )
+        except Exception:
+            pass
+
+        return sent_count
+
     # -------------------------------------------------------
     # Halka Arz Bildirimleri
     # -------------------------------------------------------
@@ -1484,7 +1600,7 @@ class NotificationService:
             f"SPK Bülten: {bulletin_no}",
         )
 
-    async def notify_viop_session(self, session_type: str, summary: str = "") -> int:
+    async def notify_viop_session(self, session_type: str, summary: str = "", price: float = 0, change_pct: float = 0, night_diff: float = None) -> int:
         """VİOP seans bildirimi — acilis, kapanis veya flash.
 
         Seans türü saate göre belirlenir:
@@ -1504,22 +1620,65 @@ class NotificationService:
         is_evening = hour >= 18 or hour < 6
         seans_adi = "Akşam Seansı" if is_evening else "Gündüz Seansı"
 
-        type_labels = {
-            "opening": (f"VİOP {seans_adi} Açıldı", f"Vadeli işlem piyasası {seans_adi.lower()} başladı."),
-            "closing": (f"VİOP {seans_adi} Kapandı", f"{seans_adi} sona erdi, veriler güncellendi."),
-            "flash": ("VİOP Flaş Haber", summary or "Önemli VİOP hareketi tespit edildi."),
-        }
-        title, default_body = type_labels.get(session_type, ("VİOP Güncelleme", "VİOP güncelleme"))
-        body = summary or default_body
+        # Fiyat bilgisi formatlama
+        def _fmt_price(p: float) -> str:
+            """16124.5 → 16.124"""
+            return f"{p:,.0f}".replace(",", ".")
+
+        def _fmt_change(c: float) -> str:
+            """0.14 → +0.14, -0.14 → -0.14"""
+            sign = "+" if c >= 0 else ""
+            return f"{sign}{c:.2f}"
+
+        # Push body: sadece veri satırları (telefona düşen bildirim)
+        # Bildirim merkezi body: veri + AI yorumu (uygulama içinde genişletince)
+        ai_summary = summary.strip() if summary else ""
+
+        if session_type == "opening" and price > 0:
+            title = f"VİOP {seans_adi} Açıldı"
+            lines = [f"Açılış: {_fmt_price(price)} puan"]
+            if night_diff is not None:
+                lines.append(f"Gece seansına göre: %{_fmt_change(night_diff)}")
+            if change_pct != 0:
+                lines.append(f"Uzlaşmaya göre: %{_fmt_change(change_pct)}")
+            push_body = "\n".join(lines)
+            # Bildirim merkezi body — veri + AI yorumu
+            log_body = push_body + (f"\n\n{ai_summary}" if ai_summary else "")
+
+        elif session_type == "closing" and price > 0:
+            title = f"VİOP {seans_adi} Kapandı"
+            lines = [f"Kapanış: {_fmt_price(price)} puan"]
+            if change_pct != 0:
+                lines.append(f"Değişim: %{_fmt_change(change_pct)}")
+            push_body = "\n".join(lines)
+            log_body = push_body + (f"\n\n{ai_summary}" if ai_summary else "")
+
+        elif session_type == "flash":
+            title = "VİOP Flaş Hareket"
+            push_body = summary or "Önemli VİOP hareketi tespit edildi."
+            log_body = push_body
+
+        else:
+            # Fallback — veri yoksa eski davranış
+            type_labels = {
+                "opening": (f"VİOP {seans_adi} Açıldı", f"Vadeli işlem piyasası {seans_adi.lower()} başladı."),
+                "closing": (f"VİOP {seans_adi} Kapandı", f"{seans_adi} sona erdi, veriler güncellendi."),
+                "flash": ("VİOP Flaş Haber", summary or "Önemli VİOP hareketi tespit edildi."),
+            }
+            title, default_body = type_labels.get(session_type, ("VİOP Güncelleme", "VİOP güncelleme"))
+            push_body = default_body
+            log_body = push_body
 
         data = {
             "type": "viop_session",
             "session_type": session_type,
             "screen": "viop-gece-seansi",
         }
+        if ai_summary:
+            data["ai_summary"] = ai_summary
 
-        return await self._send_filtered(
-            "notify_viop", title, body, data,
+        return await self._send_viop_filtered(
+            "notify_viop", title, push_body, log_body, data,
             f"VİOP {session_type}",
             category="system",
         )
