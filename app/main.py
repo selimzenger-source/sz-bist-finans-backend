@@ -1180,6 +1180,50 @@ async def get_blog_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
     return blog
 
 
+@app.post("/api/v1/admin/generate-spk-descriptions")
+async def api_generate_spk_descriptions(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """API uzerinden SPK sirket aciklamalarini toplu uret."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    import asyncio
+    from app.models.spk_application import SPKApplication as SPKApp
+    from app.services.company_description_service import generate_company_description
+
+    result = await db.execute(
+        select(SPKApp).where(
+            SPKApp.status == "pending",
+            (SPKApp.company_description == None) | (SPKApp.company_description == ""),
+        )
+    )
+    apps = list(result.scalars().all())
+
+    if not apps:
+        return {"message": "Tum sirketlerin aciklamasi zaten var", "generated": 0}
+
+    generated = 0
+    failed = 0
+    for app_item in apps:
+        try:
+            desc = await generate_company_description(app_item.company_name)
+            if desc:
+                app_item.company_description = desc
+                generated += 1
+                await db.flush()
+            else:
+                failed += 1
+        except Exception as e:
+            logger.error(f"Desc failed for {app_item.company_name}: {e}")
+            failed += 1
+        await asyncio.sleep(0.5)
+
+    await db.commit()
+    return {"message": f"{generated} aciklama uretildi, {failed} basarisiz", "generated": generated, "failed": failed}
+
+
 ########################################################
 # ARSIV
 ########################################################

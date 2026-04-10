@@ -2564,6 +2564,41 @@ async def daily_ceiling_update():
                 ", ".join(tickers),
             )
 
+            # ── Retry'da cift tweet engelleme ──────────────────────────
+            # Bugun zaten gunluk_takip tweeti atilmis ticker'lari tespit et
+            # pending_tweets tablosundan source=tweet_daily_tracking ve bugun sent olanlari oku
+            already_tweeted: set[str] = set()
+            try:
+                from app.models.pending_tweet import PendingTweet
+                today_start = datetime.combine(_today_tr(), datetime.min.time())
+                today_start_utc = today_start.replace(tzinfo=timezone.utc) - timedelta(hours=3)
+                sent_today = await db.execute(
+                    select(PendingTweet.text).where(
+                        and_(
+                            PendingTweet.source == "tweet_daily_tracking",
+                            PendingTweet.status == "sent",
+                            PendingTweet.sent_at >= today_start_utc,
+                        )
+                    )
+                )
+                for (txt,) in sent_today:
+                    # Tweet metninden ticker'i cikar: "📊 #MCARD — 22/25 Gün Sonu" → "MCARD"
+                    if txt and "#" in txt:
+                        parts = txt.split("#")
+                        for part in parts[1:]:
+                            ticker_candidate = part.split()[0].split("'")[0].split("\u2014")[0].strip()
+                            if ticker_candidate and ticker_candidate.isalpha() and len(ticker_candidate) <= 10:
+                                already_tweeted.add(ticker_candidate.upper())
+                                break
+                if already_tweeted:
+                    logger.info(
+                        "Tavan takip: Bugun zaten tweet atilmis ticker'lar: %s",
+                        ", ".join(sorted(already_tweeted)),
+                    )
+            except Exception as dedup_err:
+                logger.warning("Tavan takip dedup kontrolu basarisiz (devam ediliyor): %s", dedup_err)
+            # ────────────────────────────────────────────────────────────
+
             success_count = 0
             fail_count = 0
             failed_tickers = []
@@ -2620,11 +2655,18 @@ async def daily_ceiling_update():
                         failed_tickers.append(ipo.ticker)
                         continue
 
-                    # trading_day_count guncelle
-                    ipo.trading_day_count = len(days_data)
-
-                    if days_data and not ipo.first_day_close_price:
-                        ipo.first_day_close_price = days_data[0]["close"]
+                    # trading_day_count guncelle — ayri flush ile DB session hatasini izole et
+                    try:
+                        ipo.trading_day_count = len(days_data)
+                        if days_data and not ipo.first_day_close_price:
+                            ipo.first_day_close_price = days_data[0]["close"]
+                        await db.flush()
+                    except Exception as flush_err:
+                        logger.warning(
+                            "Tavan takip: %s — DB flush hatasi (tweet devam edecek): %s",
+                            ipo.ticker, flush_err,
+                        )
+                        await db.rollback()
 
                     success_count += 1
                     logger.info(
@@ -2665,28 +2707,38 @@ async def daily_ceiling_update():
                             # 25. gun ve sonrasi icin gunluk tweet ATMA
                             # 25/25 performans tweeti gece 00:00 arsivleme sirasinda atilir
                             if current_day <= 24:
-                                # Ceiling/floor sayisi hesapla (gorsel icin)
-                                ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
-                                floor_d = sum(1 for t in tracks if t.hit_floor)
-
-                                tweet_ok = tweet_daily_tracking(
-                                    ipo, current_day, last_close,
-                                    daily_pct, last_durum,
-                                    days_data=days_data,
-                                    ceiling_days=ceiling_d,
-                                    floor_days=floor_d,
-                                )
-                                # Admin Telegram bildirim
-                                try:
-                                    from app.services.admin_telegram import notify_tweet_sent
-                                    await notify_tweet_sent(
-                                        "gunluk_takip",
+                                # Retry'da cift tweet engelle
+                                if ipo.ticker.upper() in already_tweeted:
+                                    logger.info(
+                                        "Tavan takip: %s — bugun zaten tweet atilmis, ATLANIYOR (cift tweet engellendi)",
                                         ipo.ticker,
-                                        tweet_ok,
-                                        f"Gun: {current_day}/25 | %{daily_pct:+.2f} | {last_durum}",
                                     )
-                                except Exception:
-                                    pass
+                                else:
+                                    # Ceiling/floor sayisi hesapla (gorsel icin)
+                                    ceiling_d = sum(1 for t in tracks if t.hit_ceiling)
+                                    floor_d = sum(1 for t in tracks if t.hit_floor)
+
+                                    tweet_ok = tweet_daily_tracking(
+                                        ipo, current_day, last_close,
+                                        daily_pct, last_durum,
+                                        days_data=days_data,
+                                        ceiling_days=ceiling_d,
+                                        floor_days=floor_d,
+                                    )
+                                    # Basarili tweet'i set'e ekle (ayni calisma icinde tekrar atmayi engelle)
+                                    if tweet_ok:
+                                        already_tweeted.add(ipo.ticker.upper())
+                                    # Admin Telegram bildirim
+                                    try:
+                                        from app.services.admin_telegram import notify_tweet_sent
+                                        await notify_tweet_sent(
+                                            "gunluk_takip",
+                                            ipo.ticker,
+                                            tweet_ok,
+                                            f"Gun: {current_day}/25 | %{daily_pct:+.2f} | {last_durum}",
+                                        )
+                                    except Exception:
+                                        pass
                             else:
                                 logger.info(
                                     "Tavan takip: %s — %d. gun, gunluk tweet atlaniyor (25/25 gece atilacak)",
@@ -2707,7 +2759,11 @@ async def daily_ceiling_update():
                     fail_count += 1
                     failed_tickers.append(ipo.ticker)
 
-            await db.commit()
+            try:
+                await db.commit()
+            except Exception as commit_err:
+                logger.warning("Tavan takip commit hatasi (tweetler zaten atildi): %s", commit_err)
+                await db.rollback()
             logger.info("Tavan takip gun sonu tamamlandi — %d IPO islendi", len(active_ipos))
 
             # Sonucu admin'e bildir
