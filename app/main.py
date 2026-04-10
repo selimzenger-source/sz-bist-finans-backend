@@ -1180,6 +1180,45 @@ async def get_blog_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
     return blog
 
 
+@app.post("/api/v1/admin/generate-blog")
+async def api_generate_blog(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """API uzerinden blog yazisi uret."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.blog_post import BlogPost
+    from app.services.blog_generator_service import generate_blog_post
+
+    topic = payload.get("topic")
+    category = payload.get("category", "borsa_rehberi")
+
+    result_q = await db.execute(select(BlogPost.title))
+    existing_titles = [row[0] for row in result_q.all()]
+
+    blog_data = await generate_blog_post(topic=topic, category=category, existing_titles=existing_titles)
+    if not blog_data:
+        raise HTTPException(status_code=500, detail="Blog uretilemedi")
+
+    now = datetime.now(timezone.utc)
+    new_blog = BlogPost(
+        slug=blog_data["slug"],
+        title=blog_data["title"],
+        content=blog_data["content"],
+        meta_description=blog_data.get("meta_description"),
+        category=blog_data.get("category", category),
+        is_published=True,
+        published_at=now,
+    )
+    db.add(new_blog)
+    await db.flush()
+    await db.commit()
+
+    return {"id": new_blog.id, "title": new_blog.title, "slug": new_blog.slug}
+
+
 @app.post("/api/v1/admin/generate-spk-descriptions")
 async def api_generate_spk_descriptions(
     payload: dict = Body(...),
