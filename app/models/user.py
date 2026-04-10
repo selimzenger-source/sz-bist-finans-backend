@@ -47,6 +47,7 @@ class User(Base):
     notify_viop: Mapped[bool] = mapped_column(Boolean, default=True, comment="VIOP seans bildirimi")
     notify_tavan_taban: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunun tavan taban hisseleri bildirimi")
     notify_spk_bulten: Mapped[bool] = mapped_column(Boolean, default=True, comment="SPK bulten analizi bildirimi")
+    notify_rehber: Mapped[bool] = mapped_column(Boolean, default=True, comment="Rehber/blog yazi bildirimi")
     notify_edo_paid: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretli EDO bildirimi")
 
     # Hatirlatma zamanlari (son gun icin)

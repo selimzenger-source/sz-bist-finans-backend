@@ -139,6 +139,13 @@ async def _get_target_users(db: AsyncSession, audience: str) -> list:
                 and_(base, User.id.notin_(select(paid_sub.c.user_id)))
             )
         )
+    elif audience == "rehber":
+        # Sadece notify_rehber=True olan kullanicilar
+        result = await db.execute(
+            select(User).where(
+                and_(base, User.notify_rehber == True)
+            )
+        )
     else:
         return []
 

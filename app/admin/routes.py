@@ -3801,7 +3801,7 @@ async def generate_blog(
         asyncio.create_task(broadcast_background_task(
             title=f"📚 {new_blog.title}",
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
-            audience="all",
+            audience="rehber",
             deep_link_target="rehber",
         ))
         logger.info(f"Blog bildirim gorevi baslat: {new_blog.title}")
@@ -3895,7 +3895,7 @@ async def generate_blog_from_source_route(
         asyncio.create_task(broadcast_background_task(
             title=f"📚 {new_blog.title}",
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
-            audience="all",
+            audience="rehber",
             deep_link_target="rehber",
         ))
     except Exception as e:

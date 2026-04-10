@@ -103,6 +103,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Veritabani init hatasi: %s", e)
 
+    # User — notify_rehber kolonu ekle (migration)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_rehber BOOLEAN DEFAULT TRUE"
+            ))
+            await db.commit()
+    except Exception as e:
+        logger.warning("notify_rehber migration atlandi: %s", e)
+
     # SPK Applications — company_description kolonu ekle (migration)
     try:
         async with async_session() as db:
@@ -1223,7 +1233,7 @@ async def api_generate_blog(
         asyncio.create_task(broadcast_background_task(
             title=f"📚 {new_blog.title}",
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
-            audience="all",
+            audience="rehber",
             deep_link_target="rehber",
         ))
     except Exception:
