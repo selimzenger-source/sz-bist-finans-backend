@@ -203,6 +203,10 @@ async def broadcast_background_task(
 
             for user in users:
                 try:
+                    # Master bildirim switch kontrolu
+                    if not user.notifications_enabled:
+                        continue
+
                     fcm = (user.fcm_token or "").strip()
                     expo = (user.expo_push_token or "").strip()
                     if not fcm and not expo:
