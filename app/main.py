@@ -1210,6 +1210,10 @@ async def api_generate_spk_descriptions(
     if not apps:
         return {"message": "Tum sirketlerin aciklamasi zaten var", "generated": 0}
 
+    # Batch limit — Render 300sn timeout'una takilmamak icin
+    batch_size = int(payload.get("limit", 20))
+    apps = apps[:batch_size]
+
     generated = 0
     failed = 0
     for app_item in apps:
