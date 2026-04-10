@@ -66,6 +66,11 @@ class SPKApplication(Base):
     # Dipnotlar
     notes: Mapped[str | None] = mapped_column(Text, comment="Dipnotlar / aciklamalar")
 
+    # Sirket Hakkinda (AI uretimi)
+    company_description: Mapped[str | None] = mapped_column(
+        Text, comment="Sirket hakkinda AI tarafindan uretilen 1-2 paragraf tanitim metni"
+    )
+
     # Durum
     status: Mapped[str] = mapped_column(
         String(20), default="pending",

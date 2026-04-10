@@ -281,6 +281,7 @@ class SPKApplicationOut(BaseModel):
     sale_price: Optional[Decimal] = None
     application_date: Optional[datetime] = None
     notes: Optional[str] = None
+    company_description: Optional[str] = None
     status: str = "pending"
     created_at: Optional[datetime] = None
 

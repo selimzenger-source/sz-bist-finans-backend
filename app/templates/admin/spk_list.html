@@ -5,6 +5,13 @@
 <div class="flex items-center justify-between mb-6">
     <h1 class="text-2xl font-bold text-gray-100">SPK Onayı Beklenen Başvurular</h1>
     <div class="flex gap-3 items-center">
+        <form method="post" action="/admin/spk/generate-descriptions"
+              onsubmit="return confirm('Açıklaması olmayan tüm şirketler için AI ile tanıtım metni üretilecek. Bu işlem uzun sürebilir. Devam?')">
+            <button type="submit"
+                    class="bg-emerald-900/50 text-emerald-300 px-3 py-1 rounded-lg text-xs hover:bg-emerald-800/50 transition border border-emerald-700">
+                🤖 AI Açıklama Üret
+            </button>
+        </form>
         <form method="post" action="/admin/spk/cleanup-duplicates"
               onsubmit="return confirm('Tüm liste silinip SPK sitesinden taze veri çekilecek. Onaylıyor musun?')">
             <button type="submit"

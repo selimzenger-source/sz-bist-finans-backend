@@ -908,7 +908,31 @@ async def cleanup_spk_duplicates(
             new_count += 1
 
         await db.flush()
-        msg = f"{old_count} eski silindi, {new_count} taze yuklendi, {skipped_ipo} zaten IPO'da"
+
+        # Yeni eklenen sirketler icin AI ile aciklama uret (background)
+        import asyncio
+        from app.services.company_description_service import generate_company_description
+
+        desc_result = await db.execute(
+            select(SPKApplication).where(
+                SPKApplication.status == "pending",
+                (SPKApplication.company_description == None) | (SPKApplication.company_description == ""),
+            )
+        )
+        no_desc_apps = list(desc_result.scalars().all())
+        desc_count = 0
+        for app_item in no_desc_apps:
+            try:
+                desc = await generate_company_description(app_item.company_name)
+                if desc:
+                    app_item.company_description = desc
+                    desc_count += 1
+                    await db.flush()
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning(f"Auto-description failed for {app_item.company_name}: {e}")
+
+        msg = f"{old_count} eski silindi, {new_count} taze yuklendi, {skipped_ipo} zaten IPO'da, {desc_count} aciklama uretildi"
         logger.info(f"Admin: SPK full resync — {msg}")
 
         return RedirectResponse(
@@ -922,6 +946,58 @@ async def cleanup_spk_duplicates(
             url=f"/admin/spk?success=Hata: {str(e)[:80]}",
             status_code=303,
         )
+
+
+@router.post("/spk/generate-descriptions")
+async def generate_spk_descriptions(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Tum SPK basvurulari icin company_description uretir (eksik olanlar).
+
+    AI ile her sirket icin 1-2 paragraf tanitim metni uretir.
+    Sadece company_description bos olan kayitlar icin calisir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    import asyncio
+    from app.services.company_description_service import generate_company_description
+
+    # Aciklamasi olmayan SPK basvurularini bul
+    result = await db.execute(
+        select(SPKApplication).where(
+            SPKApplication.status == "pending",
+            (SPKApplication.company_description == None) | (SPKApplication.company_description == ""),
+        )
+    )
+    apps = list(result.scalars().all())
+
+    if not apps:
+        return RedirectResponse(url="/admin/spk?success=Tum sirketlerin aciklamasi zaten var", status_code=303)
+
+    generated = 0
+    failed = 0
+
+    for app in apps:
+        try:
+            desc = await generate_company_description(app.company_name)
+            if desc:
+                app.company_description = desc
+                generated += 1
+                await db.flush()
+            else:
+                failed += 1
+        except Exception as e:
+            logger.error(f"Description generation failed for {app.company_name}: {e}")
+            failed += 1
+
+        # Rate limit - her istek arasinda 1 sn bekle
+        await asyncio.sleep(1)
+
+    msg = f"{generated} aciklama uretildi, {failed} basarisiz"
+    logger.info(f"Admin: SPK description generation — {msg}")
+    return RedirectResponse(url=f"/admin/spk?success={msg}", status_code=303)
 
 
 # ============================================================

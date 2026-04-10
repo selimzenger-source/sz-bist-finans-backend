@@ -103,6 +103,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Veritabani init hatasi: %s", e)
 
+    # SPK Applications — company_description kolonu ekle (migration)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE spk_applications ADD COLUMN IF NOT EXISTS company_description TEXT"
+            ))
+            await db.commit()
+            logger.info("SPK: company_description kolonu kontrol edildi/eklendi")
+    except Exception as e:
+        logger.warning("SPK company_description migration atlandi: %s", e)
+
     # KAP bildirimleri — UNIQUE constraint + eski hatalı verileri temizle
     try:
         async with async_session() as db:
