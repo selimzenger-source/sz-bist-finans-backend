@@ -55,7 +55,7 @@ async def generate_company_description(company_name: str) -> Optional[str]:
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": user_msg},
                         ],
-                        "max_tokens": 500,
+                        "max_tokens": 1000,
                         "temperature": 0.7,
                     },
                 )
@@ -88,7 +88,7 @@ async def generate_company_description(company_name: str) -> Optional[str]:
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": user_msg},
                         ],
-                        "max_tokens": 500,
+                        "max_tokens": 1000,
                         "temperature": 0.7,
                     },
                 )

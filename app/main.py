@@ -1193,10 +1193,16 @@ async def api_generate_spk_descriptions(
     from app.models.spk_application import SPKApplication as SPKApp
     from app.services.company_description_service import generate_company_description
 
+    from sqlalchemy import func as sa_func
+
+    # Aciklamasi olmayan VEYA 100 karakterden kisa (yarim kalmis) olanlari bul
     result = await db.execute(
         select(SPKApp).where(
             SPKApp.status == "pending",
-            (SPKApp.company_description == None) | (SPKApp.company_description == ""),
+        ).where(
+            (SPKApp.company_description == None) |
+            (SPKApp.company_description == "") |
+            (sa_func.length(SPKApp.company_description) < 100)
         )
     )
     apps = list(result.scalars().all())
