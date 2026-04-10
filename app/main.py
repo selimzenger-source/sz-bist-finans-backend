@@ -48,7 +48,7 @@ from app.models import (
 )
 from app.schemas import (
     IPOListOut, IPODetailOut, IPOSectionsOut,
-    SPKApplicationOut,
+    SPKApplicationOut, BlogPostOut,
     KapNewsOut, TelegramNewsOut,
     UserRegister, UserUpdate, UserOut, SubscriptionInfo,
     ReminderSettingsUpdate,
@@ -113,6 +113,34 @@ async def lifespan(app: FastAPI):
             logger.info("SPK: company_description kolonu kontrol edildi/eklendi")
     except Exception as e:
         logger.warning("SPK company_description migration atlandi: %s", e)
+
+    # Blog Posts tablosu olustur (migration)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS blog_posts (
+                    id SERIAL PRIMARY KEY,
+                    slug VARCHAR(255) UNIQUE NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    meta_description VARCHAR(300),
+                    cover_image_url TEXT,
+                    category VARCHAR(50) DEFAULT 'borsa_rehberi',
+                    author_name VARCHAR(100) DEFAULT 'Borsa Cebimde',
+                    is_published BOOLEAN DEFAULT FALSE,
+                    ai_generated BOOLEAN DEFAULT TRUE,
+                    published_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            await db.execute(sa_text("CREATE INDEX IF NOT EXISTS idx_blog_slug ON blog_posts(slug)"))
+            await db.execute(sa_text("CREATE INDEX IF NOT EXISTS idx_blog_published ON blog_posts(is_published)"))
+            await db.execute(sa_text("CREATE INDEX IF NOT EXISTS idx_blog_category ON blog_posts(category)"))
+            await db.commit()
+            logger.info("Blog: blog_posts tablosu kontrol edildi/olusturuldu")
+    except Exception as e:
+        logger.warning("Blog tablosu migration atlandi: %s", e)
 
     # KAP bildirimleri — UNIQUE constraint + eski hatalı verileri temizle
     try:
@@ -1121,6 +1149,40 @@ async def get_spk_applications(db: AsyncSession = Depends(get_db)):
     )
     return list(result.scalars().all())
 
+
+########################################################
+# BLOG API
+########################################################
+
+@app.get("/api/v1/public/blogs", response_model=list[BlogPostOut])
+async def get_published_blogs(db: AsyncSession = Depends(get_db)):
+    """Yayinlanan blog yazilarini listele (web sitesi icin)."""
+    from app.models.blog_post import BlogPost as BlogPostModel
+    result = await db.execute(
+        select(BlogPostModel)
+        .where(BlogPostModel.is_published == True)
+        .order_by(BlogPostModel.published_at.desc().nullslast())
+    )
+    return list(result.scalars().all())
+
+
+@app.get("/api/v1/public/blogs/{slug}")
+async def get_blog_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
+    """Slug ile tek blog yazisi getir."""
+    from app.models.blog_post import BlogPost as BlogPostModel
+    result = await db.execute(
+        select(BlogPostModel)
+        .where(BlogPostModel.slug == slug, BlogPostModel.is_published == True)
+    )
+    blog = result.scalar_one_or_none()
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog bulunamadi")
+    return blog
+
+
+########################################################
+# ARSIV
+########################################################
 
 @app.get("/api/v1/ipos/archived", response_model=list[IPOListOut])
 async def get_archived_ipos(

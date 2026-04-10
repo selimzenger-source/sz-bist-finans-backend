@@ -289,6 +289,26 @@ class SPKApplicationOut(BaseModel):
 
 
 # -------------------------------------------------------
+# Blog Post Schema
+# -------------------------------------------------------
+
+class BlogPostOut(BaseModel):
+    """Blog yazisi public ciktisi."""
+    id: int
+    slug: str
+    title: str
+    content: str
+    meta_description: Optional[str] = None
+    cover_image_url: Optional[str] = None
+    category: str = "borsa_rehberi"
+    author_name: str = "Borsa Cebimde"
+    published_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -------------------------------------------------------
 # IPO Bolumler Schema (v3.0 — 5 bolumlu endpoint)
 # -------------------------------------------------------
 

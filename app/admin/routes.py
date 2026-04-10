@@ -3706,3 +3706,162 @@ async def admin_reply_set_limit(
     return RedirectResponse(
         f"/admin/replies?success=Günlük+limit+{limit_val}+yapıldı", status_code=302
     )
+
+
+# ============================================================
+# BLOG YONETIMI
+# ============================================================
+
+@router.get("/blog", response_class=HTMLResponse)
+async def blog_list(
+    request: Request,
+    success: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog yazilari listesi."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+
+    result = await db.execute(
+        select(BlogPost).order_by(desc(BlogPost.created_at))
+    )
+    blogs = list(result.scalars().all())
+
+    return templates.TemplateResponse("admin/blog_list.html", {
+        "request": request,
+        "blogs": blogs,
+        "success": success,
+        "error": error,
+    })
+
+
+@router.post("/blog/generate")
+async def generate_blog(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """AI ile blog yazisi uret ve kaydet."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+    from app.services.blog_generator_service import generate_blog_post
+
+    form = await request.form()
+    topic = form.get("topic", "").strip() or None
+    category = form.get("category", "borsa_rehberi")
+
+    # Mevcut basliklari al (tekrar onleme)
+    result = await db.execute(select(BlogPost.title))
+    existing_titles = [row[0] for row in result.all()]
+
+    # AI ile uret
+    try:
+        blog_data = await generate_blog_post(
+            topic=topic,
+            category=category,
+            existing_titles=existing_titles,
+        )
+    except Exception as e:
+        logger.error(f"Blog uretim hatasi: {e}")
+        return RedirectResponse(
+            url="/admin/blog?error=Blog+uretilemedi:+" + str(e)[:80],
+            status_code=303,
+        )
+
+    if not blog_data:
+        return RedirectResponse(
+            url="/admin/blog?error=AI+blog+uretemedi,+tekrar+deneyin",
+            status_code=303,
+        )
+
+    # Kaydet
+    now = datetime.now(timezone.utc)
+    new_blog = BlogPost(
+        slug=blog_data["slug"],
+        title=blog_data["title"],
+        content=blog_data["content"],
+        meta_description=blog_data.get("meta_description"),
+        category=blog_data.get("category", category),
+        is_published=True,
+        published_at=now,
+    )
+    db.add(new_blog)
+    await db.flush()
+
+    logger.info(f"Admin: Blog yazisi uretildi — {new_blog.title} (id={new_blog.id})")
+
+    return RedirectResponse(
+        url="/admin/blog?success=Blog+yazisi+basariyla+uretildi",
+        status_code=303,
+    )
+
+
+@router.post("/blog/{blog_id}/toggle-publish")
+async def toggle_blog_publish(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog yayin durumunu degistir."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+
+    result = await db.execute(
+        select(BlogPost).where(BlogPost.id == blog_id)
+    )
+    blog = result.scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    blog.is_published = not blog.is_published
+    if blog.is_published:
+        blog.published_at = datetime.now(timezone.utc)
+    else:
+        blog.published_at = None
+
+    await db.flush()
+
+    status_text = "yayina+alindi" if blog.is_published else "yayindan+kaldirildi"
+    logger.info(f"Admin: Blog {blog_id} {status_text}")
+
+    return RedirectResponse(
+        url=f"/admin/blog?success=Blog+{status_text}",
+        status_code=303,
+    )
+
+
+@router.post("/blog/{blog_id}/delete")
+async def delete_blog(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog yazisini sil."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+
+    result = await db.execute(
+        select(BlogPost).where(BlogPost.id == blog_id)
+    )
+    blog = result.scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    title = blog.title
+    await db.delete(blog)
+    await db.flush()
+
+    logger.info(f"Admin: Blog silindi — {title} (id={blog_id})")
+
+    return RedirectResponse(
+        url="/admin/blog?success=Blog+yazisi+silindi",
+        status_code=303,
+    )
