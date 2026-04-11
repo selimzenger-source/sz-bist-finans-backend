@@ -3502,6 +3502,9 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
             except Exception as ai_err:
                 logger.warning("KAP AI analiz hatasi (%s): %s", d["company_code"], ai_err)
 
+            # Rate limit onleme — ardisik AI istekleri arasi 1sn bekle
+            await asyncio.sleep(1)
+
             # 6. Watchlist push bildirim
             try:
                 sent = await notif_service.notify_kap_watchlist(record)
