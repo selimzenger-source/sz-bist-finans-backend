@@ -1577,7 +1577,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_news", title, body, data,
             f"Piyasa haberi: {headline[:50]}",
-            category="system",
+            category="other",
         )
 
     async def notify_spk_bulletin(self, bulletin_no: str, summary: str = "") -> int:
@@ -1604,6 +1604,7 @@ class NotificationService:
         return await self._send_filtered(
             "notify_spk_bulten", title, body, data,
             f"SPK Bülten: {bulletin_no}",
+            category="other",
         )
 
     async def notify_viop_session(self, session_type: str, summary: str = "", price: float = 0, change_pct: float = 0, night_diff: float = None) -> int:
@@ -1686,5 +1687,5 @@ class NotificationService:
         return await self._send_viop_filtered(
             "notify_viop", title, push_body, log_body, data,
             f"VİOP {session_type}",
-            category="system",
+            category="other",
         )
