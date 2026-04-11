@@ -51,18 +51,23 @@ _GEMINI_MODEL = "gemini-2.5-flash"
 # Gemini 2.5 Pro — yedek
 _GEMINI_PRO_MODEL = "gemini-2.5-pro"
 
+# Claude Haiku — Gemini basarisiz olursa son AI fallback
+_HAIKU_URL = "https://api.anthropic.com/v1/messages"
+_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
 _AI_TIMEOUT = 25
 
 
-def _get_keys() -> tuple[str | None]:
-    """Config'den Gemini API key'i al (Flash + Pro ikisi de ayni key)."""
+def _get_keys() -> tuple[str | None, str | None]:
+    """Config'den Gemini ve Anthropic API key'lerini al."""
     try:
         from app.config import get_settings
         s = get_settings()
         gemini = s.GEMINI_API_KEY if s.GEMINI_API_KEY else None
-        return (gemini,)
+        anthropic = s.ANTHROPIC_API_KEY if s.ANTHROPIC_API_KEY else None
+        return (gemini, anthropic)
     except Exception:
-        return (None,)
+        return (None, None)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -71,13 +76,20 @@ def _get_keys() -> tuple[str | None]:
 
 _POSITIVE_KEYWORDS = [
     "kar artisi", "kar artışı", "kâr artışı",
-    "sozlesme", "sözleşme",
-    "ihale", "anlaşma", "anlaşması",
+    "ihale kazandı", "ihale aldı",
+    "anlaşma imzaladı", "anlaşma yapıldı",
     "ihracat", "satış artışı",
-    "temettü", "kar payı", "kâr payı",
+    "temettü", "kar payı dağıtım", "kâr payı dağıtım",
     "bedelsiz", "sermaye artırımı",
-    "ortaklık", "iş birliği",
+    "iş birliği anlaşması",
     "yeni yatırım", "kapasite artışı",
+]
+
+# Rutin/notr haberler — olumlu veya olumsuz sayilmamali
+_NEUTRAL_KEYWORDS = [
+    "esas sözleşme", "bilgi formu", "yönetim kurulu",
+    "genel kurul", "sorumluluk beyanı", "faaliyet raporu",
+    "finansal rapor", "bağımsız denetim", "komite",
 ]
 
 _NEGATIVE_KEYWORDS = [
@@ -92,11 +104,16 @@ def _rule_based_analyze(title: str, body: str) -> dict:
     """Basit kural tabanli sentiment analizi (fallback)."""
     text = f"{title} {body}".lower()
 
+    # Oncelikle rutin/notr haber mi kontrol et
+    neutral_hit = sum(1 for kw in _NEUTRAL_KEYWORDS if kw in text)
+    if neutral_hit > 0:
+        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
+
     pos = sum(1 for kw in _POSITIVE_KEYWORDS if kw in text)
     neg = sum(1 for kw in _NEGATIVE_KEYWORDS if kw in text)
 
     if pos > neg:
-        return {"sentiment": "Olumlu", "impact_score": 6.0, "summary": None}
+        return {"sentiment": "Olumlu", "impact_score": 6.5, "summary": None}
     elif neg > pos:
         return {"sentiment": "Olumsuz", "impact_score": 3.5, "summary": None}
     return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
@@ -127,10 +144,10 @@ async def analyze_disclosure(
             "summary": str | None,
         }
     """
-    # Bilanco bildirimleri icin AI atla — henuz desteklenmiyor
+    # Bilanco bildirimleri — basit notr don (finansal tablolar detayli analiz gerektirmez)
     if is_bilanco:
-        logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
-        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
+        logger.info("KAP Analyzer: Bilanco/finansal rapor bildirimi (%s)", company_code)
+        return {"sentiment": "Notr", "impact_score": 5.0, "summary": f"{company_code} şirketinin finansal rapor/bilanço bildirimi. Detaylı analiz için KAP linkinden inceleyebilirsiniz."}
 
     # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
     combined_text = f"{title} {body}".lower()
@@ -205,9 +222,9 @@ async def analyze_disclosure(
     except Exception as e:
         logger.warning("KAP Analyzer: TelegramNews senkronizasyon hatasi (%s): %s", company_code, e)
 
-    (gemini_key,) = _get_keys()
-    if not gemini_key:
-        logger.error("KAP Analyzer: Gemini API key yok — fallback (%s)", company_code)
+    (gemini_key, anthropic_key) = _get_keys()
+    if not gemini_key and not anthropic_key:
+        logger.error("KAP Analyzer: Hic API key yok — fallback (%s)", company_code)
         return _rule_based_analyze(title, body)
 
     content = f"{title}\n\n{body}".strip()[:4000]
@@ -225,14 +242,25 @@ Hisse: {company_code}
 GOREV: Bu KAP bildirimini yatirimci bakis acisiyla analiz et.
 
 SENTIMENT (duygusal ton):
-- "Olumlu": Sirket icin iyi haber — kar artisi, sozlesme, ihale, temettu, bedelsiz, ihracat, buyume
-- "Olumsuz": Sirket icin kotu haber — zarar, ceza, dava, borc, fesih, sermaye erimesi
-- "Notr": Rutin bildirim — genel kurul, yonetim degisikligi, SPK onay, uyum raporu, bilgi formu
+- "Olumlu": SADECE sirket icin somut olumlu gelisme varsa — kar artisi, buyuk sozlesme imzalama, ihale kazanma, temettu dagitimi, bedelsiz sermaye artirimi, guclu ihracat verisi
+- "Olumsuz": Sirket icin somut olumsuz gelisme — zarar, ceza, dava, borc, fesih, sermaye erimesi, SPK tedbir karari
+- "Notr": Hisse fiyatini dogrudan etkilemeyecek rutin bildirim. ASAGIDAKILER KESINLIKLE NOTR'dur:
+  * Sirket Genel Bilgi Formu, Bilgi Formu
+  * Esas Sozlesme Tadili, Esas Sozlesme
+  * Yonetim Kurulu Komiteleri, Yonetim Kurulu Uye Secimi
+  * Genel Kurul cagrisi/sonucu
+  * Bagimsiz Denetim Raporu, Sorumluluk Beyani
+  * Faaliyet Raporu, Finansal Rapor
+  * SPK/Borsa onay/tescil bildirimleri (icerik belirtilmedikce)
+  * Organizasyon seması, Imza sirkuleri
+
+KRITIK KURAL: Eger bildirim sadece yasal/idari bir zorunluluk ise (bilgi formu, sozlesme tadili, komite atamasi vb.), sentiment KESINLIKLE "Notr" ve puan 5.0 olmali. Olumlu/Olumsuz icin haberin somut finansal veya operasyonel bir etki icermesi SART.
 
 ETKI PUANI (1.0-10.0 arasi, 0.1 hassasiyetle):
-  1.0-3.0: Ciddi olumsuz (zarar, ceza, iflas riski)
-  3.1-4.9: Hafif olumsuz (kucuk zarar, belirsiz)
-  5.0-5.9: Notr (rutin bildirim)
+  1.0-3.0: Ciddi olumsuz (buyuk zarar, agir ceza, iflas riski)
+  3.1-4.9: Hafif olumsuz (kucuk zarar, belirsizlik)
+  5.0-5.5: Notr/Rutin (bilgi formu, sozlesme tadili, komite, genel kurul)
+  5.6-5.9: Hafif pozitif niyetli ama somut etki yok
   6.0-6.9: Hafif olumlu (kucuk sozlesme, standart is birligi)
   7.0-7.9: Olumlu (buyuk sozlesme, guclu ihracat, onemli ihale)
   8.0-8.9: Cok olumlu (yuksek kar artisi, buyuk bedelsiz, temettu)
@@ -241,7 +269,7 @@ ETKI PUANI (1.0-10.0 arasi, 0.1 hassasiyetle):
 OZET:
 - 2-3 cumle Turkce ozet
 - Haberin ne oldugunu, sirket icin ne anlama geldigini acikla
-- Onemli rakamlari (tutar, oran, yuzde) dahil et
+- Onemli rakamlari (tutar, oran, yuzde) varsa dahil et
 
 SADECE asagidaki JSON formatinda yanit ver:
 {{"sentiment": "Olumlu", "impact_score": 7.3, "summary": "2-3 cumle Turkce ozet."}}"""
@@ -297,9 +325,43 @@ SADECE asagidaki JSON formatinda yanit ver:
             except Exception as e:
                 logger.warning("KAP Analyzer: Gemini-%s hata (%s) — %s", model_label, company_code, e)
 
-    # ── Her ikisi de basarisiz → kural tabanli fallback ──
+    # ── Gemini basarisiz → Claude Haiku fallback ──
+    if not ai_text and anthropic_key:
+        try:
+            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                haiku_resp = await client.post(
+                    _HAIKU_URL,
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": _HAIKU_MODEL,
+                        "max_tokens": 500,
+                        "temperature": 0.1,
+                        "system": get_system_prompt(),
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                if haiku_resp.status_code == 200:
+                    haiku_data = haiku_resp.json()
+                    haiku_content = haiku_data.get("content", [])
+                    if haiku_content and haiku_content[0].get("text"):
+                        ai_text = haiku_content[0]["text"].strip()
+                        provider_used = "Haiku"
+                        logger.info("KAP Analyzer: Haiku fallback basarili (%s)", company_code)
+                else:
+                    logger.warning(
+                        "KAP Analyzer: Haiku HTTP %s (%s) — %s",
+                        haiku_resp.status_code, company_code, haiku_resp.text[:200],
+                    )
+        except Exception as e:
+            logger.warning("KAP Analyzer: Haiku hata (%s) — %s", company_code, e)
+
+    # ── Tum AI modelleri basarisiz → kural tabanli fallback ──
     if not ai_text:
-        logger.error("KAP Analyzer: AI basarisiz (Flash+Pro) — kural fallback (%s)", company_code)
+        logger.error("KAP Analyzer: AI basarisiz (Gemini+Haiku) — kural fallback (%s)", company_code)
         return _rule_based_analyze(title, body)
 
     # JSON parse — bozuk JSON'u da kurtarmaya calis
