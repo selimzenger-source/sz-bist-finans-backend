@@ -1589,11 +1589,11 @@ class NotificationService:
         if not self._check_cooldown("spk_bulletin", 3600):  # 1 saat
             return 0
 
-        title = f"SPK Bülteni {bulletin_no}"
+        title = f"📋 SPK Bülteni {bulletin_no} az önce yayınlandı!"
         if summary:
-            body = f"{summary[:280]}\nDetaylar icin tiklayin."
+            body = f"{summary[:280]}\nDetaylar için tıklayın."
         else:
-            body = f"Yeni SPK bülteni yayınlandı. Detaylar SPK Bülten sayfamızda."
+            body = f"Yeni SPK bülteni yayınlandı. Detaylar için tıklayın."
 
         data = {
             "type": "spk_bulletin",

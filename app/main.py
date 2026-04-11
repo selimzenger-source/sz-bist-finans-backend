@@ -1242,6 +1242,24 @@ async def api_generate_blog(
     return {"id": new_blog.id, "title": new_blog.title, "slug": new_blog.slug}
 
 
+@app.post("/api/v1/admin/update-bulletin-text")
+async def api_update_bulletin_text(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulten metnini guncelle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    bid = payload.get("id")
+    new_text = payload.get("text")
+    if not bid or not new_text:
+        raise HTTPException(status_code=400, detail="id ve text gerekli")
+    await db.execute(sa_text("UPDATE news_feed SET text = :t WHERE id = :i"), {"t": new_text, "i": bid})
+    await db.commit()
+    return {"ok": True}
+
+
 @app.post("/api/v1/admin/generate-spk-descriptions")
 async def api_generate_spk_descriptions(
     payload: dict = Body(...),
