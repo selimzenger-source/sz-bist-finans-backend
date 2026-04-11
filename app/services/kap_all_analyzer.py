@@ -144,10 +144,10 @@ async def analyze_disclosure(
             "summary": str | None,
         }
     """
-    # Bilanco bildirimleri — basit notr don (finansal tablolar detayli analiz gerektirmez)
+    # Bilanco bildirimleri icin AI atla — ilerleyen safhada eklenecek
     if is_bilanco:
-        logger.info("KAP Analyzer: Bilanco/finansal rapor bildirimi (%s)", company_code)
-        return {"sentiment": "Notr", "impact_score": 5.0, "summary": f"{company_code} şirketinin finansal rapor/bilanço bildirimi. Detaylı analiz için KAP linkinden inceleyebilirsiniz."}
+        logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
+        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None}
 
     # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
     combined_text = f"{title} {body}".lower()
