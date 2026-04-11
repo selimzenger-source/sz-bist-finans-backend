@@ -2778,9 +2778,10 @@ TWEET FORMATI:
 
 DAHİL ET (önem sırasına göre):
 1. Halka Arz Onayları — varsa şirket adı, sermaye artırım tutarı, pay satış tutarı ve fiyat bilgisi. Her şirketi TEK BİR KERE yaz. Yoksa "Bu bültende yeni halka arz onayı bulunmuyor." yaz.
-2. Bedelli/Bedelsiz sermaye artırımları — SADECE BORSADA İŞLEM GÖREN şirketler için yaz (ticker listesinde olanlar). Borsada işlem görmeyen şirketlerin sermaye artırımlarını ATLÁ.
-3. İdari para cezaları ve işlem yasakları — şirket/hisse adı + ceza/yaptırım detayı + kısa neden (orn: piyasa manipülasyonu, yapay fiyat oluşturma vb.). Gerçek kişilere verilen cezalar bile olsa, eğer bültende spesifik bir BIST hissesi ADI AÇIKÇA GEÇİYORSA yaz (orn: "OZSUB hissesinde manipülasyon şüphesiyle X kişiye 6 ay işlem yasağı verildi"). AMA bültende hisse adı geçmiyorsa TICKER UYDURMA — sadece kişi adı ve ceza detayını yaz, hashtag KOYMA. Örneğin bültende "pay piyasasında yapay piyasa oluşturma şüphesiyle X kişiye ceza" yazıyorsa, hangi hissede olduğu belirtilmemişse ticker EKLEME.
-4. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. SADECE borsada işlem gören şirketler için (birkaç cümle yeterli)
+2. Kurul Karar Organı Kararları ve Duyurular — açığa satış yasağı, öz kaynak oranı değişikliği, kredili işlem düzenlemeleri, piyasa kuralı değişiklikleri gibi TÜM düzenleyici kararları yaz. Bu kararlar halka arz olmasa bile yatırımcıları doğrudan etkiler. "Kararda" bölümündeki maddeleri özetle.
+3. Bedelli/Bedelsiz sermaye artırımları — SADECE BORSADA İŞLEM GÖREN şirketler için yaz (ticker listesinde olanlar). Borsada işlem görmeyen şirketlerin sermaye artırımlarını ATLÁ.
+4. İdari para cezaları ve işlem yasakları — şirket/hisse adı + ceza/yaptırım detayı + kısa neden (orn: piyasa manipülasyonu, yapay fiyat oluşturma vb.). Gerçek kişilere verilen cezalar bile olsa, eğer bültende spesifik bir BIST hissesi ADI AÇIKÇA GEÇİYORSA yaz (orn: "OZSUB hissesinde manipülasyon şüphesiyle X kişiye 6 ay işlem yasağı verildi"). AMA bültende hisse adı geçmiyorsa TICKER UYDURMA — sadece kişi adı ve ceza detayını yaz, hashtag KOYMA. Örneğin bültende "pay piyasasında yapay piyasa oluşturma şüphesiyle X kişiye ceza" yazıyorsa, hangi hissede olduğu belirtilmemişse ticker EKLEME.
+5. Diğer Önemli Gelişmeler — zorunlu pay alım teklifi, pay satış bilgi formu onayı vb. SADECE borsada işlem gören şirketler için (birkaç cümle yeterli)
 
 ÖNEMLİ:
 - Sana verilen BIST ticker listesinde OLMAYAN şirketler borsada işlem görmüyor. Bu şirketleri yazıya DAHİL ETME (örn: kooperatif, tarım kredi, borsada olmayan AŞ'ler).
@@ -2811,7 +2812,8 @@ FORMAT KURALLARI:
 TEKRAR YASAĞI (ÇOK ÖNEMLİ):
 - Aynı cümleyi veya çok benzer cümleleri KESİNLİKLE İKİ KEZ YAZMA
 - "Bu bültende... bulunmuyor" gibi özet cümleler sadece 1 KEZ yazılmalı
-- Eğer halka arz, sermaye artırımı ve para cezası yoksa tek bir cümle yaz: "Bu bültende yatırımcıları doğrudan ilgilendiren yeni halka arz, sermaye artırımı veya idari para cezası kararı bulunmuyor." — bunu her bölüm için ayrı ayrı TEKRARLAMA
+- "Bu bültende... bulunmuyor" cümlesini SADECE bültende hiçbir karar, düzenleme veya duyuru yoksa yaz. Eğer bültende açığa satış yasağı, öz kaynak düzenlemesi, kredili işlem kararı gibi herhangi bir düzenleyici karar varsa bu cümleyi YAZMA — o kararları özetle.
+- SADECE gerçekten hiçbir yatırımcıyı ilgilendiren madde yoksa "Bu bültende yatırımcıları doğrudan ilgilendiren yeni halka arz, sermaye artırımı veya idari para cezası kararı bulunmuyor." yaz — bunu her bölüm için ayrı ayrı TEKRARLAMA
 - Her bilgi sadece 1 kez geçmeli, farklı kelimelerle bile olsa aynı şeyi tekrar etme
 
 SON KONTROL:
