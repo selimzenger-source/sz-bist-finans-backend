@@ -1255,9 +1255,28 @@ async def api_update_bulletin_text(
     new_text = payload.get("text")
     if not bid or not new_text:
         raise HTTPException(status_code=400, detail="id ve text gerekli")
-    await db.execute(sa_text("UPDATE pending_tweets SET text = :t WHERE id = :i"), {"t": new_text, "i": bid})
+    table = payload.get("table", "pending_tweets")
+    if table not in ("pending_tweets", "spk_applications"):
+        raise HTTPException(status_code=400, detail="Gecersiz tablo")
+    await db.execute(sa_text(f"UPDATE {table} SET {payload.get('field', 'text')} = :t WHERE id = :i"), {"t": new_text, "i": bid})
     await db.commit()
     return {"ok": True}
+
+
+@app.post("/api/v1/admin/cleanup-spk-names")
+async def api_cleanup_spk_names(
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK sirket adlarindan * ve ^ isaretlerini kaldir."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    result = await db.execute(sa_text(
+        "UPDATE spk_applications SET company_name = TRIM(LEADING '* ' FROM TRIM(LEADING '^ ' FROM TRIM(LEADING '*' FROM TRIM(LEADING '^' FROM company_name)))) WHERE company_name LIKE '*%' OR company_name LIKE '^%'"
+    ))
+    await db.commit()
+    return {"cleaned": result.rowcount}
 
 
 @app.post("/api/v1/admin/generate-spk-descriptions")
