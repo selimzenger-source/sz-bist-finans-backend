@@ -277,7 +277,11 @@ async def scrape_spk():
 
         def _normalize(name: str) -> str:
             """Sirket ismini normalize et — bosluk/satir sonu/harf farklarini gider."""
-            return re.sub(r"\s+", " ", name.strip()).lower() if name else ""
+            if not name:
+                return ""
+            # * ^ gibi prefix isaretlerini kaldir
+            cleaned = re.sub(r"^[*^•\s]+", "", name.strip())
+            return re.sub(r"\s+", " ", cleaned).lower()
 
         def _name_in_set(spk_name: str, name_set: set) -> bool:
             """SPK ismi verilen settekilerden biriyle eslesiyor mu?
@@ -338,6 +342,12 @@ async def scrape_spk():
                     if name:
                         deleted_names_normalized.add(_normalize(name))
 
+                # Mevcut SPK Application kayitlarini normalize isim → obje map'ine al
+                _spk_app_result = await db.execute(select(SPKApplication))
+                _spk_app_name_map: dict[str, SPKApplication] = {}
+                for app in _spk_app_result.scalars().all():
+                    _spk_app_name_map[_normalize(app.company_name)] = app
+
                 skipped_deleted = 0
                 _newly_added_names: list[str] = []  # Bu cycle'da eklenen şirket adları
 
@@ -362,18 +372,22 @@ async def scrape_spk():
                         skipped_deleted += 1
                         continue
 
-                    result = await db.execute(
-                        select(SPKApplication).where(
-                            SPKApplication.company_name == company_name
-                        )
-                    )
-                    existing = result.scalars().first()
+                    # Normalize edilmis isimle karsilastir
+                    # (* ^ gibi prefix isaretleri fark yaratmasin)
+                    normalized_name = _normalize(company_name)
+                    existing = None
+                    if normalized_name in _spk_app_name_map:
+                        existing = _spk_app_name_map[normalized_name]
 
                     if existing:
                         # Admin silmis ise DOKUNMA — tekrar pending yapma
                         if existing.status == "deleted":
                             skipped_deleted += 1
                             continue
+                        # Isim degismisse (ornegin * eklenmis) guncelle
+                        if existing.company_name != company_name:
+                            existing.company_name = company_name
+                            updated_count += 1
                         # Mevcut kaydi guncelle (tarih degismis olabilir)
                         new_date = app_data.get("application_date")
                         if new_date and existing.application_date != new_date:

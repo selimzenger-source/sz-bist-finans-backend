@@ -990,7 +990,10 @@ class NotificationService:
             joined = ", ".join(company_names[:-1]) + f" ve {company_names[-1]}"
             body = f"{joined}, SPK'ya halka arz onay başvurusunda bulundu"
         else:
-            body = f"{count} yeni şirket SPK'ya halka arz onay başvurusunda bulundu"
+            # İlk 4 şirketi listele, kalanını sayı olarak göster
+            listed = ", ".join(company_names[:4])
+            remaining = count - 4
+            body = f"{listed} ve {remaining} şirket daha SPK'ya halka arz onay başvurusunda bulundu"
 
         data = {
             "type": "spk_application",
