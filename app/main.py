@@ -8135,3 +8135,28 @@ async def fix_market_reason(body: dict, db: AsyncSession = Depends(get_db)):
     )
     await db.commit()
     return {"status": "ok", "ticker": ticker, "date": date_str, "rows_updated": result.rowcount}
+
+
+@app.post("/api/v1/admin/fix-notification-categories")
+async def fix_notification_categories(body: dict, db: AsyncSession = Depends(get_db)):
+    """Eski system kategorili SPK/VİOP/Piyasa bildirimlerini other'a cevir."""
+    pw = body.get("admin_password", "")
+    if not _verify_admin_password(pw):
+        raise HTTPException(403, "Yetkisiz")
+
+    from sqlalchemy import text as sa_text
+    result = await db.execute(
+        sa_text("""
+            UPDATE notification_logs SET category = 'other'
+            WHERE category = 'system'
+            AND (
+                title LIKE '%SPK%Bülten%'
+                OR title LIKE '%VİOP%'
+                OR title LIKE '%VIOP%'
+                OR title LIKE '%Önemli Piyasa%'
+                OR title LIKE '%Piyasa Gelişmesi%'
+            )
+        """)
+    )
+    await db.commit()
+    return {"status": "ok", "rows_updated": result.rowcount}
