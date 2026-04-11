@@ -980,20 +980,19 @@ class NotificationService:
 
         title = "📝 SPK Halka Arz Başvurusu"
 
-        # Body olustur — sirket sayisina gore
+        # Body olustur — sirket isimlerini listele + yonlendirme
         count = len(company_names)
         if count == 1:
-            body = f"{company_names[0]}, SPK'ya halka arz onay başvurusunda bulundu"
+            body = f"{company_names[0]}, SPK'ya halka arz onay başvurusunda bulundu.\nDetaylar için tıklayın →"
         elif count == 2:
-            body = f"{company_names[0]} ve {company_names[1]}, SPK'ya halka arz onay başvurusunda bulundu"
+            body = f"{company_names[0]} ve {company_names[1]}, SPK'ya halka arz onay başvurusunda bulundu.\nDetaylar için tıklayın →"
         elif count <= 4:
             joined = ", ".join(company_names[:-1]) + f" ve {company_names[-1]}"
-            body = f"{joined}, SPK'ya halka arz onay başvurusunda bulundu"
+            body = f"{joined} SPK'ya halka arz onay başvurusunda bulundu.\nDetaylar için tıklayın →"
         else:
-            # İlk 4 şirketi listele, kalanını sayı olarak göster
             listed = ", ".join(company_names[:4])
             remaining = count - 4
-            body = f"{listed} ve {remaining} şirket daha SPK'ya halka arz onay başvurusunda bulundu"
+            body = f"{listed} ve {remaining} şirket daha SPK'ya halka arz onay başvurusunda bulundu.\nDetaylar için tıklayın →"
 
         data = {
             "type": "spk_application",
