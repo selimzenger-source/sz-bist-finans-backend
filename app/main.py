@@ -1255,7 +1255,7 @@ async def api_update_bulletin_text(
     new_text = payload.get("text")
     if not bid or not new_text:
         raise HTTPException(status_code=400, detail="id ve text gerekli")
-    await db.execute(sa_text("UPDATE news_feed SET text = :t WHERE id = :i"), {"t": new_text, "i": bid})
+    await db.execute(sa_text("UPDATE pending_tweets SET text = :t WHERE id = :i"), {"t": new_text, "i": bid})
     await db.commit()
     return {"ok": True}
 
