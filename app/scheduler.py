@@ -3387,6 +3387,60 @@ async def update_bist50_index_job():
     await update_bist_indices_job()
 
 
+async def kap_ai_retry_job():
+    """ai_summary NULL olan son 6 saatteki KAP kayitlarini tekrar AI ile analiz et."""
+    try:
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from app.services.kap_all_analyzer import analyze_disclosure
+        from sqlalchemy import select, and_
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=6)
+        async with async_session() as db:
+            stmt = (
+                select(KapAllDisclosure)
+                .where(
+                    and_(
+                        KapAllDisclosure.ai_summary.is_(None),
+                        KapAllDisclosure.is_bilanco == False,
+                        KapAllDisclosure.created_at >= cutoff,
+                    )
+                )
+                .order_by(KapAllDisclosure.created_at.desc())
+                .limit(20)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            if not rows:
+                return
+
+            logger.info("KAP AI Retry: %d kayit tekrar analiz edilecek", len(rows))
+            retried = 0
+            for record in rows:
+                try:
+                    ai_result = await analyze_disclosure(
+                        company_code=record.company_code,
+                        title=record.title,
+                        body=record.body or record.title,
+                        is_bilanco=record.is_bilanco,
+                    )
+                    summary = ai_result.get("summary")
+                    if summary:
+                        record.ai_sentiment = ai_result.get("sentiment")
+                        record.ai_impact_score = ai_result.get("impact_score")
+                        record.ai_summary = summary
+                        record.ai_analyzed_at = datetime.now(timezone.utc)
+                        retried += 1
+                except Exception as e:
+                    logger.warning("KAP AI Retry hatasi (%s): %s", record.company_code, e)
+                await asyncio.sleep(2)
+
+            await db.commit()
+            if retried > 0:
+                logger.info("KAP AI Retry: %d/%d kayit basariyla analiz edildi", retried, len(rows))
+    except Exception as e:
+        logger.error("KAP AI Retry job hatasi: %s", e)
+
+
 async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
     """KAP bildirim isleme — DB kayit, KAP sayfa fetch, AI analiz, push bildirim.
 
@@ -4456,6 +4510,17 @@ def _setup_scheduler_impl():
         IntervalTrigger(seconds=5),
         id="admin_command_poller",
         name="Admin Komut Poller (5sn)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # KAP AI Retry — ai_summary NULL olanlari 15dk'da bir tekrar dene
+    scheduler.add_job(
+        kap_ai_retry_job,
+        IntervalTrigger(minutes=15),
+        id="kap_ai_retry",
+        name="KAP AI Retry (15dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

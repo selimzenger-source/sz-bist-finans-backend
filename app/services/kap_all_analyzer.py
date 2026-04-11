@@ -55,7 +55,7 @@ _GEMINI_PRO_MODEL = "gemini-2.5-pro"
 _HAIKU_URL = "https://api.anthropic.com/v1/messages"
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
-_AI_TIMEOUT = 25
+_AI_TIMEOUT = 45
 
 
 def _get_keys() -> tuple[str | None, str | None]:
