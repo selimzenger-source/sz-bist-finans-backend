@@ -4613,7 +4613,12 @@ async def scrape_kurum_onerileri():
             await scraper.close()
 
         if not recommendations:
-            logger.info("Kurum onerileri: scrape sonucu bos")
+            logger.warning("Kurum onerileri: scrape sonucu bos — site erisim sorunu olabilir")
+            try:
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error("Kurum Önerileri", "Scrape sonucu boş — site erişim sorunu veya HTML yapısı değişmiş olabilir")
+            except Exception:
+                pass
             return
 
         new_count = 0
@@ -4669,8 +4674,8 @@ async def scrape_kurum_onerileri():
     except Exception as e:
         logger.error("Kurum onerileri scraper HATA: %s", e)
         try:
-            from app.services.admin_telegram import send_admin_message
-            await send_admin_message(f"❌ Kurum Önerileri scraper hatası: {str(e)[:200]}")
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Kurum Önerileri", str(e))
         except Exception:
             pass
 
