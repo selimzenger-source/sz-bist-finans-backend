@@ -133,8 +133,11 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS tweet_sent_at TIMESTAMPTZ"
             ))
+            # Bir seferlik temizlik: tarihsiz olup bugune atanmis yanlis verileri sil
+            # Scraper tekrar calistiginda sadece tarihli verileri ekleyecek
+            await db.execute(sa_text("DELETE FROM kurum_onerileri"))
             await db.commit()
-            logger.info("Kurum onerileri: notification_sent_at/tweet_sent_at kolonlari kontrol edildi/eklendi")
+            logger.info("Kurum onerileri: kolonlar eklendi + eski veriler temizlendi (scraper yeniden dolduracak)")
     except Exception as e:
         logger.warning("Kurum onerileri migration atlandi: %s", e)
 
