@@ -139,6 +139,11 @@ async def lifespan(app: FastAPI):
             ))
             await db.commit()
             logger.info("Kurum onerileri: kolonlar kontrol edildi + mevcut kayitlar sent olarak isaretlendi")
+
+            # Bir seferlik: katilim_endeksi hepsini null yap (yanlis veri temizligi)
+            await db.execute(sa_text("UPDATE ipos SET katilim_endeksi = NULL WHERE katilim_endeksi IS NOT NULL"))
+            await db.commit()
+            logger.info("IPO katilim_endeksi temizlendi (scraper tekrar dolduracak)")
     except Exception as e:
         logger.warning("Kurum onerileri migration atlandi: %s", e)
 
