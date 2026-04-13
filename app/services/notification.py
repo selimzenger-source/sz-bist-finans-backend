@@ -1610,19 +1610,31 @@ class NotificationService:
         )
 
     async def notify_viop_session(self, session_type: str, summary: str = "", price: float = 0, change_pct: float = 0, night_diff: float = None) -> int:
-        """VİOP seans bildirimi — acilis, kapanis veya flash.
+        """VİOP seans bildirimi — acilis, kapanis, flash veya progress.
 
-        Seans türü saate göre belirlenir:
-        - 06:00-18:00 arası → Gündüz Seansı
-        - 18:00-06:00 arası → Akşam Seansı
+        Seans turleri:
+        - opening: Gunduz (09:3x) veya Aksam (19:05) seans acilisi
+        - closing: Gunduz veya Aksam seans kapanisi
+        - flash: Esik asimi alarmi (gunduz veya aksam)
+        - progress: Surekli islem seyir bildirimi (15:32)
 
-        Spam koruma: acilis/kapanis 4 saat, flash 30 dakika cooldown
+        Spam koruma cooldown'lar:
+        - opening/closing: 4 saat
+        - flash: 30 dakika
+        - progress: 2 saat
+        - Genel viop bildirim: en az 15 dakika arasi
         """
-        cooldown = 1800 if session_type == "flash" else 14400  # flash: 30dk, diger: 4 saat
+        # Tip bazli cooldown
+        cooldown_map = {"flash": 1800, "progress": 7200, "opening": 14400, "closing": 14400}
+        cooldown = cooldown_map.get(session_type, 14400)
         if not self._check_cooldown(f"viop_{session_type}", cooldown):
             return 0
 
-        # Saat bazlı seans türü belirleme (TR saati UTC+3)
+        # Genel viop spam korumasi — turler arasi en az 15 dk
+        if not self._check_cooldown("viop_any", 900):
+            return 0
+
+        # Saat bazli seans turu belirleme (TR saati UTC+3)
         from datetime import datetime, timezone, timedelta
         tr_now = datetime.now(timezone(timedelta(hours=3)))
         hour = tr_now.hour
@@ -1639,8 +1651,8 @@ class NotificationService:
             sign = "+" if c >= 0 else ""
             return f"{sign}{c:.2f}"
 
-        # Push body: sadece veri satırları (telefona düşen bildirim)
-        # Bildirim merkezi body: veri + AI yorumu (uygulama içinde genişletince)
+        # Push body: sadece veri satirlari (telefona dusen bildirim)
+        # Bildirim merkezi body: veri + AI yorumu (uygulama icinde genisletince)
         ai_summary = summary.strip() if summary else ""
 
         if session_type == "opening" and price > 0:
@@ -1651,7 +1663,6 @@ class NotificationService:
             if change_pct != 0:
                 lines.append(f"Uzlaşmaya göre: %{_fmt_change(change_pct)}")
             push_body = "\n".join(lines)
-            # Bildirim merkezi body — veri + AI yorumu
             log_body = push_body + (f"\n\n{ai_summary}" if ai_summary else "")
 
         elif session_type == "closing" and price > 0:
@@ -1667,16 +1678,21 @@ class NotificationService:
             push_body = summary or "Önemli VİOP hareketi tespit edildi."
             log_body = push_body
 
+        elif session_type == "progress" and price > 0:
+            title = "VİOP Sürekli İşlem"
+            lines = [f"Fiyat: {_fmt_price(price)} puan"]
+            if change_pct != 0:
+                lines.append(f"Açılışa göre: %{_fmt_change(change_pct)}")
+            push_body = "\n".join(lines)
+            log_body = push_body + (f"\n\n{ai_summary}" if ai_summary else "")
+
         else:
-            # Fallback — veri yoksa eski davranış
-            type_labels = {
-                "opening": (f"VİOP {seans_adi} Açıldı", f"Vadeli işlem piyasası {seans_adi.lower()} başladı."),
-                "closing": (f"VİOP {seans_adi} Kapandı", f"{seans_adi} sona erdi, veriler güncellendi."),
-                "flash": ("VİOP Flaş Haber", summary or "Önemli VİOP hareketi tespit edildi."),
-            }
-            title, default_body = type_labels.get(session_type, ("VİOP Güncelleme", "VİOP güncelleme"))
-            push_body = default_body
-            log_body = push_body
+            # Veri yoksa bildirim gonderme — verisiz generic bildirim spam yapar
+            import logging
+            logging.getLogger(__name__).warning(
+                "VİOP bildirim: veri eksik (type=%s, price=%s) — bildirim gonderilmedi", session_type, price
+            )
+            return 0
 
         data = {
             "type": "viop_session",

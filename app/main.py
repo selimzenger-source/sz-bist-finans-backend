@@ -7766,8 +7766,8 @@ async def admin_trigger_viop_notification(request: Request, payload: dict, db: A
     change_pct = payload.get("change_pct", 0)
     night_diff = payload.get("night_diff")
 
-    if session_type not in ("opening", "closing", "flash"):
-        raise HTTPException(status_code=400, detail="Gecersiz session_type. Gecerli: opening, closing, flash")
+    if session_type not in ("opening", "closing", "flash", "progress"):
+        raise HTTPException(status_code=400, detail="Gecersiz session_type. Gecerli: opening, closing, flash, progress")
 
     from app.services.notification import NotificationService
     notif_svc = NotificationService(db)
