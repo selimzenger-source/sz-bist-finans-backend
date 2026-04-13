@@ -124,6 +124,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("SPK company_description migration atlandi: %s", e)
 
+    # Kurum Onerileri — bildirim/tweet cift gonderim korumasi kolonlari
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS notification_sent_at TIMESTAMPTZ"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS tweet_sent_at TIMESTAMPTZ"
+            ))
+            await db.commit()
+            logger.info("Kurum onerileri: notification_sent_at/tweet_sent_at kolonlari kontrol edildi/eklendi")
+    except Exception as e:
+        logger.warning("Kurum onerileri migration atlandi: %s", e)
+
     # Blog Posts tablosu olustur (migration)
     try:
         async with async_session() as db:
