@@ -2,8 +2,15 @@
 
 Calisma Mantigi:
 1. /kurumlar sayfasindan tum araci kurum URL'lerini cek
+   - Selektor: .kurumbox a[href*="/kurum/"] → title attr = kurum adi
 2. Her kurum icin /kurum/[slug]-[id] sayfasina git
-3. div.kurumPagelist-item'lardan hisse onerileri parse et
+3. div.Tahminlerlist-item > div.senetbox icinden verileri parse et:
+   - .senetbox-title strong → ticker
+   - .senetbox-title → sirket adi
+   - .hedeffiyat span → hedef fiyat
+   - .col-8 a.btn → oneri (Al/Tut/Sat/Endeks Ustu Get.)
+   - .senettarih → tarih ("Pazartesi, 13 Nisan 2026")
+   - .col-8 a.btn[href] → rapor linki
 4. ticker, hedef_fiyat, oneri, tarih, kurum bilgilerini dondur
 
 Kaynak: https://hedeffiyat.com.tr
@@ -12,7 +19,7 @@ Kaynak: https://hedeffiyat.com.tr
 import asyncio
 import re
 import logging
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -40,9 +47,12 @@ TR_MONTHS = {
     "ekim": 10, "kasım": 11, "kasim": 11, "aralık": 12, "aralik": 12,
 }
 
+# Atlanacak slug'lar (kurum degil, kategori sayfasi)
+SKIP_SLUGS = {"akilli-raporlama", "halka-arzlar", "ilave-okumalar", "tum-kurumlar"}
+
 # Concurrency limiti — siteyi ezmemek icin
-MAX_CONCURRENT = 3
-REQUEST_DELAY = 1.0  # Istekler arasi bekleme (saniye)
+MAX_CONCURRENT = 5
+REQUEST_DELAY = 0.8  # Istekler arasi bekleme (saniye)
 
 
 class KurumOneriScraper:
@@ -90,7 +100,11 @@ class KurumOneriScraper:
     # ─── Kurum Listesi ────────────────────────────────────────
 
     async def _fetch_institution_urls(self) -> list[tuple[str, str]]:
-        """Kurumlar sayfasindan tum kurum URL'lerini cek."""
+        """Kurumlar sayfasindan tum kurum URL'lerini cek.
+
+        Selektor: .kurumbox a[href*="/kurum/"]
+        Kurum adi: a[title] veya img[alt]
+        """
         try:
             resp = await self.client.get(KURUMLAR_URL)
             resp.raise_for_status()
@@ -101,34 +115,37 @@ class KurumOneriScraper:
         soup = BeautifulSoup(resp.text, "lxml")
         institutions = []
 
-        # div.kurumPagelist > div.kurumPagelist-item > a[href]
-        items = soup.select("div.kurumPagelist-item a[href]")
-        if not items:
-            # Alternatif: tum a etiketlerinden /kurum/ icerenleri bul
-            items = soup.select('a[href*="/kurum/"]')
+        # .kurumbox a → href="/kurum/{slug}-{id}", title="{name}"
+        links = soup.select('.kurumbox a[href*="/kurum/"]')
+        if not links:
+            # Fallback: tum /kurum/ linkleri
+            links = soup.select('a[href*="/kurum/"]')
 
-        for a_tag in items:
+        for a_tag in links:
             href = a_tag.get("href", "")
             if not href or "/kurum/" not in href:
                 continue
+
+            # Kategori sayfalarini atla
+            slug_part = href.rstrip("/").split("/")[-1]
+            slug_name = re.sub(r"-\d+$", "", slug_part)
+            if slug_name in SKIP_SLUGS:
+                continue
+
             full_url = href if href.startswith("http") else f"{BASE_URL}{href}"
 
-            # Kurum adini img alt veya text'ten al
-            img = a_tag.find("img")
-            name = ""
-            if img and img.get("alt"):
-                name = img["alt"].strip()
+            # Kurum adi: title attr > img alt > slug'dan uret
+            name = a_tag.get("title", "").strip()
             if not name:
-                name = a_tag.get_text(strip=True)
+                img = a_tag.find("img")
+                if img:
+                    name = (img.get("alt") or "").strip()
             if not name:
-                # URL'den slug cikart: /kurum/garanti-bbva-31 → garanti bbva
-                slug = href.rstrip("/").split("/")[-1]
-                slug = re.sub(r"-\d+$", "", slug)
-                name = slug.replace("-", " ").title()
+                name = slug_name.replace("-", " ").title()
 
             institutions.append((name, full_url))
 
-        # Duplicate URL temizligi
+        # Duplicate temizligi
         seen = set()
         unique = []
         for name, url in institutions:
@@ -136,6 +153,7 @@ class KurumOneriScraper:
                 seen.add(url)
                 unique.append((name, url))
 
+        logger.info("Kurumlar sayfasindan %d kurum URL'si alindi", len(unique))
         return unique
 
     # ─── Tek Kurum Sayfasi ────────────────────────────────────
@@ -143,7 +161,10 @@ class KurumOneriScraper:
     async def _fetch_institution_recs(
         self, institution_name: str, url: str
     ) -> list[dict]:
-        """Bir kurum sayfasindan tum hisse onerilerini parse et."""
+        """Bir kurum sayfasindan tum hisse onerilerini parse et.
+
+        Selektor: div.Tahminlerlist-item > div.senetbox
+        """
         async with self._semaphore:
             await asyncio.sleep(REQUEST_DELAY)
             try:
@@ -158,14 +179,14 @@ class KurumOneriScraper:
         soup = BeautifulSoup(resp.text, "lxml")
         recs = []
 
-        # div.kurumPagelist-item icerisinde her hisse bir satir
-        items = soup.select("div.kurumPagelist-item")
-        if not items:
-            # Alternatif: table satirlari
-            items = soup.select("table tbody tr")
+        # Ana selektor: div.Tahminlerlist-item icerisindeki div.senetbox
+        cards = soup.select("div.Tahminlerlist-item div.senetbox")
+        if not cards:
+            # Fallback: sadece .senetbox dene
+            cards = soup.select("div.senetbox")
 
-        for item in items:
-            rec = self._parse_recommendation_item(item, institution_name)
+        for card in cards:
+            rec = self._parse_senetbox(card, institution_name)
             if rec:
                 recs.append(rec)
 
@@ -173,75 +194,71 @@ class KurumOneriScraper:
             logger.debug(
                 "%s: %d oneri parse edildi", institution_name, len(recs)
             )
+        else:
+            logger.debug("%s: 0 oneri (bos sayfa veya parse hatasi)", institution_name)
 
         return recs
 
-    # ─── Parse Helpers ────────────────────────────────────────
+    # ─── Parse: Senetbox Karti ────────────────────────────────
 
-    def _parse_recommendation_item(
-        self, item: Tag, institution_name: str
+    def _parse_senetbox(
+        self, card: Tag, institution_name: str
     ) -> Optional[dict]:
-        """Bir hisse oneri satirini parse et."""
+        """Bir senetbox kartindan veri cikar.
+
+        Yapi:
+        - .senetbox-title strong → TICKER
+        - .senetbox-title text → "TICKER - Sirket Adi"
+        - .hedeffiyat span → "169.30 ₺"
+        - .col-8 a.btn → "Al" / "Tut" / "Endeks Ustu Get."
+        - .col-8 a.btn[href] → rapor linki
+        - .senettarih → "Pazartesi, 13 Nisan 2026"
+        """
         try:
-            texts = [el.get_text(strip=True) for el in item.find_all(["td", "div", "span", "p", "h4", "h5", "a"])]
-            if len(texts) < 3:
+            # ── Ticker ──
+            ticker_el = card.select_one(".senetbox-title strong")
+            if not ticker_el:
+                return None
+            ticker = ticker_el.get_text(strip=True).upper()
+            if not ticker or len(ticker) < 2 or len(ticker) > 8:
                 return None
 
-            # Yapiyi anlamaya calis
-            ticker = None
+            # ── Sirket Adi ──
+            title_el = card.select_one(".senetbox-title")
             company_name = None
+            if title_el:
+                full_text = title_el.get_text(strip=True)
+                # "THYAO - THY AO A.S." formatindan sirket adini cikar
+                parts = full_text.split(" - ", 1)
+                if len(parts) > 1:
+                    company_name = parts[1].strip()
+
+            # ── Hedef Fiyat ──
             target_price = None
+            hf_el = card.select_one(".hedeffiyat span")
+            if hf_el:
+                target_price = self._parse_price(hf_el.get_text(strip=True))
+
+            # ── Oneri (Al/Tut/Sat) ──
             recommendation = None
-            report_date = None
             source_url = None
+            rec_btn = card.select_one(".col-8 a.btn")
+            if rec_btn:
+                rec_text = rec_btn.get_text(strip=True)
+                recommendation = self._normalize_recommendation(rec_text)
+                # Rapor linki
+                href = rec_btn.get("href", "")
+                if href and href.startswith("/"):
+                    source_url = f"{BASE_URL}{href}"
 
-            # Link varsa kaynak URL
-            link = item.find("a", href=True)
-            if link:
-                href = link["href"]
-                if href and not href.startswith("#"):
-                    source_url = href if href.startswith("http") else f"{BASE_URL}{href}"
-
-            # Tum text parcalarini tara
-            for txt in texts:
-                if not txt:
-                    continue
-
-                # Ticker tespiti: 3-6 buyuk harf (THYAO, AKBNK, SISE)
-                if not ticker and re.match(r"^[A-ZÇĞİÖŞÜ]{3,6}$", txt):
-                    ticker = txt
-                    continue
-
-                # Hedef fiyat: "123,45 TL" veya "123.45"
-                if not target_price:
-                    price = self._parse_price(txt)
-                    if price:
-                        target_price = price
-                        continue
-
-                # Oneri tespiti
-                if not recommendation:
-                    rec = self._parse_recommendation(txt)
-                    if rec:
-                        recommendation = rec
-                        continue
-
-                # Tarih tespiti
-                if not report_date:
-                    dt = self._parse_date(txt)
-                    if dt:
-                        report_date = dt
-                        continue
-
-                # Sirket adi (uzun text, ticker degilse)
-                if not company_name and len(txt) > 5 and not re.match(r"^[\d.,% ]+$", txt):
-                    company_name = txt
-
-            if not ticker:
-                return None
+            # ── Tarih ──
+            report_date = None
+            date_el = card.select_one(".senettarih")
+            if date_el:
+                report_date = self._parse_turkish_date(date_el.get_text(strip=True))
 
             return {
-                "ticker": ticker.upper(),
+                "ticker": ticker,
                 "company_name": company_name,
                 "institution_name": institution_name,
                 "recommendation": recommendation,
@@ -250,19 +267,26 @@ class KurumOneriScraper:
                 "source_url": source_url,
             }
         except Exception as e:
-            logger.debug("Parse hatasi: %s", e)
+            logger.debug("Senetbox parse hatasi: %s", e)
             return None
 
+    # ─── Helpers ──────────────────────────────────────────────
+
     def _parse_price(self, text: str) -> Optional[Decimal]:
-        """Fiyat metnini Decimal'e donustur. '123,45 TL' → 123.45"""
+        """Fiyat metnini Decimal'e donustur. '169.30 ₺' → 169.30"""
         text = text.strip()
-        # "TL" kaldir
+        # ₺, TL kaldir
+        text = re.sub(r"[\s₺]+$", "", text)
         text = re.sub(r"\s*TL\s*$", "", text, flags=re.IGNORECASE)
-        # "%" iceren metinler fiyat degil
+        # "%" iceriyorsa fiyat degil
         if "%" in text:
             return None
-        # Virgulu noktaya cevir
-        text = text.replace(".", "").replace(",", ".")
+        # Binlik ayirici nokta, ondalik virgul: "1.234,56" → "1234.56"
+        if "," in text and "." in text:
+            text = text.replace(".", "").replace(",", ".")
+        elif "," in text:
+            text = text.replace(",", ".")
+        # Sadece nokta varsa oldugu gibi birak (orn: "169.30")
         try:
             val = Decimal(text)
             if val > 0:
@@ -271,57 +295,76 @@ class KurumOneriScraper:
             pass
         return None
 
-    def _parse_recommendation(self, text: str) -> Optional[str]:
-        """Oneri metnini normalize et."""
-        text_lower = text.strip().lower()
-        # Bilinen oneri turleri
+    def _normalize_recommendation(self, text: str) -> Optional[str]:
+        """Oneri metnini normalize et.
+
+        Sitedeki varyantlar:
+        - "Al" → Al
+        - "Tut" → Tut
+        - "Sat" → Sat
+        - "Endeks Ustu Get." → Endeks Üstü Getiri
+        - "Endekse Paralel Get." → Endekse Paralel Getiri
+        - "Endeks Alti Get." → Endeks Altı Getiri
+        """
+        text = text.strip()
+        if not text:
+            return None
+        text_lower = text.lower()
+
         rec_map = {
             "al": "Al",
             "sat": "Sat",
             "tut": "Tut",
             "nötr": "Nötr",
             "notr": "Nötr",
-            "endeks üstü getiri": "Endeks Üstü Getiri",
-            "endeks ustu getiri": "Endeks Üstü Getiri",
-            "endekse paralel getiri": "Endekse Paralel Getiri",
-            "endeks altı getiri": "Endeks Altı Getiri",
-            "endeks alti getiri": "Endeks Altı Getiri",
-            "güçlü al": "Güçlü Al",
-            "guclu al": "Güçlü Al",
-            "outperform": "Endeks Üstü Getiri",
-            "market perform": "Endekse Paralel Getiri",
-            "underperform": "Endeks Altı Getiri",
-            "buy": "Al",
-            "sell": "Sat",
-            "hold": "Tut",
-            "neutral": "Nötr",
             "ekle": "Ekle",
             "azalt": "Azalt",
         }
-        for key, val in rec_map.items():
-            if text_lower == key or text_lower.startswith(key):
-                return val
-        # Baska oneri varyantlari
+        if text_lower in rec_map:
+            return rec_map[text_lower]
+
+        # Kısaltmalı varyantlar
         if "üstü" in text_lower or "ustu" in text_lower:
             return "Endeks Üstü Getiri"
         if "paralel" in text_lower:
             return "Endekse Paralel Getiri"
         if "altı" in text_lower or "alti" in text_lower:
             return "Endeks Altı Getiri"
-        return None
+        if "güçlü" in text_lower or "guclu" in text_lower:
+            return "Güçlü Al"
 
-    def _parse_date(self, text: str) -> Optional[date]:
-        """Tarih metnini date objesine donustur.
+        # Ingilizce
+        eng_map = {
+            "buy": "Al",
+            "sell": "Sat",
+            "hold": "Tut",
+            "outperform": "Endeks Üstü Getiri",
+            "underperform": "Endeks Altı Getiri",
+            "neutral": "Nötr",
+            "overweight": "Endeks Üstü Getiri",
+            "underweight": "Endeks Altı Getiri",
+        }
+        if text_lower in eng_map:
+            return eng_map[text_lower]
 
-        Desteklenen formatlar:
-        - 13.04.2026
-        - 13/04/2026
-        - 13 Nisan 2026
-        - 2026-04-13
+        # Taninamayan ama bos olmayan → oldugu gibi dondur
+        return text
+
+    def _parse_turkish_date(self, text: str) -> Optional[date]:
+        """Turkce tarih parse et.
+
+        Formatlar:
+        - "Pazartesi, 13 Nisan 2026"
+        - "13 Nisan 2026"
+        - "13.04.2026"
         """
         text = text.strip()
 
-        # DD.MM.YYYY veya DD/MM/YYYY
+        # Gun ismi varsa kaldir: "Pazartesi, 13 Nisan 2026" → "13 Nisan 2026"
+        if "," in text:
+            text = text.split(",", 1)[1].strip()
+
+        # DD.MM.YYYY
         m = re.match(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", text)
         if m:
             try:
@@ -329,15 +372,7 @@ class KurumOneriScraper:
             except ValueError:
                 pass
 
-        # YYYY-MM-DD
-        m = re.match(r"(\d{4})-(\d{2})-(\d{2})", text)
-        if m:
-            try:
-                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-            except ValueError:
-                pass
-
-        # Turkce tarih: 13 Nisan 2026
+        # "13 Nisan 2026"
         m = re.match(r"(\d{1,2})\s+(\w+)\s+(\d{4})", text)
         if m:
             month = TR_MONTHS.get(m.group(2).lower())
