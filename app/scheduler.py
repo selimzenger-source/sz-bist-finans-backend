@@ -4492,6 +4492,18 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Kurum Onerileri Scraper — 2 saatte bir (hafta ici 09:00-18:00 TR) ───
+    scheduler.add_job(
+        scrape_kurum_onerileri,
+        IntervalTrigger(hours=2),
+        id="kurum_oneri_scraper",
+        name="Kurum Onerileri Scraper (2 saat)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
+    )
+
     # ─── Haber State Temizligi — her gun 03:00 TR (UTC 00:00) ───
     scheduler.add_job(
         news_cleanup_job,
@@ -4584,6 +4596,83 @@ async def news_scanner_job():
             )
     except Exception as e:
         logger.error("Haber tarama job hatasi: %s", e)
+
+
+async def scrape_kurum_onerileri():
+    """Kurum onerileri scraper — hedeffiyat.com.tr'den araci kurum hedef fiyatlari."""
+    logger.info("Kurum onerileri scraper basliyor...")
+    try:
+        from app.scrapers.kurum_oneri_scraper import KurumOneriScraper
+        from app.services.kurum_oneri_service import KurumOneriService
+        from app.services.notification import NotificationService
+
+        scraper = KurumOneriScraper()
+        try:
+            recommendations = await scraper.fetch_all_recommendations()
+        finally:
+            await scraper.close()
+
+        if not recommendations:
+            logger.info("Kurum onerileri: scrape sonucu bos")
+            return
+
+        new_count = 0
+        async with async_session() as db:
+            service = KurumOneriService(db)
+            notif_service = NotificationService(db)
+            new_items = []
+
+            for rec in recommendations:
+                try:
+                    oneri, is_new = await service.create_or_update(rec)
+                    if is_new and oneri:
+                        new_count += 1
+                        new_items.append(oneri)
+                except Exception as e:
+                    logger.debug("Kurum oneri kayit hatasi: %s", e)
+                    continue
+
+            await db.commit()
+
+            # TODO: Bildirim — veri dogrulandiktan sonra aktif edilecek
+            # Yeni oneriler icin bildirim gonder
+            if False and new_items:  # DEVRE DISI — once veri dogrulama
+                sent = 0
+                for item in new_items[:20]:  # Max 20 bildirim (toplu scrape'de spam onleme)
+                    try:
+                        rec_text = item.recommendation or "Yeni Öneri"
+                        price_text = f" — {float(item.target_price):.2f} TL" if item.target_price else ""
+                        title = f"📊 {item.institution_name}"
+                        body = f"{item.ticker}: {rec_text}{price_text}"
+                        data = {
+                            "type": "kurum_oneri",
+                            "screen": "kurum-onerileri",
+                            "ticker": item.ticker,
+                        }
+                        sent += await notif_service._send_kurum_oneri_notification(
+                            title=title,
+                            body=body,
+                            data=data,
+                        )
+                    except Exception as e:
+                        logger.debug("Kurum oneri bildirim hatasi: %s", e)
+                logger.info(
+                    "Kurum onerileri: %d yeni / %d toplam — %d bildirim gonderildi",
+                    new_count, len(recommendations), sent,
+                )
+            else:
+                logger.info(
+                    "Kurum onerileri: 0 yeni / %d toplam (guncelleme yok)",
+                    len(recommendations),
+                )
+
+    except Exception as e:
+        logger.error("Kurum onerileri scraper HATA: %s", e)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(f"❌ Kurum Önerileri scraper hatası: {str(e)[:200]}")
+        except Exception:
+            pass
 
 
 async def news_cleanup_job():

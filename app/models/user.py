@@ -49,6 +49,7 @@ class User(Base):
     notify_spk_bulten: Mapped[bool] = mapped_column(Boolean, default=True, comment="SPK bulten analizi bildirimi")
     notify_rehber: Mapped[bool] = mapped_column(Boolean, default=True, comment="Rehber/blog yazi bildirimi")
     notify_edo_paid: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretli EDO bildirimi")
+    notify_kurum_onerileri: Mapped[bool] = mapped_column(Boolean, default=True, comment="Kurum onerileri/hedef fiyat bildirimi")
 
     # Hatirlatma zamanlari (son gun icin)
     reminder_30min: Mapped[bool] = mapped_column(Boolean, default=True, comment="Son gune 30 dk kala")

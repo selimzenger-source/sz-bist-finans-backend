@@ -8160,3 +8160,94 @@ async def fix_notification_categories(body: dict, db: AsyncSession = Depends(get
     )
     await db.commit()
     return {"status": "ok", "rows_updated": result.rowcount}
+
+
+# -------------------------------------------------------
+# Kurum Onerileri — Araci Kurum Hedef Fiyat & Tavsiye
+# -------------------------------------------------------
+
+@app.get("/api/v1/kurum-onerileri")
+@limiter.limit("30/minute")
+async def get_kurum_onerileri(
+    request: Request,
+    period: str = Query("today", description="today, week, month, all"),
+    ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
+    institution: Optional[str] = Query(None, description="Kurum adi filtresi"),
+    recommendation: Optional[str] = Query(None, description="Oneri filtresi (Al, Tut, Sat vb.)"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kurum onerilerini listele — tarih, hisse, kurum bazli filtreleme."""
+    from app.services.kurum_oneri_service import KurumOneriService
+    service = KurumOneriService(db)
+    items, total = await service.get_recommendations(
+        period=period,
+        ticker=ticker,
+        institution=institution,
+        recommendation=recommendation,
+        page=page,
+        limit=limit,
+    )
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "ticker": item.ticker,
+                "company_name": item.company_name,
+                "institution_name": item.institution_name,
+                "recommendation": item.recommendation,
+                "target_price": float(item.target_price) if item.target_price else None,
+                "report_date": item.report_date.isoformat() if item.report_date else None,
+                "source_url": item.source_url,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
+
+
+@app.get("/api/v1/kurum-onerileri/stats")
+@limiter.limit("30/minute")
+async def get_kurum_onerileri_stats(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kurum onerileri istatistikleri."""
+    from app.services.kurum_oneri_service import KurumOneriService
+    service = KurumOneriService(db)
+    return await service.get_stats()
+
+
+@app.get("/api/v1/kurum-onerileri/filters")
+@limiter.limit("30/minute")
+async def get_kurum_onerileri_filters(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Filtre secenekleri — benzersiz kurum ve hisse listesi."""
+    from app.services.kurum_oneri_service import KurumOneriService
+    service = KurumOneriService(db)
+    institutions = await service.get_institutions()
+    tickers = await service.get_tickers()
+    return {
+        "institutions": institutions,
+        "tickers": tickers,
+    }
+
+
+@app.post("/api/v1/admin/trigger-kurum-scrape")
+@limiter.limit("5/minute")
+async def admin_trigger_kurum_scrape(request: Request, payload: dict = Body(...)):
+    """Admin: Kurum onerileri scraper'i manuel tetikle."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scheduler import scrape_kurum_onerileri
+        await scrape_kurum_onerileri()
+        return {"status": "ok", "message": "Kurum onerileri scrape tamamlandi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}

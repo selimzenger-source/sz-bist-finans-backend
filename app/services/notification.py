@@ -1707,3 +1707,21 @@ class NotificationService:
             f"VİOP {session_type}",
             category="other",
         )
+
+    # -------------------------------------------------------
+    # Kurum Onerileri Bildirimleri
+    # -------------------------------------------------------
+
+    async def _send_kurum_oneri_notification(
+        self,
+        title: str,
+        body: str,
+        data: dict,
+    ) -> int:
+        """Kurum onerileri bildirimini gonder — notify_kurum_onerileri = True olanlara."""
+        return await self._send_filtered(
+            "notify_kurum_onerileri", title, body, data,
+            f"Kurum oneri: {body[:50]}",
+            channel_id="default_v2",
+            category="kurum_oneri",
+        )

@@ -584,6 +584,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v48 migration: notify_kurum_onerileri kolonu (kurum onerileri bildirim tercihi)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_kurum_onerileri BOOLEAN DEFAULT TRUE")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
