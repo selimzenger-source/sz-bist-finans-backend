@@ -271,6 +271,11 @@ class KurumOneriScraper:
             if date_el:
                 report_date = self._parse_turkish_date(date_el.get_text(strip=True))
 
+            # Tarih yoksa bu oneriyi ekleme — yanlis tarihe atanmasin
+            if not report_date:
+                logger.debug("Tarihsiz oneri atlanıyor: %s (%s)", ticker, institution_name)
+                return None
+
             return {
                 "ticker": ticker,
                 "company_name": company_name,
@@ -279,7 +284,7 @@ class KurumOneriScraper:
                 "target_price": target_price,
                 "current_price": current_price,
                 "potential_return": potential_return,
-                "report_date": report_date or date.today(),
+                "report_date": report_date,
                 "source_url": source_url,
             }
         except Exception as e:

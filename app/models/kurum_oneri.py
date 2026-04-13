@@ -64,6 +64,16 @@ class KurumOneri(Base):
         comment="Rapor kaynak linki (varsa)"
     )
 
+    # Bildirim & Tweet korumasi
+    notification_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+        comment="Bildirim gonderildi mi? None ise gonderilmedi"
+    )
+    tweet_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None,
+        comment="Tweet atildi mi? None ise atilmadi"
+    )
+
     # Meta
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

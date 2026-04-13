@@ -4639,12 +4639,17 @@ async def scrape_kurum_onerileri():
 
             await db.commit()
 
-            # TODO: Bildirim — veri dogrulandiktan sonra aktif edilecek
-            # Yeni oneriler icin bildirim gonder
-            if False and new_items:  # DEVRE DISI — once veri dogrulama
+            # Yeni oneriler icin bildirim + tweet gonder
+            if new_items:
                 sent = 0
+                tweeted = 0
+                from datetime import datetime as _dt, timezone as _tz
                 for item in new_items[:20]:  # Max 20 bildirim (toplu scrape'de spam onleme)
                     try:
+                        # Cift bildirim korumasi — notification_sent_at doluysa atla
+                        if item.notification_sent_at is not None:
+                            continue
+
                         rec_text = item.recommendation or "Yeni Öneri"
                         price_text = f" — {float(item.target_price):.2f} TL" if item.target_price else ""
                         title = f"📊 {item.institution_name}"
@@ -4654,16 +4659,42 @@ async def scrape_kurum_onerileri():
                             "screen": "kurum-onerileri",
                             "ticker": item.ticker,
                         }
-                        sent += await notif_service._send_kurum_oneri_notification(
+                        result = await notif_service._send_kurum_oneri_notification(
                             title=title,
                             body=body,
                             data=data,
                         )
+                        if result:
+                            item.notification_sent_at = _dt.now(_tz.utc)
+                            sent += 1
                     except Exception as e:
                         logger.debug("Kurum oneri bildirim hatasi: %s", e)
+
+                    # Tweet gonder — cift tweet korumasi (tweet_sent_at + MD5 cache)
+                    try:
+                        if item.tweet_sent_at is not None:
+                            continue
+                        from app.services.twitter_service import send_tweet
+                        rec_label = item.recommendation or "Yeni Öneri"
+                        target_txt = f"Hedef: {float(item.target_price):.2f} ₺" if item.target_price else ""
+                        pot_txt = f"(%{float(item.potential_return):.1f})" if item.potential_return else ""
+                        tweet_text = (
+                            f"📊 {item.institution_name}\n"
+                            f"#{item.ticker} → {rec_label}\n"
+                            f"{target_txt} {pot_txt}\n\n"
+                            f"#BorsaCebimde #BIST #HisseTavsiye"
+                        ).strip()
+                        tweet_ok = send_tweet(tweet_text, source="kurum_oneri")
+                        if tweet_ok:
+                            item.tweet_sent_at = _dt.now(_tz.utc)
+                            tweeted += 1
+                    except Exception as e:
+                        logger.debug("Kurum oneri tweet hatasi: %s", e)
+
+                await db.commit()
                 logger.info(
-                    "Kurum onerileri: %d yeni / %d toplam — %d bildirim gonderildi",
-                    new_count, len(recommendations), sent,
+                    "Kurum onerileri: %d yeni / %d toplam — %d bildirim, %d tweet",
+                    new_count, len(recommendations), sent, tweeted,
                 )
             else:
                 logger.info(
