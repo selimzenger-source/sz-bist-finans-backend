@@ -481,14 +481,12 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
         y += 15
 
-        # 0: Hisse, 1: Fiyat, 2: Değişim, 3: Seri, 4: 30 Gün, 5: Not
-        # Eski video formatına uygun geniş aralık
-        col_x = [padding, 200, 360, 500, 630, 770]
+        # 0: Hisse, 1: Fiyat, 2: Son 30G, 3: Seri, 4: Neden
+        col_x = [padding, 200, 360, 490, 620, 620]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
-        draw.text((col_x[2], y), "Değişim", fill=GRAY, font=font_col)
+        draw.text((col_x[2], y), "Son 30G", fill=GRAY, font=font_col)
         draw.text((col_x[3], y), "Seri", fill=GRAY, font=font_col)
-        draw.text((col_x[4], y), "Son 30G", fill=GRAY, font=font_col)
         neden_header = "Neden Yükseldi (AI)" if is_ceiling else "Neden Düştü (AI)"
         draw.text((col_x[5], y), neden_header, fill=CYAN, font=font_col)
         y += 40
@@ -512,9 +510,12 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             color = GREEN if is_ceiling else RED
             draw.text((col_x[1], text_y), f"{stat.close_price:.2f} ₺", fill=color, font=font_row)
 
-            # Percent Change (%) — font_change (24px) ile çakışma önlenir
-            pct = getattr(stat, "percent_change", 10.0) # Fallback to 10.0
-            draw.text((col_x[2], text_y), f"% {pct:+.2f}", fill=color, font=font_change)
+            # Son 30G — col_x[2] (eski Değişim yerine)
+            m_count = stat.monthly_ceiling_count if is_ceiling else stat.monthly_floor_count
+            m_yazi = f"{m_count} Kez"
+            m_color = GOLD if m_count >= 2 else WHITE
+            m_font = font_seri_bold if m_count >= 2 else font_reason
+            draw.text((col_x[2], text_y), m_yazi, fill=m_color, font=m_font)
 
             # Seri — gold+bold if ≥2
             consec = stat.consecutive_ceiling_count if is_ceiling else stat.consecutive_floor_count
@@ -522,13 +523,6 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             seri_color = GOLD if consec >= 2 else WHITE
             seri_font = font_seri_bold if consec >= 2 else font_reason
             draw.text((col_x[3], text_y), seri_yazi, fill=seri_color, font=seri_font)
-
-            # Son 1 Ay — gold+bold if ≥2
-            m_count = stat.monthly_ceiling_count if is_ceiling else stat.monthly_floor_count
-            m_yazi = f"{m_count} Kez"
-            m_color = GOLD if m_count >= 2 else WHITE
-            m_font = font_seri_bold if m_count >= 2 else font_reason
-            draw.text((col_x[4], text_y), m_yazi, fill=m_color, font=m_font)
 
             # Neden (Multi-line) — 15px font, ~9.6px/char, 390px alan → max 35 char/satır
             reason_text = stat.reason if stat.reason else ""

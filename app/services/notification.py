@@ -1723,5 +1723,5 @@ class NotificationService:
             "notify_kurum_onerileri", title, body, data,
             f"Kurum oneri: {body[:50]}",
             channel_id="default_v2",
-            category="kurum_oneri",
+            category="other",
         )
