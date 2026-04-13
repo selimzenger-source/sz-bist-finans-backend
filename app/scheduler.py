@@ -4639,24 +4639,32 @@ async def scrape_kurum_onerileri():
 
             await db.commit()
 
-            # Yeni oneriler icin bildirim (TEK TOPLU) + tweet (her biri icin)
+            # Yeni oneriler icin TEK bildirim + TEK tweet (toplu ozet)
             if new_items:
-                sent = 0
-                tweeted = 0
                 from datetime import datetime as _dt, timezone as _tz
 
-                # ── TEK TOPLU BİLDİRİM ──
-                # Bildirim gonderilmemis yeni onerileri filtrele
+                # ── KORUMA: Anormal durum tespiti ──
+                # 50'den fazla yeni oneri = muhtemelen tablo temizligi/ilk yukl eme
+                # Bu durumda bildirim/tweet ATMA, sadece sent olarak isaretle
                 unsent_items = [i for i in new_items if i.notification_sent_at is None]
-                if unsent_items:
-                    try:
-                        count = len(unsent_items)
-                        # Ilk 3 ticker'i goster
-                        tickers = [i.ticker for i in unsent_items[:3]]
-                        tickers_str = ", ".join(tickers)
-                        if count > 3:
-                            tickers_str += f" +{count - 3} hisse"
+                if len(unsent_items) > 50:
+                    logger.warning(
+                        "KORUMA: %d yeni oneri tespit edildi (anormal). Bildirim/tweet atlanıyor, sent olarak isaretleniyor.",
+                        len(unsent_items),
+                    )
+                    for item in unsent_items:
+                        item.notification_sent_at = _dt.now(_tz.utc)
+                        item.tweet_sent_at = _dt.now(_tz.utc)
+                    await db.commit()
+                elif unsent_items:
+                    count = len(unsent_items)
+                    tickers = [i.ticker for i in unsent_items[:3]]
+                    tickers_str = ", ".join(tickers)
+                    if count > 3:
+                        tickers_str += f" +{count - 3} hisse"
 
+                    # ── TEK BİLDİRİM ──
+                    try:
                         title = f"📊 {count} Yeni Kurum Önerisi"
                         body = f"{tickers_str} — Detaylar için tıklayın"
                         data = {
@@ -4664,43 +4672,42 @@ async def scrape_kurum_onerileri():
                             "screen": "kurum-onerileri",
                         }
                         result = await notif_service._send_kurum_oneri_notification(
-                            title=title,
-                            body=body,
-                            data=data,
+                            title=title, body=body, data=data,
                         )
                         if result:
                             for item in unsent_items:
                                 item.notification_sent_at = _dt.now(_tz.utc)
-                            sent = 1
                     except Exception as e:
                         logger.debug("Kurum oneri bildirim hatasi: %s", e)
 
-                # ── TWEET — her oneri icin ayri ──
-                from app.services.twitter_service import _safe_tweet
-                for item in new_items[:10]:  # Max 10 tweet (spam onleme)
+                    # ── TEK TWEET (toplu ozet) ──
                     try:
-                        if item.tweet_sent_at is not None:
-                            continue
-                        rec_label = item.recommendation or "Yeni Öneri"
-                        target_txt = f"Hedef: {float(item.target_price):.2f} ₺" if item.target_price else ""
-                        pot_txt = f"(%{float(item.potential_return):.1f})" if item.potential_return else ""
-                        tweet_text = (
-                            f"📊 {item.institution_name}\n"
-                            f"#{item.ticker} → {rec_label}\n"
-                            f"{target_txt} {pot_txt}\n\n"
-                            f"#BorsaCebimde #BIST #HisseTavsiye"
-                        ).strip()
-                        tweet_ok = _safe_tweet(tweet_text, source="kurum_oneri")
-                        if tweet_ok:
-                            item.tweet_sent_at = _dt.now(_tz.utc)
-                            tweeted += 1
+                        from app.services.twitter_service import _safe_tweet
+                        unsent_tweets = [i for i in unsent_items if i.tweet_sent_at is None]
+                        if unsent_tweets:
+                            # Ozet tweet: tum hisseleri listele
+                            tweet_tickers = [f"#{i.ticker}" for i in unsent_tweets[:5]]
+                            tweet_list = " ".join(tweet_tickers)
+                            if len(unsent_tweets) > 5:
+                                tweet_list += f" +{len(unsent_tweets) - 5} hisse"
+                            tweet_text = (
+                                f"📊 {len(unsent_tweets)} Yeni Kurum Önerisi\n\n"
+                                f"{tweet_list}\n\n"
+                                f"Detaylar uygulamamızda 👇\n"
+                                f"#BorsaCebimde #BIST #HisseTavsiye"
+                            ).strip()
+                            tweet_ok = _safe_tweet(tweet_text, source="kurum_oneri")
+                            if tweet_ok:
+                                for item in unsent_tweets:
+                                    item.tweet_sent_at = _dt.now(_tz.utc)
                     except Exception as e:
                         logger.debug("Kurum oneri tweet hatasi: %s", e)
 
-                await db.commit()
+                    await db.commit()
+
                 logger.info(
-                    "Kurum onerileri: %d yeni / %d toplam — %d bildirim, %d tweet",
-                    new_count, len(recommendations), sent, tweeted,
+                    "Kurum onerileri: %d yeni / %d toplam",
+                    new_count, len(recommendations),
                 )
             else:
                 logger.info(
