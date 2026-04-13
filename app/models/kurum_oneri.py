@@ -43,6 +43,14 @@ class KurumOneri(Base):
         Numeric(12, 2),
         comment="Hedef fiyat (TL)"
     )
+    current_price: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2),
+        comment="Oneri anindaki son fiyat (TL)"
+    )
+    potential_return: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 2),
+        comment="Potansiyel getiri yuzdesi"
+    )
 
     # Tarih
     report_date: Mapped[date] = mapped_column(

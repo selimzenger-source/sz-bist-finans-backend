@@ -8198,6 +8198,8 @@ async def get_kurum_onerileri(
                 "institution_name": item.institution_name,
                 "recommendation": item.recommendation,
                 "target_price": float(item.target_price) if item.target_price else None,
+                "current_price": float(item.current_price) if item.current_price else None,
+                "potential_return": float(item.potential_return) if item.potential_return else None,
                 "report_date": item.report_date.isoformat() if item.report_date else None,
                 "source_url": item.source_url,
                 "created_at": item.created_at.isoformat() if item.created_at else None,

@@ -584,6 +584,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v48a migration: kurum_onerileri tablosuna current_price + potential_return kolonlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS current_price NUMERIC(12,2)")
+            )
+            await conn.execute(
+                text("ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS potential_return NUMERIC(8,2)")
+            )
+        except Exception:
+            pass
+
         # v48 migration: notify_kurum_onerileri kolonu (kurum onerileri bildirim tercihi)
         try:
             await conn.execute(

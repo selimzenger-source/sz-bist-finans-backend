@@ -209,7 +209,9 @@ class KurumOneriScraper:
         Yapi:
         - .senetbox-title strong → TICKER
         - .senetbox-title text → "TICKER - Sirket Adi"
+        - .sonfiyat span → "118.80 ₺" (oneri anindaki fiyat)
         - .hedeffiyat span → "169.30 ₺"
+        - .potansiyelgetiri span → "%42.51"
         - .col-8 a.btn → "Al" / "Tut" / "Endeks Ustu Get."
         - .col-8 a.btn[href] → rapor linki
         - .senettarih → "Pazartesi, 13 Nisan 2026"
@@ -233,11 +235,23 @@ class KurumOneriScraper:
                 if len(parts) > 1:
                     company_name = parts[1].strip()
 
+            # ── Son Fiyat (oneri anindaki fiyat) ──
+            current_price = None
+            sf_el = card.select_one(".sonfiyat span")
+            if sf_el:
+                current_price = self._parse_price(sf_el.get_text(strip=True))
+
             # ── Hedef Fiyat ──
             target_price = None
             hf_el = card.select_one(".hedeffiyat span")
             if hf_el:
                 target_price = self._parse_price(hf_el.get_text(strip=True))
+
+            # ── Potansiyel Getiri ──
+            potential_return = None
+            pg_el = card.select_one(".potansiyelgetiri span")
+            if pg_el:
+                potential_return = self._parse_percentage(pg_el.get_text(strip=True))
 
             # ── Oneri (Al/Tut/Sat) ──
             recommendation = None
@@ -263,6 +277,8 @@ class KurumOneriScraper:
                 "institution_name": institution_name,
                 "recommendation": recommendation,
                 "target_price": target_price,
+                "current_price": current_price,
+                "potential_return": potential_return,
                 "report_date": report_date or date.today(),
                 "source_url": source_url,
             }
@@ -291,6 +307,21 @@ class KurumOneriScraper:
             val = Decimal(text)
             if val > 0:
                 return val
+        except (InvalidOperation, ValueError):
+            pass
+        return None
+
+    def _parse_percentage(self, text: str) -> Optional[Decimal]:
+        """Yuzde metnini Decimal'e donustur. '%42.51' → 42.51"""
+        text = text.strip()
+        text = text.replace("%", "").replace("₺", "").strip()
+        if not text:
+            return None
+        # Virgulu noktaya cevir
+        text = text.replace(",", ".")
+        try:
+            val = Decimal(text)
+            return val  # Negatif getiri de olabilir
         except (InvalidOperation, ValueError):
             pass
         return None

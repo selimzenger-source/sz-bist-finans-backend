@@ -47,7 +47,7 @@ class KurumOneriService:
         if existing:
             # Guncelle
             changed = False
-            for field in ["recommendation", "target_price", "company_name", "source_url"]:
+            for field in ["recommendation", "target_price", "current_price", "potential_return", "company_name", "source_url"]:
                 new_val = data.get(field)
                 if new_val is not None and new_val != getattr(existing, field):
                     setattr(existing, field, new_val)
@@ -61,6 +61,8 @@ class KurumOneriService:
                 institution_name=institution,
                 recommendation=data.get("recommendation"),
                 target_price=data.get("target_price"),
+                current_price=data.get("current_price"),
+                potential_return=data.get("potential_return"),
                 report_date=report_date,
                 source_url=data.get("source_url"),
             )
