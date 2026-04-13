@@ -133,8 +133,12 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS tweet_sent_at TIMESTAMPTZ"
             ))
+            # Mevcut tum kayitlari "gonderildi" olarak isaretle (tekrar bildirim/tweet onleme)
+            await db.execute(sa_text(
+                "UPDATE kurum_onerileri SET notification_sent_at = NOW(), tweet_sent_at = NOW() WHERE notification_sent_at IS NULL"
+            ))
             await db.commit()
-            logger.info("Kurum onerileri: notification_sent_at/tweet_sent_at kolonlari kontrol edildi/eklendi")
+            logger.info("Kurum onerileri: kolonlar kontrol edildi + mevcut kayitlar sent olarak isaretlendi")
     except Exception as e:
         logger.warning("Kurum onerileri migration atlandi: %s", e)
 
