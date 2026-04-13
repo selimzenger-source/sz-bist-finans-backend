@@ -4647,7 +4647,7 @@ async def scrape_kurum_onerileri():
                 # 50'den fazla yeni oneri = muhtemelen tablo temizligi/ilk yukl eme
                 # Bu durumda bildirim/tweet ATMA, sadece sent olarak isaretle
                 unsent_items = [i for i in new_items if i.notification_sent_at is None]
-                if len(unsent_items) > 50:
+                if len(unsent_items) > 25:
                     logger.warning(
                         "KORUMA: %d yeni oneri tespit edildi (anormal). Bildirim/tweet atlanıyor, sent olarak isaretleniyor.",
                         len(unsent_items),
