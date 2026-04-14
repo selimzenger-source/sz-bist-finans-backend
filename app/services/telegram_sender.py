@@ -26,10 +26,19 @@ TELEGRAM_API_BASE = "https://api.telegram.org/bot{token}"
 
 
 def _get_telegram_config():
-    """Config'den Telegram ayarlarini al."""
+    """Config'den Telegram ayarlarini al — sistem raporlari icin."""
     from app.config import get_settings
     settings = get_settings()
     return settings.TELEGRAM_BOT_TOKEN, settings.TELEGRAM_CHAT_ID
+
+
+def _get_news_telegram_config():
+    """Config'den haber botu ayarlarini al (@sz_reply_notify_bot)."""
+    from app.config import get_settings
+    settings = get_settings()
+    token = settings.TELEGRAM_NEWS_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_NEWS_CHAT_ID or settings.TELEGRAM_CHAT_ID
+    return token, chat_id
 
 
 def _format_telegram_message(
@@ -133,9 +142,9 @@ async def send_to_telegram(
         news_title=news_title,
     )
 
-    bot_token, chat_id = _get_telegram_config()
+    bot_token, chat_id = _get_news_telegram_config()
     if not bot_token:
-        logger.warning("TELEGRAM_BOT_TOKEN ayarlanmamis, mesaj gonderilemedi")
+        logger.warning("TELEGRAM_NEWS_BOT_TOKEN ayarlanmamis, mesaj gonderilemedi")
         return None
 
     try:
@@ -183,7 +192,7 @@ async def save_to_telegram_news(
     if news_title:
         body_text = f"{news_title}\n{body_text}"
 
-    _, chat_id = _get_telegram_config()
+    _, chat_id = _get_news_telegram_config()
     news = TelegramNews(
         telegram_message_id=telegram_message_id,
         chat_id=chat_id or "-1002704950091",

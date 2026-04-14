@@ -65,8 +65,8 @@ _daily_counts: dict[str, int] = {}  # category -> count
 _daily_counts_date: str = ""  # YYYY-MM-DD
 _last_tweet_times: dict[str, datetime] = {}  # category -> last_tweet_time
 
-# ── Pending news — FIFO kuyruk (max 4 haber, dolunca durur) ──
-_MAX_QUEUE_SIZE = 4
+# ── Pending news — FIFO kuyruk (max 5 haber, dolunca durur) ──
+_MAX_QUEUE_SIZE = 5
 _pending_news: list[dict] = []  # En yeni basta, en eski sonda
 _queue_paused: bool = False  # Kuyruk dolunca True olur, /devam ile False olur
 
