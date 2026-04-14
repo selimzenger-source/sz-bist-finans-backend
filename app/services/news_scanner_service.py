@@ -711,10 +711,10 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
 # ── Telegram Onay Mekanizmasi ───────────────────────────
 
 async def _send_telegram_photo(image_path: str, caption: str) -> bool:
-    """Telegram'a foto gonder."""
+    """Telegram'a foto gonder — haber botu (@sz_reply_notify_bot)."""
     settings = get_settings()
-    bot_token = settings.ADMIN_TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
-    chat_id = settings.ADMIN_TELEGRAM_CHAT_ID
+    bot_token = settings.TELEGRAM_NEWS_BOT_TOKEN or settings.ADMIN_TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_NEWS_CHAT_ID or settings.ADMIN_TELEGRAM_CHAT_ID
 
     if not bot_token or not chat_id:
         logger.warning("Telegram yapilandirilmamis")
@@ -736,10 +736,10 @@ async def _send_telegram_photo(image_path: str, caption: str) -> bool:
 
 
 async def _send_telegram_message(text: str, disable_preview: bool = False) -> bool:
-    """Telegram'a mesaj gonder."""
+    """Telegram'a mesaj gonder — haber botu (@sz_reply_notify_bot)."""
     settings = get_settings()
-    bot_token = settings.ADMIN_TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
-    chat_id = settings.ADMIN_TELEGRAM_CHAT_ID
+    bot_token = settings.TELEGRAM_NEWS_BOT_TOKEN or settings.ADMIN_TELEGRAM_BOT_TOKEN or settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_NEWS_CHAT_ID or settings.ADMIN_TELEGRAM_CHAT_ID
 
     if not bot_token or not chat_id:
         return False
@@ -1318,16 +1318,16 @@ _admin_cmd_last_update_id: Optional[int] = None
 
 
 async def poll_admin_commands():
-    """Admin Telegram chat'ten komutlari okur ve isler.
+    """Haber botu (@sz_reply_notify_bot) chat'ten komutlari okur ve isler.
 
     Scheduler tarafindan 5 saniyede bir cagrilir.
-    Admin bot token ile getUpdates yapar.
+    News bot token ile getUpdates yapar.
     """
     global _admin_cmd_last_update_id
 
     settings = get_settings()
-    bot_token = settings.ADMIN_TELEGRAM_BOT_TOKEN
-    chat_id = settings.ADMIN_TELEGRAM_CHAT_ID
+    bot_token = settings.TELEGRAM_NEWS_BOT_TOKEN or settings.ADMIN_TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_NEWS_CHAT_ID or settings.ADMIN_TELEGRAM_CHAT_ID
 
     if not bot_token or not chat_id:
         return
