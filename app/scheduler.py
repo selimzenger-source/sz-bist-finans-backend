@@ -3181,35 +3181,42 @@ async def _generate_index_cover_image(index_name: str, added: set[str], removed:
         )
 
         import httpx
-        resp = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={api_key}",
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "responseModalities": ["TEXT", "IMAGE"],
-                    "responseMimeType": "text/plain",
-                },
-            },
-            timeout=60.0,
-        )
+        image_models = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"]
+        for model_name in image_models:
+            try:
+                resp = httpx.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "responseModalities": ["TEXT", "IMAGE"],
+                            "responseMimeType": "text/plain",
+                        },
+                    },
+                    timeout=90.0,
+                )
 
-        if resp.status_code == 200:
-            data = resp.json()
-            for candidate in data.get("candidates", []):
-                for part in candidate.get("content", {}).get("parts", []):
-                    if "inlineData" in part:
-                        img_b64 = part["inlineData"]["data"]
-                        img_bytes = base64.b64decode(img_b64)
-                        static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app", "static", "img")
-                        os.makedirs(static_dir, exist_ok=True)
-                        fname = f"index_update_{index_name.replace(' ', '_').lower()}_{int(__import__('time').time())}.png"
-                        fpath = os.path.join(static_dir, fname)
-                        with open(fpath, "wb") as f:
-                            f.write(img_bytes)
-                        logger.info("Gemini kapak resmi olusturuldu: %s", fpath)
-                        return fpath
-        else:
-            logger.warning("Gemini image hatasi HTTP %d: %s", resp.status_code, resp.text[:200])
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for candidate in data.get("candidates", []):
+                        for part in candidate.get("content", {}).get("parts", []):
+                            if "inlineData" in part:
+                                img_b64 = part["inlineData"]["data"]
+                                img_bytes = base64.b64decode(img_b64)
+                                static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app", "static", "img")
+                                os.makedirs(static_dir, exist_ok=True)
+                                fname = f"index_update_{index_name.replace(' ', '_').lower()}_{int(__import__('time').time())}.png"
+                                fpath = os.path.join(static_dir, fname)
+                                with open(fpath, "wb") as f:
+                                    f.write(img_bytes)
+                                logger.info("Gemini kapak resmi olusturuldu (%s): %s", model_name, fpath)
+                                return fpath
+                    logger.warning("Gemini %s: 200 ama image yok", model_name)
+                else:
+                    logger.warning("Gemini %s hatasi HTTP %d: %s", model_name, resp.status_code, resp.text[:200])
+            except Exception as model_err:
+                logger.warning("Gemini %s exception: %s", model_name, model_err)
+                continue
 
     except Exception as e:
         logger.error("Gemini kapak resmi hatasi: %s", e)
@@ -4598,6 +4605,82 @@ async def news_scanner_job():
         logger.error("Haber tarama job hatasi: %s", e)
 
 
+async def _generate_kurum_oneri_cover(items: list) -> str | None:
+    """Gemini Imagen ile kurum onerileri kapak resmi uret."""
+    import os
+    import base64
+    try:
+        from app.config import settings
+        api_key = settings.GEMINI_API_KEY
+        if not api_key:
+            logger.warning("GEMINI_API_KEY yok, kurum oneri kapak resmi uretilemedi")
+            return None
+
+        # Oneri detaylarini prompt icin hazirla
+        rec_lines = []
+        for i in items[:5]:
+            rec = (i.recommendation or "").upper()[:3]
+            tp = f"{i.target_price:,.2f}" if i.target_price else "?"
+            inst = (i.institution_name or "").replace(" Menkul Değerler", "").replace(" Yatırım Menkul Değerler", " Yat.")
+            rec_lines.append(f"{inst}: {i.ticker} hedef {tp} TL ({rec})")
+        recs_text = " | ".join(rec_lines)
+
+        prompt = (
+            f"Create a professional, modern financial infographic banner for Turkish stock market institutional recommendations. "
+            f"Dark navy blue gradient background (#0D1B2A to #1B2838). "
+            f"Title: 'KURUM ÖNERİLERİ' in bold white text at top with a chart/target icon. "
+            f"Show {len(items)} recommendation cards in a clean list layout: {recs_text}. "
+            f"Use green color for AL/BUY recommendations, yellow for TUT/HOLD, red for SAT/SELL. "
+            f"Each card shows: institution name, ticker code, 'hedef' label with target price in TL, recommendation badge. "
+            f"IMPORTANT: Use Turkish word 'hedef' instead of 'target' on the cards. "
+            f"Bottom: 'BorsaCebimde' branding text. "
+            f"Style: Clean, corporate, fintech aesthetic. Aspect ratio 16:9, 1200x675 pixels. No watermark."
+        )
+
+        import httpx
+        # Image-capable modeller: gemini-2.5-flash-image (birincil), gemini-3-pro-image-preview (yedek)
+        image_models = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"]
+        for model_name in image_models:
+            try:
+                resp = httpx.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt}]}],
+                        "generationConfig": {
+                            "responseModalities": ["TEXT", "IMAGE"],
+                            "responseMimeType": "text/plain",
+                        },
+                    },
+                    timeout=90.0,
+                )
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for candidate in data.get("candidates", []):
+                        for part in candidate.get("content", {}).get("parts", []):
+                            if "inlineData" in part:
+                                img_b64 = part["inlineData"]["data"]
+                                img_bytes = base64.b64decode(img_b64)
+                                static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "app", "static", "img")
+                                os.makedirs(static_dir, exist_ok=True)
+                                fname = f"kurum_oneri_{int(__import__('time').time())}.png"
+                                fpath = os.path.join(static_dir, fname)
+                                with open(fpath, "wb") as f:
+                                    f.write(img_bytes)
+                                logger.info("Kurum oneri kapak resmi olusturuldu (%s): %s", model_name, fpath)
+                                return fpath
+                    logger.warning("Gemini %s: 200 ama image yok", model_name)
+                else:
+                    logger.warning("Gemini %s hatasi HTTP %d: %s", model_name, resp.status_code, resp.text[:200])
+            except Exception as model_err:
+                logger.warning("Gemini %s exception: %s", model_name, model_err)
+                continue
+
+    except Exception as e:
+        logger.error("Gemini kurum oneri kapak resmi hatasi: %s", e)
+    return None
+
+
 async def scrape_kurum_onerileri():
     """Kurum onerileri scraper — hedeffiyat.com.tr'den araci kurum hedef fiyatlari."""
     logger.info("Kurum onerileri scraper basliyor...")
@@ -4658,15 +4741,42 @@ async def scrape_kurum_onerileri():
                     await db.commit()
                 elif unsent_items:
                     count = len(unsent_items)
-                    tickers = [i.ticker for i in unsent_items[:3]]
-                    tickers_str = ", ".join(tickers)
+
+                    # ── Detayli oneri ozeti: "Kurum: TICKER hedef X TL (TAVSİYE)" ──
+                    def _format_oneri(item) -> str:
+                        """Tek bir kurum onerisini kisa formata donustur."""
+                        parts = []
+                        if item.institution_name:
+                            parts.append(item.institution_name.replace(" Menkul", "").replace(" Yatırım Menkul Değerler", " Yatırım"))
+                        parts.append(item.ticker or "?")
+                        if item.target_price:
+                            tp = f"{item.target_price:,.2f}".replace(",", ".")
+                            parts.append(f"hedef {tp} TL")
+                        if item.recommendation:
+                            rec_map = {
+                                "Endeks Üstü Getiri": "AL",
+                                "Endeks Altı Getiri": "SAT",
+                                "Endekse Paralel Getiri": "TUT",
+                                "Outperform": "AL",
+                                "Underperform": "SAT",
+                                "Neutral": "TUT",
+                            }
+                            rec_short = rec_map.get(item.recommendation, item.recommendation.upper()[:3])
+                            parts.append(f"({rec_short})")
+                        # "Kurum: TICKER hedef 71.50 TL (AL)"
+                        if len(parts) >= 2:
+                            return f"{parts[0]}: {' '.join(parts[1:])}"
+                        return " ".join(parts)
+
+                    detail_lines = [_format_oneri(i) for i in unsent_items[:3]]
+                    body_text = " | ".join(detail_lines)
                     if count > 3:
-                        tickers_str += f" +{count - 3} hisse"
+                        body_text += f" +{count - 3} öneri daha"
 
                     # ── TEK BİLDİRİM ──
                     try:
                         title = f"📊 {count} Yeni Kurum Önerisi"
-                        body = f"{tickers_str} — Detaylar için tıklayın"
+                        body = body_text
                         data = {
                             "type": "kurum_oneri",
                             "screen": "kurum-onerileri",
@@ -4680,23 +4790,33 @@ async def scrape_kurum_onerileri():
                     except Exception as e:
                         logger.debug("Kurum oneri bildirim hatasi: %s", e)
 
-                    # ── TEK TWEET (toplu ozet) ──
+                    # ── TEK TWEET + Gemini kapak resmi ──
                     try:
-                        from app.services.twitter_service import _safe_tweet
+                        from app.services.twitter_service import _safe_tweet, _safe_tweet_with_media
                         unsent_tweets = [i for i in unsent_items if i.tweet_sent_at is None]
                         if unsent_tweets:
-                            # Ozet tweet: tum hisseleri listele
-                            tweet_tickers = [f"#{i.ticker}" for i in unsent_tweets[:5]]
-                            tweet_list = " ".join(tweet_tickers)
+                            # Detayli tweet: her oneriyi satirda goster (max 5)
+                            tweet_lines = []
+                            for i in unsent_tweets[:5]:
+                                line = f"{'🟢' if (i.recommendation or '').lower() in ('al', 'buy', 'endeks üstü getiri', 'outperform') else '🟡' if (i.recommendation or '').lower() in ('tut', 'hold', 'neutral', 'endekse paralel getiri') else '🔴'} "
+                                line += _format_oneri(i)
+                                tweet_lines.append(line)
+                            tweet_detail = "\n".join(tweet_lines)
                             if len(unsent_tweets) > 5:
-                                tweet_list += f" +{len(unsent_tweets) - 5} hisse"
+                                tweet_detail += f"\n+{len(unsent_tweets) - 5} öneri daha"
                             tweet_text = (
                                 f"📊 {len(unsent_tweets)} Yeni Kurum Önerisi\n\n"
-                                f"{tweet_list}\n\n"
+                                f"{tweet_detail}\n\n"
                                 f"Detaylar uygulamamızda 👇\n"
                                 f"#BorsaCebimde #BIST #HisseTavsiye"
                             ).strip()
-                            tweet_ok = _safe_tweet(tweet_text, source="kurum_oneri")
+
+                            # Gemini kapak resmi
+                            cover = await _generate_kurum_oneri_cover(unsent_tweets[:5])
+                            if cover:
+                                tweet_ok = _safe_tweet_with_media(tweet_text, cover, source="kurum_oneri")
+                            else:
+                                tweet_ok = _safe_tweet(tweet_text, source="kurum_oneri")
                             if tweet_ok:
                                 for item in unsent_tweets:
                                     item.tweet_sent_at = _dt.now(_tz.utc)
