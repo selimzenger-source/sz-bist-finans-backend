@@ -118,56 +118,149 @@ def get_default_system_prompt() -> str:
 
 _TR_TZ = ZoneInfo("Europe/Istanbul")
 
-async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
-    """Uzmanpara'dan tavan/taban hisseleri ceker."""
-    url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-azalanlar/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html"
-    }
+def _parse_tavan_taban_rows(table, is_ceiling: bool, direction: str) -> list[dict]:
+    """Bir HTML tablosundan tavan/taban hisselerini parse eder."""
     results = []
-    
+    rows = table.find_all("tr")[1:]  # header atla
+    parsed_count = 0
+
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) >= 4:
+            ticker_raw = cols[0].text.strip()
+            ticker = ticker_raw.split("\n")[0].strip().split(" ")[0].strip()
+            if not ticker or len(ticker) > 10:
+                continue
+
+            price_str = cols[1].text.strip().replace(".", "").replace(",", ".")
+            change_str = cols[3].text.strip().replace("%", "").replace(".", "").replace(",", ".")
+
+            try:
+                price = float(price_str)
+                change = float(change_str)
+                parsed_count += 1
+
+                # %10.01 filtresi — uzmanpara bazen yanlış veri verir
+                # Tavan: +9.75 ile +10.01 arası, Taban: -10.01 ile -9.75 arası
+                if is_ceiling and 9.75 <= change <= 10.01:
+                    results.append({"ticker": ticker, "price": price, "change": change})
+                elif not is_ceiling and -10.01 <= change <= -9.75:
+                    results.append({"ticker": ticker, "price": price, "change": change})
+                elif is_ceiling and change > 10.01:
+                    logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} > +10.01 (veri hatası)")
+                elif not is_ceiling and change < -10.01:
+                    logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} < -10.01 (veri hatası)")
+            except ValueError:
+                if parsed_count == 0:
+                    logger.warning(f"[{direction}] Parse hatası: ticker={ticker}, price='{price_str}', change='{change_str}'")
+                continue
+
+    logger.info(f"[{direction}] Parse: {parsed_count} geçerli satır, {len(results)} tavan/taban hisse")
+    return results
+
+
+async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
+    """Uzmanpara'dan tavan/taban hisseleri ceker. Boş dönerse BigPara yedek kaynak."""
+    direction = "tavan" if is_ceiling else "taban"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "tr-TR,tr;q=0.9"
+    }
+
+    # ── 1. UZMANPARA (birincil kaynak) ──
+    url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-azalanlar/"
+    results = []
     try:
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers)
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.get(url, headers=headers, follow_redirects=True)
             if res.status_code != 200:
-                logger.error(f"Scrape URL error: {url} -> {res.status_code}")
+                logger.error(f"[{direction}] Uzmanpara HTTP {res.status_code}")
+            else:
+                soup = BeautifulSoup(res.text, "html.parser")
+
+                # Tablo arama — önce ID ile, sonra en büyük tabloyu bul
+                table_id = "tbl_artanlar" if is_ceiling else "tbl_azalanlar"
+                table = soup.find("table", {"id": table_id})
+
+                if not table:
+                    # Sayfadaki TÜM tabloları bul, en çok satırı olanı seç
+                    all_tables = soup.find_all("table")
+                    logger.info(f"[{direction}] tbl_id bulunamadı, sayfada {len(all_tables)} tablo var")
+                    if all_tables:
+                        table = max(all_tables, key=lambda t: len(t.find_all("tr")))
+
+                if not table:
+                    logger.warning(f"[{direction}] Uzmanpara'da hiç tablo bulunamadı! HTML: {len(res.text)} byte")
+                else:
+                    row_count = len(table.find_all("tr"))
+                    logger.info(f"[{direction}] Uzmanpara tablo bulundu: {row_count} satır (id={table.get('id', 'YOK')})")
+                    results = _parse_tavan_taban_rows(table, is_ceiling, direction)
+    except Exception as e:
+        logger.error(f"[{direction}] Uzmanpara scrape hatası: {e}")
+
+    if results:
+        return results
+
+    # ── 2. BIGPARA (yedek kaynak) ──
+    logger.warning(f"[{direction}] Uzmanpara boş döndü, BigPara yedek kaynağa geçiliyor...")
+    bp_url = "https://bigpara.hurriyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://bigpara.hurriyet.com.tr/borsa/en-cok-azalanlar/"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.get(bp_url, headers=headers, follow_redirects=True)
+            if res.status_code != 200:
+                logger.error(f"[{direction}] BigPara HTTP {res.status_code}")
                 return []
-                
+
             soup = BeautifulSoup(res.text, "html.parser")
-            table_id = "tbl_artanlar" if is_ceiling else "tbl_azalanlar"
-            table = soup.find("table", {"id": table_id})
-            if not table:
-                table = soup.select_one("table")
-                
-            if not table:
-                return []
-                
-            for row in table.find_all("tr")[1:]:
-                cols = row.find_all("td")
-                if len(cols) >= 4:
-                    ticker = cols[0].text.strip()
-                    price_str = cols[1].text.strip().replace(".", "").replace(",", ".")
-                    change_str = cols[3].text.strip().replace(".", "").replace(",", ".")
-                    
+            all_tables = soup.find_all("table")
+            if all_tables:
+                table = max(all_tables, key=lambda t: len(t.find_all("tr")))
+                row_count = len(table.find_all("tr"))
+                logger.info(f"[{direction}] BigPara tablo bulundu: {row_count} satır")
+                results = _parse_tavan_taban_rows(table, is_ceiling, f"{direction}-BigPara")
+                if results:
+                    logger.info(f"[{direction}] BigPara'dan {len(results)} hisse alındı ✅")
+                    return results
+
+            # BigPara tablo yoksa, li/div tabanlı yapıyı dene
+            items = soup.select("ul.live-stock-item, li[data-symbol]")
+            if items:
+                logger.info(f"[{direction}] BigPara div/li yapısı bulundu: {len(items)} item")
+                for item in items:
                     try:
+                        symbol = item.get("data-symbol", "")
+                        if not symbol:
+                            sym_el = item.select_one("[data-symbol]")
+                            symbol = sym_el.get("data-symbol", "") if sym_el else ""
+                        if not symbol:
+                            continue
+
+                        # BigPara'da fiyat ve değişim node'ları
+                        price_el = item.select_one(".node-k, .value, td:nth-child(2)")
+                        change_el = item.select_one(".node-e, .change, td:nth-child(4)")
+                        if not price_el or not change_el:
+                            continue
+
+                        price_str = price_el.text.strip().replace(".", "").replace(",", ".")
+                        change_str = change_el.text.strip().replace("%", "").replace(".", "").replace(",", ".")
                         price = float(price_str)
                         change = float(change_str)
 
-                        # %10.01 filtresi — uzmanpara bazen yanlış veri verir
-                        # Tavan: +9.75 ile +10.01 arası, Taban: -10.01 ile -9.75 arası
                         if is_ceiling and 9.75 <= change <= 10.01:
-                            results.append({"ticker": ticker, "price": price, "change": change})
+                            results.append({"ticker": symbol, "price": price, "change": change})
                         elif not is_ceiling and -10.01 <= change <= -9.75:
-                            results.append({"ticker": ticker, "price": price, "change": change})
-                        elif is_ceiling and change > 10.01:
-                            logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} > +10.01 (veri hatası)")
-                        elif not is_ceiling and change < -10.01:
-                            logger.warning(f"[FİLTRE] {ticker} atlandı: %{change:+.2f} < -10.01 (veri hatası)")
-                    except ValueError:
+                            results.append({"ticker": symbol, "price": price, "change": change})
+                    except (ValueError, AttributeError):
                         continue
+
+                if results:
+                    logger.info(f"[{direction}] BigPara div yapısından {len(results)} hisse alındı ✅")
     except Exception as e:
-        logger.error(f"Uzmanpara scrape hatasi: {e}")
+        logger.error(f"[{direction}] BigPara scrape hatası: {e}")
+
+    if not results:
+        logger.warning(f"[{direction}] Hem Uzmanpara hem BigPara boş döndü!")
 
     return results
 
