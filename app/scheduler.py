@@ -620,19 +620,42 @@ async def check_viop_notifications():
 
                 text_lower = tw.text.lower()
 
+                # Tweet metninden fiyat ve degisim parse et
+                import re as _re
+                _price = 0.0
+                _change = 0.0
+                _night_diff = None
+                price_match = _re.search(r'(?:Fiyat|Açılış|Kapanış)[:\s]*([0-9.]+)', tw.text)
+                if price_match:
+                    try:
+                        _price = float(price_match.group(1).replace(".", ""))
+                    except Exception:
+                        pass
+                change_match = _re.search(r'%([+-]?[0-9.]+)', tw.text)
+                if change_match:
+                    try:
+                        _change = float(change_match.group(1))
+                    except Exception:
+                        pass
+                night_match = _re.search(r'gece.*?%([+-]?[0-9.]+)', tw.text, _re.IGNORECASE)
+                if night_match:
+                    try:
+                        _night_diff = float(night_match.group(1))
+                    except Exception:
+                        pass
+
                 # Acilis — tweet metninden ozet cikar
                 if "açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower:
                     opening_summary = tw.text[:300].replace("\n", " ").strip()
-                    await notif_svc.notify_viop_session("opening", opening_summary)
+                    await notif_svc.notify_viop_session("opening", opening_summary, price=_price, change_pct=_change, night_diff=_night_diff)
                     _viop_notified_ids.add(tw.id)
                 # Kapanis — tweet metninden ozet cikar
                 elif "kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower:
                     closing_summary = tw.text[:300].replace("\n", " ").strip()
-                    await notif_svc.notify_viop_session("closing", closing_summary)
+                    await notif_svc.notify_viop_session("closing", closing_summary, price=_price, change_pct=_change)
                     _viop_notified_ids.add(tw.id)
                 # Flash
                 elif "flash" in text_lower or "flaş" in text_lower:
-                    # Flash iceriginden ozet cikar
                     summary = tw.text[:120].replace("\n", " ").strip()
                     await notif_svc.notify_viop_session("flash", summary)
                     _viop_notified_ids.add(tw.id)
