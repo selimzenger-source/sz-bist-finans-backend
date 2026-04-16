@@ -591,8 +591,12 @@ async def get_public_news_feed(
     tweets = result.scalars().all()
 
     def clean_text(text: str) -> str:
-        # Remove hashtags
-        text = re.sub(r'#\w+', '', text)
+        # Sadece platform hashtag'leri sil — ticker hashtag'leri (#CEMZY, #TRILC)
+        # SPK bülten ve haber metinlerinde hisseyi tanımladığı için KORUNMALI.
+        text = re.sub(
+            r'#(SPK|BIST100|BIST|borsa|BultenAnaliz|HalkaArz|Borsa|BorsaCebimde|SzAlgo|szalgo)\b',
+            '', text, flags=re.IGNORECASE,
+        )
         # Remove URLs (store links, t.co links, etc.)
         text = re.sub(r'https?://\S+', '', text)
         # Remove Android/iOS/Web store references
@@ -695,7 +699,11 @@ async def get_public_viop_night_session(
     tweets = result.scalars().all()
 
     def clean_text(text: str) -> str:
-        text = re.sub(r'#\w+', '', text)
+        # Ticker hashtag'leri korunur, sadece platform hashtag'leri silinir
+        text = re.sub(
+            r'#(SPK|BIST100|BIST|borsa|BultenAnaliz|HalkaArz|Borsa|BorsaCebimde|SzAlgo|szalgo)\b',
+            '', text, flags=re.IGNORECASE,
+        )
         text = re.sub(r'https?://\S+', '', text)
         text = re.sub(r'\n{3,}', '\n\n', text.strip())
         return text.strip()
