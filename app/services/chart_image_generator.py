@@ -2291,8 +2291,12 @@ def _parse_spk_bulletin_sections(ai_text: str) -> dict:
             # Body satırı — temizle
             clean = stripped.replace("**", "")
             clean = re.sub(r'[\U0001F300-\U0001F9FF\U0001F1E0-\U0001F1FF\u2600-\u26FF\u2700-\u27BF\u200d]', '', clean).strip()
-            # Resimde # işareti olmasın — hashtag sadece tweet metninde
-            clean = re.sub(r'#([A-Za-z])', r'\1', clean)
+            # Platform hashtag'lerini temizle, ticker hashtag'lerini KORU.
+            # #CEMZY, #TRILC gibi ticker'lar görselde kalmalı.
+            clean = re.sub(
+                r'#(SPK|BIST100|BIST|borsa|BultenAnaliz|HalkaArz|BorsaCebimde|SzAlgo|szalgo)\b',
+                '', clean, flags=re.IGNORECASE,
+            )
             if clean:
                 current_section["lines"].append(clean)
 

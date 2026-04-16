@@ -734,7 +734,13 @@ async def get_spk_bulletin_analyses(
     tweets = result.scalars().all()
 
     def clean_text(text: str) -> str:
-        text = re.sub(r'#\w+', '', text)
+        # ÖNEMLİ: Ticker hashtag'leri (#CEMZY, #TRILC vb.) KORUNMALI —
+        # sermaye artırımı/karar satırlarında hissenin kim olduğunu gösterir.
+        # Sadece platform hashtag'lerini sil.
+        text = re.sub(
+            r'#(SPK|BIST100|BIST|borsa|BultenAnaliz|HalkaArz|Borsa|BorsaCebimde|SzAlgo|szalgo)\b',
+            '', text, flags=re.IGNORECASE,
+        )
         text = re.sub(r'https?://\S+', '', text)
         text = re.sub(r'📲?\s*(Detaylar\s*görselde|Android|szalgo)[^\n]*', '', text, flags=re.IGNORECASE)
         text = re.sub(r'🍏?\s*iOS:?[^\n]*', '', text, flags=re.IGNORECASE)
