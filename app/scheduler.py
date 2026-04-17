@@ -614,6 +614,29 @@ async def check_viop_notifications():
             from app.services.notification import NotificationService
             notif_svc = NotificationService(session)
 
+            # Saat bazli guard — AI context'te "kapanış" kelimesi gecse bile
+            # yanlis closing bildirimi atilmasin. Gercek seans saatleri:
+            #  - Gunduz acilis: 09:15-10:30 TR
+            #  - Gunduz kapanis / spot close: 17:45-18:45 TR
+            #  - Aksam acilis: 18:45-19:30 TR
+            #  - Aksam kapanis: 22:40-00:45 TR (23:00 + feed gecikmesi)
+            #  - Gun ici seyir (progress): 15:00-16:00 TR
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            _tr_now = _dt.now(_tz(_td(hours=3)))
+            _hhmm = _tr_now.hour * 60 + _tr_now.minute
+
+            def _in(start_hh: int, start_mm: int, end_hh: int, end_mm: int) -> bool:
+                s = start_hh * 60 + start_mm
+                e = end_hh * 60 + end_mm
+                if s <= e:
+                    return s <= _hhmm <= e
+                # Gece asimi (23:xx -> 00:xx)
+                return _hhmm >= s or _hhmm <= e
+
+            _is_opening_window = _in(9, 15, 10, 30) or _in(18, 45, 19, 30)
+            _is_closing_window = _in(17, 45, 18, 45) or _in(22, 40, 0, 45)
+            _is_progress_window = _in(15, 0, 16, 0)
+
             for tw in tweets:
                 if tw.id in _viop_notified_ids:
                     continue
@@ -644,21 +667,45 @@ async def check_viop_notifications():
                     except Exception:
                         pass
 
-                # Acilis — tweet metninden ozet cikar
-                if "açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower:
-                    opening_summary = tw.text[:300].replace("\n", " ").strip()
-                    await notif_svc.notify_viop_session("opening", opening_summary, price=_price, change_pct=_change, night_diff=_night_diff)
-                    _viop_notified_ids.add(tw.id)
-                # Kapanis — tweet metninden ozet cikar
-                elif "kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower:
-                    closing_summary = tw.text[:300].replace("\n", " ").strip()
-                    await notif_svc.notify_viop_session("closing", closing_summary, price=_price, change_pct=_change)
-                    _viop_notified_ids.add(tw.id)
-                # Flash
-                elif "flash" in text_lower or "flaş" in text_lower:
+                # Flash kontrol once — explicit "flaş"/"flash" keyword'u varsa
+                # saat bagimsiz flash bildirimi gonder (eşik aşımı her saat olabilir)
+                if "flash" in text_lower or "flaş" in text_lower:
                     summary = tw.text[:120].replace("\n", " ").strip()
                     await notif_svc.notify_viop_session("flash", summary)
                     _viop_notified_ids.add(tw.id)
+                    continue
+
+                # Acilis — SADECE gercek acilis saatlerinde
+                if ("açıldı" in text_lower or "açılış" in text_lower or "seans başladı" in text_lower) and _is_opening_window:
+                    opening_summary = tw.text[:300].replace("\n", " ").strip()
+                    await notif_svc.notify_viop_session("opening", opening_summary, price=_price, change_pct=_change, night_diff=_night_diff)
+                    _viop_notified_ids.add(tw.id)
+                    continue
+
+                # Kapanis — SADECE gercek kapanis saatlerinde
+                # Bu guard sayesinde 20:22 veya 21:59'daki seyir tweetlerinde
+                # "kapanış" kelimesi gecse bile yanlis kapanis bildirimi atilmaz.
+                if ("kapandı" in text_lower or "kapanış" in text_lower or "seans bitti" in text_lower) and _is_closing_window:
+                    closing_summary = tw.text[:300].replace("\n", " ").strip()
+                    await notif_svc.notify_viop_session("closing", closing_summary, price=_price, change_pct=_change)
+                    _viop_notified_ids.add(tw.id)
+                    continue
+
+                # Gunduz seansi gun ici seyir tweeti — 15:00-16:00 arasi
+                # "seyir" / "seans" / "sürekli" kelimesi gecerse progress bildirimi
+                if _is_progress_window and ("seyir" in text_lower or "sürekli" in text_lower or "akşam seans" not in text_lower):
+                    # Akşam seansı tweeti olmadığından emin ol
+                    if "akşam" not in text_lower and "gece" not in text_lower:
+                        progress_summary = tw.text[:300].replace("\n", " ").strip()
+                        await notif_svc.notify_viop_session("progress", progress_summary, price=_price, change_pct=_change)
+                        _viop_notified_ids.add(tw.id)
+                        continue
+
+                # Diger durumlarda (ornegin 20:22'deki akşam seyir tweet'i)
+                # bildirim gonderilmez — tweet zaten Twitter'da var, bildirime
+                # gerek yok. Kullanici istegi: ak\u015fam seans\u0131nda 1 seyir tweeti yeterli,
+                # bildirim sadece a\u00e7\u0131l\u0131\u015f (19:05) + kapan\u0131\u015f (23:00) + flash esigi icin.
+                _viop_notified_ids.add(tw.id)  # Bir daha kontrol etme
 
             await session.commit()
 
