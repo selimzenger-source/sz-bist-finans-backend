@@ -1916,6 +1916,62 @@ async def list_telegram_news(
     return list(result.scalars().all())
 
 
+@app.get("/api/v1/telegram-news/locked-teasers")
+@limiter.limit("60/minute")
+async def get_locked_teasers(
+    request: Request,
+    limit: int = Query(30, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """FREE kullanicinin GOREMEDIGI PRO-only haberlerin teaser'i.
+
+    Sadece ticker + kisa baslik (ilk 60 karakter) + tarih doner.
+    AI puani ve body gizli — frontend'de kilitli PRO kart gosterir.
+
+    Filtre:
+      - Sadece BIST50 DISINDAKI hisseler (PRO paket icerigi)
+      - sentiment='positive' olanlar (pozitif haber akisindayiz)
+      - Son 7 gun
+    """
+    from app.services.news_service import get_bist50_tickers_sync
+    BIST50_TICKERS = get_bist50_tickers_sync()
+
+    since = datetime.utcnow() - timedelta(days=7)
+
+    stmt = (
+        select(TelegramNews.ticker, TelegramNews.parsed_title, TelegramNews.message_date, TelegramNews.created_at)
+        .where(
+            and_(
+                TelegramNews.created_at >= since,
+                TelegramNews.ticker.isnot(None),
+                TelegramNews.parsed_title.isnot(None),
+                TelegramNews.message_type != "seans_disi_acilis",
+                TelegramNews.sentiment == "positive",
+                ~TelegramNews.ticker.in_(BIST50_TICKERS),  # BIST50 HARICI
+            )
+        )
+        .order_by(desc(TelegramNews.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    teasers = []
+    for r in rows:
+        title = (r.parsed_title or "").strip()
+        # Kisalt (teaser) — ilk 60 karakter
+        if len(title) > 60:
+            title = title[:57].rstrip() + "..."
+        if not title:
+            continue
+        teasers.append({
+            "ticker": r.ticker,
+            "keyword": title,
+            "date": (r.message_date or r.created_at).isoformat() if (r.message_date or r.created_at) else None,
+        })
+    return teasers
+
+
 # -------------------------------------------------------
 # TELEGRAM DEBUG / TEST ENDPOINT
 # -------------------------------------------------------
