@@ -74,10 +74,10 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _draw_bg_watermark(img: Image.Image, width: int, height: int):
-    """Gorsel uzerine silik capraz 'szalgo.net.tr' watermark basar."""
+    """Gorsel uzerine silik capraz 'borsacebimde.app' watermark basar."""
     try:
         wm_font = _load_font(30, bold=False)
-        wm_text = "szalgo.net.tr"
+        wm_text = "borsacebimde.app"
         # Seffaf katman olustur
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(overlay)
@@ -170,7 +170,7 @@ def generate_25day_image(
         width = 1200
         row_h = 44            # her satir yuksekligi
         col_header_h = 50     # sutun baslik satiri
-        footer_h = 120        # alt — toplam + tavan/taban/normal + szalgo
+        footer_h = 120        # alt — toplam + tavan/taban/normal + borsacebimde
         padding = 40
         num_rows = len(days_data)
 
@@ -190,7 +190,7 @@ def generate_25day_image(
         if banner_img:
             img.paste(banner_img, (0, 0))
 
-        # ── ARKA PLAN WATERMARK (silik çapraz szalgo.net.tr) ──
+        # ── ARKA PLAN WATERMARK (silik çapraz borsacebimde.app) ──
         _draw_bg_watermark(img, width, total_h)
 
         draw = ImageDraw.Draw(img)
@@ -340,8 +340,8 @@ def generate_25day_image(
                   f"Tavan: {ceiling_days}  |  Taban: {floor_days}  |  Normal İşlem: {normal_days}",
                   fill=GRAY, font=font_footer_sm)
 
-        # szalgo.net.tr
-        draw.text((padding, footer_y + 70), "szalgo.net.tr", fill=ORANGE, font=font_watermark)
+        # borsacebimde.app
+        draw.text((padding, footer_y + 70), "borsacebimde.app", fill=ORANGE, font=font_watermark)
 
         # ── KAYDET ─────────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -576,8 +576,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         footer_y = total_h - footer_h
         draw.line([(padding, footer_y), (width - padding, footer_y)], fill=DIVIDER, width=2)
         footer_y += 12
-        draw.text((padding, footer_y), "szalgo.net.tr", fill=ORANGE, font=_load_font(18, bold=True))
-        line1 = "SZ Algo Özel Eğitimli Modeller Tarafından Üretilmiştir."
+        draw.text((padding, footer_y), "borsacebimde.app", fill=ORANGE, font=_load_font(18, bold=True))
+        line1 = "Borsa Cebimde Özel Eğitimli Modeller Tarafından Üretilmiştir."
         line2 = "Yatırım yaparken mutlaka kendi araştırmanızı yapınız."
         draw.text((padding + 170, footer_y), line1, fill=GRAY, font=_load_font(16, bold=False))
         draw.text((padding + 170, footer_y + 22), line2, fill=(120, 120, 120), font=_load_font(14, bold=False))
@@ -774,13 +774,13 @@ def generate_daily_tracking_image(
                 else:
                     draw.text((col_x[5], text_y), "—", fill=GRAY, font=font_row)
 
-        # ── FOOTER (sadece szalgo.net.tr) ────────────────
+        # ── FOOTER (sadece borsacebimde.app) ────────────────
         footer_y = banner_h + header_h + table_h + 15
 
         draw.line([(padding, footer_y - 5), (width - padding, footer_y - 5)],
                   fill=DIVIDER, width=2)
 
-        draw.text((padding, footer_y + 10), "szalgo.net.tr", fill=ORANGE, font=font_watermark)
+        draw.text((padding, footer_y + 10), "borsacebimde.app", fill=ORANGE, font=font_watermark)
 
         # ── KAYDET ───────────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -926,7 +926,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         header_h = 90      # Baslik (42pt GOLD) + tarih
         card_h = 90         # Her kart yuksekligi
         card_gap = 4        # Kartlar arasi bosluk
-        footer_h = 45       # Footer (sadece szalgo.net.tr)
+        footer_h = 45       # Footer (sadece borsacebimde.app)
         accent_w = 5        # Sol kenar renk cizgisi genisligi
 
         num_cards = len(snapshot_data)
@@ -1089,8 +1089,8 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         footer_y += 8
         draw.rectangle([(0, footer_y), (width, footer_y + footer_h)], fill=HEADER_BG)
 
-        # szalgo.net.tr (orta)
-        footer_text = "szalgo.net.tr"
+        # borsacebimde.app (orta)
+        footer_text = "borsacebimde.app"
         ft_bbox = font_footer_bold.getbbox(footer_text)
         ft_w = ft_bbox[2] - ft_bbox[0]
         draw.text(((width - ft_w) // 2, footer_y + 8), footer_text, fill=ORANGE, font=font_footer_bold)
@@ -1427,8 +1427,8 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         except Exception:
             pass
 
-        # szalgo.net.tr (logo'nun yaninda)
-        site_text = "szalgo.net.tr"
+        # borsacebimde.app (logo'nun yaninda)
+        site_text = "borsacebimde.app"
         draw.text((logo_x, footer_y + 12), site_text,
                   fill=ORANGE, font=font_footer)
 
@@ -1520,7 +1520,7 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
 
         # ── Boyut hesapla ────────────────────────────────
         top_stripe_h = 8      # üst yeşil çizgi
-        header_h     = 160    # SZ Algo branding
+        header_h     = 160    # Borsa Cebimde branding
         title_h      = 120    # başlık bölümü
         card_h       = 175    # her IPO kartı
         gap          = 16     # kartlar arası boşluk
@@ -1534,7 +1534,7 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         # ── Üst yeşil şerit ─────────────────────────────
         draw.rectangle([(0, 0), (width, top_stripe_h)], fill=TOP_STRIPE)
 
-        # ── Header bölümü (Logo + SZ Algo Finans) ───────
+        # ── Header bölümü (Logo + Borsa Cebimde) ───────
         y = top_stripe_h
         draw.rectangle([(0, y), (width, y + header_h)], fill=HEADER_BG_C)
 
@@ -1559,8 +1559,8 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
         except Exception:
             pass
 
-        # "SZ Algo Finans" + "Halka Arz İzleme"
-        draw.text((logo_x, y + 28), "SZ Algo Finans",
+        # "Borsa Cebimde" + "Halka Arz İzleme"
+        draw.text((logo_x, y + 28), "Borsa Cebimde",
                   fill=WHITE_C, font=_load_font(36, bold=True))
         draw.text((logo_x, y + 76), "Halka Arz Takip & Bildirim",
                   fill=GRAY_C, font=f_subtitle)
@@ -1691,7 +1691,7 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
                 logo_xx += 40
         except Exception:
             pass
-        draw.text((logo_xx, footer_y + 24), "szalgo.net.tr",
+        draw.text((logo_xx, footer_y + 24), "borsacebimde.app",
                   fill=ORANGE_C, font=f_footer)
 
         # Sağ: disclaimer

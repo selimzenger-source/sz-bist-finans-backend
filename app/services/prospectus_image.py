@@ -3,7 +3,7 @@
 Tasarım: SZZZ.png stilinde koyu arka planlı, yeşil/kırmızı bölümlü PNG.
 Layout:
   ┌─────────────────────────────────────────────────────────┐
-  │  🏦 SZ Algo Finans    [ŞİRKET ADI]   [İZAHNAME ANALİZİ]│  ← Header
+  │  🏦 Borsa Cebimde    [ŞİRKET ADI]   [İZAHNAME ANALİZİ]│  ← Header
   ├─────────────────────────────────────────────────────────┤
   │  ✅ OLUMLU DİPNOTLAR                                     │  ← Yeşil başlık
   │  ●  Madde 1                                              │
@@ -17,7 +17,7 @@ Layout:
   ├─────────────────────────────────────────────────────────┤
   │  📌 ÖZET: ...                                            │  ← Mavi bant
   ├─────────────────────────────────────────────────────────┤
-  │  szalgo.net.tr          Yatırım tavsiyesi değildir       │  ← Footer
+  │  borsacebimde.app          Yatırım tavsiyesi değildir       │  ← Footer
   └─────────────────────────────────────────────────────────┘
 
 Her IPO için ayrı PNG üretilir ve /static/prospectus/{ipo_id}.png olarak saklanır.
@@ -91,14 +91,14 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _draw_bg_watermark(img: Image.Image, width: int, height: int):
-    """Diagonal szalgo.net.tr watermark."""
+    """Diagonal borsacebimde.app watermark."""
     try:
         wm_font = _load_font(28, bold=False)
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(overlay)
         for yy in range(-height, height * 2, 300):
             for xx in range(-width, width * 2, 550):
-                wm_draw.text((xx, yy), "szalgo.net.tr", fill=(255, 255, 255, 14), font=wm_font)
+                wm_draw.text((xx, yy), "borsacebimde.app", fill=(255, 255, 255, 14), font=wm_font)
         overlay = overlay.rotate(-30, resample=Image.BICUBIC, expand=False)
         img_rgba = img.convert("RGBA")
         img_rgba = Image.alpha_composite(img_rgba, overlay)
@@ -298,7 +298,7 @@ def generate_prospectus_analysis_image(
 
         # Brand text
         brand_y = y + 22
-        draw.text((logo_x, brand_y), "SZ Algo Finans", fill=WHITE, font=f_header_brand)
+        draw.text((logo_x, brand_y), "Borsa Cebimde", fill=WHITE, font=f_header_brand)
         draw.text((logo_x, brand_y + 44), "İzahname Analizi", fill=GRAY, font=f_header_sm)
 
         # Şirket adı — orta (sadece ilk 2 kelime: "Gentaş Kimya" gibi)
@@ -414,7 +414,7 @@ def generate_prospectus_analysis_image(
         except Exception:
             pass
 
-        draw.text((footer_logo_x, y + 14), "szalgo.net.tr", fill=ORANGE, font=f_footer)
+        draw.text((footer_logo_x, y + 14), "borsacebimde.app", fill=ORANGE, font=f_footer)
 
         # Sayfa sayısı + dipnot sayısı — orta
         dipnot_count = len(positives) + len(negatives)

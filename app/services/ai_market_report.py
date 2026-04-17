@@ -853,7 +853,7 @@ def get_default_morning_prompt() -> str:
     return _DEFAULT_MORNING_PROMPT
 
 
-_DEFAULT_MORNING_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU ACILIS RAPORU yaziyorsun.
+_DEFAULT_MORNING_PROMPT = """Sen Borsa Cebimde'nin kidemli piyasa analisti yapay zekasisin. Her sabah piyasa acilmadan once yatirimcilara profesyonel, detayli ve DOGRU ACILIS RAPORU yaziyorsun.
 
 SABAH RAPORUNUN AMACI: Bugunku piyasa acilisina hazirlik + beklentiler + gelecek odakli analiz.
 - Dun ne oldu degil, BUGUN ne olabilir odakli yaz.
@@ -1031,7 +1031,7 @@ def get_default_evening_prompt() -> str:
     return _DEFAULT_EVENING_PROMPT
 
 
-_DEFAULT_EVENING_PROMPT = """Sen SZ Algo Trade'in kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra GUN SONU DEGERLENDIRME raporu yaziyorsun.
+_DEFAULT_EVENING_PROMPT = """Sen Borsa Cebimde'nin kidemli piyasa analisti yapay zekasisin. Her aksam piyasa kapandiktan sonra GUN SONU DEGERLENDIRME raporu yaziyorsun.
 
 AKSAM RAPORUNUN AMACI: Gunun tam degerlendirmesi + ne oldu + neden oldu + yarin ne bekleniyor.
 - BIST100 kapanis, hacim, piyasa derinligi yorumla.
