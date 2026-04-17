@@ -448,11 +448,12 @@ SEKTOR: [BANKA|ENERJI|ILAC|OTOMOTIV|PERAKENDE|TEKNOLOJI|INSAAT|DEMIR_CELIK|HOLDI
 
 
 async def _ai_evaluate(news: dict) -> dict | None:
-    """Gemini ile haberi puanla."""
+    """Haberi puanla — Gemini birincil, Claude Haiku yedek."""
     settings = get_settings()
-    api_key = settings.GEMINI_API_KEY
-    if not api_key:
-        logger.warning("GEMINI_API_KEY yok, haber puanlama atlaniyor")
+    gemini_key = settings.GEMINI_API_KEY
+    anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", "") or ""
+    if not gemini_key and not anthropic_key:
+        logger.warning("GEMINI_API_KEY ve ANTHROPIC_API_KEY yok, haber puanlama atlaniyor")
         return None
 
     prompt = _IMPORTANCE_PROMPT.format(
@@ -461,26 +462,72 @@ async def _ai_evaluate(news: dict) -> dict | None:
         source=news["source"],
     )
 
+    text: str | None = None
+    provider_used: str | None = None
+
+    # 1. Birincil: Gemini
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gemini-2.5-flash",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 200,
+                        "temperature": 0.1,
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data["choices"][0]["message"]["content"].strip()
+                    provider_used = "Gemini"
+                else:
+                    logger.warning("Gemini haber puanlama HTTP %s: %s", resp.status_code, resp.text[:200])
+        except Exception as e:
+            logger.warning("Gemini haber puanlama hatasi: %s", e)
+
+    # 2. Yedek: Claude Haiku
+    if not text and anthropic_key:
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-haiku-4-5-20251001",
+                        "max_tokens": 300,
+                        "temperature": 0.1,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for block in data.get("content", []):
+                        if block.get("type") == "text":
+                            text = block.get("text", "").strip()
+                            break
+                    provider_used = "Claude-Haiku"
+                else:
+                    logger.error("Claude haber puanlama HTTP %s: %s", resp.status_code, resp.text[:200])
+        except Exception as e:
+            logger.error("Claude haber puanlama hatasi: %s", e)
+
+    if not text:
+        logger.error("Haber puanlama: hicbir provider yanit vermedi (%s)", news.get("title", "")[:60])
+        return None
+
+    logger.debug("Haber puanlama: %s (%s)", provider_used, news.get("title", "")[:40])
+
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
-                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": "gemini-2.5-flash",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": 200,
-                    "temperature": 0.1,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        text = data["choices"][0]["message"]["content"].strip()
-
         # Parse response
         score_match = re.search(r"PUAN:\s*(\d+(?:\.\d+)?)", text)
         topic_match = re.search(r"KONU:\s*(.+)", text)
