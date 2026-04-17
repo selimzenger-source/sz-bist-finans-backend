@@ -2918,6 +2918,48 @@ async def admin_test_kap_notification(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/set-ipo-status")
+@limiter.limit("10/minute")
+async def admin_set_ipo_status(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: IPO status degistir (test/demo amacli).
+
+    Payload: {admin_password, ipo_id, status}
+
+    Gecerli status'lar: spk_pending, newly_approved, in_distribution,
+    awaiting_trading, trading, completed, archived
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    new_status = str(payload.get("status") or "").strip()
+    valid_statuses = {"spk_pending", "newly_approved", "in_distribution",
+                      "awaiting_trading", "trading", "completed", "archived"}
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Gecersiz status. Gecerli: {valid_statuses}")
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    old_status = ipo.status
+    ipo.status = new_status
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "ipo_id": ipo_id,
+        "ticker": ipo.ticker,
+        "old_status": old_status,
+        "new_status": new_status,
+    }
+
+
 @app.post("/api/v1/admin/seed-ipo-poll")
 @limiter.limit("10/minute")
 async def admin_seed_ipo_poll(
