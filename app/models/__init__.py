@@ -21,6 +21,7 @@ from app.models.kap_all_disclosure import KapAllDisclosure
 from app.models.user_watchlist import UserWatchlist
 from app.models.daily_stock_market_stat import DailyStockMarketStat
 from app.models.kurum_oneri import KurumOneri
+from app.models.ipo_poll_vote import IPOPollVote
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -44,4 +45,5 @@ __all__ = [
     "FeatureInterest",
     "DailyStockMarketStat",
     "KurumOneri",
+    "IPOPollVote",
 ]

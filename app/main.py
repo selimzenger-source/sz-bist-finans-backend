@@ -1523,6 +1523,276 @@ async def get_prospectus_image(ipo_id: int, db: AsyncSession = Depends(get_db)):
 
 
 # -------------------------------------------------------
+# IPO POLL (Katılım Anketi + Tavan Tahmini) — 2 Fazlı
+# -------------------------------------------------------
+# Faz belirleme IPO status'a gore:
+#   - hype   (Faz 1): status in ('newly_approved', 'in_distribution')
+#   - ceiling (Faz 2): status in ('awaiting_trading', 'trading') ve first trading
+#     gununden 1 gunden az gecmisse aktif.
+# Archived IPO'larda anket kapali.
+
+
+def _determine_poll_phase(ipo: IPO) -> str | None:
+    """IPO status'una gore aktif poll fazini dondurur.
+
+    Returns:
+        'hype'    — Faz 1 (talep toplama sureci)
+        'ceiling' — Faz 2 (dagitim sonrasi + ilk islem gunu)
+        None      — Anket kapali
+    """
+    status = (ipo.status or "").strip()
+    if status in ("newly_approved", "in_distribution"):
+        return "hype"
+    if status in ("awaiting_trading", "trading"):
+        # trading gunu baslayali 1 gunden fazla olduysa kapali
+        from datetime import date as _date, timedelta as _td
+        if status == "trading" and ipo.trading_start:
+            try:
+                days_since = (_date.today() - ipo.trading_start).days
+                if days_since > 1:
+                    return None
+            except Exception:
+                pass
+        return "ceiling"
+    return None
+
+
+def _get_client_ip(request: Request) -> str:
+    """X-Forwarded-For header'indan veya client.host'tan IP adresi al."""
+    xff = request.headers.get("x-forwarded-for") or ""
+    if xff:
+        return xff.split(",")[0].strip()
+    try:
+        return request.client.host if request.client else "unknown"
+    except Exception:
+        return "unknown"
+
+
+@app.get("/api/v1/ipos/{ipo_id}/poll-phase")
+@limiter.limit("60/minute")
+async def get_poll_phase(ipo_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """IPO icin aktif poll fazini dondurur. Anket kapali ise phase=null."""
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+    return {
+        "ipo_id": ipo_id,
+        "phase": _determine_poll_phase(ipo),
+        "status": ipo.status,
+    }
+
+
+@app.post("/api/v1/ipos/{ipo_id}/poll-vote")
+@limiter.limit("30/minute")
+async def submit_poll_vote(
+    ipo_id: int,
+    payload: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Oy kaydet.
+
+    Payload:
+      {
+        "phase": "hype" | "ceiling",
+        "choice": "participate" | "undecided" | "skip"  (hype icin)
+                  "<int>"                                (ceiling icin, 1-30)
+        "device_id": "..."  (mobil ise, opsiyonel ama tek oy kurali icin onerilen)
+      }
+
+    Tek oy kurali:
+      - device_id varsa (mobil)  → (ipo_id, phase, device_id) unique
+      - device_id yoksa (web)    → (ipo_id, phase, ip_address) unique
+    """
+    from app.models.ipo_poll_vote import IPOPollVote
+
+    phase = str(payload.get("phase") or "").strip()
+    choice = str(payload.get("choice") or "").strip()
+    device_id = (payload.get("device_id") or "").strip() or None
+
+    if phase not in ("hype", "ceiling"):
+        raise HTTPException(status_code=400, detail="Gecersiz faz")
+
+    # Choice validasyonu
+    if phase == "hype":
+        if choice not in ("participate", "undecided", "skip"):
+            raise HTTPException(status_code=400, detail="Gecersiz secim (hype)")
+    else:  # ceiling
+        try:
+            n = int(choice)
+            if n < 1 or n > 30:
+                raise ValueError()
+            choice = str(n)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Tavan sayisi 1-30 arasi olmali")
+
+    # IPO ve faz kontrolu
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    active_phase = _determine_poll_phase(ipo)
+    if active_phase != phase:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bu faz su anda aktif degil (aktif: {active_phase})",
+        )
+
+    ip_address = None if device_id else _get_client_ip(request)
+
+    # Duplicate kontrolu — kullanici zaten oy verdi mi?
+    from sqlalchemy import and_ as _and
+    if device_id:
+        dup_stmt = select(IPOPollVote).where(_and(
+            IPOPollVote.ipo_id == ipo_id,
+            IPOPollVote.phase == phase,
+            IPOPollVote.device_id == device_id,
+        ))
+    else:
+        dup_stmt = select(IPOPollVote).where(_and(
+            IPOPollVote.ipo_id == ipo_id,
+            IPOPollVote.phase == phase,
+            IPOPollVote.ip_address == ip_address,
+        ))
+    dup_result = await db.execute(dup_stmt)
+    if dup_result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Bu ankete zaten oy kullandiniz")
+
+    # Kaydet
+    vote = IPOPollVote(
+        ipo_id=ipo_id,
+        phase=phase,
+        choice=choice,
+        device_id=device_id,
+        ip_address=ip_address,
+    )
+    db.add(vote)
+    try:
+        await db.commit()
+    except Exception as _e:
+        await db.rollback()
+        # Unique constraint violation — race condition ile duplicate
+        raise HTTPException(status_code=409, detail="Bu ankete zaten oy kullandiniz")
+
+    return {"status": "ok", "phase": phase, "choice": choice}
+
+
+@app.get("/api/v1/ipos/{ipo_id}/poll-stats")
+@limiter.limit("60/minute")
+async def get_poll_stats(ipo_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    """Anket istatistikleri.
+
+    Response:
+      {
+        "ipo_id": 1,
+        "active_phase": "hype" | "ceiling" | null,
+        "hype": {
+          "total": 10,
+          "participate": 5, "participate_pct": 50.0,
+          "undecided": 3,   "undecided_pct": 30.0,
+          "skip": 2,        "skip_pct": 20.0
+        },
+        "ceiling": {
+          "total": 5,
+          "average": 7.4,     # ortalama tavan tahmini
+          "distribution": {"5": 2, "8": 2, "10": 1}
+        }
+      }
+    """
+    from app.models.ipo_poll_vote import IPOPollVote
+    from sqlalchemy import func as _f
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
+
+    # Hype istatistikleri
+    hype_stmt = select(IPOPollVote.choice, _f.count().label("n")).where(
+        IPOPollVote.ipo_id == ipo_id, IPOPollVote.phase == "hype",
+    ).group_by(IPOPollVote.choice)
+    hype_rows = (await db.execute(hype_stmt)).all()
+    hype_counts = {"participate": 0, "undecided": 0, "skip": 0}
+    for choice, n in hype_rows:
+        if choice in hype_counts:
+            hype_counts[choice] = n
+    hype_total = sum(hype_counts.values())
+
+    def _pct(n: int, total: int) -> float:
+        return round(100.0 * n / total, 1) if total else 0.0
+
+    # Ceiling istatistikleri
+    ceiling_stmt = select(IPOPollVote.choice).where(
+        IPOPollVote.ipo_id == ipo_id, IPOPollVote.phase == "ceiling",
+    )
+    ceiling_rows = (await db.execute(ceiling_stmt)).all()
+    ceiling_values = []
+    distribution: dict[str, int] = {}
+    for (choice,) in ceiling_rows:
+        try:
+            v = int(choice)
+            ceiling_values.append(v)
+            distribution[str(v)] = distribution.get(str(v), 0) + 1
+        except (ValueError, TypeError):
+            continue
+    ceiling_avg = round(sum(ceiling_values) / len(ceiling_values), 1) if ceiling_values else None
+
+    return {
+        "ipo_id": ipo_id,
+        "active_phase": _determine_poll_phase(ipo),
+        "hype": {
+            "total": hype_total,
+            "participate": hype_counts["participate"],
+            "participate_pct": _pct(hype_counts["participate"], hype_total),
+            "undecided": hype_counts["undecided"],
+            "undecided_pct": _pct(hype_counts["undecided"], hype_total),
+            "skip": hype_counts["skip"],
+            "skip_pct": _pct(hype_counts["skip"], hype_total),
+        },
+        "ceiling": {
+            "total": len(ceiling_values),
+            "average": ceiling_avg,
+            "distribution": distribution,
+        },
+    }
+
+
+@app.get("/api/v1/ipos/{ipo_id}/poll-my-vote")
+@limiter.limit("60/minute")
+async def get_my_poll_vote(
+    ipo_id: int,
+    request: Request,
+    device_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin bu IPO'ya verdigi oyu dondurur (her iki faz icin)."""
+    from app.models.ipo_poll_vote import IPOPollVote
+    from sqlalchemy import and_ as _and
+
+    ip_address = None if device_id else _get_client_ip(request)
+
+    if device_id:
+        stmt = select(IPOPollVote).where(_and(
+            IPOPollVote.ipo_id == ipo_id,
+            IPOPollVote.device_id == device_id,
+        ))
+    else:
+        stmt = select(IPOPollVote).where(_and(
+            IPOPollVote.ipo_id == ipo_id,
+            IPOPollVote.ip_address == ip_address,
+        ))
+
+    rows = (await db.execute(stmt)).scalars().all()
+    result = {"hype": None, "ceiling": None}
+    for v in rows:
+        if v.phase in result:
+            result[v.phase] = v.choice
+    return {"ipo_id": ipo_id, **result}
+
+
+# -------------------------------------------------------
 # TELEGRAM HABER ENDPOINTS (YENi)
 # -------------------------------------------------------
 

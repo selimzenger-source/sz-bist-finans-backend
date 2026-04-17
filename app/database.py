@@ -603,6 +603,34 @@ async def init_db():
         except Exception:
             pass
 
+        # v49 migration: ipo_poll_votes tablosu (2 fazli anket: hype + ceiling prediction)
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ipo_poll_votes (
+                    id SERIAL PRIMARY KEY,
+                    ipo_id INTEGER NOT NULL REFERENCES ipos(id) ON DELETE CASCADE,
+                    phase VARCHAR(16) NOT NULL,
+                    choice VARCHAR(32) NOT NULL,
+                    device_id VARCHAR(128),
+                    ip_address VARCHAR(64),
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ipo_poll_ipo ON ipo_poll_votes(ipo_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ipo_poll_phase ON ipo_poll_votes(phase)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ipo_poll_device ON ipo_poll_votes(device_id)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ipo_poll_ip ON ipo_poll_votes(ip_address)"))
+            # device bazli tekillik (mobil icin)
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipo_poll_device ON ipo_poll_votes(ipo_id, phase, device_id) WHERE device_id IS NOT NULL"
+            ))
+            # ip bazli tekillik (web icin)
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipo_poll_ip ON ipo_poll_votes(ipo_id, phase, ip_address) WHERE ip_address IS NOT NULL"
+            ))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
