@@ -1747,8 +1747,6 @@ async def get_poll_stats(ipo_id: int, request: Request, db: AsyncSession = Depen
             "total": hype_total,
             "participate": hype_counts["participate"],
             "participate_pct": _pct(hype_counts["participate"], hype_total),
-            "undecided": hype_counts["undecided"],
-            "undecided_pct": _pct(hype_counts["undecided"], hype_total),
             "skip": hype_counts["skip"],
             "skip_pct": _pct(hype_counts["skip"], hype_total),
         },
