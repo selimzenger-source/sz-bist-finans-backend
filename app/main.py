@@ -1596,8 +1596,8 @@ async def submit_poll_vote(
     Payload:
       {
         "phase": "hype" | "ceiling",
-        "choice": "participate" | "undecided" | "skip"  (hype icin)
-                  "<int>"                                (ceiling icin, 1-30)
+        "choice": "participate" | "skip"   (hype icin — sadece evet/hayir)
+                  "<int>"                    (ceiling icin, 1-30)
         "device_id": "..."  (mobil ise, opsiyonel ama tek oy kurali icin onerilen)
       }
 
@@ -1616,7 +1616,8 @@ async def submit_poll_vote(
 
     # Choice validasyonu
     if phase == "hype":
-        if choice not in ("participate", "undecided", "skip"):
+        # Sadece evet/hayir. 'undecided' eski surumden gelmis olabilir → reddet.
+        if choice not in ("participate", "skip"):
             raise HTTPException(status_code=400, detail="Gecersiz secim (hype)")
     else:  # ceiling
         try:
@@ -1690,9 +1691,8 @@ async def get_poll_stats(ipo_id: int, request: Request, db: AsyncSession = Depen
         "active_phase": "hype" | "ceiling" | null,
         "hype": {
           "total": 10,
-          "participate": 5, "participate_pct": 50.0,
-          "undecided": 3,   "undecided_pct": 30.0,
-          "skip": 2,        "skip_pct": 20.0
+          "participate": 6, "participate_pct": 60.0,
+          "skip": 4,        "skip_pct": 40.0
         },
         "ceiling": {
           "total": 5,
@@ -1709,12 +1709,13 @@ async def get_poll_stats(ipo_id: int, request: Request, db: AsyncSession = Depen
     if not ipo:
         raise HTTPException(status_code=404, detail="Halka arz bulunamadi")
 
-    # Hype istatistikleri
+    # Hype istatistikleri — sadece evet/hayir. Eski 'undecided' kayitlari
+    # gelirse istatistige dahil edilmez (geriye donuk uyumluluk).
     hype_stmt = select(IPOPollVote.choice, _f.count().label("n")).where(
         IPOPollVote.ipo_id == ipo_id, IPOPollVote.phase == "hype",
     ).group_by(IPOPollVote.choice)
     hype_rows = (await db.execute(hype_stmt)).all()
-    hype_counts = {"participate": 0, "undecided": 0, "skip": 0}
+    hype_counts = {"participate": 0, "skip": 0}
     for choice, n in hype_rows:
         if choice in hype_counts:
             hype_counts[choice] = n
