@@ -1542,10 +1542,22 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
     """
     status = (ipo.status or "").strip()
     # HYPE fazi: SPK onayi bekleyen veya dagitim surecindeyken "Katilacak misin?" anketi
+    # ONEMLI: Dagitim surecinde (in_distribution) olsa bile subscription_end GECTIYSE,
+    # artik 'sure doldu' anlamina gelir \u2192 ceiling fazina gec (status henuz guncellenmemis
+    # olabilir ama UX olarak tahmin anketi baslamali).
     if status in ("newly_approved", "in_distribution"):
+        from datetime import date as _date
+        if status == "in_distribution" and ipo.subscription_end:
+            try:
+                end = ipo.subscription_end
+                end_date = end.date() if hasattr(end, 'date') else end
+                if _date.today() > end_date:
+                    return "ceiling"
+            except Exception:
+                pass
         return "hype"
-    # CEILING fazi: SADECE awaiting_trading (talep toplama bitti, islem gunu bekleniyor)
-    # Trading basladigi an anket ARSIVLENIR — ger\u00e7ek sonuc gorulmeye baslayinca tahmin kapanir.
+    # CEILING fazi: awaiting_trading (talep toplama bitti, islem gunu bekleniyor)
+    # Trading basladigi an anket ARSIVLENIR — gercek sonuc gorulmeye baslayinca tahmin kapanir.
     if status == "awaiting_trading":
         return "ceiling"
     return None
