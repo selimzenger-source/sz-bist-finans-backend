@@ -1541,18 +1541,12 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
         None      — Anket kapali
     """
     status = (ipo.status or "").strip()
+    # HYPE fazi: SPK onayi bekleyen veya dagitim surecindeyken "Katilacak misin?" anketi
     if status in ("newly_approved", "in_distribution"):
         return "hype"
-    if status in ("awaiting_trading", "trading"):
-        # trading gunu baslayali 1 gunden fazla olduysa kapali
-        from datetime import date as _date, timedelta as _td
-        if status == "trading" and ipo.trading_start:
-            try:
-                days_since = (_date.today() - ipo.trading_start).days
-                if days_since > 1:
-                    return None
-            except Exception:
-                pass
+    # CEILING fazi: SADECE awaiting_trading (talep toplama bitti, islem gunu bekleniyor)
+    # Trading basladigi an anket ARSIVLENIR — ger\u00e7ek sonuc gorulmeye baslayinca tahmin kapanir.
+    if status == "awaiting_trading":
         return "ceiling"
     return None
 
