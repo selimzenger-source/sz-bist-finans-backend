@@ -2863,6 +2863,105 @@ async def admin_test_kap_notification(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/seed-ipo-poll")
+@limiter.limit("10/minute")
+async def admin_seed_ipo_poll(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: IPO anketine sanal oy seed et (test/demo icin).
+
+    Payload:
+      {
+        "admin_password": "...",
+        "ipo_id": 46,
+        "hype": {"participate": 53, "undecided": 28, "skip": 40},
+        "ceiling": {"1": 15, "2": 35, "3": 60, "4": 45, "5": 30, "6": 3, "7": 1},
+        "reset": false  // true ise IPO'daki tum poll oylarini once siler
+      }
+
+    Her oy unique device_id ile insert edilir: 'seed_{ipo}_{phase}_{i}'.
+    Toplam oy, hype/ceiling counts toplamidir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.ipo_poll_vote import IPOPollVote
+    from sqlalchemy import delete as _del
+
+    ipo_id = payload.get("ipo_id")
+    if not isinstance(ipo_id, int):
+        raise HTTPException(status_code=400, detail="ipo_id gerekli (int)")
+
+    # IPO var mi?
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    # Reset — mevcut poll oylarini sil
+    if payload.get("reset"):
+        await db.execute(_del(IPOPollVote).where(IPOPollVote.ipo_id == ipo_id))
+
+    hype = payload.get("hype") or {}
+    ceiling = payload.get("ceiling") or {}
+
+    inserted_hype = 0
+    inserted_ceiling = 0
+
+    # Hype oyları — (participate|undecided|skip): count
+    seq = 0
+    for choice in ("participate", "undecided", "skip"):
+        count = int(hype.get(choice, 0) or 0)
+        for _ in range(count):
+            seq += 1
+            db.add(IPOPollVote(
+                ipo_id=ipo_id,
+                phase="hype",
+                choice=choice,
+                device_id=f"seed_{ipo_id}_hype_{seq}",
+                ip_address=None,
+            ))
+            inserted_hype += 1
+
+    # Ceiling oyları — {"1": 15, "2": 35, ...}
+    seq = 0
+    for choice_str, count in ceiling.items():
+        try:
+            n = int(choice_str)
+            if n < 1 or n > 30:
+                continue
+        except (ValueError, TypeError):
+            continue
+        count = int(count or 0)
+        for _ in range(count):
+            seq += 1
+            db.add(IPOPollVote(
+                ipo_id=ipo_id,
+                phase="ceiling",
+                choice=str(n),
+                device_id=f"seed_{ipo_id}_ceiling_{seq}",
+                ip_address=None,
+            ))
+            inserted_ceiling += 1
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Insert hatasi: {e}")
+
+    return {
+        "status": "ok",
+        "ipo_id": ipo_id,
+        "ticker": ipo.ticker,
+        "inserted_hype": inserted_hype,
+        "inserted_ceiling": inserted_ceiling,
+        "total": inserted_hype + inserted_ceiling,
+    }
+
+
 @app.post("/api/v1/admin/backfill-ai-scores")
 @limiter.limit("3/minute")
 async def admin_backfill_ai_scores(
