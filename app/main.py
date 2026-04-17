@@ -2918,6 +2918,42 @@ async def admin_test_kap_notification(request: Request, payload: dict, db: Async
     }
 
 
+@app.post("/api/v1/admin/patch-ipo-fields")
+@limiter.limit("10/minute")
+async def admin_patch_ipo_fields(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: IPO alanlarini manuel guncelle (test/hot-fix).
+
+    Payload: {admin_password, ipo_id, fields:{close_price:..., percent_change:..., ...}}
+    Sadece sunlar guncellenir: close_price, percent_change, ceiling_broken,
+    trading_day_count, archived, status, distribution_completed.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    fields = payload.get("fields") or {}
+    ALLOWED = {"close_price", "percent_change", "ceiling_broken",
+               "trading_day_count", "archived", "status", "distribution_completed"}
+
+    result = await db.execute(select(IPO).where(IPO.id == ipo_id))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+
+    updated = {}
+    for k, v in fields.items():
+        if k in ALLOWED:
+            setattr(ipo, k, v)
+            updated[k] = v
+    await db.commit()
+
+    return {"status": "ok", "ipo_id": ipo_id, "ticker": ipo.ticker, "updated": updated}
+
+
 @app.post("/api/v1/admin/set-ipo-status")
 @limiter.limit("10/minute")
 async def admin_set_ipo_status(
