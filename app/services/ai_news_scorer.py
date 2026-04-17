@@ -514,19 +514,27 @@ GÜÇLÜ OLUMLU (8.0 — 10.0):
 ═══ KAP ÖZEL DURUM TİPLERİ VE PUANLAMA REHBERİ ═══
 
 SÖZLEŞME / İHALE KAZANIMI (NET TUTAR BAZLI — KRITIK KURAL):
-  Mutlak tutar olcegi (tutar biliniyorsa BU ESAS):
-    >5 milyar TL (mega ihale)  → 8.5-9.5
-    1-5 milyar TL              → 7.5-8.5
-    500M-1B TL                 → 7.0-7.7
-    200-500M TL                → 6.7-7.2
-    50-200M TL                 → 6.2-6.7
-    10-50M TL                  → 5.8-6.3
-    <10M TL (kucuk)            → 5.5-6.0
 
-  Bu tutar ciroyla karsilastirilarak +/- 0.3 ayarlanir:
+  ADIM 1: Para birimini tespit et ve referans kurla TL'ye cevir:
+    1 USD ≈ 40 TL | 1 EUR ≈ 43 TL | 1 GBP ≈ 50 TL
+    (Kesin kur gerekmez; siraliama icin yeterli yaklasiklik)
+
+  ADIM 2: TL karsiligini mutlak tutar olcegine uygula:
+    >5 milyar TL / >125M USD / >115M EUR       → 8.5-9.5 (mega)
+    1-5 milyar TL / 25-125M USD / 23-115M EUR  → 7.5-8.5 (cok buyuk)
+    500M-1B TL / 12-25M USD / 11-23M EUR       → 7.0-7.7 (buyuk)
+    200-500M TL / 5-12M USD / 4.5-11M EUR      → 6.7-7.2 (orta-buyuk)
+    50-200M TL / 1.25-5M USD / 1.1-4.5M EUR    → 6.2-6.7 (orta)
+    10-50M TL / 250K-1.25M USD / 230K-1.1M EUR → 5.8-6.3 (kucuk-orta)
+    <10M TL / <250K USD / <230K EUR            → 5.5-6.0 (kucuk)
+
+  ADIM 3: Ciroyla karsilastirip +/- ayarla (sirket buyuklugu):
     Cironun >%30 → +0.5 bonus | %15-30 → +0.3 | %5-15 → 0 | <%5 → -0.2
 
-  ONEMLI: 100M $ ihale ile 1M $ ihale AYNI puan alamaz. Mutlaka ölceklendir.
+  ONEMLI: 100M USD ihale ile 1M USD ihale AYNI puan alamaz. Mutlaka ölceklendir.
+  ONEMLI: Para birimi EUR/USD/GBP gibi DOVIZ ise MUTLAKA once TL'ye yaklasik cevir.
+          Cevirmeden direkt sayiyi TL eşiklerine uygulamak BÜYÜK HATA.
+          (1M USD = 40M TL, yani 5.8-6.3 bandi degil, 6.2-6.7 bandi).
 
 YENİ TİCARİ İLİŞKİ (yeni tedarikci/musteri/is ortakligi/sozlesme — tutar BELIRTILMEMIS):
   Tutar/detay yoksa DEFAULT HAFIF POZITIF VER — ciunku yeni ticari iliski
