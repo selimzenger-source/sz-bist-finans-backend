@@ -1628,11 +1628,12 @@ async def submit_poll_vote(
     else:  # ceiling
         try:
             n = int(choice)
-            if n < 1 or n > 30:
+            # UI ile tutarli: 1-25 (mobil chip scroll + web slider)
+            if n < 1 or n > 25:
                 raise ValueError()
             choice = str(n)
         except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="Tavan sayisi 1-30 arasi olmali")
+            raise HTTPException(status_code=400, detail="Tavan sayisi 1-25 arasi olmali")
 
     # IPO ve faz kontrolu
     result = await db.execute(select(IPO).where(IPO.id == ipo_id))
