@@ -1394,7 +1394,8 @@ async def poll_admin_commands():
         return
 
     url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
-    params: dict = {"timeout": 0, "allowed_updates": ["message"]}
+    # channel_post: kanala yazilan komutlar icin; message: grup/DM icin
+    params: dict = {"timeout": 0, "allowed_updates": ["message", "channel_post", "edited_message", "edited_channel_post"]}
     if _admin_cmd_last_update_id is not None:
         params["offset"] = _admin_cmd_last_update_id
 
@@ -1416,17 +1417,27 @@ async def poll_admin_commands():
         update_id = update.get("update_id", 0)
         _admin_cmd_last_update_id = update_id + 1
 
-        message = update.get("message")
+        # Hem message hem channel_post destekle
+        message = (
+            update.get("message")
+            or update.get("channel_post")
+            or update.get("edited_message")
+            or update.get("edited_channel_post")
+        )
         if not message:
             continue
 
         msg_chat_id = str(message.get("chat", {}).get("id", ""))
         if msg_chat_id != str(chat_id):
+            logger.info("Admin komut: chat_id eslesmedi (gelen=%s, beklenen=%s) — text=%s",
+                        msg_chat_id, chat_id, (message.get("text") or "")[:40])
             continue
 
         text = (message.get("text") or "").strip()
         if not text.startswith("/"):
             continue
+
+        logger.info("Admin komut alindi: %s (chat=%s)", text[:60], msg_chat_id)
 
         try:
             await _handle_admin_command(text)
