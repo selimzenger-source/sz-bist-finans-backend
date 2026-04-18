@@ -1596,15 +1596,125 @@ async def poll_admin_commands():
             continue
 
         text = (message.get("text") or "").strip()
-        if not text.startswith("/"):
+        # Komut '/' ile baslamali veya X/Twitter linki icermeli
+        is_cmd = text.startswith("/")
+        has_tweet_url = bool(re.search(r"(x\.com|twitter\.com)/[^/\s]+/status/\d+", text))
+        if not is_cmd and not has_tweet_url:
             continue
 
         logger.info("Admin komut alindi: %s (chat=%s)", text[:60], msg_chat_id)
 
         try:
-            await _handle_admin_command(text)
+            if has_tweet_url and not is_cmd:
+                await _handle_tweet_url_forward(text)
+            else:
+                await _handle_admin_command(text)
         except Exception as e:
             logger.error("Admin komut isleme hatasi: %s — komut: %s", e, text)
+
+
+async def _handle_tweet_url_forward(text: str):
+    """Kullanici X/Twitter link atinca — metni fxtwitter API ile cek, AI'ya ver,
+    kuyruga taslak olarak ekle. Kaynak GOSTERME (kendi tweetimiz gibi)."""
+    m = re.search(r"(?:x\.com|twitter\.com)/([^/\s]+)/status/(\d+)", text)
+    if not m:
+        return
+    username, tweet_id = m.group(1), m.group(2)
+
+    await _send_telegram_message(f"🔍 Tweet analiz ediliyor: @{username}/{tweet_id}")
+
+    # fxtwitter free API — metin + resim
+    fx_url = f"https://api.fxtwitter.com/{username}/status/{tweet_id}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(fx_url)
+            if resp.status_code != 200:
+                await _send_telegram_message(f"❌ Tweet cekilemedi (HTTP {resp.status_code})")
+                return
+            data = resp.json()
+    except Exception as e:
+        await _send_telegram_message(f"❌ Tweet cekme hatasi: {str(e)[:100]}")
+        return
+
+    tw = data.get("tweet", {})
+    tweet_text = tw.get("text", "").strip()
+    if not tweet_text:
+        await _send_telegram_message("❌ Tweet metni bos")
+        return
+
+    # Media var mi (ilk resim)
+    media = tw.get("media", {})
+    photos = media.get("photos") or []
+    image_url = photos[0].get("url") if photos else None
+
+    # Fake RSS entry olustur — AI pipeline'a ver
+    fake_entry = {
+        "title": tweet_text[:150],
+        "link": f"https://x.com/{username}/status/{tweet_id}",  # dedup icin
+        "summary": tweet_text[:3000],
+        "source": "Tweet Forward",
+        "published": None,
+    }
+
+    # Pre-filter atla — kullanici manuel gonderdi, onemli kabul et
+    ai_result = await _ai_evaluate(fake_entry)
+    if not ai_result:
+        await _send_telegram_message("❌ AI analiz edemedi (Gemini+Claude fail)")
+        return
+
+    # Skor kontrol etme — kullanicinin attigi tweet tartisilmaz, taslak yap
+    fake_entry["ai"] = ai_result
+
+    # Tweet icerigi ve kapak resmi olustur
+    tweet_data = await _generate_tweet_content(fake_entry, ai_result)
+    if not tweet_data:
+        await _send_telegram_message("❌ Tweet icerigi olusturulamadi")
+        return
+
+    # Eger tweet'te resim varsa kapak olarak kullan (indir + cloudinary)
+    if image_url and not tweet_data.get("cover_path"):
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                img_resp = await client.get(image_url)
+                if img_resp.status_code == 200:
+                    import tempfile
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
+                    tmp.write(img_resp.content)
+                    tmp.close()
+                    tweet_data["cover_path"] = tmp.name
+                    logger.info("Tweet resmi indirildi kapak olarak: %s", tmp.name)
+        except Exception as e:
+            logger.warning("Tweet resmi indirme hatasi: %s", e)
+
+    cover_url = await _upload_cover_image(tweet_data.get("cover_path"))
+    tweet_data["cover_url"] = cover_url
+
+    # HEMEN tweet at (kuyruga koymaz, onay beklemez)
+    success = await _post_tweet(tweet_data)
+    if success:
+        # DB'ye kaydet + daily counter
+        category = tweet_data.get("category", "PIYASA")
+        cat_key = "GLOBAL" if category == "GLOBAL" else "LOCAL"
+        _daily_counts[cat_key] = _daily_counts.get(cat_key, 0) + 1
+        _last_tweet_times[category] = datetime.now(_TR_TZ)
+        await _save_news_to_db(tweet_data)
+
+        # Cover temizlik
+        cover_path = tweet_data.get("cover_path")
+        if cover_path and os.path.exists(cover_path):
+            try:
+                os.unlink(cover_path)
+            except Exception:
+                pass
+
+        await _send_telegram_message(
+            f"✅ Tweet atildi: <b>{tweet_data.get('headline', '?')[:60]}</b>\n"
+            f"Skor: {ai_result.get('score', '?')} | Kategori: {ai_result.get('category', '?')}"
+        )
+    else:
+        await _send_telegram_message(
+            f"❌ Tweet gonderilemedi: {tweet_data.get('headline', '?')[:60]}"
+        )
 
 
 async def _handle_admin_command(text: str):
