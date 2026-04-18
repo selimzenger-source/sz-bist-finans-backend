@@ -4640,10 +4640,11 @@ async def news_scanner_job():
     try:
         settings = get_settings()
 
-        # Saat kontrolu: sadece 08:00-23:00 TR arasi (hafta ici + hafta sonu)
+        # Saat kontrolu: sadece 02:00-07:00 TR arasi ATLANIR (uyku saatleri)
+        # Geri kalan tum saatlerde (07:00-01:59) tarama yapilir
         now_tr = datetime.now(_TR_TZ)
-        if now_tr.hour < 8 or now_tr.hour >= 23:
-            logger.debug("Haber tarama: saat %02d, atlanıyor (08-23 arasi calisir)", now_tr.hour)
+        if 2 <= now_tr.hour < 7:
+            logger.debug("Haber tarama: saat %02d, atlanıyor (02-07 arasi atlanir)", now_tr.hour)
             return
 
         from app.services.news_scanner_service import scan_news, process_important_news, is_queue_paused
