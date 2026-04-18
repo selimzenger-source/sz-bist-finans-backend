@@ -27,18 +27,22 @@ _TR_TZ = timezone(timedelta(hours=3))
 
 # ── RSS Kaynaklari ──────────────────────────────────────
 # Genel ekonomi/piyasa kaynaklari
-RSS_FEEDS = [
-    # ── Şirket/Borsa ODAKLI kaynaklar (öncelikli) ──
+# ── Hızlı Son Dakika — her 5dk taranir ──
+BREAKING_FEEDS = [
+    ("CNN Turk Ekonomi", "https://www.cnnturk.com/feed/rss/ekonomi/news"),
+    ("Sozcu Son Dakika", "https://www.sozcu.com.tr/rss/son-dakika.xml"),
     ("Forbes Sirketler", "https://www.forbes.com.tr/rss/sirketler"),
+]
+
+# ── Diger kaynaklar — her 10dk taranir ──
+MAIN_FEEDS = [
+    # Şirket/Borsa ODAKLI
     ("Forbes Ana", "https://www.forbes.com.tr/rss"),
     ("Para Analiz Sirketler", "https://www.paraanaliz.com/category/sirketler/feed/"),
     ("Para Analiz Borsa", "https://www.paraanaliz.com/category/borsa/feed/"),
     ("AA Kurumsal Haberler", "https://www.aa.com.tr/tr/rss/default?cat=kurumsal-haberler"),
     ("Sabah Ekonomi", "https://www.sabah.com.tr/rss/ekonomi.xml"),
-    # ── Hızlı Son Dakika kaynakları (breaking) ──
-    ("CNN Turk Ekonomi", "https://www.cnnturk.com/feed/rss/ekonomi/news"),
-    ("Sozcu Son Dakika", "https://www.sozcu.com.tr/rss/son-dakika.xml"),
-    # ── Genel ekonomi kaynakları ──
+    # Genel ekonomi
     ("Bloomberg HT", "https://www.bloomberght.com/rss"),
     ("Dunya", "https://www.dunya.com/rss"),
     ("Bigpara", "https://bigpara.hurriyet.com.tr/rss/"),
@@ -54,6 +58,9 @@ RSS_FEEDS = [
     ("Milliyet Ekonomi", "https://www.milliyet.com.tr/rss/rssnew/ekonomiall.xml"),
     ("EnSonHaber Ekonomi", "https://www.ensonhaber.com/rss/ekonomi.xml"),
 ]
+
+# Geriye donuk uyumluluk — tum kaynaklar
+RSS_FEEDS = BREAKING_FEEDS + MAIN_FEEDS
 
 # ── Sabitler ────────────────────────────────────────────
 _MIN_IMPORTANCE_SCORE = 7.5
@@ -74,6 +81,37 @@ _recent_titles: list[tuple[str, datetime]] = []  # (title, time) (max 100)
 _MAX_URL_HASHES = 1000
 _MAX_TOPIC_HASHES = 500
 _MAX_RECENT_TITLES = 100
+
+# AI quota blocklama — 5 art arda fail ise 30dk tarama durur
+_ai_consecutive_fails = 0
+_ai_block_until: datetime | None = None
+_AI_FAIL_THRESHOLD = 5
+_AI_BLOCK_MINUTES = 30
+
+
+def _is_ai_blocked() -> bool:
+    if _ai_block_until is None:
+        return False
+    if datetime.now(_TR_TZ) < _ai_block_until:
+        return True
+    return False
+
+
+def _record_ai_failure():
+    global _ai_consecutive_fails, _ai_block_until
+    _ai_consecutive_fails += 1
+    if _ai_consecutive_fails >= _AI_FAIL_THRESHOLD and _ai_block_until is None:
+        _ai_block_until = datetime.now(_TR_TZ) + timedelta(minutes=_AI_BLOCK_MINUTES)
+        logger.error(
+            "AI BLOCKED — %d art arda fail. %d dk sonra tekrar denenecek (%s)",
+            _ai_consecutive_fails, _AI_BLOCK_MINUTES, _ai_block_until.strftime("%H:%M")
+        )
+
+
+def _record_ai_success():
+    global _ai_consecutive_fails, _ai_block_until
+    _ai_consecutive_fails = 0
+    _ai_block_until = None
 _daily_counts: dict[str, int] = {}  # category -> count
 _daily_counts_date: str = ""  # YYYY-MM-DD
 _last_tweet_times: dict[str, datetime] = {}  # category -> last_tweet_time
@@ -427,20 +465,24 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
         return []
 
 
-async def _fetch_all_rss() -> list[dict]:
-    """RSS kaynaklarini 5'erli batch'lerde tara — memory optimizasyonu."""
+async def _fetch_rss_batch(feeds: list) -> list[dict]:
+    """Verilen feed listesini 5'erli batch'lerde tara."""
     all_entries = []
-    BATCH = 5  # 22 feed'i 5 seferde calistir, her sefer 5 kaynak
-    for i in range(0, len(RSS_FEEDS), BATCH):
-        batch = RSS_FEEDS[i:i + BATCH]
+    BATCH = 5
+    for i in range(0, len(feeds), BATCH):
+        batch = feeds[i:i + BATCH]
         tasks = [_fetch_rss_entries(name, url) for name, url in batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for result in results:
             if isinstance(result, list):
                 all_entries.extend(result)
-        del results, tasks  # memory temizle
-
+        del results, tasks
     return all_entries
+
+
+async def _fetch_all_rss() -> list[dict]:
+    """Tum kaynaklari tara — geriye donuk uyumluluk."""
+    return await _fetch_rss_batch(RSS_FEEDS)
 
 
 # ── Gemini AI Analiz ────────────────────────────────────
@@ -476,6 +518,52 @@ KONU: [2-4 kelimelik konu etiketi, ayni olay icin ayni etiket kullan]
 KATEGORI: [HALKA_ARZ|TURKIYE_GUNDEM|SIRKET_HABERI|PIYASA|GLOBAL|SEKTOR]
 BANNER: [SON_DAKIKA|HALKA_ARZ|SIRKET_HABERI|SEKTOR|GLOBAL|PIYASA|TURKIYE_GUNDEM]
 SEKTOR: [BANKA|ENERJI|ILAC|OTOMOTIV|PERAKENDE|TEKNOLOJI|INSAAT|DEMIR_CELIK|HOLDING|SIGORTA|GIDA|TELEKOM|HAVACILIK|MADENCILIK|YOK]"""
+
+
+# ── PRE-FILTER: Finans/sirket keyword icermeyen haberler AI'ya gonderilmez ──
+_RELEVANT_KEYWORDS = {
+    # Borsa/Finans
+    "bist", "borsa", "hisse", "pay", "sözleşme", "sozlesme", "ihale", "kap",
+    "sermaye", "temettü", "temettu", "bedelsiz", "halka arz", "satın al",
+    "satın aldı", "satin al", "satış", "satis", "satıldı", "satildi",
+    "devir", "birleş", "anlaşma", "anlasma", "yatırım", "yatirim",
+    "ortak", "iştirak", "istirak", "konsolide", "kar", "zarar",
+    # Ekonomi
+    "tcmb", "faiz", "enflasyon", "kur", "dolar", "euro", "avro",
+    "ihracat", "ithalat", "bütçe", "butce", "vergi", "tüfe", "tufe",
+    # Sirket / Sektor keywords (spesifik ticker/sirket adi bir keyword sayilir)
+    "garan", "akbnk", "yapi kredi", "thyao", "asels", "tcell", "turkcell",
+    "petkim", "erdemir", "tuprs", "sabanci", "sahol", "koc", "kchol",
+    "bim", "migros", "sok", "aselsan", "sasa", "form", "tav",
+    "enerji", "banka", "bankas", "otomotiv", "madenc", "holding",
+    "inşaat", "insaat", "perakende", "teknoloji", "ilaç", "ilac",
+    # M&A / Kurumsal
+    "ceo", "yönetim", "yonetim", "genel müdür", "genel mudur",
+    "operasyon", "stratej", "pazar", "genel kurul",
+}
+
+_EXCLUDE_KEYWORDS = {
+    "magazin", "ünlü", "unlu", "dizi", "film", "sinema", "festival",
+    "spor", "futbol", "basketbol", "galatasaray", "fenerbahçe", "fenerbahce",
+    "beşiktaş", "besiktas", "oyuncu", "şarkı", "sarki", "konser",
+    "hava durumu", "meteoroloji", "trafik", "yol acildi",
+}
+
+
+def _prefilter_relevant(entry: dict) -> bool:
+    """AI çağrılmadan önce hızlı keyword taraması.
+    True döner → AI'ya gönder. False → atla (maliyet kaydı)."""
+    text = (entry.get("title", "") + " " + entry.get("summary", "")[:300]).lower()
+    if not text.strip():
+        return False
+    # Hariç tutulan konu varsa direkt atla
+    if any(k in text for k in _EXCLUDE_KEYWORDS):
+        return False
+    # Finans/sirket keyword'u varsa AI'ya gonder
+    if any(k in text for k in _RELEVANT_KEYWORDS):
+        return True
+    # Keyword hic yoksa = genel olay, AI'ya gonderme
+    return False
 
 
 async def _ai_evaluate(news: dict) -> dict | None:
@@ -962,17 +1050,20 @@ async def _upload_cover_image(image_path: str) -> str | None:
 
 # ── Ana Tarama Fonksiyonu ───────────────────────────────
 
-async def scan_news() -> list[dict]:
+async def scan_news(feeds: list | None = None, label: str = "ALL") -> list[dict]:
     """RSS tarama + AI analiz + dedup. Onemli haberleri dondur.
 
-    Returns:
-        Onemli haberlerin listesi (score >= 8.5)
+    Args:
+        feeds: Hangi RSS kaynaklarini tara. None = RSS_FEEDS (hepsi).
+        label: Log icin ("BREAKING", "MAIN", "ALL").
     """
     _reset_daily_if_needed()
 
+    target_feeds = feeds if feeds is not None else RSS_FEEDS
+
     # 1. RSS fetch
-    entries = await _fetch_all_rss()
-    logger.info("RSS tarama: %d haber bulundu", len(entries))
+    entries = await _fetch_rss_batch(target_feeds)
+    logger.info("RSS tarama [%s]: %d haber bulundu", label, len(entries))
 
     if not entries:
         return []
@@ -990,17 +1081,31 @@ async def scan_news() -> list[dict]:
 
     logger.info("Yeni haber: %d (toplam %d)", len(new_entries), len(entries))
 
-    # 3. AI analiz (max 20 haber, maliyet optimizasyonu)
+    # 3. AI analiz (max 10 haber, maliyet optimizasyonu — $6-7/ay butcesi)
     important = []
-    ai_stats = {"none": 0, "low": 0, "pass": 0, "dedup": 0}
-    for entry in new_entries[:20]:
+    ai_stats = {"prefilter": 0, "none": 0, "low": 0, "pass": 0, "dedup": 0}
+    for entry in new_entries[:10]:
+        # Pre-filter: finans/sirket keyword yoksa AI'ya gonderme, direkt sil
+        if not _prefilter_relevant(entry):
+            ai_stats["prefilter"] += 1
+            url_hash = _hash_url(entry["link"])
+            _seen_url_hashes.add(url_hash)  # tekrar gelmesin
+            continue
+
+        # AI quota blocklu mu?
+        if _is_ai_blocked():
+            logger.warning("AI quota bloklu, tarama sonlandiriliyor")
+            break
+
         ai_result = await _ai_evaluate(entry)
         url_hash = _hash_url(entry["link"])
         _seen_url_hashes.add(url_hash)
 
         if not ai_result:
             ai_stats["none"] += 1
+            _record_ai_failure()
             continue
+        _record_ai_success()
 
         score = ai_result["score"]
         if score < _MIN_IMPORTANCE_SCORE:
@@ -1036,9 +1141,10 @@ async def scan_news() -> list[dict]:
         logger.info("AI PASS: %.1f [%s] %s", score, ai_result.get("category", "?"), entry["title"][:60])
 
     logger.info(
-        "scan_news ozet: RSS=%d new=%d | AI none=%d low=%d dedup=%d pass=%d",
-        len(entries), len(new_entries),
-        ai_stats["none"], ai_stats["low"], ai_stats["dedup"], ai_stats["pass"]
+        "scan_news ozet [%s]: RSS=%d new=%d | prefilter=%d AI(none=%d low=%d dedup=%d pass=%d) | ai_blocked=%s",
+        label, len(entries), len(new_entries),
+        ai_stats["prefilter"], ai_stats["none"], ai_stats["low"], ai_stats["dedup"], ai_stats["pass"],
+        _is_ai_blocked()
     )
 
     # Memory korumasi — state siniri asilmissa kes

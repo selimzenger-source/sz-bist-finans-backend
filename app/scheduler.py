@@ -4558,12 +4558,23 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Haber Tarama — her 10 dakikada bir (Pzt-Cum 08:00-23:00 TR) ───
+    # ─── Haber Tarama BREAKING — her 5 dakikada bir (hizli son dakika) ───
     scheduler.add_job(
-        news_scanner_job,
+        news_scanner_breaking_job,
+        IntervalTrigger(minutes=5),
+        id="news_scanner_breaking",
+        name="Haber Tarama BREAKING (5dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # ─── Haber Tarama MAIN — her 10 dakikada bir (ana kaynaklar) ───
+    scheduler.add_job(
+        news_scanner_main_job,
         IntervalTrigger(minutes=10),
         id="news_scanner",
-        name="Haber Tarama (10dk)",
+        name="Haber Tarama MAIN (10dk)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
@@ -4635,29 +4646,22 @@ _news_scanner_consecutive_empty = 0  # Art arda kac tarama'da haber bulunmadi
 _news_scanner_last_success = None    # En son basarili haber isleme zamani
 
 
-async def news_scanner_job():
-    """Haber tarama job — 10 dakikada bir calisir.
-
-    RSS kaynaklarini tarar, AI ile puanlar, onemli haberleri Telegram'a gonderir.
-    TWITTER_AUTO_SEND True ise direkt tweet atar.
-    """
+async def _news_scan_core(feeds, label: str):
+    """Ortak haber tarama + isleme mantigi. Breaking ve Main jobs bunu cagirir."""
     global _news_scanner_consecutive_empty, _news_scanner_last_success
     try:
         settings = get_settings()
-
-        # Saat kontrolu: sadece 02:00-07:00 TR arasi ATLANIR (uyku saatleri)
         now_tr = datetime.now(_TR_TZ)
         if 2 <= now_tr.hour < 7:
-            logger.debug("Haber tarama: saat %02d, atlanıyor (02-07 arasi atlanir)", now_tr.hour)
             return
 
         from app.services.news_scanner_service import scan_news, process_important_news, is_queue_paused
 
         if is_queue_paused():
-            logger.info("Haber tarama: kuyruk dolu, tarama atlanıyor. /devam ile devam edin.")
+            logger.info("Haber tarama [%s]: kuyruk dolu, tarama atlanıyor.", label)
             return
 
-        important = await scan_news()
+        important = await scan_news(feeds=feeds, label=label)
 
         if not important:
             _news_scanner_consecutive_empty += 1
@@ -4691,12 +4695,29 @@ async def news_scanner_job():
                 silent=True,
             )
     except Exception as e:
-        logger.error("Haber tarama job hatasi: %s", e, exc_info=True)
+        logger.error("Haber tarama job hatasi [%s]: %s", label, e, exc_info=True)
         try:
             from app.services.admin_telegram import notify_scraper_error
-            await notify_scraper_error("Haber Scanner (Exception)", str(e)[:500])
+            await notify_scraper_error(f"Haber Scanner {label} (Exception)", str(e)[:500])
         except Exception:
             pass
+
+
+async def news_scanner_breaking_job():
+    """Breaking haberler — 5 dakikada bir (hızlı son dakika kaynakları)."""
+    from app.services.news_scanner_service import BREAKING_FEEDS
+    await _news_scan_core(BREAKING_FEEDS, label="BREAKING")
+
+
+async def news_scanner_main_job():
+    """Ana haberler — 10 dakikada bir (detaylı ekonomi/şirket kaynakları)."""
+    from app.services.news_scanner_service import MAIN_FEEDS
+    await _news_scan_core(MAIN_FEEDS, label="MAIN")
+
+
+# Geriye donuk uyumluluk — eski ismle cagiran yerler icin
+async def news_scanner_job():
+    await news_scanner_main_job()
 
 
 async def _generate_kurum_oneri_cover(items: list) -> str | None:
