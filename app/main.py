@@ -16,7 +16,7 @@ from typing import Optional
 
 import hmac
 
-from fastapi import FastAPI, Body, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, BackgroundTasks, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -8489,26 +8489,25 @@ async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)
 # ================================================================
 
 @app.post("/api/v1/admin/news-scan")
-async def admin_trigger_news_scan(body: dict):
-    """Manuel haber tarama tetikle."""
+async def admin_trigger_news_scan(body: dict, background_tasks: BackgroundTasks):
+    """Manuel haber tarama tetikle — background'da calisir, hemen donmez."""
     settings = get_settings()
     if body.get("admin_password") != settings.ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Yetkisiz")
 
-    from app.services.news_scanner_service import scan_news, process_important_news
-
-    important = await scan_news()
     auto_tweet = body.get("auto_tweet", False)
-    processed = await process_important_news(important, auto_tweet=auto_tweet)
 
-    return {
-        "status": "ok",
-        "scanned": True,
-        "important_count": len(important),
-        "processed_count": len(processed),
-        "auto_tweet": auto_tweet,
-        "headlines": [p.get("headline", "?") for p in processed],
-    }
+    async def _run_scan():
+        from app.services.news_scanner_service import scan_news, process_important_news
+        try:
+            important = await scan_news()
+            if important:
+                await process_important_news(important, auto_tweet=auto_tweet)
+        except Exception as e:
+            logger.error("Manuel news-scan hatasi: %s", e, exc_info=True)
+
+    background_tasks.add_task(_run_scan)
+    return {"status": "queued", "message": "Tarama arka planda baslatildi"}
 
 
 @app.post("/api/v1/admin/news-approve")

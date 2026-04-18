@@ -68,9 +68,12 @@ _CATEGORY_COOLDOWNS = {
 _DEFAULT_COOLDOWN = 25
 
 # ── Dedup State (memory-based, Render restart'ta sifirlanir) ──
-_seen_url_hashes: set[str] = set()
-_seen_topic_hashes: dict[str, datetime] = {}  # topic_hash -> last_seen
-_recent_titles: list[tuple[str, datetime]] = []  # (title, time)
+_seen_url_hashes: set[str] = set()  # max 1000 (OOM koruması)
+_seen_topic_hashes: dict[str, datetime] = {}  # topic_hash -> last_seen (max 500)
+_recent_titles: list[tuple[str, datetime]] = []  # (title, time) (max 100)
+_MAX_URL_HASHES = 1000
+_MAX_TOPIC_HASHES = 500
+_MAX_RECENT_TITLES = 100
 _daily_counts: dict[str, int] = {}  # category -> count
 _daily_counts_date: str = ""  # YYYY-MM-DD
 _last_tweet_times: dict[str, datetime] = {}  # category -> last_tweet_time
@@ -425,14 +428,17 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
 
 
 async def _fetch_all_rss() -> list[dict]:
-    """Tum RSS kaynaklarini paralel tara."""
-    tasks = [_fetch_rss_entries(name, url) for name, url in RSS_FEEDS]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
+    """RSS kaynaklarini 5'erli batch'lerde tara — memory optimizasyonu."""
     all_entries = []
-    for result in results:
-        if isinstance(result, list):
-            all_entries.extend(result)
+    BATCH = 5  # 22 feed'i 5 seferde calistir, her sefer 5 kaynak
+    for i in range(0, len(RSS_FEEDS), BATCH):
+        batch = RSS_FEEDS[i:i + BATCH]
+        tasks = [_fetch_rss_entries(name, url) for name, url in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, list):
+                all_entries.extend(result)
+        del results, tasks  # memory temizle
 
     return all_entries
 
@@ -1034,6 +1040,23 @@ async def scan_news() -> list[dict]:
         len(entries), len(new_entries),
         ai_stats["none"], ai_stats["low"], ai_stats["dedup"], ai_stats["pass"]
     )
+
+    # Memory korumasi — state siniri asilmissa kes
+    if len(_seen_url_hashes) > _MAX_URL_HASHES:
+        # En eski kayitlari atmak zor (set), yarisini rastgele at
+        _seen_url_hashes.clear()
+        logger.info("_seen_url_hashes temizlendi (>%d)", _MAX_URL_HASHES)
+    if len(_seen_topic_hashes) > _MAX_TOPIC_HASHES:
+        # En eski topic hash'leri sil
+        sorted_items = sorted(_seen_topic_hashes.items(), key=lambda x: x[1])
+        for key, _ in sorted_items[:len(sorted_items) // 2]:
+            del _seen_topic_hashes[key]
+        logger.info("_seen_topic_hashes yarisi temizlendi (>%d)", _MAX_TOPIC_HASHES)
+    if len(_recent_titles) > _MAX_RECENT_TITLES:
+        _recent_titles[:] = _recent_titles[-_MAX_RECENT_TITLES // 2:]
+
+    # Orijinal entries listesi memory'de tutulmasin
+    del entries, new_entries
 
     # Skora gore sirala, max 3
     important.sort(key=lambda x: x["ai"]["score"], reverse=True)
