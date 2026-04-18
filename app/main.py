@@ -8532,16 +8532,34 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
     if not tweet_text:
         raise HTTPException(status_code=400, detail="tweet_text gerekli")
 
-    # 1. DB'ye kaydet (mobile app public feed için)
+    # 1. DB'ye kaydet — twitter_service._mark_tweet_sent zaten son 2 dk icinde
+    # PendingTweet(source="unknown") yazmis olabilir. Varsa onu guncelle, yoksa yeni ekle.
     from app.models import PendingTweet
-    pt = PendingTweet(
-        text=tweet_text,
-        image_path=body.get("cover_url", "") or "",
-        source="news_scanner",
-        status="sent",
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(pt)
+    from sqlalchemy import select
+    from datetime import timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
+    existing = (await db.execute(
+        select(PendingTweet)
+        .where(PendingTweet.text == tweet_text)
+        .where(PendingTweet.sent_at >= cutoff)
+        .order_by(PendingTweet.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if existing:
+        existing.source = "news_scanner"
+        if body.get("cover_url"):
+            existing.image_path = body.get("cover_url")
+        pt = existing
+    else:
+        pt = PendingTweet(
+            text=tweet_text,
+            image_path=body.get("cover_url", "") or "",
+            source="news_scanner",
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+        )
+        db.add(pt)
     await db.commit()
 
     # 2. Push bildirim (önemli haber)
