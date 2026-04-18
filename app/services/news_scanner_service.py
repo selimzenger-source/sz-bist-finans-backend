@@ -28,6 +28,11 @@ _TR_TZ = timezone(timedelta(hours=3))
 # ── RSS Kaynaklari ──────────────────────────────────────
 # Genel ekonomi/piyasa kaynaklari
 RSS_FEEDS = [
+    # ── Şirket/Borsa ODAKLI kaynaklar (öncelikli) ──
+    ("Para Analiz Sirketler", "https://www.paraanaliz.com/category/sirketler/feed/"),
+    ("Para Analiz Borsa", "https://www.paraanaliz.com/category/borsa/feed/"),
+    ("AA Kurumsal Haberler", "https://www.aa.com.tr/tr/rss/default?cat=kurumsal-haberler"),
+    # ── Genel ekonomi kaynakları ──
     ("Bloomberg HT", "https://www.bloomberght.com/rss"),
     ("Dunya", "https://www.dunya.com/rss"),
     ("Bigpara", "https://bigpara.hurriyet.com.tr/rss/"),
@@ -36,7 +41,6 @@ RSS_FEEDS = [
     ("Investing.com", "https://tr.investing.com/rss/news_25.rss"),
     ("Haberturk", "https://www.haberturk.com/rss/ekonomi.xml"),
     ("AA Ekonomi", "https://www.aa.com.tr/tr/rss/default?cat=ekonomi"),
-    # Sirket odakli / borsa haberleri
     ("Finans Gundem", "https://www.finansgundem.com/rss"),
     ("Sozcu Ekonomi", "https://www.sozcu.com.tr/rss/ekonomi.xml"),
     ("Hurriyet Ekonomi", "https://www.hurriyet.com.tr/rss/ekonomi"),
@@ -47,8 +51,8 @@ RSS_FEEDS = [
 
 # ── Sabitler ────────────────────────────────────────────
 _MIN_IMPORTANCE_SCORE = 7.5
-_MAX_DAILY_LOCAL_TWEETS = 8
-_MAX_DAILY_GLOBAL_TWEETS = 4
+_MAX_DAILY_LOCAL_TWEETS = 12  # Sirket/BIST odakli haberleri artir
+_MAX_DAILY_GLOBAL_TWEETS = 2  # Global gundemi azalt (daha az genel olaylar)
 
 # Kategori bazli tweet aralik limitleri (dakika)
 _CATEGORY_COOLDOWNS = {
@@ -422,14 +426,19 @@ async def _fetch_all_rss() -> list[dict]:
 _IMPORTANCE_PROMPT = """Sen bir finans haberi analizcisisin. Haberin BIST borsa yatirimcilari icin onemini 1-10 arasi puanla.
 
 PUANLAMA KRITERLERI:
-- 9-10: BIST sirket haberi (kar/zarar, ortaklik, satin alma, halka arz), TCMB faiz karari, buyuk regülasyon
-- 8-9: Sektor haberleri (enerji, banka, otomotiv vb.), Turkiye ekonomisi (enflasyon, buyume, ihracat), sert kur hareketi
-- 8+: Global flas (savas, surpriz faiz, finansal kriz) — gunde max 1
-- 5-7: Orta onem, rutin kararlar, kucuk sirket haberleri, genel ekonomi
-- 1-4: Kapsam disi (spor, magazin, yabanci sirket, rutin diplomasi, genel siyaset)
+- 9-10: BIST/TURK sirketi spesifik haberi (isim + aksiyon): satin alma/satis (orn: 'Carrefour X'e satildi'),
+        kar/zarar aciklamasi, ortaklik/JV, buyuk sozlesme (>500M TL), halka arz, bedelsiz/temettu, ust yonetim degisikligi
+- 8-9: Sektor haberleri (enerji, banka, otomotiv vb.) TCMB faiz, buyume/enflasyon, kur soku, buyuk regulasyon
+- 7-8: Halka arz sureci, kucuk/orta sirket somut gelismeleri
+- 8+: Global flas (savas, surpriz faiz, piyasa-kiran kriz) — gunde MAX 2
+- 5-7: Genel ekonomi, rutin makro, sektorel yorumlar
+- 1-4: Kapsam disi (spor, magazin, yabanci sirket, rutin diplomasi, siyaset, cerez/gizlilik metni)
 
-ONCELIK: Sirket haberleri ve Turkiye ekonomisi haberleri EN YUKSEK oncelikli.
-Global haberler sadece piyasayi dogrudan etkileyecekse yuksek puan al.
+ONCELIK (cok kritik):
+1. Spesifik Turk sirketi adinin gectigi haberler EN YUKSEK oncelikli (+1 puan bonus zihinsel olarak)
+2. M&A, satin alma, birleşme, büyük sözleşme, halka arz → 9-10 bandinda olmalı
+3. Global gundem (ABD faizi, Trump aciklamasi, Ortadogu) sadece DOGRUDAN BIST'i etkileyecekse 8+ ver
+4. 'Ekonomi' etiketli ama sirket/sektor/TCMB icermeyen genel yorum/analiz → max 6
 
 DIKKAT: Eger ozet kismi cerez politikasi, gizlilik politikasi, KVKK veya site kullanim kosullari ile ilgiliyse
 bu bir HABER DEGILDIR — PUAN 0 ver. RSS feed bazen site yasal metinlerini icerir, bunlari yoksay.
