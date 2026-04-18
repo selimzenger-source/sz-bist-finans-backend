@@ -674,6 +674,115 @@ async def get_public_daily_market_stats(
     ]
 
 
+# ─── BIST hisse fiyat proxy (halka-arz-defteri icin) ───────────
+# Frontend eskiden Yahoo'yu dogrudan cekiyordu; Yahoo v7 kapatildi, v8 calisiyor.
+# Yeni servisler degisirse app build gerekmesin diye proxy edelim.
+_STOCK_PRICE_CACHE: dict = {}  # ticker -> {"price": float, "source": str, "at": float}
+_STOCK_PRICE_TTL = 5 * 60  # 5 dk
+
+
+async def _fetch_yahoo_v8(ticker: str) -> float | None:
+    import httpx
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.IS?interval=1d&range=1d"
+    try:
+        async with httpx.AsyncClient(timeout=8) as c:
+            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        meta = r.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+        p = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+        if isinstance(p, (int, float)) and p > 0:
+            return float(p)
+    except Exception:
+        pass
+    return None
+
+
+async def _fetch_mynet(ticker: str) -> float | None:
+    """Mynet Finans HTML scrape — ucretsiz gecikmeli fiyat."""
+    import httpx, re
+    url = f"https://finans.mynet.com/borsa/hisseler/{ticker.lower()}-{ticker.lower()}/"
+    try:
+        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
+            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code != 200:
+            return None
+        # Son fiyat <span class="data-price"... veya tl formatinda
+        m = re.search(r'data-price[^>]*>\s*([0-9.,]+)\s*<', r.text)
+        if m:
+            val = m.group(1).replace('.', '').replace(',', '.')
+            try:
+                p = float(val)
+                if p > 0:
+                    return p
+            except ValueError:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/v1/public/stock-price/{ticker}")
+@limiter.limit("120/minute")
+async def get_stock_price(request: Request, ticker: str):
+    """BIST hisse anlik/gecikmeli fiyat.
+
+    Cache: 5 dk. Fallback zinciri: Yahoo v8 -> Mynet.
+    Frontend'in bu endpoint'i cagirmasi, veri saglayici degisse bile
+    app build gerekmesini onler.
+    """
+    import time
+    tk = ticker.upper().strip()
+    if not tk or not tk.isalnum():
+        return {"ticker": tk, "price": None, "source": "invalid", "cached": False}
+
+    now = time.time()
+    hit = _STOCK_PRICE_CACHE.get(tk)
+    if hit and now - hit["at"] < _STOCK_PRICE_TTL:
+        return {"ticker": tk, "price": hit["price"], "source": hit["source"], "cached": True}
+
+    for fn, name in [(_fetch_yahoo_v8, "yahoo_v8"), (_fetch_mynet, "mynet")]:
+        price = await fn(tk)
+        if price is not None:
+            _STOCK_PRICE_CACHE[tk] = {"price": price, "source": name, "at": now}
+            return {"ticker": tk, "price": price, "source": name, "cached": False}
+
+    return {"ticker": tk, "price": None, "source": "none", "cached": False}
+
+
+@app.get("/api/v1/public/stock-prices")
+@limiter.limit("60/minute")
+async def get_stock_prices(request: Request, tickers: str = Query(..., description="virgulle ayrilmis ticker listesi")):
+    """Toplu fiyat cekimi — frontend N hisseyi tek istekle alsin."""
+    import asyncio, time
+    ticker_list = [t.upper().strip() for t in tickers.split(",") if t.strip() and t.strip().isalnum()][:50]
+    now = time.time()
+    results: dict[str, dict] = {}
+    missing: list[str] = []
+
+    for tk in ticker_list:
+        hit = _STOCK_PRICE_CACHE.get(tk)
+        if hit and now - hit["at"] < _STOCK_PRICE_TTL:
+            results[tk] = {"price": hit["price"], "source": hit["source"], "cached": True}
+        else:
+            missing.append(tk)
+
+    async def _fetch_one(tk: str):
+        for fn, name in [(_fetch_yahoo_v8, "yahoo_v8"), (_fetch_mynet, "mynet")]:
+            p = await fn(tk)
+            if p is not None:
+                _STOCK_PRICE_CACHE[tk] = {"price": p, "source": name, "at": time.time()}
+                return tk, {"price": p, "source": name, "cached": False}
+        return tk, {"price": None, "source": "none", "cached": False}
+
+    if missing:
+        fetched = await asyncio.gather(*[_fetch_one(t) for t in missing])
+        for tk, data in fetched:
+            results[tk] = data
+
+    return {"prices": results}
+
+
 @app.get("/api/v1/public/viop-night-session")
 @limiter.limit("30/minute")
 async def get_public_viop_night_session(
