@@ -548,6 +548,15 @@ async def _ai_evaluate(news: dict) -> dict | None:
 
     if not text:
         logger.error("Haber puanlama: hicbir provider yanit vermedi (%s)", news.get("title", "")[:60])
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error(
+                "AI News Scorer",
+                f"Gemini VE Claude ikisi de yanit vermedi. Quota/Key kontrol et. "
+                f"Haber: {news.get('title', '?')[:80]}"
+            )
+        except Exception:
+            pass
         return None
 
     logger.debug("Haber puanlama: %s (%s)", provider_used, news.get("title", "")[:40])

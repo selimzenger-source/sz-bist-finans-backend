@@ -4631,17 +4631,21 @@ def _setup_scheduler_impl():
 
 
 
+_news_scanner_consecutive_empty = 0  # Art arda kac tarama'da haber bulunmadi
+_news_scanner_last_success = None    # En son basarili haber isleme zamani
+
+
 async def news_scanner_job():
     """Haber tarama job — 10 dakikada bir calisir.
 
     RSS kaynaklarini tarar, AI ile puanlar, onemli haberleri Telegram'a gonderir.
     TWITTER_AUTO_SEND True ise direkt tweet atar.
     """
+    global _news_scanner_consecutive_empty, _news_scanner_last_success
     try:
         settings = get_settings()
 
         # Saat kontrolu: sadece 02:00-07:00 TR arasi ATLANIR (uyku saatleri)
-        # Geri kalan tum saatlerde (07:00-01:59) tarama yapilir
         now_tr = datetime.now(_TR_TZ)
         if 2 <= now_tr.hour < 7:
             logger.debug("Haber tarama: saat %02d, atlanıyor (02-07 arasi atlanir)", now_tr.hour)
@@ -4649,14 +4653,28 @@ async def news_scanner_job():
 
         from app.services.news_scanner_service import scan_news, process_important_news, is_queue_paused
 
-        # Kuyruk doluysa tarama yapma — haberler seen'e eklenmeden kalsın
         if is_queue_paused():
-            logger.debug("Haber tarama: kuyruk dolu, tarama atlanıyor. /devam ile devam edin.")
+            logger.info("Haber tarama: kuyruk dolu, tarama atlanıyor. /devam ile devam edin.")
             return
 
         important = await scan_news()
+
         if not important:
+            _news_scanner_consecutive_empty += 1
+            # 18 art arda bos (3 saat) → SZ bot'una uyari bildir
+            if _news_scanner_consecutive_empty in (18, 36, 72):
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error(
+                    "Haber Scanner",
+                    f"{_news_scanner_consecutive_empty} art arda tarama sonucu BOS. "
+                    f"Son basarili: {_news_scanner_last_success or 'yok'}. "
+                    f"RSS kaynaklari + AI (Gemini/Claude) kontrol edilmeli."
+                )
             return
+
+        # Basarili — counter sifirla
+        _news_scanner_consecutive_empty = 0
+        _news_scanner_last_success = now_tr.strftime("%Y-%m-%d %H:%M:%S TR")
 
         auto_tweet = settings.TWITTER_AUTO_SEND
         processed = await process_important_news(important, auto_tweet=auto_tweet)
@@ -4673,7 +4691,12 @@ async def news_scanner_job():
                 silent=True,
             )
     except Exception as e:
-        logger.error("Haber tarama job hatasi: %s", e)
+        logger.error("Haber tarama job hatasi: %s", e, exc_info=True)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Haber Scanner (Exception)", str(e)[:500])
+        except Exception:
+            pass
 
 
 async def _generate_kurum_oneri_cover(items: list) -> str | None:
