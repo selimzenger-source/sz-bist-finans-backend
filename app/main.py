@@ -8510,6 +8510,55 @@ async def admin_trigger_news_scan(body: dict, background_tasks: BackgroundTasks)
     return {"status": "queued", "message": "Tarama arka planda baslatildi"}
 
 
+@app.post("/api/v1/admin/publish-news")
+async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
+    """Yerel news_scanner_v2'den çağrılır — tweet attıktan sonra
+    PendingTweet tablosuna yazar (mobile app public news-feed için) +
+    push bildirim gönderir.
+
+    Body:
+        admin_password: str
+        tweet_text: str
+        cover_url: str (optional)
+        headline: str (push için)
+        summary: str (push için)
+        category: str (optional)
+    """
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    tweet_text = body.get("tweet_text", "")
+    if not tweet_text:
+        raise HTTPException(status_code=400, detail="tweet_text gerekli")
+
+    # 1. DB'ye kaydet (mobile app public feed için)
+    from app.models import PendingTweet
+    pt = PendingTweet(
+        text=tweet_text,
+        image_path=body.get("cover_url", "") or "",
+        source="news_scanner",
+        status="sent",
+        sent_at=datetime.now(timezone.utc),
+    )
+    db.add(pt)
+    await db.commit()
+
+    # 2. Push bildirim (önemli haber)
+    try:
+        from app.services.notification import NotificationService
+        svc = NotificationService(db)
+        await svc.notify_market_news(
+            body.get("headline", "Önemli gelişme"),
+            summary=(body.get("summary") or "")[:800],
+        )
+        await db.commit()
+    except Exception as e:
+        logger.error("Publish-news push hatasi: %s", e)
+
+    return {"status": "ok", "pending_tweet_id": pt.id}
+
+
 @app.post("/api/v1/admin/news-approve")
 async def admin_approve_news(body: dict):
     """Telegram'dan onay bekleyen haberi tweet at."""
