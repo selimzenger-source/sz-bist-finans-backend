@@ -1439,6 +1439,9 @@ async def _handle_admin_command(text: str):
     """Tek bir admin komutunu isler."""
     parts = text.split()
     cmd = parts[0].lower()
+    # Grup/kanal'da Telegram komutlari /at@botname seklinde gelir — @ sonrasini at
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
 
     if cmd in ("/haber_at", "/onay", "/at"):
         if len(parts) < 2:
