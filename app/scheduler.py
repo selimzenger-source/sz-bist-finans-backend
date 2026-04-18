@@ -4558,27 +4558,12 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Haber Tarama BREAKING — her 5 dakikada bir (hizli son dakika) ───
-    scheduler.add_job(
-        news_scanner_breaking_job,
-        IntervalTrigger(minutes=5),
-        id="news_scanner_breaking",
-        name="Haber Tarama BREAKING (5dk)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    # ─── Haber Tarama MAIN — her 10 dakikada bir (ana kaynaklar) ───
-    scheduler.add_job(
-        news_scanner_main_job,
-        IntervalTrigger(minutes=10),
-        id="news_scanner",
-        name="Haber Tarama MAIN (10dk)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    # ─── Haber Tarama DISABLED — yerel PC'ye tasindi (OOM korumasi) ───
+    # RSS + AI scanner artik C:\Users\PC\Desktop\sz-twitter-reply-bot\news_scanner_v2.py'da calisir.
+    # Render'da sadece API endpoint'leri + KAP/SPK scraper'lari + Telegram bot calisir.
+    # Geri acmak icin asagidaki 2 job'i uncomment et.
+    # scheduler.add_job(news_scanner_breaking_job, IntervalTrigger(minutes=5), id="news_scanner_breaking", name="Haber Tarama BREAKING (5dk)", replace_existing=True, max_instances=1, coalesce=True)
+    # scheduler.add_job(news_scanner_main_job, IntervalTrigger(minutes=10), id="news_scanner", name="Haber Tarama MAIN (10dk)", replace_existing=True, max_instances=1, coalesce=True)
 
     # ─── Kurum Onerileri Scraper — saatte bir ───
     scheduler.add_job(
@@ -4603,17 +4588,11 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Admin Telegram Komut Poller — her 5 saniyede bir ───
-    # /haber_at, /haber_sil, /haber_liste, /onay, /iptal komutlarini dinler
-    scheduler.add_job(
-        admin_command_poll_job,
-        IntervalTrigger(seconds=5),
-        id="admin_command_poller",
-        name="Admin Komut Poller (5sn)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    # ─── Admin Komut Poller DISABLED — yerel PC'ye tasindi ───
+    # Haber scanner yerelleşince aynı haberci_bot token'ı ile Render+PC iki yerden
+    # getUpdates yaparsa 409 Conflict olur. Bu yüzden Render tarafı kapatıldı.
+    # Komutlar (/at, /sil, /devam, /temizle) yerel news_scanner_v2.py tarafından dinlenir.
+    # scheduler.add_job(admin_command_poll_job, IntervalTrigger(seconds=5), id="admin_command_poller", name="Admin Komut Poller (5sn)", replace_existing=True, max_instances=1, coalesce=True)
 
     # KAP AI Retry — ai_summary NULL olanlari 15dk'da bir tekrar dene
     scheduler.add_job(
