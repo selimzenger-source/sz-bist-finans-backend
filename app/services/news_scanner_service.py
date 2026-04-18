@@ -32,6 +32,9 @@ RSS_FEEDS = [
     ("Para Analiz Sirketler", "https://www.paraanaliz.com/category/sirketler/feed/"),
     ("Para Analiz Borsa", "https://www.paraanaliz.com/category/borsa/feed/"),
     ("AA Kurumsal Haberler", "https://www.aa.com.tr/tr/rss/default?cat=kurumsal-haberler"),
+    # ── Hızlı Son Dakika kaynakları (breaking) ──
+    ("CNN Turk Ekonomi", "https://www.cnnturk.com/feed/rss/ekonomi/news"),
+    ("Sozcu Son Dakika", "https://www.sozcu.com.tr/rss/son-dakika.xml"),
     # ── Genel ekonomi kaynakları ──
     ("Bloomberg HT", "https://www.bloomberght.com/rss"),
     ("Dunya", "https://www.dunya.com/rss"),
