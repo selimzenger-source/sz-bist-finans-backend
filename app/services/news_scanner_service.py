@@ -75,8 +75,8 @@ _daily_counts: dict[str, int] = {}  # category -> count
 _daily_counts_date: str = ""  # YYYY-MM-DD
 _last_tweet_times: dict[str, datetime] = {}  # category -> last_tweet_time
 
-# ── Pending news — FIFO kuyruk (max 5 haber, dolunca durur) ──
-_MAX_QUEUE_SIZE = 5
+# ── Pending news — FIFO kuyruk (max 6 haber, dolunca durur) ──
+_MAX_QUEUE_SIZE = 6
 _pending_news: list[dict] = []  # En yeni basta, en eski sonda
 _queue_paused: bool = False  # Kuyruk dolunca True olur, /devam ile False olur
 
@@ -578,12 +578,11 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: MINIMUM 150 kelime, MAKSIMUM 250 kelime. 6-10 cumle yaz. KISA YAZMA, DETAYLI YAZ!
-  * Paragraf 1 (EN AZ 4 cumle): Haberin ana konusunu DETAYLI acikla. Rakamlari, tarihleri, isimleri, tutarlari mutlaka dahil et. Ne oldu, kim yapti, ne zaman, neden onemli — hepsini yaz.
-  * Paragraf 2 (EN AZ 3 cumle): BIST etkisi — hangi sektoru/sirketleri etkileyecegini, yatirimcilar icin ne anlama geldigini yaz.
+- OZET: MINIMUM 120 kelime, MAKSIMUM 200 kelime. 5-8 cumle yaz. OZLU ama TAM yaz.
+  * Paragraf 1 (3-4 cumle): Haberin ana konusunu net acikla. Rakamlari, tarihleri, isimleri, tutarlari mutlaka dahil et. Ne oldu, kim yapti, neden onemli — kisa cumlelerle aktarim yap.
+  * Paragraf 2 (2-3 cumle): BIST etkisi — hangi sektoru/sirketleri etkileyecegini, yatirimcilar icin ne anlama geldigini yaz. SON CUMLE yatirimci icin kisa bir yorum/oneri olsun.
   * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir).
-  * SON CUMLE: Yatirimcilar icin kisa bir yorum/oneri.
-  UYARI: 150 kelimeden KISA ozet KABUL EDILMEZ. Haberi YARIM birakma. Tek cumlelik ozet YASAK.
+  UYARI: 120 kelimeden KISA ozet KABUL EDILMEZ. HER CUMLEYI TAMAMLA, yarim birakma. Tek cumlelik ozet YASAK.
   ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
