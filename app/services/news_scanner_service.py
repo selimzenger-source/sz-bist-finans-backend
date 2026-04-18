@@ -360,16 +360,19 @@ HEADERS = {
 
 
 async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
-    """Tek bir RSS kaynagindan son 25 dakikadaki haberleri al."""
+    """Tek bir RSS kaynagindan son 60 dakikadaki haberleri al."""
     try:
         async with httpx.AsyncClient(timeout=15, headers=HEADERS, follow_redirects=True) as client:
             resp = await client.get(url)
             resp.raise_for_status()
 
         feed = feedparser.parse(resp.text)
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=25)
+        # Cutoff 60dk — RSS'ler guncel olmayabilir, dedup zaten uzun mesafede (12-24h)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=60)
 
         entries = []
+        skipped_old = 0
+        skipped_nodate = 0
         for entry in feed.entries[:20]:
             # Tarih kontrolu
             pub_date = None
@@ -379,7 +382,12 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
                 pub_date = datetime(*entry.updated_parsed[:6], tzinfo=timezone.utc)
 
             if pub_date and pub_date < cutoff:
+                skipped_old += 1
                 continue
+            if not pub_date:
+                skipped_nodate += 1
+                # published tarih yok → yine de al, sadece cok eski olabilir riskini goz onunde bulundurarak
+                pass
 
             import html as _html
             title = _html.unescape(getattr(entry, "title", "").strip())
@@ -408,6 +416,8 @@ async def _fetch_rss_entries(source_name: str, url: str) -> list[dict]:
                 "published": pub_date,
             })
 
+        logger.info("RSS [%s]: total=%d, fresh=%d, skipped_old=%d, no_date=%d",
+                    source_name, len(feed.entries), len(entries), skipped_old, skipped_nodate)
         return entries
     except Exception as e:
         logger.warning("RSS fetch hatasi (%s): %s", source_name, e)
@@ -967,16 +977,20 @@ async def scan_news() -> list[dict]:
 
     # 3. AI analiz (max 20 haber, maliyet optimizasyonu)
     important = []
+    ai_stats = {"none": 0, "low": 0, "pass": 0, "dedup": 0}
     for entry in new_entries[:20]:
         ai_result = await _ai_evaluate(entry)
         url_hash = _hash_url(entry["link"])
         _seen_url_hashes.add(url_hash)
 
         if not ai_result:
+            ai_stats["none"] += 1
             continue
 
         score = ai_result["score"]
         if score < _MIN_IMPORTANCE_SCORE:
+            ai_stats["low"] += 1
+            logger.debug("AI skor dusuk: %.1f < %.1f — %s", score, _MIN_IMPORTANCE_SCORE, entry["title"][:50])
             continue
 
         # Topic dedup (12-24 saat)
@@ -988,12 +1002,14 @@ async def scan_news() -> list[dict]:
             cutoff = datetime.now(_TR_TZ) - timedelta(hours=dedup_hours)
 
             if topic_hash in _seen_topic_hashes and _seen_topic_hashes[topic_hash] > cutoff:
+                ai_stats["dedup"] += 1
                 logger.debug("Topic dedup: %s (%s)", topic, entry["title"][:40])
                 continue
             _seen_topic_hashes[topic_hash] = datetime.now(_TR_TZ)
 
         # Title benzerlik dedup
         if _is_similar_to_recent(entry["title"]):
+            ai_stats["dedup"] += 1
             logger.debug("Baslik benzerlik dedup: %s", entry["title"][:40])
             continue
 
@@ -1001,6 +1017,14 @@ async def scan_news() -> list[dict]:
 
         entry["ai"] = ai_result
         important.append(entry)
+        ai_stats["pass"] += 1
+        logger.info("AI PASS: %.1f [%s] %s", score, ai_result.get("category", "?"), entry["title"][:60])
+
+    logger.info(
+        "scan_news ozet: RSS=%d new=%d | AI none=%d low=%d dedup=%d pass=%d",
+        len(entries), len(new_entries),
+        ai_stats["none"], ai_stats["low"], ai_stats["dedup"], ai_stats["pass"]
+    )
 
     # Skora gore sirala, max 3
     important.sort(key=lambda x: x["ai"]["score"], reverse=True)
