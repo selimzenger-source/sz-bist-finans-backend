@@ -29,9 +29,12 @@ _TR_TZ = timezone(timedelta(hours=3))
 # Genel ekonomi/piyasa kaynaklari
 RSS_FEEDS = [
     # ── Şirket/Borsa ODAKLI kaynaklar (öncelikli) ──
+    ("Forbes Sirketler", "https://www.forbes.com.tr/rss/sirketler"),
+    ("Forbes Ana", "https://www.forbes.com.tr/rss"),
     ("Para Analiz Sirketler", "https://www.paraanaliz.com/category/sirketler/feed/"),
     ("Para Analiz Borsa", "https://www.paraanaliz.com/category/borsa/feed/"),
     ("AA Kurumsal Haberler", "https://www.aa.com.tr/tr/rss/default?cat=kurumsal-haberler"),
+    ("Sabah Ekonomi", "https://www.sabah.com.tr/rss/ekonomi.xml"),
     # ── Hızlı Son Dakika kaynakları (breaking) ──
     ("CNN Turk Ekonomi", "https://www.cnnturk.com/feed/rss/ekonomi/news"),
     ("Sozcu Son Dakika", "https://www.sozcu.com.tr/rss/son-dakika.xml"),
