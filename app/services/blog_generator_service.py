@@ -171,7 +171,7 @@ async def generate_blog_post(
 
 
 async def _call_ai(settings, user_prompt: str) -> str | None:
-    """AI API'yi cagir — Claude Haiku birincil."""
+    """AI API'yi cagir — Claude Haiku birincil, Gemini fallback."""
 
     # Claude Haiku (birincil — hızlı ve güvenilir)
     anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", "")
@@ -211,6 +211,40 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
                     logger.warning(f"Claude API error {resp.status_code}: {resp.text[:300]}")
         except Exception as e:
             logger.warning(f"Claude Haiku failed: {e}", exc_info=True)
+    else:
+        logger.warning("ANTHROPIC_API_KEY yok — Gemini fallback denenecek")
+
+    # Gemini 2.5 Flash (fallback)
+    gemini_key = getattr(settings, "GEMINI_API_KEY", "")
+    if gemini_key:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+                resp = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {gemini_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gemini-2.5-flash",
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_tokens": 8000,
+                        "temperature": 0.4,
+                    },
+                )
+                if resp.status_code == 200:
+                    text = resp.json()["choices"][0]["message"]["content"]
+                    logger.info(f"Blog generated via Gemini 2.5 Flash ({len(text)} chars)")
+                    return text
+                else:
+                    logger.warning(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+        except Exception as e:
+            logger.warning(f"Gemini fallback failed: {e}", exc_info=True)
+    else:
+        logger.warning("GEMINI_API_KEY da yok — blog uretilemez")
 
     return None
 
