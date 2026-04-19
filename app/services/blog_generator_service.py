@@ -77,11 +77,15 @@ KURALLAR:
 10. Gerçekçi ve doğru bilgiler ver, uydurma.
 11. Örneklerle açıkla, soyut kalma.
 12. Emoji KULLANMA.
+13. ÖNEMLİ: HTML içinde SADECE BASIT etiketler kullan — attribute (class, id, style)
+    EKLEME. Örnek: <p>metin</p> ✓  —  <p class="intro">metin</p> ✗
+    Bu kural JSON parse hatasını önlemek için zorunludur.
+14. JSON string değerleri içinde çift tırnak (") kullanma.
 
 ÇIKTI FORMATI (kesinlikle JSON):
 {
   "title": "SEO uyumlu, 6-10 kelimelik başlık",
-  "content": "<h2>...</h2><p>...</p>... sadece HTML",
+  "content": "<h2>...</h2><p>...</p>... sadece HTML, attribute yok",
   "meta_description": "150-160 karakter SEO açıklaması"
 }"""
 
@@ -134,47 +138,77 @@ async def generate_blog_post(
         return None
 
     # JSON parse — Claude bazen ```json ... ``` sarmaliyla donuyor, temizle
+    cleaned = result.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+
+    title = ""
+    content = ""
+    meta_desc = ""
+
+    # Once standart JSON parse dene
     try:
-        cleaned = result.strip()
-        # Markdown code block varsa cikar
-        if cleaned.startswith("```"):
-            # ```json veya ``` ile baslar — ilk satiri at, kapanan ``` ata
-            cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
-            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
-
-        # JSON bloğunu bul (greedy, son } kadar)
         json_match = re.search(r'\{[\s\S]*\}', cleaned)
-        if not json_match:
-            logger.error(f"Blog generation: JSON not found in response. First 500 chars: {result[:500]}")
-            return None
-
-        data = json.loads(json_match.group())
-        title = data.get("title", "").strip()
-        content = data.get("content", "").strip()
-        meta_desc = data.get("meta_description", "").strip()
-
-        if not title or not content:
-            logger.error(f"Blog generation: Empty title or content. Data keys: {list(data.keys())}")
-            return None
-
-        slug = _slugify(title)
-
-        return {
-            "title": title,
-            "content": content,
-            "meta_description": meta_desc,
-            "slug": slug,
-            "category": category,
-        }
-
+        if json_match:
+            data = json.loads(json_match.group())
+            title = data.get("title", "").strip()
+            content = data.get("content", "").strip()
+            meta_desc = data.get("meta_description", "").strip()
     except json.JSONDecodeError as e:
-        # JSON bozuksa muhtemelen max_tokens kesilmesi — son chars log'la
+        logger.warning(
+            f"Blog generation JSON parse basarisiz (HTML icinde escape edilmemis tirnak "
+            f"olabilir): {e}. Regex fallback deneniyor."
+        )
+
+    # JSON parse basarisiz veya eksikse regex ile tek tek cikar
+    # (Claude HTML'de \" kacmiyorsa bu kurtaricidir)
+    if not title or not content:
+        # title: "..."
+        t_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+        if t_match:
+            title = t_match.group(1).replace('\\"', '"').replace("\\n", "\n").strip()
+
+        # meta_description: "..."
+        m_match = re.search(r'"meta_description"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+        if m_match:
+            meta_desc = m_match.group(1).replace('\\"', '"').strip()
+
+        # content: "..." — HTML icinde tirnak olabilir, daha dikkatli regex
+        # "content": " ile basla, sonraki "meta_description" ya da } kadar al.
+        c_match = re.search(
+            r'"content"\s*:\s*"(.*?)"\s*,\s*"meta_description"',
+            cleaned,
+            re.DOTALL,
+        )
+        if not c_match:
+            # meta_description onceden geliyorsa veya yoksa: content ... " } ile bitis
+            c_match = re.search(
+                r'"content"\s*:\s*"(.*?)"\s*\}',
+                cleaned,
+                re.DOTALL,
+            )
+        if c_match:
+            content = c_match.group(1).replace('\\n', '\n').strip()
+
+    if not title or not content:
         tail = result[-400:] if len(result) > 400 else result
         logger.error(
-            f"Blog generation JSON parse error: {e}. "
+            f"Blog generation: Title/content cikarilamadi. "
             f"Response length: {len(result)}. Last 400 chars: {tail}"
         )
         return None
+
+    slug = _slugify(title)
+    logger.info(f"Blog uretildi: '{title[:60]}' (content {len(content)} chars)")
+
+    return {
+        "title": title,
+        "content": content,
+        "meta_description": meta_desc,
+        "slug": slug,
+        "category": category,
+    }
 
 
 async def _call_ai(settings, user_prompt: str) -> str | None:
