@@ -3808,6 +3808,27 @@ async def generate_blog(
     except Exception as e:
         logger.warning(f"Blog bildirim gonderilemedi: {e}")
 
+    # Web site auto-deploy — borsacebimde.app Render Deploy Hook
+    # Env var'da RENDER_WEB_DEPLOY_HOOK set edilmeli (Render > borsacebimde-web
+    # > Settings > Deploy Hook). Set edilmemisse atla, log'la.
+    import os
+    deploy_hook = os.getenv("RENDER_WEB_DEPLOY_HOOK", "")
+    if deploy_hook:
+        try:
+            import httpx
+            async def _trigger_web_deploy():
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        r = await client.post(deploy_hook)
+                        logger.info(f"Web deploy tetiklendi: HTTP {r.status_code}")
+                except Exception as ex:
+                    logger.warning(f"Web deploy tetikleme hatasi: {ex}")
+            asyncio.create_task(_trigger_web_deploy())
+        except Exception as e:
+            logger.warning(f"Web deploy hook hatasi: {e}")
+    else:
+        logger.info("RENDER_WEB_DEPLOY_HOOK tanimli degil — web redeploy manuel yapilmali")
+
     return RedirectResponse(
         url="/admin/blog?success=Blog+yazisi+basariyla+uretildi",
         status_code=303,

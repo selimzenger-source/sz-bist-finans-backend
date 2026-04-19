@@ -181,6 +181,30 @@ async def init_db():
         except Exception:
             pass
 
+        # notify_rehber: Rehber/blog yazisi bildirimi — mevcut kullanicilarin
+        # NULL kalmamasi icin server_default TRUE + UPDATE ile NULL'lari TRUE yap.
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_rehber BOOLEAN DEFAULT TRUE")
+            )
+            # Mevcut NULL degerleri TRUE yap (blog bildirimi varsayilan acik)
+            await conn.execute(
+                text("UPDATE users SET notify_rehber = TRUE WHERE notify_rehber IS NULL")
+            )
+        except Exception:
+            pass
+
+        # notify_news: Piyasa haberleri — aynı sekilde NULL'lari TRUE yap
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_news BOOLEAN DEFAULT TRUE")
+            )
+            await conn.execute(
+                text("UPDATE users SET notify_news = TRUE WHERE notify_news IS NULL")
+            )
+        except Exception:
+            pass
+
         # v13 migration: ipos.company_name'deki \n karakterlerini temizle
         # SPK bultenden gelen sirket isimlerinde \n olabiliyor (tweet'lerde bozuk gorunuyor)
         try:
