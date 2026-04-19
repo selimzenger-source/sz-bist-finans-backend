@@ -133,10 +133,17 @@ async def generate_blog_post(
     if not result:
         return None
 
-    # JSON parse
+    # JSON parse — Claude bazen ```json ... ``` sarmaliyla donuyor, temizle
     try:
-        # JSON bloğunu bul
-        json_match = re.search(r'\{[\s\S]*\}', result)
+        cleaned = result.strip()
+        # Markdown code block varsa cikar
+        if cleaned.startswith("```"):
+            # ```json veya ``` ile baslar — ilk satiri at, kapanan ``` ata
+            cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+
+        # JSON bloğunu bul (greedy, son } kadar)
+        json_match = re.search(r'\{[\s\S]*\}', cleaned)
         if not json_match:
             logger.error(f"Blog generation: JSON not found in response. First 500 chars: {result[:500]}")
             return None
