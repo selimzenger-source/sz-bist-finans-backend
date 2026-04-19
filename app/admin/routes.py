@@ -3778,59 +3778,124 @@ async def generate_blog(
             status_code=303,
         )
 
-    # Kaydet
-    now = datetime.now(timezone.utc)
+    # Kaydet — TASLAK olarak (yayinda degil). Admin inceleyip "Yayinla"
+    # butonuna basinca bildirim gider ve site deploy edilir.
     new_blog = BlogPost(
         slug=blog_data["slug"],
         title=blog_data["title"],
         content=blog_data["content"],
         meta_description=blog_data.get("meta_description"),
         category=blog_data.get("category", category),
-        is_published=True,
-        published_at=now,
+        is_published=False,
+        published_at=None,
     )
     db.add(new_blog)
     await db.flush()
 
-    logger.info(f"Admin: Blog yazisi uretildi — {new_blog.title} (id={new_blog.id})")
+    logger.info(f"Admin: Blog yazisi uretildi (TASLAK) — {new_blog.title} (id={new_blog.id})")
 
-    # Push bildirim gonder — "Yeni rehber yayinlandi"
+    return RedirectResponse(
+        url=f"/admin/blog/{new_blog.id}/edit?success=Blog+taslak+olarak+olusturuldu.+Inceleyip+duzenleyin+ve+Yayinla+butonuna+basin.",
+        status_code=303,
+    )
+
+
+# Eski bildirim/deploy kodu toggle-publish'e tasindi (asagida)
+async def _post_publish_actions(blog, logger_):
+    """Yayinlama sonrasi: push bildirim + web site deploy hook."""
     try:
         import asyncio
         from app.services.broadcast import broadcast_background_task
         asyncio.create_task(broadcast_background_task(
-            title=f"📚 {new_blog.title}",
+            title=f"📚 {blog.title}",
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
             audience="rehber",
             deep_link_target="rehber",
         ))
-        logger.info(f"Blog bildirim gorevi baslat: {new_blog.title}")
+        logger_.info(f"Blog bildirim gorevi baslat: {blog.title}")
     except Exception as e:
-        logger.warning(f"Blog bildirim gonderilemedi: {e}")
+        logger_.warning(f"Blog bildirim gonderilemedi: {e}")
 
-    # Web site auto-deploy — borsacebimde.app Render Deploy Hook
-    # Env var'da RENDER_WEB_DEPLOY_HOOK set edilmeli (Render > borsacebimde-web
-    # > Settings > Deploy Hook). Set edilmemisse atla, log'la.
     import os
     deploy_hook = os.getenv("RENDER_WEB_DEPLOY_HOOK", "")
     if deploy_hook:
         try:
-            import httpx
+            import httpx, asyncio
             async def _trigger_web_deploy():
                 try:
                     async with httpx.AsyncClient(timeout=10) as client:
                         r = await client.post(deploy_hook)
-                        logger.info(f"Web deploy tetiklendi: HTTP {r.status_code}")
+                        logger_.info(f"Web deploy tetiklendi: HTTP {r.status_code}")
                 except Exception as ex:
-                    logger.warning(f"Web deploy tetikleme hatasi: {ex}")
+                    logger_.warning(f"Web deploy tetikleme hatasi: {ex}")
             asyncio.create_task(_trigger_web_deploy())
         except Exception as e:
-            logger.warning(f"Web deploy hook hatasi: {e}")
+            logger_.warning(f"Web deploy hook hatasi: {e}")
     else:
-        logger.info("RENDER_WEB_DEPLOY_HOOK tanimli degil — web redeploy manuel yapilmali")
+        logger_.info("RENDER_WEB_DEPLOY_HOOK tanimli degil — web redeploy manuel yapilmali")
+
+
+@router.get("/blog/{blog_id}/edit")
+async def edit_blog_form(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog duzenleme formu."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+    result = await db.execute(select(BlogPost).where(BlogPost.id == blog_id))
+    blog = result.scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    return templates.TemplateResponse(
+        "admin/blog_edit.html",
+        {"request": request, "blog": blog, "success": request.query_params.get("success"), "error": request.query_params.get("error")},
+    )
+
+
+@router.post("/blog/{blog_id}/edit")
+async def edit_blog_save(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog duzenlemeyi kaydet."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+    result = await db.execute(select(BlogPost).where(BlogPost.id == blog_id))
+    blog = result.scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    form = await request.form()
+    new_title = form.get("title", "").strip()
+    new_content = form.get("content", "").strip()
+    new_meta = form.get("meta_description", "").strip()
+    new_category = form.get("category", "").strip()
+
+    if not new_title or not new_content:
+        return RedirectResponse(
+            url=f"/admin/blog/{blog_id}/edit?error=Baslik+ve+icerik+zorunlu",
+            status_code=303,
+        )
+
+    blog.title = new_title
+    blog.content = new_content
+    blog.meta_description = new_meta or None
+    if new_category:
+        blog.category = new_category
+
+    await db.commit()
+    logger.info(f"Admin: Blog guncellendi — {blog.title} (id={blog.id})")
 
     return RedirectResponse(
-        url="/admin/blog?success=Blog+yazisi+basariyla+uretildi",
+        url=f"/admin/blog/{blog_id}/edit?success=Degisiklikler+kaydedildi",
         status_code=303,
     )
 
@@ -3947,19 +4012,67 @@ async def toggle_blog_publish(
     if not blog:
         return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
 
+    was_published = blog.is_published
     blog.is_published = not blog.is_published
+    newly_published = blog.is_published and not was_published
+
     if blog.is_published:
-        blog.published_at = datetime.now(timezone.utc)
+        if not blog.published_at:
+            blog.published_at = datetime.now(timezone.utc)
     else:
         blog.published_at = None
 
-    await db.flush()
+    await db.commit()
+
+    # Taslaktan yayina alinirken push + deploy tetikle
+    if newly_published:
+        await _post_publish_actions(blog, logger)
 
     status_text = "yayina+alindi" if blog.is_published else "yayindan+kaldirildi"
     logger.info(f"Admin: Blog {blog_id} {status_text}")
 
     return RedirectResponse(
         url=f"/admin/blog?success=Blog+{status_text}",
+        status_code=303,
+    )
+
+
+@router.post("/blog/{blog_id}/resend-notification")
+async def resend_blog_notification(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog icin push bildirimi tekrar gonder — eski bloglar veya
+    migration sonrasi bildirim gitmemis bloglar icin."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+    result = await db.execute(select(BlogPost).where(BlogPost.id == blog_id))
+    blog = result.scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    try:
+        import asyncio
+        from app.services.broadcast import broadcast_background_task
+        asyncio.create_task(broadcast_background_task(
+            title=f"📚 {blog.title}",
+            body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
+            audience="rehber",
+            deep_link_target="rehber",
+        ))
+        logger.info(f"Blog bildirim TEKRAR gonderildi: {blog.title} (id={blog.id})")
+    except Exception as e:
+        logger.warning(f"Blog bildirim tekrar gonderilemedi: {e}")
+        return RedirectResponse(
+            url=f"/admin/blog?error=Bildirim+gonderilemedi",
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url="/admin/blog?success=Bildirim+tekrar+tetiklendi+(2-5+dk+icinde+kullanicilara+gider,+Telegram+raporu+bitince+gelir)",
         status_code=303,
     )
 
