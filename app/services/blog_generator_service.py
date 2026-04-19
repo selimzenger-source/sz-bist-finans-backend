@@ -138,7 +138,7 @@ async def generate_blog_post(
         # JSON bloğunu bul
         json_match = re.search(r'\{[\s\S]*\}', result)
         if not json_match:
-            logger.error("Blog generation: JSON not found in response")
+            logger.error(f"Blog generation: JSON not found in response. First 500 chars: {result[:500]}")
             return None
 
         data = json.loads(json_match.group())
@@ -147,7 +147,7 @@ async def generate_blog_post(
         meta_desc = data.get("meta_description", "").strip()
 
         if not title or not content:
-            logger.error("Blog generation: Empty title or content")
+            logger.error(f"Blog generation: Empty title or content. Data keys: {list(data.keys())}")
             return None
 
         slug = _slugify(title)
@@ -161,7 +161,12 @@ async def generate_blog_post(
         }
 
     except json.JSONDecodeError as e:
-        logger.error(f"Blog generation JSON parse error: {e}")
+        # JSON bozuksa muhtemelen max_tokens kesilmesi — son chars log'la
+        tail = result[-400:] if len(result) > 400 else result
+        logger.error(
+            f"Blog generation JSON parse error: {e}. "
+            f"Response length: {len(result)}. Last 400 chars: {tail}"
+        )
         return None
 
 
@@ -182,7 +187,7 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
                     },
                     json={
                         "model": "claude-haiku-4-5-20251001",
-                        "max_tokens": 4000,
+                        "max_tokens": 8000,
                         "system": _SYSTEM_PROMPT,
                         "messages": [
                             {"role": "user", "content": user_prompt},
@@ -190,13 +195,22 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
                     },
                 )
                 if resp.status_code == 200:
-                    text = resp.json()["content"][0]["text"]
-                    logger.info(f"Blog generated via Claude Haiku ({len(text)} chars)")
+                    data = resp.json()
+                    text = data["content"][0]["text"]
+                    stop_reason = data.get("stop_reason", "?")
+                    logger.info(
+                        f"Blog generated via Claude Haiku ({len(text)} chars, "
+                        f"stop_reason={stop_reason})"
+                    )
+                    if stop_reason == "max_tokens":
+                        logger.warning(
+                            "Claude response hit max_tokens — content may be truncated"
+                        )
                     return text
                 else:
-                    logger.warning(f"Claude API error {resp.status_code}: {resp.text[:200]}")
+                    logger.warning(f"Claude API error {resp.status_code}: {resp.text[:300]}")
         except Exception as e:
-            logger.warning(f"Claude Haiku failed: {e}")
+            logger.warning(f"Claude Haiku failed: {e}", exc_info=True)
 
     return None
 
