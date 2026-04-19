@@ -3811,8 +3811,9 @@ async def _post_publish_actions(blog, logger_):
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
             audience="rehber",
             deep_link_target="rehber",
+            extra_data={"blog_slug": blog.slug, "blog_id": blog.id},
         ))
-        logger_.info(f"Blog bildirim gorevi baslat: {blog.title}")
+        logger_.info(f"Blog bildirim gorevi baslat: {blog.title} (slug={blog.slug})")
     except Exception as e:
         logger_.warning(f"Blog bildirim gonderilemedi: {e}")
 
@@ -4062,6 +4063,7 @@ async def resend_blog_notification(
             body="Yeni rehber yazısı yayınlandı. İncelemek için tıklayın!",
             audience="rehber",
             deep_link_target="rehber",
+            extra_data={"blog_slug": blog.slug, "blog_id": blog.id},
         ))
         logger.info(f"Blog bildirim TEKRAR gonderildi: {blog.title} (id={blog.id})")
     except Exception as e:

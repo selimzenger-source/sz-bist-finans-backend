@@ -161,10 +161,14 @@ async def broadcast_background_task(
     body: str,
     audience: str,
     deep_link_target: str,
+    extra_data: dict | None = None,
 ):
     """Broadcast gonderim gorevi — asyncio.create_task() ile cagrilir.
 
     Kendi async_session acar (HTTP request session'i kapanmis olur).
+
+    extra_data: Mobil uygulama NotificationContext'in okudugu data'ya
+    ek alanlar (ornek: blog_slug, screen, ipo_id). Tum degerler string'e cevrilir.
     """
     from app.database import async_session
 
@@ -192,7 +196,11 @@ async def broadcast_background_task(
             safe_data = {
                 "type": "announcement",
                 "target": str(deep_link_target),
+                "screen": str(deep_link_target),  # NotificationContext data.screen okur
             }
+            if extra_data:
+                for k, v in extra_data.items():
+                    safe_data[str(k)] = str(v) if v is not None else ""
 
             logger.info(
                 "Broadcast baslatiliyor: '%s' → %d kullanici (%s)",
