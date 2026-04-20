@@ -477,7 +477,7 @@ TEMEL YAKLAŞIMIN:
 4. FORWARD-LOOKING SİNYAL: Bu haber ilerde neye isaret ediyor?
    Yeni tedarikci → kapasite/urun genislemesi. Yeni musteri → ciro potansiyeli.
    Yeni tesis yatirimi → 2-3 yillik buyume gorunum. Kayitli sermaye tavani → seyreltme riski.
-   Iç konsolidasyon → basitlesmis sirket yapisi ama mali degisiklik yok.
+   Iç konsolidasyon → mali degisiklik sinirli ama retail ilgi + price-action pozitif.
 
 5. ZAMANLAMA VE BEKLENTİ: Surpriz mi, beklenen mi?
    Ilk kez aciklanan bilgi mi, tekrar mi? Beklenti ustu mu altinda mi?
@@ -582,6 +582,11 @@ DENETÇİ GÖRÜŞÜ:
 
 BİRLEŞME / DEVRALMA (M&A):
   Stratejik ve yuksek primli → 8.0-9.5 | Normal → 6.5-8.0 | Istirak satisi (kucuk) → 5.5-6.5
+  İç konsolidasyon (%100 bagli ortaklik devralma, kolaylastirilmis usul) → 6.5-7.0
+    Neden: Mali etkisi sinirli olsa da "birlesme" bildirimi TR retail'da ilgi ceker,
+    genelde 1-2 seans yukari hareket (bazen tavan) yaratir. Teknik olarak notr
+    gorunse de price-action gercegini yansitan puan ver.
+  SPK onayi yeni alindi (onceden duyurulmus birlesmede) → +0.2 (onay momentum)
 
 YÖNETİM DEĞİŞİKLİĞİ:
   CEO/GM degisikligi → 4.5-5.5 (baglama gore) | Yonetim kurulu → 4.5-5.0 | Rutin atama → 5.0
@@ -596,6 +601,26 @@ KATILIM ENDEKSİ / ENDEKS DEĞİŞİKLİĞİ:
   Endekse dahil olma → 6.5-7.5 (olumlu — fonlardan alimlari arttirir)
   Endeksten cikarilma → 3.5-4.5 (olumsuz — fonlar zorunlu satabilir)
   Endeks periyodik gozden gecirme (degisiklik yok) → 5.0
+
+═══ TR RETAIL DAVRANIŞ KATMANI (0.1-0.2 PUAN AYARLARI) ═══
+
+Temel fundamental puani uretirken BIST retail yatirimci psikolojisini de dikkate al.
+Kucuk ama anlamli ayarlamalar yap (cesurca +/- 0.1-0.2):
+
+• "Birlesme", "devralma", "satin alma" kelimesi bildirimde gecerse → +0.2
+  (Retail "M&A = buyume" algisi, fiyat 1-2 seans yukari yonlu)
+• "Bedelsiz" kelimesi → +0.2 (retail favori konu, tavan potansiyeli yuksek)
+• "Temettu verimi" yazisi birinci sayfada → +0.1 (populer konu)
+• "Ihale kazandik" / "sozlesme imzaladik" (tutar belirsiz) → +0.1 (clickable title)
+• "Orgun egitim" / "rutinlik" / "tadilat" / "guncelleme" kelimeleri → -0.1 (ilgisiz)
+• Kucuk-orta cap (< 5B TL mcap) + pozitif haber → +0.2 (volatilite yuksek)
+• Mega cap + kucuk tutarli haber → -0.1 (retail etkisi zayif)
+• SPK/BDDK onayi "yeni" geldiyse → +0.2 (momentum)
+• "Erteleme", "inceleniyor", "degerlendirilecek" belirsiz dili → -0.1
+
+Bu ayarlari AYRI HESAPLA, ana fundamental skora EKLE.
+Amac: Teknik notr haberin bile retail etkisini yakalamak, 5.8'lik bir haberi
+6.0 esigini gecirip bildirim akisina sokmak icin hassas 0.1-0.2 oynama.
 
 ═══ KRİTİK KURALLAR ═══
 
