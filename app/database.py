@@ -619,6 +619,17 @@ async def init_db():
         except Exception:
             pass
 
+        # v49 migration: AI yorumu kolonlari
+        try:
+            await conn.execute(
+                text("ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS ai_comment TEXT")
+            )
+            await conn.execute(
+                text("ALTER TABLE kurum_onerileri ADD COLUMN IF NOT EXISTS ai_comment_at TIMESTAMPTZ")
+            )
+        except Exception:
+            pass
+
         # v48 migration: notify_kurum_onerileri kolonu (kurum onerileri bildirim tercihi)
         try:
             await conn.execute(

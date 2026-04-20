@@ -738,13 +738,26 @@ def live_sync(filepath, interval=15):
                 rows = read_matriks_excel_live(filepath)
             except Exception as e:
                 log(f"[{now}] Excel okuma hatasi: {e} — {interval}s sonra tekrar...")
+                _consecutive_empty_reads = locals().get("_consecutive_empty_reads", 0) + 1
                 time.sleep(interval)
                 continue
 
             if not rows:
                 log(f"[{now}] Excel bos — {interval}s sonra tekrar...")
+                _consecutive_empty_reads = locals().get("_consecutive_empty_reads", 0) + 1
                 time.sleep(interval)
                 continue
+
+            # Excel bos/hata sonrasi veri gelince warmup'i sifirla
+            # (kullanici Excel'i kapatip/acinca ilk gelen veri tavan/taban cozuldu/kalkti gibi
+            #  yanlis bildirim tetiklemesin)
+            _prev_empty = locals().get("_consecutive_empty_reads", 0)
+            if _prev_empty >= 3 and _warmup_done:
+                _warmup_done = False
+                _WARMUP_ACTIVE = True
+                cycle = 0  # Warmup sayacini sifirla
+                log(f"[{now}] 🔄 Excel verisi geri geldi ({_prev_empty} bos okumadan sonra) — WARMUP sifirlandi, {WARMUP_CYCLES} dongu bildirim yok")
+            _consecutive_empty_reads = 0
             changed_tracks = []
 
             for row in rows:

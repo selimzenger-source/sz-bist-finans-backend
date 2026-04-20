@@ -8712,20 +8712,23 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
         from app.services.notification import NotificationService
         svc = NotificationService(db)
         if category_upper == "BILGI":
-            # Sistem bilgilendirme — baska baslik ve type
+            # Sistem bilgilendirme — Sistem kategorisinde, metin tamamen govdede,
+            # yonlendirme yok (bildirim merkezinde acildiginda expand olur)
             headline = body.get("headline", "Bilgilendirme")
-            summary = (body.get("summary") or "")[:200]
+            summary = (body.get("summary") or "")
             data = {
                 "type": "system_info",
-                "screen": "haberler-genel",
+                # screen yok → Detaylari Incele butonu cikmaz, tiklayinca expand olur
             }
+            # Body = baslik + ozet (tam metin)
+            full_body = f"{headline}\n\n{summary}" if summary else headline
             await svc._send_filtered(
                 "notify_news",
                 "📢 Borsa Cebimde Bilgilendirme",
-                f"{headline}",
+                full_body[:900],
                 data,
                 f"Bilgilendirme: {headline[:50]}",
-                category="other",
+                category="system",
             )
         else:
             await svc.notify_market_news(
@@ -9047,6 +9050,8 @@ async def get_kurum_onerileri(
                 "report_date": item.report_date.isoformat() if item.report_date else None,
                 "source_url": item.source_url,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
+                "ai_comment": item.ai_comment,
+                "ai_comment_at": item.ai_comment_at.isoformat() if item.ai_comment_at else None,
             }
             for item in items
         ],
@@ -9054,6 +9059,19 @@ async def get_kurum_onerileri(
         "page": page,
         "limit": limit,
     }
+
+
+@app.post("/api/v1/admin/kurum-oneri-ai-backfill")
+async def admin_kurum_oneri_backfill(body: dict, db: AsyncSession = Depends(get_db)):
+    """AI yorumu eksik olan kurum onerilerine Claude Sonnet ile yorum ekle.
+    Body: { admin_password, limit (opsiyonel, varsayilan 30) }"""
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from app.services.kurum_oneri_ai import backfill_comments
+    limit = int(body.get("limit", 30))
+    result = await backfill_comments(db, limit=limit)
+    return {"status": "ok", **result}
 
 
 @app.get("/api/v1/kurum-onerileri/stats")

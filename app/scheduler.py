@@ -4816,6 +4816,25 @@ async def scrape_kurum_onerileri():
 
             await db.commit()
 
+            # Yeni oneriler icin AI yorumu uret (Claude Sonnet, 3-4 cumle)
+            if new_items:
+                try:
+                    from app.services.kurum_oneri_ai import generate_ai_comment
+                    from datetime import datetime as _dt2, timezone as _tz2
+                    for oneri in new_items:
+                        if oneri.ai_comment:
+                            continue
+                        try:
+                            comment = await generate_ai_comment(oneri)
+                            if comment:
+                                oneri.ai_comment = comment
+                                oneri.ai_comment_at = _dt2.now(_tz2.utc)
+                        except Exception as ai_err:
+                            logger.debug("AI yorum hatasi (%s): %s", oneri.ticker, ai_err)
+                    await db.commit()
+                except Exception as e:
+                    logger.warning("Kurum oneri AI batch hatasi: %s", e)
+
             # Yeni oneriler icin TEK bildirim + TEK tweet (toplu ozet)
             if new_items:
                 from datetime import datetime as _dt, timezone as _tz

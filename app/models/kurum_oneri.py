@@ -74,6 +74,16 @@ class KurumOneri(Base):
         comment="Tweet atildi mi? None ise atilmadi"
     )
 
+    # AI yorumu (3-4 cumle) — hedef fiyat % vs gecelik faiz karsilastirmasi
+    ai_comment: Mapped[str | None] = mapped_column(
+        Text, nullable=True,
+        comment="Claude Sonnet tarafindan uretilen yorum (3-4 cumle)"
+    )
+    ai_comment_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="AI yorumu ne zaman uretildi"
+    )
+
     # Meta
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
