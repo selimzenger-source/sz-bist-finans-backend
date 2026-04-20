@@ -1322,6 +1322,37 @@ async def get_published_blogs(db: AsyncSession = Depends(get_db)):
     return list(result.scalars().all())
 
 
+@app.get("/api/v1/public/system-announcements")
+async def get_system_announcements(
+    db: AsyncSession = Depends(get_db),
+    days: int = Query(30, le=90),
+    limit: int = Query(10, le=30),
+):
+    """Sistem bilgilendirme duyurulari (borsa tatili, bakim, genel duyurular).
+    Web sitesinde 'Son Guncellemeler' icin."""
+    from app.models import PendingTweet
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    stmt = (
+        select(PendingTweet)
+        .where(
+            PendingTweet.source == "system_info",
+            PendingTweet.sent_at >= cutoff,
+        )
+        .order_by(desc(PendingTweet.sent_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "text": r.text,
+            "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+            "image_path": r.image_path or None,
+        }
+        for r in rows
+    ]
+
+
 @app.get("/api/v1/public/blogs/{slug}")
 async def get_blog_by_slug(slug: str, db: AsyncSession = Depends(get_db)):
     """Slug ile tek blog yazisi getir."""
@@ -8655,8 +8686,12 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
         .limit(1)
     )).scalar_one_or_none()
 
+    # Kategori BILGI ise source="system_info" — piyasa haberleri listesinde gorunmez,
+    # sadece sistem bildirimi olarak islenir
+    _src = "system_info" if (body.get("category") or "").upper() == "BILGI" else "news_scanner"
+
     if existing:
-        existing.source = "news_scanner"
+        existing.source = _src
         if body.get("cover_url"):
             existing.image_path = body.get("cover_url")
         pt = existing
@@ -8664,21 +8699,39 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
         pt = PendingTweet(
             text=tweet_text,
             image_path=body.get("cover_url", "") or "",
-            source="news_scanner",
+            source=_src,
             status="sent",
             sent_at=datetime.now(timezone.utc),
         )
         db.add(pt)
     await db.commit()
 
-    # 2. Push bildirim (önemli haber)
+    # 2. Push bildirim
+    category_upper = (body.get("category") or "").upper()
     try:
         from app.services.notification import NotificationService
         svc = NotificationService(db)
-        await svc.notify_market_news(
-            body.get("headline", "Önemli gelişme"),
-            summary=(body.get("summary") or "")[:800],
-        )
+        if category_upper == "BILGI":
+            # Sistem bilgilendirme — baska baslik ve type
+            headline = body.get("headline", "Bilgilendirme")
+            summary = (body.get("summary") or "")[:200]
+            data = {
+                "type": "system_info",
+                "screen": "haberler-genel",
+            }
+            await svc._send_filtered(
+                "notify_news",
+                "📢 Borsa Cebimde Bilgilendirme",
+                f"{headline}",
+                data,
+                f"Bilgilendirme: {headline[:50]}",
+                category="other",
+            )
+        else:
+            await svc.notify_market_news(
+                body.get("headline", "Önemli gelişme"),
+                summary=(body.get("summary") or "")[:800],
+            )
         await db.commit()
     except Exception as e:
         logger.error("Publish-news push hatasi: %s", e)
