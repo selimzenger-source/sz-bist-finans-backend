@@ -8686,6 +8686,76 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "pending_tweet_id": pt.id}
 
 
+@app.post("/api/v1/admin/cleanup-bad-hashtags")
+async def admin_cleanup_bad_hashtags(body: dict, db: AsyncSession = Depends(get_db)):
+    """Tek bir PendingTweet kaydinda #KOC, #SABANCI gibi yanlis hashtag satirini
+    ve orphan 'Ç' / 'C' karakterini temizler.
+
+    Body:
+      admin_password: str
+      search: str (tweet text icinde arama yapar, ilk eslesen satiri duzeltir)
+    """
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    search = (body.get("search") or "").strip()
+    if not search:
+        raise HTTPException(status_code=400, detail="search gerekli (ornek: 'KOC HOLDING')")
+
+    import re as _re
+    from app.models import PendingTweet
+    from sqlalchemy import select
+
+    BAD_TAGS = {
+        "KOC", "KOÇ", "SABANCI", "ANADOLU", "DOGUS", "DOĞUŞ", "EGE", "ZORLU",
+        "YILDIZ", "CALIK", "ÇALIK", "OYAK", "BORUSAN", "ENKA", "IHLAS",
+        "TURKCELL", "TURKIYE", "TÜRKİYE", "TURK", "TÜRK", "ISBANK", "GARANTI",
+        "YAPIKREDI", "AKBANK", "HOLDING", "GRUP", "BIST", "BORSA", "KAP",
+        "SPK", "TCMB", "Ç", "C",
+    }
+
+    row = (await db.execute(
+        select(PendingTweet)
+        .where(PendingTweet.text.ilike(f"%{search}%"))
+        .order_by(PendingTweet.id.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if not row:
+        return {"status": "not_found", "search": search}
+
+    original = row.text or ""
+    lines = original.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        s = line.strip()
+        if "#" in s:
+            tags = _re.findall(r"#(\S+)", s)
+            if tags:
+                good = [t for t in tags if t.upper() not in BAD_TAGS and 4 <= len(t) <= 5 and t.isalpha()]
+                if good:
+                    cleaned_lines.append(" ".join(f"#{t}" for t in good))
+                continue
+        if s in BAD_TAGS and len(s) <= 2:
+            continue
+        cleaned_lines.append(line)
+    new_text = _re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned_lines)).strip()
+
+    changed = new_text != original
+    if changed:
+        row.text = new_text
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "id": row.id,
+        "changed": changed,
+        "before_len": len(original),
+        "after_len": len(new_text),
+    }
+
+
 @app.post("/api/v1/admin/news-approve")
 async def admin_approve_news(body: dict):
     """Telegram'dan onay bekleyen haberi tweet at."""
