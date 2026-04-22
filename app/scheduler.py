@@ -2957,7 +2957,7 @@ async def ceiling_update_watchdog():
             f"Tarih: {today.strftime('%d.%m.%Y')}\n"
             f"Etkilenen IPO'lar ({len(active_tickers)}):\n"
             f"<code>{tickers_str}</code>\n\n"
-            "⚠️ Render servisi çökmüş olabilir veya Excel sync gelmemiş.\n"
+            "⚠️ Render servisi çökmüş/yeniden başlamış olabilir.\n"
             "Kontrol et: https://dashboard.render.com"
         )
         from app.services.admin_telegram import send_admin_message
