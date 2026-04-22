@@ -98,7 +98,7 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-haiku-4-5",
+                    "model": "claude-sonnet-4-5-20250929",
                     "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 },
