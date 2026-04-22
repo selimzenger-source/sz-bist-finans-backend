@@ -988,8 +988,10 @@ async def _save_market_close_data(session, today, ceilings, floors):
 
     logger.info(f"Faz1 OK: {len(prepared)} hisse. AI sıralı analiz başlıyor...")
 
-    # ── FAZ 2: AI analiz — sıralı + her hisse arasında delay (rate limit koruması) ──
+    # ── FAZ 2: AI analiz — sıralı + her hisse arasında delay (rate limit + bellek koruması) ──
     # Anthropic limiti: 30K token/dakika. Her prompt ~5-8K token → 3-4 hisse/dakika güvenli.
+    # Bellek: her iterasyonda gc.collect() + 10 sn bekle, Tavily+Claude response'lari temizlensin
+    import gc
     reasons = []
     for i, s in enumerate(prepared):
         try:
@@ -1001,9 +1003,11 @@ async def _save_market_close_data(session, today, ceilings, floors):
         except Exception as e:
             logger.error(f"AI {s['ticker']}: {e}")
             reasons.append("")
-        # Rate limit koruması: her hisseden sonra 4 sn bekle (dakikada ~12 hisse)
+        # Bellek temizliği: Tavily + Claude/OpenAI/Gemini response'lari serbest biraksin
+        gc.collect()
+        # Rate limit + bellek rahatlama: her hisseden sonra 10 sn bekle (dakikada 6 hisse)
         if i < len(prepared) - 1:
-            await asyncio.sleep(4)
+            await asyncio.sleep(10)
     ai_ok = sum(1 for r in reasons if r)
     logger.info(f"Faz2 OK: {ai_ok}/{len(prepared)} AI başarılı.")
 
