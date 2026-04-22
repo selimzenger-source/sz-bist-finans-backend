@@ -49,6 +49,9 @@ _STARTUP_DELAY_SECONDS = 30
 # Ceiling update retry — basarisiz olursa saatte bir tekrar dene (24:00'a kadar)
 _ceiling_retry_pending = False
 
+# Ceiling update watchdog — bugun basarili calisma oldu mu?
+_last_ceiling_update_success_date: "date | None" = None
+
 scheduler = AsyncIOScheduler()
 
 # --- Scraper Boost Modu ---
@@ -2867,6 +2870,9 @@ async def daily_ceiling_update():
                 _ceiling_retry_pending = True
             else:
                 _ceiling_retry_pending = False
+                # Watchdog: basarili calisma tarihini kaydet
+                global _last_ceiling_update_success_date
+                _last_ceiling_update_success_date = _today_tr()
 
     except Exception as e:
         logger.error("Tavan takip gun sonu hatasi: %s", e)
@@ -2906,6 +2912,65 @@ async def ceiling_update_retry():
             await send_admin_message(
                 "✅ <b>Tavan Takip Retry Başarılı</b>\nGüncelleme tamamlandı.",
             )
+        except Exception:
+            pass
+
+
+async def ceiling_update_watchdog():
+    """Tavan takip watchdog — 20:30 TR (UTC 17:30) Pzt-Cuma.
+
+    Eger bugun hic basarili ceiling update olmadiysa (sistem coktu, render
+    uyudu, retry'lar da calismadi) admin'e kritik alarm gonder.
+    """
+    today = _today_tr()
+    if _last_ceiling_update_success_date == today:
+        # Bugun basarili calisma oldu — her sey yolunda
+        logger.info("Ceiling watchdog: bugun basarili calisma mevcut (%s), alarm yok", today)
+        return
+
+    # Tavan takibi olan aktif IPO var mi kontrol et
+    try:
+        from sqlalchemy import select, and_
+        from app.models.ipo import IPO
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(IPO.ticker).where(
+                    and_(
+                        IPO.status == "trading",
+                        IPO.archived == False,
+                        IPO.ceiling_tracking_active == True,
+                    )
+                )
+            )
+            active_tickers = [row[0] for row in result.all() if row[0]]
+
+        if not active_tickers:
+            logger.info("Ceiling watchdog: aktif tavan takipli IPO yok, alarm gerekmiyor")
+            return
+
+        # Aktif IPO var ama guncelleme yapilmadi — ALARM
+        tickers_str = ", ".join(active_tickers[:10])
+        msg = (
+            "🚨 <b>TAVAN TAKİP GÜNCELLEME YAPILMADI!</b>\n"
+            "━━━━━━━━━━━━━━\n"
+            f"Tarih: {today.strftime('%d.%m.%Y')}\n"
+            f"Etkilenen IPO'lar ({len(active_tickers)}):\n"
+            f"<code>{tickers_str}</code>\n\n"
+            "⚠️ Render servisi çökmüş olabilir veya Excel sync gelmemiş.\n"
+            "Kontrol et: https://dashboard.render.com"
+        )
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(msg)
+        logger.error(
+            "CEILING WATCHDOG ALARM: Bugun (%s) hic basarili guncelleme yok! Aktif: %s",
+            today, tickers_str,
+        )
+    except Exception as e:
+        logger.error("Ceiling watchdog hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error("Ceiling Watchdog", str(e))
         except Exception:
             pass
 
@@ -4254,6 +4319,16 @@ def _setup_scheduler_impl():
             name=f"Tavan Takip Retry ({h+3:02d}:{m:02d} TR)",
             replace_existing=True,
         )
+
+    # 13c. Tavan Takip Watchdog — 20:30 TR (UTC 17:30) Pzt-Cuma
+    # Eger bugun hic basarili ceiling update olmadiysa alarm gonder
+    scheduler.add_job(
+        ceiling_update_watchdog,
+        CronTrigger(hour=17, minute=30, day_of_week="mon-fri"),
+        id="ceiling_watchdog",
+        name="Tavan Takip Watchdog (20:30 TR)",
+        replace_existing=True,
+    )
 
     # 14. Sabah Scraper — her gun 09:00 Turkiye (UTC 06:00) Pzt-Cuma
     # Borsa acilmadan once tum verileri guncellemek icin
