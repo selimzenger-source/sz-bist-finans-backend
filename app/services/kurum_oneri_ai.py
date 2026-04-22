@@ -5,6 +5,7 @@ faiz orani ile karsilastirir, mantik zinciri kurar.
 
 from __future__ import annotations
 
+import asyncio
 import gc
 import logging
 import os
@@ -119,7 +120,7 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
         return None
 
 
-async def backfill_comments(db: AsyncSession, limit: int = 5) -> dict:
+async def backfill_comments(db: AsyncSession, limit: int = 30) -> dict:
     """AI yorumu eksik olan kayitlara Claude ile yorum ekle."""
     result = await db.execute(
         select(KurumOneri)
@@ -140,6 +141,7 @@ async def backfill_comments(db: AsyncSession, limit: int = 5) -> dict:
         else:
             failed += 1
         gc.collect()  # Her API cagrisindan sonra bellek temizle
+        await asyncio.sleep(30)  # Bellek rahatlasin, OOM engeli
     await db.commit()
     return {"scanned": len(rows), "done": done, "failed": failed}
 
