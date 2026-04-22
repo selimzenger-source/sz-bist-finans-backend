@@ -6230,6 +6230,58 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
                 db.add(subscription)
 
     await db.flush()
+
+    # ─── Admin Telegram bildirimi — paket satın alma / trial / yenileme / iptal ───
+    # Her webhook event'i sonrası admin'e özet bildirim gitsin (stale token dışında tek en kritik olay)
+    try:
+        # Hangi kategori?
+        if product_id in news_package_map:
+            pkg_name = news_package_map.get(product_id, "free")
+        elif product_id in notif_package_map:
+            pkg_name = f"bildirim:{notif_package_map.get(product_id, '?')}"
+        elif product_id in ceiling_package_map:
+            pkg_name = f"tavan:{ceiling_package_map.get(product_id, '?')}"
+        else:
+            pkg_name = product_id or "?"
+
+        # Trial kontrolü
+        period_type = (event.get("period_type") or "").upper()
+        is_trial = period_type in ("TRIAL", "INTRO")
+
+        # Fiyat tahmini (RC event'inden veya bundle map'ten)
+        price_in_purchased = event.get("price_in_purchased_currency")
+        price_tl_val: Optional[float] = None
+        if price_in_purchased is not None:
+            try:
+                price_tl_val = float(price_in_purchased)
+            except (TypeError, ValueError):
+                price_tl_val = None
+
+        # Sadece anlamlı event'lerde gönder (spam engeli)
+        if event_type in (
+            "INITIAL_PURCHASE",
+            "RENEWAL",
+            "NON_RENEWING_PURCHASE",
+            "PRODUCT_CHANGE",
+            "CANCELLATION",
+            "EXPIRATION",
+        ):
+            from app.services.admin_telegram import notify_subscription_purchase
+            await notify_subscription_purchase(
+                event_type=event_type,
+                user_id=user.id,
+                device_id=user.device_id or "?",
+                platform=user.platform or "?",
+                product_id=product_id,
+                package=pkg_name,
+                price_tl=price_tl_val,
+                store=event.get("store", ""),
+                is_trial=is_trial,
+            )
+    except Exception as e:
+        # Bildirim hatası webhook akışını bozmasın
+        logger.warning("RevenueCat telegram bildirim hatasi: %s", e)
+
     return {"status": "ok"}
 
 

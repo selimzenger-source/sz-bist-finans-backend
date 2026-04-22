@@ -274,14 +274,118 @@ async def notify_push_error(
     await send_admin_message(text)
 
 
-async def notify_stale_token_cleaned(user_id: int, device_id: str):
-    """Stale FCM token temizlendi — bilgilendirme."""
+# ─── Stale token batcher — tek tek bildirim yerine 60sn'de bir özet ───
+import asyncio
+
+_stale_token_buffer: list[tuple[int, str]] = []   # (user_id, device_id) listesi
+_stale_token_flush_task: Optional[asyncio.Task] = None
+_STALE_FLUSH_INTERVAL_SEC = 60                     # 60sn'de bir özet at
+_STALE_FLUSH_THRESHOLD = 20                        # 20 birikince hemen at
+
+
+async def _flush_stale_tokens():
+    """Buffer'ı boşalt, özet mesaj at."""
+    global _stale_token_buffer
+    if not _stale_token_buffer:
+        return
+    batch = _stale_token_buffer[:]
+    _stale_token_buffer = []
+
+    count = len(batch)
+    # İlk 10 user'ı detayda göster, gerisi sayı olarak
+    preview_lines = [f"• User {uid} ({did[:8]}...)" for uid, did in batch[:10]]
+    preview = "\n".join(preview_lines)
+    extra = f"\n... ve {count - 10} kullanıcı daha" if count > 10 else ""
+
     await send_admin_message(
-        f"🗑 <b>Stale Token Temizlendi</b>\n"
-        f"User ID: {user_id}\n"
-        f"Device: {device_id[:12]}...",
+        f"🗑 <b>Stale Token Temizlendi</b> (toplam {count})\n{preview}{extra}",
         silent=True,
     )
+
+
+async def _stale_flush_loop():
+    """Periyodik flush task."""
+    while True:
+        try:
+            await asyncio.sleep(_STALE_FLUSH_INTERVAL_SEC)
+            await _flush_stale_tokens()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Stale token flush hatasi: %s", e)
+
+
+async def notify_stale_token_cleaned(user_id: int, device_id: str):
+    """Stale FCM token temizlendi — buffer'a ekle, periyodik özet at (spam engeli)."""
+    global _stale_token_flush_task
+    _stale_token_buffer.append((user_id, device_id))
+
+    # Flush task başlatılmadıysa başlat
+    if _stale_token_flush_task is None or _stale_token_flush_task.done():
+        try:
+            _stale_token_flush_task = asyncio.create_task(_stale_flush_loop())
+        except RuntimeError:
+            # Event loop yoksa (muhtemelen import sırasında) sessizce geç
+            pass
+
+    # Çok birikti — hemen flush et
+    if len(_stale_token_buffer) >= _STALE_FLUSH_THRESHOLD:
+        await _flush_stale_tokens()
+
+
+async def notify_subscription_purchase(
+    event_type: str,
+    user_id: int,
+    device_id: str,
+    platform: str,
+    product_id: str,
+    package: str,
+    price_tl: Optional[float] = None,
+    store: str = "",
+    is_trial: bool = False,
+):
+    """Paket satın alma / trial / yenileme bildirimi — en kritik olay.
+
+    event_type: INITIAL_PURCHASE, RENEWAL, NON_RENEWING_PURCHASE, PRODUCT_CHANGE,
+                CANCELLATION, EXPIRATION
+    """
+    event_emoji = {
+        "INITIAL_PURCHASE": "💰",
+        "RENEWAL": "🔁",
+        "NON_RENEWING_PURCHASE": "💰",
+        "PRODUCT_CHANGE": "🔀",
+        "CANCELLATION": "❌",
+        "EXPIRATION": "⌛",
+    }
+    emoji = event_emoji.get(event_type, "💳")
+
+    event_labels = {
+        "INITIAL_PURCHASE": "Yeni Satın Alma" if not is_trial else "🎁 Free Trial Başladı",
+        "RENEWAL": "Yenileme",
+        "NON_RENEWING_PURCHASE": "Tek Seferlik Satın Alma",
+        "PRODUCT_CHANGE": "Paket Değişimi",
+        "CANCELLATION": "İptal",
+        "EXPIRATION": "Süresi Doldu",
+    }
+    label = event_labels.get(event_type, event_type)
+
+    platform_emoji = {"ios": "🍎", "android": "🤖"}.get((platform or "").lower(), "📱")
+
+    price_line = f"\nFiyat: <b>{price_tl:.2f} ₺</b>" if price_tl else ""
+
+    text = (
+        f"{emoji} <b>{label}</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"User ID: <code>{user_id}</code>\n"
+        f"Cihaz: {platform_emoji} {platform or '?'} — <code>{device_id[:12]}...</code>\n"
+        f"Ürün: <code>{product_id}</code>\n"
+        f"Paket: <b>{package}</b>"
+        f"{price_line}"
+    )
+    if store:
+        text += f"\nMağaza: {store}"
+
+    await send_admin_message(text, silent=(event_type in ("RENEWAL",)))
 
 
 async def notify_push_health_report(
