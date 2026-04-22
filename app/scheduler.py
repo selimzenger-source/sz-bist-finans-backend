@@ -4445,9 +4445,9 @@ def _setup_scheduler_impl():
     from app.services.market_close_analyzer import scrape_and_analyze_market_close
     scheduler.add_job(
         scrape_and_analyze_market_close,
-        CronTrigger(hour=15, minute=50, day_of_week="mon-fri"), # UTC 15:50 = TR 18:50
+        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"), # UTC 15:45 = TR 18:45
         id="market_close_analyzer_tavan_taban",
-        name="Market Close Analyzer (Tavan/Taban) - 18:50 TR",
+        name="Market Close Analyzer (Tavan/Taban) - 18:45 TR",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
