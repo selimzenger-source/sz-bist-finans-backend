@@ -5,6 +5,7 @@ faiz orani ile karsilastirir, mantik zinciri kurar.
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 from datetime import datetime, timezone
@@ -97,7 +98,7 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-5-20250929",
+                    "model": "claude-haiku-4-5",
                     "max_tokens": 500,
                     "messages": [{"role": "user", "content": prompt}],
                 },
@@ -107,6 +108,7 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
                 return None
             data = resp.json()
             text = data.get("content", [{}])[0].get("text", "").strip()
+            del data, resp  # Bellek temizle
             if not text:
                 return None
             # Temizle: Baslangictaki tirnaklari, gereksiz markdown kaldir
@@ -117,7 +119,7 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
         return None
 
 
-async def backfill_comments(db: AsyncSession, limit: int = 30) -> dict:
+async def backfill_comments(db: AsyncSession, limit: int = 5) -> dict:
     """AI yorumu eksik olan kayitlara Claude ile yorum ekle."""
     result = await db.execute(
         select(KurumOneri)
@@ -137,6 +139,7 @@ async def backfill_comments(db: AsyncSession, limit: int = 30) -> dict:
             done += 1
         else:
             failed += 1
+        gc.collect()  # Her API cagrisindan sonra bellek temizle
     await db.commit()
     return {"scanned": len(rows), "done": done, "failed": failed}
 
