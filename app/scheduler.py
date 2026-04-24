@@ -4473,11 +4473,32 @@ def _setup_scheduler_impl():
                 count = res.scalar() or 0
             if count == 0:
                 logger.warning("Tavan/taban yedek tetikleme: bugün verisi yok, tekrar deneniyor...")
+                # Admin'e haber ver — yedek tetikleme devrede
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        f"🔄 <b>Tavan/Taban Yedek Tetikleme</b>\n"
+                        f"Bugunun verisi yok (ana job basarisiz olmus), yeniden deneniyor...",
+                        silent=True,
+                    )
+                except Exception:
+                    pass
                 await scrape_and_analyze_market_close()
             else:
                 logger.debug("Tavan/taban yedek: bugün %d kayıt var, atlanıyor.", count)
         except Exception as e:
             logger.error("Tavan/taban yedek tetikleme hatası: %s", e)
+            # Admin'e hatayi bildir — aksi halde sessizce kaybolur
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"❌ <b>Tavan/Taban Yedek Tetikleme HATASI</b>\n"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"Tip: <code>{type(e).__name__}</code>\n"
+                    f"Hata: <code>{str(e)[:600]}</code>"
+                )
+            except Exception:
+                pass
 
     scheduler.add_job(
         _tavan_taban_retry,
@@ -4522,21 +4543,39 @@ def _setup_scheduler_impl():
             if count > 0:
                 logger.info("Tavan/taban watchdog: bugun %d kayit var, alarm yok", count)
                 return
-            # Hic kayit yok — ALARM
+            # Hic kayit yok — ALARM + yeniden deneme
             msg = (
                 "🚨 <b>TAVAN/TABAN ÇEKİLEMEDİ!</b>\n"
                 "━━━━━━━━━━━━━━\n"
                 f"Tarih: {today.strftime('%d.%m.%Y')}\n"
-                "18:50, 19:30, 20:30 denemeleri başarısız.\n\n"
-                "⚠️ Uzmanpara (milliyet.com.tr) veri vermedi ya da site çöktü.\n"
-                "Bugün tweet atılmadı, sayfaya veri gitmedi.\n\n"
+                "18:45, 19:30, 20:30 denemeleri başarısız.\n\n"
+                "🔄 Son bir kez daha deneniyor...\n"
                 "Kontrol: https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/"
             )
             from app.services.admin_telegram import send_admin_message
             await send_admin_message(msg)
             logger.error("TAVAN/TABAN WATCHDOG ALARM: bugun (%s) hic kayit yok!", today)
+            # Son sans — watchdog'da da tekrar dene
+            try:
+                from app.services.market_close_analyzer import scrape_and_analyze_market_close
+                await scrape_and_analyze_market_close()
+            except Exception as retry_err:
+                await send_admin_message(
+                    f"❌ <b>Watchdog son deneme de basarisiz</b>\n"
+                    f"Tip: <code>{type(retry_err).__name__}</code>\n"
+                    f"Hata: <code>{str(retry_err)[:600]}</code>"
+                )
         except Exception as e:
             logger.error("Tavan/taban watchdog hatasi: %s", e)
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"❌ <b>Watchdog Kendisi Patladi</b>\n"
+                    f"Tip: <code>{type(e).__name__}</code>\n"
+                    f"Hata: <code>{str(e)[:600]}</code>"
+                )
+            except Exception:
+                pass
 
     scheduler.add_job(
         _tavan_taban_watchdog,

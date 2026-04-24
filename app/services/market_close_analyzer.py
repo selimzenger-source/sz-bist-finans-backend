@@ -990,12 +990,29 @@ async def _save_market_close_data(session, today, ceilings, floors):
     # Uzmanpara bazen bir hisseyi iki listede de dondurur — unique constraint patlamasin
     seen_tickers = set()
     deduped = []
+    duplicate_tickers: list[str] = []
     for p in prepared:
         if p["ticker"] not in seen_tickers:
             seen_tickers.add(p["ticker"])
             deduped.append(p)
-    if len(deduped) != len(prepared):
-        logger.warning(f"Dedupe: {len(prepared)} -> {len(deduped)} (duplicate ticker kaldirildi)")
+        else:
+            duplicate_tickers.append(p["ticker"])
+    if duplicate_tickers:
+        logger.warning(f"Dedupe: {len(prepared)} -> {len(deduped)} (duplicate ticker kaldirildi): {duplicate_tickers}")
+        # Admin'e haber ver — uzmanpara'da duplicate varsa bilelim, scraper iyilestirilebilir
+        try:
+            from app.services.admin_telegram import send_admin_message
+            dups_str = ", ".join(sorted(set(duplicate_tickers)))
+            await send_admin_message(
+                f"ℹ️ <b>Uzmanpara Duplicate Tespit</b>\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"Uzmanpara bugun ayni hisseyi birden fazla listede dondurdu:\n"
+                f"<code>{dups_str}</code>\n\n"
+                f"Dedupe ile otomatik temizlendi, islem devam ediyor.",
+                silent=True,
+            )
+        except Exception:
+            pass
     prepared = deduped
 
     # Emniyet: bugunun kayitlarini bastan temizle (partial insert'lerden kalan varsa)
@@ -1306,8 +1323,23 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
             return # DB kaydedildi, tweet denendi
 
         except Exception as e:
+            err_str = str(e)
+            err_type = type(e).__name__
             if attempt < 3:
                 logger.warning(f"Market close analysis attempt {attempt + 1} failed: {e}. Retrying in 60s...")
+                # ILK DENEMEDE HEMEN bildirim at — hatayi erken gor, hizli mudahale edebil
+                if attempt == 0:
+                    try:
+                        from app.services.admin_telegram import send_admin_message
+                        await send_admin_message(
+                            f"⚠️ <b>Tavan/Taban İlk Deneme Başarısız</b>\n"
+                            f"━━━━━━━━━━━━━━\n"
+                            f"Hata tipi: <code>{err_type}</code>\n"
+                            f"Hata: <code>{err_str[:600]}</code>\n\n"
+                            f"🔄 3 deneme daha yapılacak (her biri ~8dk)..."
+                        )
+                    except Exception:
+                        pass
                 await asyncio.sleep(60)
             else:
                 logger.error(f"All 4 attempts for market close analysis failed. Final error: {e}")
@@ -1315,9 +1347,11 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                 try:
                     from app.services.admin_telegram import send_admin_message
                     await send_admin_message(
-                        f"❌ Tavan/Taban Tweet BAŞARISIZ!\n"
-                        f"4 deneme de hata aldı.\n"
-                        f"Son hata: {str(e)[:200]}"
+                        f"❌ <b>Tavan/Taban TÜM DENEMELER BAŞARISIZ</b>\n"
+                        f"━━━━━━━━━━━━━━\n"
+                        f"4 deneme de hata aldı, vazgeçildi.\n\n"
+                        f"Hata tipi: <code>{err_type}</code>\n"
+                        f"Son hata: <code>{err_str[:800]}</code>"
                     )
                 except Exception:
                     pass
