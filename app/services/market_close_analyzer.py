@@ -986,6 +986,26 @@ async def _save_market_close_data(session, today, ceilings, floors):
         except Exception as e:
             logger.error(f"[PREP] {stock.get('ticker','?')} hata: {e}")
 
+    # Dedupe: ayni ticker birden fazla eklenmissse tek kalir (ilk tavan, sonra taban)
+    # Uzmanpara bazen bir hisseyi iki listede de dondurur — unique constraint patlamasin
+    seen_tickers = set()
+    deduped = []
+    for p in prepared:
+        if p["ticker"] not in seen_tickers:
+            seen_tickers.add(p["ticker"])
+            deduped.append(p)
+    if len(deduped) != len(prepared):
+        logger.warning(f"Dedupe: {len(prepared)} -> {len(deduped)} (duplicate ticker kaldirildi)")
+    prepared = deduped
+
+    # Emniyet: bugunun kayitlarini bastan temizle (partial insert'lerden kalan varsa)
+    # Unique constraint (ticker, date) patlamasini engeller
+    await session.execute(
+        text('DELETE FROM daily_stock_market_stats WHERE "date" = :today'),
+        {"today": today}
+    )
+    await session.commit()
+
     logger.info(f"Faz1 OK: {len(prepared)} hisse. AI sıralı analiz başlıyor...")
 
     # ── FAZ 2: AI analiz — sıralı + her hisse arasında delay (rate limit + bellek koruması) ──
