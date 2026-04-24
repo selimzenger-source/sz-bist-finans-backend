@@ -187,22 +187,19 @@ async def lifespan(app: FastAPI):
                 logger.info("Eski KAP seed verileri temizlendi: %d kayit", cleanup_res.rowcount)
             await db.commit()
 
-            # Mevcut duplicate'lari temizle (en eski kaydi tut)
-            await db.execute(sa_text("""
-                DELETE FROM kap_all_disclosures
-                WHERE id NOT IN (
-                    SELECT MIN(id) FROM kap_all_disclosures
-                    GROUP BY company_code, title
-                )
-            """))
-            await db.commit()
-            # Unique index olustur
-            await db.execute(sa_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_company_title "
-                "ON kap_all_disclosures (company_code, title)"
-            ))
-            await db.commit()
-            logger.info("KAP unique constraint OK")
+            # ❌ DEPRECATED: (company_code, title) uniq constraint bug'liyidi —
+            # ayni sirketin ayni basliktaki farkli tarihli haberlerini siliyor/rediyordu
+            # (ornek: "Yonetim Kurulu Karari", "Faaliyet Raporu" gibi periyodik basliklar).
+            # Bu sebeple 2 ay once gelen haberler kayboldu, eski tarihler bos goruniyor.
+            #
+            # DOGRU index zaten var: idx_kap_all_dedup (company_code, title, published_at)
+            # — database.py v40 migration'da olusturuluyor. Uzerine yanlis index'i siliyoruz.
+            try:
+                await db.execute(sa_text("DROP INDEX IF EXISTS uq_kap_company_title"))
+                await db.commit()
+                logger.info("KAP eski yanlis unique index (uq_kap_company_title) silindi")
+            except Exception as e:
+                logger.warning("uq_kap_company_title silinemedi: %s", e)
     except Exception as e:
         logger.warning("KAP unique constraint olusturulamadi: %s", e)
 
