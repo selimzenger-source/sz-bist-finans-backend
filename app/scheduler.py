@@ -4459,13 +4459,13 @@ def _setup_scheduler_impl():
         """Bugünün verisi yoksa tavan/taban analizini tekrar dene."""
         from app.services.market_close_analyzer import scrape_and_analyze_market_close
         try:
-            from app.database import async_session_maker
+            from app.database import async_session
             from sqlalchemy import text as sa_text
             now_tr = datetime.now(_TR_TZ)
             if now_tr.weekday() >= 5:  # Hafta sonu
                 return
             today = now_tr.date()
-            async with async_session_maker() as session:
+            async with async_session() as session:
                 res = await session.execute(
                     sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
                     {"today": today}
@@ -4511,9 +4511,9 @@ def _setup_scheduler_impl():
             if now_tr.weekday() >= 5:  # Hafta sonu
                 return
             today = now_tr.date()
-            from app.database import async_session_maker
+            from app.database import async_session
             from sqlalchemy import text as sa_text
-            async with async_session_maker() as session:
+            async with async_session() as session:
                 res = await session.execute(
                     sa_text('SELECT COUNT(*) FROM daily_stock_market_stats WHERE "date" = :today'),
                     {"today": today},
