@@ -7850,6 +7850,7 @@ async def list_bist_stocks(
 async def list_kap_all_disclosures(
     ticker: Optional[str] = Query(None, description="Hisse kodu filtresi"),
     hours: Optional[int] = Query(None, ge=1, le=744, description="Son kac saat (1=son 1 saat, 24=son 1 gun)"),
+    date: Optional[str] = Query(None, description="Belirli gun (YYYY-MM-DD). Bu gunun TR saatine gore tum haberlerini getirir."),
     min_score: Optional[float] = Query(None, ge=0, le=10, description="Minimum AI etki skoru (pozitif filtre icin 6.0)"),
     max_score: Optional[float] = Query(None, ge=0, le=10, description="Maksimum AI etki skoru (negatif filtre icin 5.0)"),
     limit: int = Query(50, ge=1, le=200),
@@ -7861,6 +7862,7 @@ async def list_kap_all_disclosures(
     Filtreler:
     - ticker: Hisse kodu (orn: THYAO)
     - hours: Son kac saat (1, 24, 168, 720)
+    - date: Belirli gun (YYYY-MM-DD formatinda, TR saatine gore)
     - min_score: Minimum AI etki skoru (>=)
     - max_score: Maksimum AI etki skoru (<)
     - limit/offset: Sayfalama
@@ -7870,7 +7872,22 @@ async def list_kap_all_disclosures(
     if ticker:
         query = query.where(KapAllDisclosure.company_code == ticker.upper())
 
-    if hours:
+    # date filtresi hours'tan onceliklidir
+    if date:
+        try:
+            from datetime import date as _date, time as _time
+            from zoneinfo import ZoneInfo as _ZoneInfo
+            tr_tz = _ZoneInfo("Europe/Istanbul")
+            day = _date.fromisoformat(date)
+            day_start_tr = datetime.combine(day, _time.min).replace(tzinfo=tr_tz)
+            day_end_tr = datetime.combine(day, _time.max).replace(tzinfo=tr_tz)
+            query = query.where(
+                KapAllDisclosure.created_at >= day_start_tr.astimezone(timezone.utc),
+                KapAllDisclosure.created_at <= day_end_tr.astimezone(timezone.utc),
+            )
+        except ValueError:
+            pass  # Gecersiz format, filtre uygulanmaz
+    elif hours:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
         query = query.where(KapAllDisclosure.created_at >= since)
 
