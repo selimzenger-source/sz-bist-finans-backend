@@ -4066,6 +4066,15 @@ def _setup_scheduler_impl():
         name="SPK Bulten Monitor (Gece)",
         replace_existing=True,
     )
+    # 3c. SPK Bulten Monitor — GUNDUZ: her 5 dk (05:00-15:00 UTC = 08:00-18:00 TR)
+    # Onceden bu saatlerde kontrol yoktu; SPK gunduz yayinlarsa kacirmamak icin eklendi
+    scheduler.add_job(
+        check_spk_bulletins_job,
+        CronTrigger(minute="*/5", hour="5-15"),
+        id="spk_bulletin_monitor_day",
+        name="SPK Bulten Monitor (Gunduz)",
+        replace_existing=True,
+    )
 
     # 3c. Resmi Gazete Monitor — her 30 dakikada bir, 7/24, hafta ici
     # RG gece 00:00 TR yayinlanir, mukerrer gun ici herhangi bir saat
