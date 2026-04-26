@@ -7873,6 +7873,8 @@ async def list_kap_all_disclosures(
         query = query.where(KapAllDisclosure.company_code == ticker.upper())
 
     # date filtresi hours'tan onceliklidir
+    # NOT: published_at kullaniyoruz (gercek KAP yayin zamani),
+    # created_at degil (DB insert zamani — backfill durumunda yanilticidir).
     if date:
         try:
             from datetime import date as _date, time as _time
@@ -7882,14 +7884,14 @@ async def list_kap_all_disclosures(
             day_start_tr = datetime.combine(day, _time.min).replace(tzinfo=tr_tz)
             day_end_tr = datetime.combine(day, _time.max).replace(tzinfo=tr_tz)
             query = query.where(
-                KapAllDisclosure.created_at >= day_start_tr.astimezone(timezone.utc),
-                KapAllDisclosure.created_at <= day_end_tr.astimezone(timezone.utc),
+                KapAllDisclosure.published_at >= day_start_tr.astimezone(timezone.utc),
+                KapAllDisclosure.published_at <= day_end_tr.astimezone(timezone.utc),
             )
         except ValueError:
             pass  # Gecersiz format, filtre uygulanmaz
     elif hours:
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        query = query.where(KapAllDisclosure.created_at >= since)
+        query = query.where(KapAllDisclosure.published_at >= since)
 
     if min_score is not None:
         query = query.where(KapAllDisclosure.ai_impact_score.isnot(None))

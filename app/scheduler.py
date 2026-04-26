@@ -811,6 +811,35 @@ async def generate_missing_ipo_reports():
         logger.error(f"AI rapor catch-up genel hata: {e}")
 
 
+async def cleanup_old_kap_disclosures():
+    """KAP haberleri FIFO 30 gun arsivi — 30 gunden eski kayitlari siler.
+
+    DB sismesin diye gunluk calisir. published_at NULL olanlar created_at'e gore silinir.
+    Yeni gelen haberler etkilenmez (bugun + son 30 gun her zaman korunur).
+    """
+    try:
+        from datetime import datetime, timezone, timedelta
+        from sqlalchemy import text as sa_text
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        async with async_session() as db:
+            result = await db.execute(
+                sa_text(
+                    "DELETE FROM kap_all_disclosures "
+                    "WHERE COALESCE(published_at, created_at) < :cutoff"
+                ),
+                {"cutoff": cutoff},
+            )
+            await db.commit()
+            if result.rowcount > 0:
+                logger.info(
+                    "KAP FIFO cleanup: %d kayit silindi (30 gunden eski, cutoff=%s)",
+                    result.rowcount, cutoff.isoformat(),
+                )
+    except Exception as e:
+        logger.error("KAP FIFO cleanup hatasi: %s", e)
+
+
 async def cleanup_expired_coupons():
     """Suresi gecmis kuponlari deaktive eder (her 2 saatte calisir)."""
     try:
@@ -4148,6 +4177,15 @@ def _setup_scheduler_impl():
         IntervalTrigger(hours=2),
         id="coupon_cleanup",
         name="Kupon SKT Temizleyici",
+        replace_existing=True,
+    )
+
+    # 7e. KAP haberleri FIFO 30 gun arsivi — her gece 03:00 TR (UTC 00:00)
+    scheduler.add_job(
+        cleanup_old_kap_disclosures,
+        CronTrigger(hour=0, minute=0),
+        id="kap_fifo_cleanup",
+        name="KAP FIFO 30 Gun Cleanup",
         replace_existing=True,
     )
 
