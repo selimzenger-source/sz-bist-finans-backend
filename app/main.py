@@ -1258,7 +1258,7 @@ async def ipo_sections(db: AsyncSession = Depends(get_db)):
         )
         .options(selectinload(IPO.ceiling_tracks), selectinload(IPO.allocations))
         .order_by(IPO.trading_start.desc().nullslast())
-        .limit(20)
+        .limit(200)
     )
     performance_archive = list(perf_result.scalars().all())
 
