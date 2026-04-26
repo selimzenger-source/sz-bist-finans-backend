@@ -66,7 +66,12 @@ _SYSTEM_PROMPT = """Sen Türkiye borsası (BIST) konusunda uzman bir finans eği
 
 KURALLAR:
 1. Minimum 800 kelime yaz, detaylı ve eğitici olsun.
-2. Sadece HTML kullan: <h2>, <h3>, <p>, <strong>, <ul>, <li>, <ol> etiketleri.
+2. SADECE HTML kullan: <h2>, <h3>, <p>, <strong>, <ul>, <li>, <ol> etiketleri.
+   ⚠️ MARKDOWN KESİNLİKLE YASAK! Aşağıdakileri ASLA KULLANMA:
+   - **kalın** yazma → BUNUN YERİNE <strong>kalın</strong> kullan
+   - ## başlık veya # başlık → BUNUN YERİNE <h2>başlık</h2> kullan
+   - * liste veya - liste → BUNUN YERİNE <ul><li>liste</li></ul> kullan
+   - Her başlık <h2></h2> içinde olmalı, paragraflar <p></p> içinde
 3. <h1> KULLANMA — başlık ayrıca alınacak.
 4. En az 3 alt başlık (<h2>) kullan.
 5. Türkçe yaz, doğru Türkçe karakterler kullan (ş, ç, ğ, ı, ö, ü, İ).
@@ -88,6 +93,79 @@ KURALLAR:
   "content": "<h2>...</h2><p>...</p>... sadece HTML, attribute yok",
   "meta_description": "150-160 karakter SEO açıklaması"
 }"""
+
+
+def _markdown_to_html_fallback(content: str) -> str:
+    """AI HTML donmediyse markdown'i HTML'e cevir.
+
+    Eski blog'lar duzgun HTML iken yeni AI bazen markdown donduruyor.
+    Bu fonksiyon: ## baslik → <h2>, **kalin** → <strong>, - liste → <ul><li>,
+    paragraflar bos satirla ayriliyorsa <p> ile sarmaliyor.
+    """
+    # Eger zaten HTML ise (h2/p tag'i varsa) dokunma
+    if re.search(r'<(h2|h3|p|ul|ol)\b', content, re.IGNORECASE):
+        return content
+
+    lines = content.split("\n")
+    html_lines: list[str] = []
+    in_list = False
+    paragraph_buffer: list[str] = []
+
+    def flush_paragraph():
+        nonlocal paragraph_buffer
+        if paragraph_buffer:
+            text = " ".join(paragraph_buffer).strip()
+            if text:
+                # **kalin** → <strong>
+                text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+                html_lines.append(f"<p>{text}</p>")
+            paragraph_buffer = []
+
+    def close_list():
+        nonlocal in_list
+        if in_list:
+            html_lines.append("</ul>")
+            in_list = False
+
+    for raw in lines:
+        line = raw.rstrip()
+        if not line.strip():
+            flush_paragraph()
+            close_list()
+            continue
+        # Baslik
+        h2_match = re.match(r'^##\s+(.+)$', line)
+        h3_match = re.match(r'^###\s+(.+)$', line)
+        list_match = re.match(r'^[-*]\s+(.+)$', line)
+        if h2_match:
+            flush_paragraph()
+            close_list()
+            html_lines.append(f"<h2>{h2_match.group(1).strip()}</h2>")
+        elif h3_match:
+            flush_paragraph()
+            close_list()
+            html_lines.append(f"<h3>{h3_match.group(1).strip()}</h3>")
+        elif list_match:
+            flush_paragraph()
+            if not in_list:
+                html_lines.append("<ul>")
+                in_list = True
+            item = list_match.group(1).strip()
+            item = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', item)
+            html_lines.append(f"<li>{item}</li>")
+        else:
+            close_list()
+            # Bold tek satirda baslik gibi davraniyor olabilir: **Yatirim Uyarisi:**
+            standalone_bold = re.match(r'^\*\*(.+?):\*\*\s*(.*)$', line)
+            if standalone_bold and not standalone_bold.group(2):
+                flush_paragraph()
+                html_lines.append(f"<h3>{standalone_bold.group(1).strip()}</h3>")
+            else:
+                paragraph_buffer.append(line.strip())
+
+    flush_paragraph()
+    close_list()
+    return "".join(html_lines)
 
 
 def _slugify(text: str) -> str:
@@ -198,6 +276,12 @@ async def generate_blog_post(
             f"Response length: {len(result)}. Last 400 chars: {tail}"
         )
         return None
+
+    # AI markdown dondurmusse HTML'e cevir (guvenlik agi)
+    original_len = len(content)
+    content = _markdown_to_html_fallback(content)
+    if len(content) != original_len:
+        logger.warning(f"Blog content markdown'dan HTML'e cevrildi ({original_len} -> {len(content)} chars)")
 
     slug = _slugify(title)
     logger.info(f"Blog uretildi: '{title[:60]}' (content {len(content)} chars)")
