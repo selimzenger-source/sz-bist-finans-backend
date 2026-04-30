@@ -568,7 +568,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 try:
                     from app.models.kap_all_disclosure import KapAllDisclosure
                     from app.scrapers.kap_all_scraper import _infer_category
-                    from sqlalchemy.exc import IntegrityError as _IntErr
+                    from sqlalchemy import select as _sa_select
 
                     # Sentiment çıkarımı (ai_news_scorer score'dan):
                     if ai_score >= 6.0:
@@ -586,34 +586,54 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ka_category = _infer_category(ka_title)
                     ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
 
-                    kap_disc = KapAllDisclosure(
-                        company_code=ticker,
-                        title=ka_title,
-                        body=ai_summary,  # Tradingview'den AI'ya gitti, ozet body olarak
-                        category=ka_category,
-                        is_bilanco=ka_is_bilanco,
-                        kap_url=kap_url,
-                        source="telegram",
-                        published_at=msg_date,
-                        ai_sentiment=ka_sentiment,
-                        ai_impact_score=ai_score,
-                        ai_summary=ai_summary,
-                        ai_analyzed_at=datetime.now(timezone.utc),
+                    # ── DUPLICATE ONLEME: Once SELECT ile kontrol et ──
+                    # KRITIK: Eskiden IntegrityError yakalanip rollback() yapiliyordu,
+                    # bu BUTUN session'i siliyordu (onceki yazimlar dahil). Simdi SELECT
+                    # ile once kontrol → duplicate ise INSERT atlanir, transaction korunur.
+                    existing_check = await session.execute(
+                        _sa_select(KapAllDisclosure.id).where(
+                            KapAllDisclosure.company_code == ticker,
+                            KapAllDisclosure.title == ka_title,
+                        ).limit(1)
                     )
-                    session.add(kap_disc)
-                    try:
-                        await session.flush()
-                        logger.info(
-                            "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
-                            ticker, ka_title[:50], ka_sentiment, ai_score,
-                        )
-                    except _IntErr:
-                        # Uzmanpara/BigPara onceden ayni baslik+ticker yazmis (uq_kap_company_title)
-                        await session.rollback()
+                    if existing_check.scalar_one_or_none() is not None:
                         logger.debug(
                             "kap_all_disclosures duplicate atlandi (zaten var): %s — %s",
                             ticker, ka_title[:50],
                         )
+                    else:
+                        kap_disc = KapAllDisclosure(
+                            company_code=ticker,
+                            title=ka_title,
+                            body=ai_summary,
+                            category=ka_category,
+                            is_bilanco=ka_is_bilanco,
+                            kap_url=kap_url,
+                            source="telegram",
+                            published_at=msg_date,
+                            ai_sentiment=ka_sentiment,
+                            ai_impact_score=ai_score,
+                            ai_summary=ai_summary,
+                            ai_analyzed_at=datetime.now(timezone.utc),
+                        )
+                        session.add(kap_disc)
+                        try:
+                            await session.flush()
+                            logger.info(
+                                "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
+                                ticker, ka_title[:50], ka_sentiment, ai_score,
+                            )
+                        except Exception as _flush_err:
+                            # Race condition: SELECT ile INSERT arasinda baska process yazmis olabilir
+                            # Sadece bu kayit icin expunge — session korunur.
+                            try:
+                                session.expunge(kap_disc)
+                            except Exception:
+                                pass
+                            logger.debug(
+                                "kap_all_disclosures flush hatasi (race condition): %s — %s",
+                                ticker, _flush_err,
+                            )
                 except Exception as _ka_err:
                     logger.warning(
                         "Telegram → kap_all_disclosures yazma hatasi (%s): %s",

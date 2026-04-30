@@ -370,6 +370,28 @@ _ROUTINE_TITLE_PATTERNS = [
     "yatirimci iliskileri",
     "yatırımcı ilişkileri",
     "yetki belgesi",
+
+    # ── BILANCO DONEMI FINANSAL TABLOLAR ──
+    # Tek tek AI'a verilirse parcali rakamlar yorumlanir, kotu puan cikar.
+    # Ileride "Bilanco AI Analizi" feature ile butun olarak yorumlanacak.
+    # Su an Notr/5.0 + frontend "ÇOK YAKINDA" badge ile gosteriliyor.
+    "özkaynaklar değişim tablosu",
+    "ozkaynaklar degisim tablosu",
+    "nakit akış tablosu",
+    "nakit akis tablosu",
+    "finansal durum tablosu",
+    "bilanço",
+    "bilanco",
+    "kar veya zarar tablosu",
+    "kâr veya zarar tablosu",
+    "kar veya zarar ve diğer kapsamli",
+    "kâr veya zarar ve diğer kapsamlı",
+    "kapsamlı gelir tablosu",
+    "kapsamli gelir tablosu",
+    "ara dönem finansal rapor",
+    "ara donem finansal rapor",
+    "finansal rapor",
+    "mali tablo",
 ]
 
 
