@@ -259,6 +259,13 @@ async def dashboard(
     notif_killed = is_notifications_killed()
     tweets_killed = is_tweets_killed()
 
+    # KAP kaynak durumu — dashboard kart icin
+    try:
+        from app.services.kap_source_setting import get_kap_source
+        kap_source = await get_kap_source()
+    except Exception:
+        kap_source = "telegram"
+
     return templates.TemplateResponse("admin/dashboard.html", {
         "request": request,
         "ipos": ipos,
@@ -268,6 +275,7 @@ async def dashboard(
         "current_status": status,
         "notif_killed": notif_killed,
         "tweets_killed": tweets_killed,
+        "kap_source": kap_source,
     })
 
 
@@ -4227,3 +4235,26 @@ async def kap_source_update(
         url=f"/admin/system/kap-source?success={msg}",
         status_code=303,
     )
+
+
+@router.post("/toggle-kap-source")
+async def toggle_kap_source(request: Request, redirect: Optional[str] = None):
+    """Tek tikla KAP kaynagi toggle: telegram <-> uzmanpara.
+
+    Dashboard'daki "Yedege Gec" / "Telegram'a Don" butonu icin.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.services.kap_source_setting import get_kap_source, set_kap_source
+
+    current = await get_kap_source()
+    # Telegram → uzmanpara, geri kalan (uzmanpara/both) → telegram
+    new_source = "uzmanpara" if current == "telegram" else "telegram"
+    ok = await set_kap_source(new_source)
+    logger.info(f"Admin: KAP kaynagi toggle: {current} → {new_source} (ok={ok})")
+
+    target = redirect or "/admin/"
+    sep = "&" if "?" in target else "?"
+    msg = f"KAP+kaynagi:+{new_source.upper()}" if ok else "Toggle+hatasi"
+    return RedirectResponse(url=f"{target}{sep}success={msg}", status_code=303)

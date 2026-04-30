@@ -15,7 +15,7 @@
 {% endif %}
 
 <!-- ═══ KILL SWITCH — Acil Durdurma ═══ -->
-<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
     <!-- Bildirim Kill Switch -->
     <div class="rounded-lg border p-4 flex items-center justify-between {{ 'bg-red-900/30 border-red-600' if notif_killed else 'bg-gray-800 border-green-600' }}">
         <div class="flex items-center gap-3">
@@ -67,6 +67,37 @@
             <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-bold text-sm px-4 py-2 rounded transition"
                     onclick="return confirm('TÜM tweetleri DURDURMAK istediğinize emin misiniz?\n\nX\'e hiçbir tweet atılmayacak!')">
                 ⏸ Durdur
+            </button>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- KAP Kaynak Toggle — Telegram (primary) ↔ Uzmanpara (yedek) -->
+    {% set _kap_is_telegram = (kap_source or 'telegram') == 'telegram' %}
+    {% set _kap_is_uzmanpara = (kap_source or 'telegram') == 'uzmanpara' %}
+    {% set _kap_is_both = (kap_source or 'telegram') == 'both' %}
+    <div class="rounded-lg border p-4 flex items-center justify-between {{ 'bg-blue-900/30 border-blue-600' if _kap_is_telegram else ('bg-yellow-900/30 border-yellow-600' if _kap_is_uzmanpara else 'bg-purple-900/30 border-purple-600') }}">
+        <div class="flex items-center gap-3">
+            <span class="text-2xl">{{ '📡' if _kap_is_telegram else ('🔁' if _kap_is_uzmanpara else '⚙️') }}</span>
+            <div>
+                <h3 class="font-bold text-lg {{ 'text-blue-400' if _kap_is_telegram else ('text-yellow-400' if _kap_is_uzmanpara else 'text-purple-400') }}">
+                    KAP: {{ 'TELEGRAM' if _kap_is_telegram else ('UZMANPARA' if _kap_is_uzmanpara else 'HİBRİT') }}
+                </h3>
+                <p class="text-xs text-gray-400 mt-0.5">
+                    {{ 'Telegram bot primary. Tradingview→AI.' if _kap_is_telegram else ('Yedek mod: Uzmanpara/BigPara aktif.' if _kap_is_uzmanpara else 'İkisi de paralel çalışır.') }}
+                </p>
+            </div>
+        </div>
+        <form method="post" action="/admin/toggle-kap-source?redirect=/admin/">
+            {% if _kap_is_telegram %}
+            <button type="submit" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('KAP kaynağını UZMANPARA yedek moduna geçirmek istediğinize emin misiniz?\n\nTelegram bot devre dışı kalacak.')">
+                🔁 Yedeğe Geç
+            </button>
+            {% else %}
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-bold text-sm px-4 py-2 rounded transition"
+                    onclick="return confirm('KAP kaynağını TELEGRAM (primary) moduna geri almak istediğinize emin misiniz?')">
+                📡 Telegram'a Dön
             </button>
             {% endif %}
         </form>
