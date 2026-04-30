@@ -515,10 +515,22 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Rutin formaliteler (Sorumluluk Beyani, Faaliyet Raporu, Genel Kurul vb)
             # → AI'a GONDERILMEZ, dogrudan Notr/5.0 atanir. Token tasarrufu.
             # Yine de kap_all_disclosures'a Notr olarak yazilir → Tum KAP Haber'de gorunur.
+            # Ancak GERCEK KAP URL'sini cekmek icin TradingView'dan ufak bir fetch yapilir
+            # (icerik AI'a gitmez, sadece KAP linki parse edilir).
             if _is_routine:
                 ai_score = 5.0
                 ai_summary = f"{news_title.strip()} — rutin/idari bildirim. Hisse fiyatina dogrudan etkisi beklenmemektedir."
                 logger.info("Rutin bildirim: AI atlandi, Notr/5.0 atanan: %s — %s", ticker, news_title[:50])
+
+                # KAP URL'sini TradingView'dan cek (sadece URL, icerik yok)
+                if kap_id:
+                    try:
+                        from app.services.ai_news_scorer import fetch_tradingview_content
+                        tv_data = await fetch_tradingview_content(kap_id)
+                        if tv_data and tv_data.get("real_kap_url"):
+                            kap_url = tv_data["real_kap_url"]
+                    except Exception as _kap_url_err:
+                        logger.debug("Rutin bildirim KAP URL fetch hatasi: %s", _kap_url_err)
             elif ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import analyze_news
