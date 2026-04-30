@@ -87,6 +87,57 @@ async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> l
 # Mesaj Parse Fonksiyonlari
 # -------------------------------------------------------------------
 
+# ═══════════════════════════════════════════════════════════════════
+# Ticker Validation — XU100/Endeks ve BIST'te olmayan ticker'lari ele
+# ═══════════════════════════════════════════════════════════════════
+
+# BIST endeksleri — bunlar hisse degil, atlanmali
+_INDEX_TICKERS = {
+    "XU100", "XU030", "XU050", "XBANK", "XKURU", "XSPOR", "XTUMY",
+    "XGIDA", "XKMYA", "XMANA", "XKAGT", "XMESY", "XILTM", "XGMYO",
+    "XUMAL", "XUSIN", "XHOLD", "XINSA", "XELKT", "XTEKS", "XTAST",
+    "XTRZM", "XSGRT", "XFINK", "XHARZ", "XYORT", "XBLSM", "XUTEK",
+    "XTRAS", "XKOBI", "XKURY", "XSANT", "XYUZO", "XUSIN", "XILMN",
+    "XMADN", "XKMYA", "XSAVE",
+}
+
+
+def _is_valid_bist_ticker(ticker: str) -> bool:
+    """Ticker BIST'te islem goren bir hisse mi?
+
+    1. Endeks ticker'larini reddet (XU100, XU030, XBANK...)
+    2. BigPara'nin BIST hisse listesinde var mi kontrol et
+    3. Listede yoksa ATLA — KAP bazi BIST'te islem gormeyen sirketleri de
+       icerir (bagli ortakliklar, halka acik olmayanlar). Bunlari islemiyoruz.
+    """
+    if not ticker:
+        return False
+    tk = ticker.upper().strip()
+
+    # Endeksler
+    if tk in _INDEX_TICKERS or tk.startswith("XU0") or tk.startswith("XU1"):
+        return False
+
+    # BigPara whitelist
+    try:
+        from app.services.twitter_service import _get_bist_ticker_cache
+        ticker_lines = _get_bist_ticker_cache()
+        if not ticker_lines:
+            # Cache bos donerse riske girme — geciyor say (false negative onle)
+            return True
+        # Format: "Sirket Adi → #TICKER"
+        valid_set = set()
+        for line in ticker_lines:
+            m = re.search(r"#([A-Z0-9]+)\s*$", line)
+            if m:
+                valid_set.add(m.group(1).upper())
+        if not valid_set:
+            return True  # parse hatasi — riske girme
+        return tk in valid_set
+    except Exception:
+        return True  # hata durumunda blokla degil, gecsin
+
+
 def detect_message_type(text: str) -> str | None:
     """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli.
 
@@ -152,10 +203,36 @@ def parse_price(text: str, label: str = "Fiyat") -> Decimal | None:
 
 
 def parse_kap_id(text: str) -> str | None:
-    """HaberId alanini cikart."""
-    match = re.search(r"HaberId[:\s]*(\d+)", text, re.IGNORECASE)
+    """HaberId / NewsId alanini cikart.
+
+    Eski Matriks botu: 'HaberId: 6418080'
+    Yeni kap_tumhaberler_bot: 'NewsId: 6418080'
+    Ikisi de KAP'tan gelen ayni ID — farkli prefix ile yaziliyor.
+    """
+    # Once HaberId, sonra NewsId dene
+    for pattern in (r"HaberId[:\s]*(\d+)", r"NewsId[:\s]*(\d+)"):
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def parse_news_title(text: str) -> str | None:
+    """Yeni bot formatindaki 'Baslik:' satirindan haberin asil basligini cikart.
+
+    Format:
+        Baslik: Ozel Durum Aciklamasi (Genel)
+        Baslik: Kar Payi Dagitim Islemlerine Iliskin Bildirim
+
+    Eski Matriks formatinda 'Baslik:' satiri yoktur, None doner.
+    """
+    # "Başlık:" veya "Baslik:" sonrasi satirin sonuna kadar
+    match = re.search(r"Ba[şs]l[ıi]k[:\s]+(.+?)(?:\n|$)", text, re.IGNORECASE)
     if match:
-        return match.group(1)
+        title = match.group(1).strip()
+        # Anlamsiz / cok kisa basliklar
+        if title and len(title) >= 3 and title.upper() not in ("BULUNAMADI", "YOK", "?", "-"):
+            return title
     return None
 
 
@@ -337,6 +414,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             # Parse
             ticker = parse_ticker(text)
+
+            # ── Ticker Validation: Endeks / BIST'te olmayan ticker'lari atla ──
+            # XU100, XU030 (endeksler) + GATEG gibi BIST listesinde olmayanlar.
+            if ticker and not _is_valid_bist_ticker(ticker):
+                logger.info(
+                    "Telegram: Ticker BIST'te yok veya endeks (msg_id=%s, ticker=%s) — atlandi",
+                    telegram_message_id, ticker,
+                )
+                continue
+
             # Fiyat bilgisi KAYDEDILMEZ (veri ihlali)
             kap_id = parse_kap_id(text)
             expected_date = parse_expected_trading_date(text)
@@ -355,9 +442,41 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 if msg_date_unix else None
             )
 
-            # Matched keyword'u raw text'ten cikar (parsed_body icin de lazim)
+            # Matched keyword/baslik — frontend listede gosterilir.
+            # Oncelik:
+            #   1) Yeni bot formati: "Baslik: <KAP bildirim basligi>" (en iyi — anlamli)
+            #   2) Eski Matriks formati: "Iliskilendirilen Haber Detayi: <keyword>"
+            #   3) Fallback: ticker
             matched_kw = ""
-            if kap_id:
+
+            # 1) Yeni format — "Baslik:" satiri
+            news_title = parse_news_title(text)
+            if news_title:
+                matched_kw = news_title
+
+                # ── Pre-filter: Rutin/idari formalite mi? ──
+                # Sorumluluk Beyani, Faaliyet Raporu, Genel Kurul, Sirket Genel Bilgi Formu vb.
+                # Bu basliklar AI'a GONDERILMEZ (token tasarrufu).
+                # AMA: Tum KAP Haber sekmesinde gorunmesi icin kap_all_disclosures'a
+                # Notr/5.0 olarak DOGRUDAN yazilir. AI Pozitif Haber sekmesine dusmez
+                # (cunku score 5.0 < 6.0 esik).
+                _is_routine = False
+                try:
+                    from app.services.kap_all_analyzer import _is_routine_admin_disclosure
+                    _is_routine = _is_routine_admin_disclosure(news_title, "")
+                except Exception as e:
+                    logger.warning("Telegram pre-filter hatasi: %s", e)
+
+                if _is_routine:
+                    logger.info(
+                        "Telegram: Rutin bildirim — AI atlandi, Notr olarak kaydedilecek (msg_id=%s, ticker=%s, baslik='%s')",
+                        telegram_message_id, ticker, news_title[:50],
+                    )
+                    # Bu flag asagida ai_news_scorer cagrisini bypass eder
+                    # ve dogrudan kap_all_disclosures'a Notr/5.0 yazimini tetikler
+
+            # 2) Eski format — "Iliskilendirilen Haber Detayi"
+            if not matched_kw and kap_id:
                 detail_match = re.search(
                     r"[İI]li[sş]kilendirilen\s+Haber\s+Detay[ıiİ]:\s*\n?(.+)",
                     text, re.IGNORECASE
@@ -367,6 +486,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # "Haber Detayi Bulunamadi" gibi anlamsiz degerler atlanir
                     if raw_kw and "BULUNAMADI" not in raw_kw.upper():
                         matched_kw = raw_kw
+
+            # 3) Fallback — ticker
             if not matched_kw:
                 matched_kw = ticker or ""
 
@@ -390,7 +511,15 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             ai_summary = None
             ai_hashtags = []
             kap_url = None
-            if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
+
+            # Rutin formaliteler (Sorumluluk Beyani, Faaliyet Raporu, Genel Kurul vb)
+            # → AI'a GONDERILMEZ, dogrudan Notr/5.0 atanir. Token tasarrufu.
+            # Yine de kap_all_disclosures'a Notr olarak yazilir → Tum KAP Haber'de gorunur.
+            if _is_routine:
+                ai_score = 5.0
+                ai_summary = f"{news_title.strip()} — rutin/idari bildirim. Hisse fiyatina dogrudan etkisi beklenmemektedir."
+                logger.info("Rutin bildirim: AI atlandi, Notr/5.0 atanan: %s — %s", ticker, news_title[:50])
+            elif ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import analyze_news
                     ai_result = await analyze_news(
@@ -412,8 +541,81 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
 
-            # AI skoru kontrolu — 6 altindaki haberler DB'ye kaydedilmez,
-            # bildirim gitmez, tweet atilmaz. Chatbox'ta gorünmez.
+            # ──────────────────────────────────────────────────────────────────
+            # YENI: kap_all_disclosures'a yaz — Tum KAP Haber sekmesi icin
+            # ──────────────────────────────────────────────────────────────────
+            # Telegram bot artik primary kaynak. Tum sentiment'leri (Olumlu/Notr/
+            # Olumsuz) kap_all_disclosures'a yazar — boylece Tum KAP Haber sekmesi
+            # buradan beslenir. AI Pozitif Haber sekmesi telegram_news'den okumaya
+            # devam eder (sadece score >= 6).
+            #
+            # Admin panelden "kap_primary_source" ayariyla kontrol edilir:
+            #   - "telegram"  → buraya yazilir (default)
+            #   - "uzmanpara" → yazilmaz (Uzmanpara/BigPara primary)
+            #   - "both"      → yazilir (Uzmanpara da paralel calisir)
+            try:
+                from app.services.kap_source_setting import get_kap_source, is_telegram_active
+                kap_source = await get_kap_source()
+            except Exception:
+                kap_source = "telegram"  # Default — guvenli yol
+
+            if (
+                ticker
+                and ai_score is not None
+                and message_type in ("seans_ici_pozitif", "borsa_kapali")
+                and is_telegram_active(kap_source)
+            ):
+                try:
+                    from app.models.kap_all_disclosure import KapAllDisclosure
+                    from sqlalchemy.exc import IntegrityError as _IntErr
+
+                    # Sentiment çıkarımı (ai_news_scorer score'dan):
+                    if ai_score >= 6.0:
+                        ka_sentiment = "Olumlu"
+                    elif ai_score < 4.5:
+                        ka_sentiment = "Olumsuz"
+                    else:
+                        ka_sentiment = "Notr"
+
+                    # Title — yeni bot "Baslik:" satirindan, fallback matched_kw
+                    ka_title = (news_title or matched_kw or title or "")[:500]
+
+                    kap_disc = KapAllDisclosure(
+                        company_code=ticker,
+                        title=ka_title,
+                        body=ai_summary,  # Tradingview'den AI'ya gitti, ozet body olarak
+                        kap_url=kap_url,
+                        source="telegram",
+                        published_at=msg_date,
+                        ai_sentiment=ka_sentiment,
+                        ai_impact_score=ai_score,
+                        ai_summary=ai_summary,
+                        ai_analyzed_at=datetime.now(timezone.utc),
+                    )
+                    session.add(kap_disc)
+                    try:
+                        await session.flush()
+                        logger.info(
+                            "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
+                            ticker, ka_title[:50], ka_sentiment, ai_score,
+                        )
+                    except _IntErr:
+                        # Uzmanpara/BigPara onceden ayni baslik+ticker yazmis (uq_kap_company_title)
+                        await session.rollback()
+                        logger.debug(
+                            "kap_all_disclosures duplicate atlandi (zaten var): %s — %s",
+                            ticker, ka_title[:50],
+                        )
+                except Exception as _ka_err:
+                    logger.warning(
+                        "Telegram → kap_all_disclosures yazma hatasi (%s): %s",
+                        ticker, _ka_err,
+                    )
+
+            # AI skoru kontrolu — 6 altindaki haberler telegram_news'e kaydedilmez,
+            # bildirim gitmez, tweet atilmaz. AI Pozitif Haber sekmesinde gorünmez.
+            # NOT: kap_all_disclosures'a yukarida ZATEN yazildi — Tum KAP Haber
+            # sekmesinde gorünur (sentiment ne olursa olsun).
             # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
             should_notify = (ai_score is None) or (ai_score >= 6)
 

@@ -4108,3 +4108,122 @@ async def delete_blog(
         url="/admin/blog?success=Blog+yazisi+silindi",
         status_code=303,
     )
+
+
+# ============================================================
+# KAP KAYNAK YONETIMI — Telegram bot vs Uzmanpara/BigPara
+# ============================================================
+
+@router.get("/system/kap-source", response_class=HTMLResponse)
+async def kap_source_page(request: Request, success: Optional[str] = None):
+    """KAP veri kaynagi yonetim sayfasi — toggle UI.
+
+    Modlar:
+      - telegram  : Sadece Telegram bot (default, primary)
+      - uzmanpara : Sadece Uzmanpara/BigPara (yedek)
+      - both      : Ikisi de paralel (felaket modu)
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.services.kap_source_setting import get_kap_source
+    current = await get_kap_source()
+
+    success_msg = ""
+    if success:
+        success_msg = f'<div style="background:#1f3a1f;border:1px solid #4caf50;padding:12px;border-radius:6px;margin-bottom:16px;color:#a5d6a7">✓ {success}</div>'
+
+    def _opt(value: str, label: str, desc: str) -> str:
+        checked = "checked" if current == value else ""
+        return f'''
+        <label style="display:block;padding:14px;border:1px solid #444;border-radius:8px;margin-bottom:10px;cursor:pointer;background:#1e1e1e">
+            <input type="radio" name="source" value="{value}" {checked} style="margin-right:10px;transform:scale(1.3)">
+            <strong style="color:#fff;font-size:16px">{label}</strong>
+            <div style="color:#999;font-size:13px;margin-top:6px;margin-left:24px">{desc}</div>
+        </label>
+        '''
+
+    html = f'''
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+        <meta charset="UTF-8">
+        <title>KAP Kaynak Yonetimi - Admin</title>
+        <style>
+            body {{ font-family: -apple-system, sans-serif; background:#121212; color:#eee; margin:0; padding:24px; }}
+            .container {{ max-width: 720px; margin: 0 auto; }}
+            h1 {{ font-size: 22px; margin-bottom: 8px; }}
+            .subtitle {{ color:#888; margin-bottom: 24px; font-size: 14px; }}
+            .current {{ background:#0d2840; border:1px solid #2196f3; padding:14px; border-radius:8px; margin-bottom:20px; }}
+            .current strong {{ color:#64b5f6; }}
+            button {{ background:#2196f3; color:white; border:none; padding:12px 28px; border-radius:6px; font-size:15px; font-weight:600; cursor:pointer; margin-top:8px; }}
+            button:hover {{ background:#1976d2; }}
+            a {{ color:#2196f3; text-decoration:none; }}
+            .back {{ display:inline-block; margin-top:24px; color:#888; }}
+            .warning {{ background:#3a2a14; border:1px solid #ff9800; padding:12px; border-radius:6px; margin-top:20px; color:#ffb74d; font-size:13px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📡 KAP Veri Kaynagi Yonetimi</h1>
+            <div class="subtitle">Tum KAP Haber sekmesinin hangi kaynaktan beslendigini ayarla.</div>
+
+            {success_msg}
+
+            <div class="current">
+                Aktif Kaynak: <strong>{current.upper()}</strong>
+            </div>
+
+            <form method="POST" action="/admin/system/kap-source">
+                {_opt("telegram", "🚀 Telegram Bot (Primary)",
+                      "Yeni varsayilan. kap_tumhaberler_bot kanalindan gelen tum haberler "
+                      "TradingView'dan okunur, AI puanlanir. Uzmanpara/BigPara devre disi.")}
+
+                {_opt("uzmanpara", "🔁 Uzmanpara / BigPara (Yedek)",
+                      "Eski sistem — Uzmanpara/BigPara HTML scrape edilir. "
+                      "Telegram bot cokerse veya hatali calisirsa buna gec.")}
+
+                {_opt("both", "⚙️ Hibrit (Ikisi de)",
+                      "Hem Telegram hem Uzmanpara paralel calisir. Duplicate'lar "
+                      "unique constraint ile elenir. Felaket / gecici cozum.")}
+
+                <button type="submit">💾 Kaydet</button>
+            </form>
+
+            <div class="warning">
+                ⚠️ Degisiklik 60 saniye icinde aktif olur (cache TTL). Kayit aninda kontrol etmek icin sayfayi yenile.
+            </div>
+
+            <a href="/admin" class="back">← Admin Paneline Don</a>
+        </div>
+    </body>
+    </html>
+    '''
+    return HTMLResponse(content=html)
+
+
+@router.post("/system/kap-source")
+async def kap_source_update(
+    request: Request,
+    source: str = Form(...),
+):
+    """KAP kaynagini degistir."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.services.kap_source_setting import set_kap_source, VALID_SOURCES
+
+    if source not in VALID_SOURCES:
+        return RedirectResponse(
+            url="/admin/system/kap-source?success=Gecersiz+kaynak",
+            status_code=303,
+        )
+
+    ok = await set_kap_source(source)
+    msg = f"KAP+kaynagi+degistirildi:+{source}" if ok else "Kayit+hatasi"
+    logger.info(f"Admin: KAP kaynagi degistirildi → {source} (ok={ok})")
+
+    return RedirectResponse(
+        url=f"/admin/system/kap-source?success={msg}",
+        status_code=303,
+    )

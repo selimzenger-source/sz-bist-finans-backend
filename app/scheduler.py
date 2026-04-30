@@ -3686,7 +3686,22 @@ async def kap_uzmanpara_quick_job():
 
     Sadece Uzmanpara'yi tarar (en guncel kaynak).
     Yeni bildirimler aninda DB'ye kaydedilir + AI analiz + push bildirim.
+
+    NOT: Telegram bot artik primary kaynak. Bu job sadece kap_primary_source
+    "uzmanpara" veya "both" oldugunda calisir. Default'ta (telegram) atlanir.
     """
+    # Toggle kontrolu — admin panelden ayarlanir
+    try:
+        from app.services.kap_source_setting import get_kap_source, is_uzmanpara_active
+        source = await get_kap_source()
+        if not is_uzmanpara_active(source):
+            # Telegram primary modda — Uzmanpara devre disi
+            logger.debug("KAP source: %s — Uzmanpara quick job atlandi", source)
+            return
+    except Exception as e:
+        # Toggle okunamadi — guvenli yol: eski sistemi calistir (yedek mantigi)
+        logger.warning("KAP source toggle okunamadi (%s) — Uzmanpara calisiyor (yedek)", e)
+
     try:
         from app.scrapers.kap_all_scraper import scrape_uzmanpara_only
         disclosures = await scrape_uzmanpara_only()

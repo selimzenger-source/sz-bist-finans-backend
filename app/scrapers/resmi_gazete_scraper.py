@@ -444,10 +444,13 @@ async def _check_resmi_gazete_inner():
             tickers_str = ", ".join(f"#{t}" for t in dec.get("tickers", [])) or "ticker yok"
             sentiment = dec.get("sentiment", "?")
             sentiment_emoji = {"pozitif": "🟢", "negatif": "🔴", "nötr": "⚪"}.get(sentiment, "❓")
+            category = dec.get("category", "?")
+            category_emoji = {"finansal": "💰", "strateji": "🎯", "bilgi": "ℹ️"}.get(category, "❓")
             tg_text = (
                 f"📰 <b>Resmi Gazete Karar Yakalandı!</b>\n\n"
                 f"<b>{dec.get('title', '?')}</b>\n\n"
                 f"{dec.get('summary', '')}\n\n"
+                f"{category_emoji} Kategori: <b>{category.upper()}</b>\n"
                 f"{sentiment_emoji} Etki: {dec.get('impact', '?')}\n"
                 f"🏷️ Ticker: {tickers_str}\n"
                 f"🔗 {dec.get('source_url', '')}"
@@ -560,12 +563,39 @@ HOLDİNG / İŞTİRAK BAĞLANTILARI (sadece DOĞRUDAN ilişki varsa kullan):
 - THY → THYAO
 NOT: Holding bağlantısı KUR ama sadece karar o holding/grubu DOĞRUDAN etkiliyorsa.
 
+═══ FİNANSAL ETKİ KATEGORİSİ — HER KARARI MUTLAKA ETİKETLE ═══
+
+Her kararı 3 kategoriden BİRİNE yerleştir:
+
+1. "finansal" → Vergi/ÖTV/KDV değişikliği, teşvik kararı, ceza, tarife, gümrük, asgari ücret, faiz/kur düzenlemesi, sermaye yeterlilik oranı, kar payı sınırlaması
+   → ŞİRKETİN GELİR/GİDER/KAR'INI DOĞRUDAN RAKAMLA ETKİLER
+   → Tweet/bildirim atılır
+   → Örnek: "Otomotivde ÖTV %5 arttı" → finansal
+
+2. "strateji" → Sektör yapısal değişiklik, yeni lisans tipi, monopolün kırılması, halka arz zorunluluğu, satış kısıtlaması, üretim kotası, ihale açılması/iptali, izin değişikliği (geniş kapsamlı)
+   → ŞİRKETİN İŞ MODELİNİ veya REKABET KONUMUNU UZUN VADELİ ETKİLER
+   → Tweet/bildirim atılır
+   → Örnek: "Telekom'da yeni operatör lisansı" → strateji
+
+3. "bilgi" → Marka/logo kuralları, ünvan ayrıştırması, idari/usul değişiklikleri, formaliteler, teknik raporlama prosedürleri, isim değişikliği zorunluluğu, yönetmeliğin yönetmelik içi referans güncellemesi, atama/görevden alma (üst düzey hariç)
+   → SADECE OPERASYONEL/İDARİ — fiyat hareketi yaratmaz
+   → Tweet/bildirim ATILMAZ ama liste için saklanır
+   → Örnek: "Tedarik şirketleri dağıtım marka/logosunu kullanamayacak" → bilgi
+   → Örnek: "EPDK içyapı yönetmeliği" → bilgi
+
+═══ KATEGORİ KARAR KURALLARI ═══
+- Kararın özü "şirket ne kadar para kazanır/kaybeder?" sorusuna NET cevap veriyorsa → finansal
+- Kararın özü "şirket farklı bir oyun oynar mı?" sorusuna NET cevap veriyorsa → strateji
+- Kararın özü "şirketin günlük operasyonu nasıl değişir?" ise → bilgi
+- ŞÜPHEDEYSEN → "bilgi" seç (sentiment de "nötr" olur)
+
 FORMAT: JSON dizisi döndür. Eğer kuvvetli etki yoksa boş dizi [] döndür.
 [
   {
     "title": "Karar başlığı (kısa, 80 karakter max)",
     "summary": "2-3 cümle açıklama. Cümleleri TAMAMLA, yarıda bırakma. Ne kararı, kimi etkiler, nasıl etkiler.",
     "impact": "Borsa etkisi açıklaması (1 tam cümle — yarıda kesme)",
+    "category": "finansal" veya "strateji" veya "bilgi",
     "tickers": ["KCHOL", "ARCLK"],
     "sentiment": "pozitif" veya "negatif" veya "nötr",
     "source_url": "Kararın PDF/HTM URL'si"
@@ -576,6 +606,8 @@ FORMAT: JSON dizisi döndür. Eğer kuvvetli etki yoksa boş dizi [] döndür.
 - KESİNLİKLE sadece kuvvetli ve doğrudan etkisi olan kararları dahil et
 - "Dolaylı etki olabilir" düzeyindeki kararları DAHİL ETME
 - tickers dizisi BOŞ olan karar ekleme — her kararın en az 1 ticker'ı olmalı
+- "category" alanı ZORUNLU — eksik bırakırsan karar geçersiz sayılır
+- "bilgi" kategorisindeki kararların sentiment'i "nötr" olmalı (fiyat hareketi yaratmaz)
 - Cümleleri TAMAMLA, yarıda bırakma — summary ve impact alanları tam cümlelerle bitmeli
 - ASLA karar uydurmayın — sadece verilen içerikten çıkar
 - JSON dışında hiçbir şey yazma"""
@@ -689,7 +721,23 @@ Yukarıdaki kararları analiz et. Borsa etkisi olan kararları JSON formatında 
         logger.info("Resmi Gazete AI: Tum kararlar ticker'siz, atlanıyor")
         return None
 
-    return filtered
+    # Kategori filtresi — sadece "finansal" ve "strateji" tweet/bildirim alır
+    # "bilgi" kategorisi (idari/usul) loglanır ama gönderilmez
+    info_category = [d for d in filtered if d.get("category") == "bilgi"]
+    actionable = [d for d in filtered if d.get("category") in ("finansal", "strateji")]
+
+    if info_category:
+        info_titles = ", ".join(d.get("title", "?")[:50] for d in info_category)
+        logger.info(
+            "Resmi Gazete: %d 'bilgi' kategorisi karar atlandı (idari/usul): %s",
+            len(info_category), info_titles,
+        )
+
+    if not actionable:
+        logger.info("Resmi Gazete AI: Aksiyon alinabilir karar yok (sadece 'bilgi' kategorisi)")
+        return None
+
+    return actionable
 
 
 def _extract_json_from_response(text: str) -> list | None:
