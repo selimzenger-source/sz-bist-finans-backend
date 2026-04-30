@@ -567,6 +567,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             ):
                 try:
                     from app.models.kap_all_disclosure import KapAllDisclosure
+                    from app.scrapers.kap_all_scraper import _infer_category
                     from sqlalchemy.exc import IntegrityError as _IntErr
 
                     # Sentiment çıkarımı (ai_news_scorer score'dan):
@@ -580,10 +581,17 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # Title — yeni bot "Baslik:" satirindan, fallback matched_kw
                     ka_title = (news_title or matched_kw or title or "")[:500]
 
+                    # Kategori + is_bilanco — frontend "Bilanco AI Analizi - COK YAKINDA"
+                    # badge'ini bu flag'e gore gosterir. KAP scraper ile ayni mantik.
+                    ka_category = _infer_category(ka_title)
+                    ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
+
                     kap_disc = KapAllDisclosure(
                         company_code=ticker,
                         title=ka_title,
                         body=ai_summary,  # Tradingview'den AI'ya gitti, ozet body olarak
+                        category=ka_category,
+                        is_bilanco=ka_is_bilanco,
                         kap_url=kap_url,
                         source="telegram",
                         published_at=msg_date,
