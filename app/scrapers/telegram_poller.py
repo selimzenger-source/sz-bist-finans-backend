@@ -659,24 +659,13 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             if not should_notify:
                 logger.info(
-                    "AI skoru dusuk (%s < 6), DB+bildirim+tweet atlanıyor: %s — %s",
+                    "AI skoru dusuk (%s < 6), telegram_news + push + tweet atlandi: %s — %s",
                     ai_score, ticker, title,
                 )
-                # Admin'e bildir — manuel inceleme firsati
-                try:
-                    from app.services.admin_telegram import send_admin_message
-                    _summary_preview = (ai_summary or "")[:400]
-                    _kap_line = f"\n🔗 {kap_url}" if kap_url else ""
-                    await send_admin_message(
-                        f"⚠️ <b>AI olumlu bulmadı — manuel inceleme</b>\n"
-                        f"Ticker: <b>{ticker}</b>\n"
-                        f"Skor: {ai_score}/10 (eşik 6.0)\n"
-                        f"Başlık: {title}\n"
-                        f"AI özet: {_summary_preview}{_kap_line}",
-                        silent=True,
-                    )
-                except Exception as _adm_err:
-                    logger.warning("Admin 'olumlu bulmadı' bildirim hatasi: %s", _adm_err)
+                # NOT: Admin Telegram'a "AI olumlu bulmadi" bildirimi gonderilmiyor.
+                # Yeni sistemde tum KAP haberleri Telegram'dan geldigi icin her bildirimde
+                # admin'e mesaj atmak spam yaratiyordu. Sadece log'a yazilir, izlemek icin
+                # Render logs kullanilir.
             elif message_type == "seans_disi_acilis":
                 # seans_disi_acilis = acilis gap bilgisi, haber degil → DB'ye kaydetme
                 logger.info(
