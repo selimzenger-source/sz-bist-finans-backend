@@ -638,6 +638,35 @@ async def init_db():
         except Exception:
             pass
 
+        # v51 migration: KAP URL'leri /tr/Bildirim/ formatina cevir
+        # Bazi eski telegram kayitlari dilsiz URL'ye sahipti (kap.org.tr/Bildirim/123).
+        # KAP bu durumda browser diline gore aciyor → Ingilizce kullanicilarda Ingilizce sayfa.
+        # Bu migration bir kerelik fix — yeni gelen URL'ler kodda /tr/'ye zorlanir.
+        try:
+            await conn.execute(text("""
+                UPDATE kap_all_disclosures
+                SET kap_url = REPLACE(kap_url, 'kap.org.tr/Bildirim/', 'kap.org.tr/tr/Bildirim/')
+                WHERE kap_url LIKE 'https://www.kap.org.tr/Bildirim/%'
+                AND NOT EXISTS (
+                    SELECT 1 FROM kap_all_disclosures k2
+                    WHERE k2.kap_url = REPLACE(kap_all_disclosures.kap_url, 'kap.org.tr/Bildirim/', 'kap.org.tr/tr/Bildirim/')
+                    AND k2.id != kap_all_disclosures.id
+                )
+            """))
+            # /en/ olanlari da /tr/'ye cevir
+            await conn.execute(text("""
+                UPDATE kap_all_disclosures
+                SET kap_url = REPLACE(kap_url, '/en/Bildirim/', '/tr/Bildirim/')
+                WHERE kap_url LIKE '%/en/Bildirim/%'
+                AND NOT EXISTS (
+                    SELECT 1 FROM kap_all_disclosures k2
+                    WHERE k2.kap_url = REPLACE(kap_all_disclosures.kap_url, '/en/Bildirim/', '/tr/Bildirim/')
+                    AND k2.id != kap_all_disclosures.id
+                )
+            """))
+        except Exception:
+            pass
+
         # v50 migration: kap_all_disclosures unique constraint duzeltmesi
         # Eski: (company_code, title) — ayni baslikla farkli tarihlerde gelen
         # bildirimleri reddediyordu (Sorumluluk Beyani, Genel Kurul vb)
