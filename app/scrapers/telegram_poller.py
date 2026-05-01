@@ -822,8 +822,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as tw_err:
                     logger.error("[TWEET-FLOW] Twitter tweet hatasi (poller devam eder): %s", tw_err, exc_info=True)
 
+        # Commit her zaman yapilir — score < 6 mesajlari telegram_news'e yazilmaz
+        # ama kap_all_disclosures'a yazilir. Eger sadece new_count > 0 kontrolu
+        # yaparsak, kap_all_disclosures INSERT'leri commit edilmez ve rollback olur.
+        await session.commit()
         if new_count > 0:
-            await session.commit()
             logger.info(
                 "Telegram: %d yeni mesaj kaydedildi (DB commit basarili)",
                 new_count,
