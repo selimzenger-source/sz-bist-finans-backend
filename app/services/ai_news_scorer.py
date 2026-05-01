@@ -231,9 +231,13 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
                     real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{kap_match.group(1)}"
 
             if real_kap_url:
-                # /en/ → /tr/ normalize (TradingView bazen Ingilizce KAP linki veriyor)
-                real_kap_url = real_kap_url.replace("/en/Bildirim/", "/tr/Bildirim/")
-                real_kap_url = real_kap_url.replace("/en/bildirim/", "/tr/Bildirim/")
+                # KAP URL'sini her zaman /tr/Bildirim/{id} formatina zorla
+                # Bazi URL'lerde dil prefix'i yok (kap.org.tr/Bildirim/123) → KAP browser
+                # diline gore acar (Ingilizce browser → Ingilizce sayfa). Bunu onlemek
+                # icin URL'den ID'yi cikar, /tr/ ile yeniden olustur.
+                _id_match = _re.search(r'Bildirim/(\d+)', real_kap_url)
+                if _id_match:
+                    real_kap_url = f"https://www.kap.org.tr/tr/Bildirim/{_id_match.group(1)}"
                 logger.info(
                     "KAP bildirim linki bulundu: matriks:%s → %s",
                     matriks_id, real_kap_url,
