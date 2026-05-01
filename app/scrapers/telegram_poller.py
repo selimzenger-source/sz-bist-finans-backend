@@ -598,14 +598,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ka_category = _infer_category(ka_title)
                     ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
 
-                    # ── DUPLICATE ONLEME: kap_url uzerinden kontrol ──
-                    # KRITIK: Once (company_code, title) ile kontrol ediyorduk ama eski
-                    # Uzmanpara/BigPara'dan ayni baslikla kayit varsa (ornek: "Genel Kurul
-                    # Islemlerine Iliskin Bildirim" ayda 1 gelebilir), yeni kayit duplicate
-                    # sayilip atlaniyordu.
-                    # Simdi: kap_url uzerinden kontrol — her bildirimin kendi unique KAP
-                    # URL'si var (Bildirim ID farkli). Boylece ayni baslik farkli tarihlerde
-                    # gelirse hepsi DB'ye yazilir.
+                    # ── BASIT DUPLICATE KONTROLU: kap_url uzerinden ──
+                    # Her KAP bildiriminin unique URL'si var (Bildirim/XXXXX).
+                    # Ayni URL DB'de yoksa yaz, varsa atla. Bu kadar.
                     is_duplicate = False
                     if kap_url:
                         existing_check = await session.execute(
@@ -617,23 +612,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
                     if is_duplicate:
                         logger.debug(
-                            "kap_all_disclosures duplicate (kap_url) atlandi: %s — %s",
+                            "kap_all_disclosures duplicate atlandi: %s — %s",
                             ticker, ka_title[:50],
                         )
                     else:
-                        # Eski kayitlardan (uq_kap_company_title) ayni baslikla varsa
-                        # title'a kap_id suffix ekleyerek unique kil. Frontend'de hala
-                        # ana baslik gorunsun diye sadece ID son ekleniyor.
-                        existing_title_check = await session.execute(
-                            _sa_select(KapAllDisclosure.id).where(
-                                KapAllDisclosure.company_code == ticker,
-                                KapAllDisclosure.title == ka_title,
-                            ).limit(1)
-                        )
-                        if existing_title_check.scalar_one_or_none() is not None and kap_id:
-                            # Ayni baslik zaten var — kap_id ekleyerek unique kil
-                            ka_title = f"{ka_title} ({kap_id})"[:500]
-
                         kap_disc = KapAllDisclosure(
                             company_code=ticker,
                             title=ka_title,
@@ -648,9 +630,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             ai_summary=ai_summary,
                             ai_analyzed_at=datetime.now(timezone.utc),
                         )
-
-                        # Savepoint (nested transaction) — IntegrityError olursa
-                        # sadece bu INSERT geri alinir, ana session korunur.
+                        # Savepoint — beklenmedik hata olursa session korunur
                         try:
                             async with session.begin_nested():
                                 session.add(kap_disc)
@@ -660,8 +640,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 ticker, ka_title[:50], ka_sentiment, ai_score,
                             )
                         except Exception as _flush_err:
-                            logger.debug(
-                                "kap_all_disclosures yazma hatasi (savepoint rollback): %s — %s",
+                            logger.warning(
+                                "kap_all_disclosures yazma hatasi: %s — %s",
                                 ticker, _flush_err,
                             )
                 except Exception as _ka_err:

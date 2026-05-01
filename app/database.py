@@ -638,6 +638,20 @@ async def init_db():
         except Exception:
             pass
 
+        # v50 migration: kap_all_disclosures unique constraint duzeltmesi
+        # Eski: (company_code, title) — ayni baslikla farkli tarihlerde gelen
+        # bildirimleri reddediyordu (Sorumluluk Beyani, Genel Kurul vb)
+        # Yeni: kap_url unique — her bildirim KAP'ta ayri Bildirim ID'sine sahip
+        try:
+            await conn.execute(text(
+                "ALTER TABLE kap_all_disclosures DROP CONSTRAINT IF EXISTS uq_kap_company_title"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_url ON kap_all_disclosures(kap_url) WHERE kap_url IS NOT NULL"
+            ))
+        except Exception:
+            pass
+
         # v49 migration: ipo_poll_votes tablosu (2 fazli anket: hype + ceiling prediction)
         try:
             await conn.execute(text("""
