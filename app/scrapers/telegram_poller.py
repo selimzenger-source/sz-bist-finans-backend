@@ -598,22 +598,42 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ka_category = _infer_category(ka_title)
                     ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
 
-                    # ── DUPLICATE ONLEME: Once SELECT ile kontrol et ──
-                    # KRITIK: Eskiden IntegrityError yakalanip rollback() yapiliyordu,
-                    # bu BUTUN session'i siliyordu (onceki yazimlar dahil). Simdi SELECT
-                    # ile once kontrol → duplicate ise INSERT atlanir, transaction korunur.
-                    existing_check = await session.execute(
-                        _sa_select(KapAllDisclosure.id).where(
-                            KapAllDisclosure.company_code == ticker,
-                            KapAllDisclosure.title == ka_title,
-                        ).limit(1)
-                    )
-                    if existing_check.scalar_one_or_none() is not None:
+                    # ── DUPLICATE ONLEME: kap_url uzerinden kontrol ──
+                    # KRITIK: Once (company_code, title) ile kontrol ediyorduk ama eski
+                    # Uzmanpara/BigPara'dan ayni baslikla kayit varsa (ornek: "Genel Kurul
+                    # Islemlerine Iliskin Bildirim" ayda 1 gelebilir), yeni kayit duplicate
+                    # sayilip atlaniyordu.
+                    # Simdi: kap_url uzerinden kontrol — her bildirimin kendi unique KAP
+                    # URL'si var (Bildirim ID farkli). Boylece ayni baslik farkli tarihlerde
+                    # gelirse hepsi DB'ye yazilir.
+                    is_duplicate = False
+                    if kap_url:
+                        existing_check = await session.execute(
+                            _sa_select(KapAllDisclosure.id).where(
+                                KapAllDisclosure.kap_url == kap_url,
+                            ).limit(1)
+                        )
+                        is_duplicate = existing_check.scalar_one_or_none() is not None
+
+                    if is_duplicate:
                         logger.debug(
-                            "kap_all_disclosures duplicate atlandi (zaten var): %s — %s",
+                            "kap_all_disclosures duplicate (kap_url) atlandi: %s — %s",
                             ticker, ka_title[:50],
                         )
                     else:
+                        # Eski kayitlardan (uq_kap_company_title) ayni baslikla varsa
+                        # title'a kap_id suffix ekleyerek unique kil. Frontend'de hala
+                        # ana baslik gorunsun diye sadece ID son ekleniyor.
+                        existing_title_check = await session.execute(
+                            _sa_select(KapAllDisclosure.id).where(
+                                KapAllDisclosure.company_code == ticker,
+                                KapAllDisclosure.title == ka_title,
+                            ).limit(1)
+                        )
+                        if existing_title_check.scalar_one_or_none() is not None and kap_id:
+                            # Ayni baslik zaten var — kap_id ekleyerek unique kil
+                            ka_title = f"{ka_title} ({kap_id})"[:500]
+
                         kap_disc = KapAllDisclosure(
                             company_code=ticker,
                             title=ka_title,
@@ -628,22 +648,20 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             ai_summary=ai_summary,
                             ai_analyzed_at=datetime.now(timezone.utc),
                         )
-                        session.add(kap_disc)
+
+                        # Savepoint (nested transaction) — IntegrityError olursa
+                        # sadece bu INSERT geri alinir, ana session korunur.
                         try:
-                            await session.flush()
+                            async with session.begin_nested():
+                                session.add(kap_disc)
+                                await session.flush()
                             logger.info(
                                 "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
                                 ticker, ka_title[:50], ka_sentiment, ai_score,
                             )
                         except Exception as _flush_err:
-                            # Race condition: SELECT ile INSERT arasinda baska process yazmis olabilir
-                            # Sadece bu kayit icin expunge — session korunur.
-                            try:
-                                session.expunge(kap_disc)
-                            except Exception:
-                                pass
                             logger.debug(
-                                "kap_all_disclosures flush hatasi (race condition): %s — %s",
+                                "kap_all_disclosures yazma hatasi (savepoint rollback): %s — %s",
                                 ticker, _flush_err,
                             )
                 except Exception as _ka_err:
