@@ -30,6 +30,8 @@ import re
 from datetime import date
 from typing import Iterator, Optional
 
+from app.utils.tr_text import lower_tr
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,7 +140,7 @@ def parse_records(raw_text: str) -> list[dict]:
         type_match = _TYPE_RE.match(lines[i])
         if not type_match:
             continue
-        ttype_raw = type_match.group(1).lower()
+        ttype_raw = lower_tr(type_match.group(1))
         transaction_type = "alici" if "al" in ttype_raw else "satici"
         i += 1
 
@@ -150,7 +152,7 @@ def parse_records(raw_text: str) -> list[dict]:
 
         # Opsiyonel: Görev
         party_role = None
-        if i < n and lines[i].lower() == "görev":
+        if i < n and lower_tr(lines[i]) == "görev":
             i += 1
             if i < n:
                 party_role = lines[i]
@@ -159,7 +161,7 @@ def parse_records(raw_text: str) -> list[dict]:
         # Opsiyonel: Fiyat
         price_low: Optional[float] = None
         price_high: Optional[float] = None
-        if i < n and lines[i].lower() == "fiyat":
+        if i < n and lower_tr(lines[i]) == "fiyat":
             i += 1
             if i < n:
                 price_low, price_high = _parse_price_range(lines[i])
@@ -167,7 +169,7 @@ def parse_records(raw_text: str) -> list[dict]:
 
         # Opsiyonel: Nominal
         nominal_lot: Optional[int] = None
-        if i < n and lines[i].lower() == "nominal":
+        if i < n and lower_tr(lines[i]) == "nominal":
             i += 1
             if i < n:
                 nominal_lot = _parse_int_lot(lines[i])
@@ -176,7 +178,7 @@ def parse_records(raw_text: str) -> list[dict]:
         # Oy Hakki
         oy_hakki_pct: Optional[float] = None
         oy_hakki_change_pct: Optional[float] = None
-        if i < n and lines[i].lower().startswith("oy hakk"):
+        if i < n and lower_tr(lines[i]).startswith("oy hakk"):
             i += 1
             if i < n:
                 m = _PCT_RE.match(lines[i].replace(" ", ""))
@@ -192,7 +194,7 @@ def parse_records(raw_text: str) -> list[dict]:
         # Pay Orani
         pay_orani_pct: Optional[float] = None
         pay_orani_change_pct: Optional[float] = None
-        if i < n and lines[i].lower().startswith("pay oran"):
+        if i < n and lower_tr(lines[i]).startswith("pay oran"):
             i += 1
             if i < n:
                 m = _PCT_RE.match(lines[i].replace(" ", ""))

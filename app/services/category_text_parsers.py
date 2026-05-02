@@ -10,6 +10,8 @@ import re
 from datetime import date
 from typing import Optional
 
+from app.utils.tr_text import lower_tr
+
 logger = logging.getLogger(__name__)
 
 # ─── Common helpers ───
@@ -68,7 +70,7 @@ def _parse_tr_short_date(s: str, default_year: int) -> Optional[date]:
         return None
     try:
         day = int(parts[0])
-        month = _TR_MONTHS.get(parts[1].lower()[:3])
+        month = _TR_MONTHS.get(lower_tr(parts[1])[:3])
         if not month:
             return None
         return date(default_year, month, day)
@@ -117,7 +119,7 @@ def parse_type_conversions(raw_text: str) -> list[dict]:
         i += 1
 
         # Yatırımcı satırı
-        if i < n and lines[i].lower().startswith("yatırımcı"):
+        if i < n and lower_tr(lines[i]).startswith("yatırımcı"):
             i += 1
 
         if i >= n: break
@@ -125,7 +127,7 @@ def parse_type_conversions(raw_text: str) -> list[dict]:
         i += 1
 
         # Dönüştürülen Lot satırı
-        if i < n and lines[i].lower().startswith("dönüştürülen"):
+        if i < n and lower_tr(lines[i]).startswith("dönüştürülen"):
             i += 1
 
         converted_lot: Optional[int] = None
@@ -192,17 +194,17 @@ def parse_block_trades(raw_text: str) -> list[dict]:
         i += 1
 
         # İşlem Tipi label
-        if i < n and lines[i].lower().startswith("işlem tipi"):
+        if i < n and lower_tr(lines[i]).startswith("işlem tipi"):
             i += 1
 
         if i >= n: break
-        ttype_raw = lines[i].lower()
+        ttype_raw = lower_tr(lines[i])
         transaction_type = "alis" if "al" in ttype_raw else "satis"
         i += 1
 
         # Aracı Kurum label
         broker = None
-        if i < n and lines[i].lower().startswith("aracı kurum"):
+        if i < n and lower_tr(lines[i]).startswith("aracı kurum"):
             i += 1
             if i < n:
                 broker = lines[i]
@@ -210,7 +212,7 @@ def parse_block_trades(raw_text: str) -> list[dict]:
 
         # Alıcılar / Satıcılar label + uzun parties metni
         counterparties = None
-        if i < n and (lines[i].lower().startswith("alıcılar") or lines[i].lower().startswith("satıcılar")):
+        if i < n and (lower_tr(lines[i]).startswith("alıcılar") or lower_tr(lines[i]).startswith("satıcılar")):
             i += 1
             # Parties'in tek satır olduğunu varsay (genelde virgülle çok uzun)
             if i < n:
@@ -219,7 +221,7 @@ def parse_block_trades(raw_text: str) -> list[dict]:
 
         # Lot Miktarı label
         lot_amount: Optional[int] = None
-        if i < n and lines[i].lower().startswith("lot miktarı"):
+        if i < n and lower_tr(lines[i]).startswith("lot miktarı"):
             i += 1
             if i < n:
                 lot_amount = _parse_int_lot(lines[i])
@@ -228,7 +230,7 @@ def parse_block_trades(raw_text: str) -> list[dict]:
 
         # Maliyet Fiyatı label
         cost_price: Optional[float] = None
-        if i < n and lines[i].lower().startswith("maliyet fiyatı"):
+        if i < n and lower_tr(lines[i]).startswith("maliyet fiyatı"):
             i += 1
             if i < n:
                 m = _TL_RE.search(lines[i])
