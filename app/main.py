@@ -10074,6 +10074,102 @@ async def list_latest_bilancos(
 
 
 # -------------------------------------------------------
+# TEMETTU SAMPIYONLAR (v3.0.0) — En yuksek verim / en uzun seri
+# DIKKAT: /sampiyonlar route'u {ticker} oncesinde tanimlanmali
+# -------------------------------------------------------
+
+@app.get("/api/v1/temettu/sampiyonlar")
+async def get_temettu_sampiyonlar(
+    sort_by: str = Query("yield", regex="^(yield|streak)$"),
+    limit: int = Query(50, ge=10, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temettu sampiyonlari — en yuksek verim veya en uzun seri sirali.
+
+    Hesaplama:
+      - yieldPct: Son yil dividend_yield_pct (en guncel)
+      - consecutiveYears: Pespese odeme yapilan yil sayisi
+      - payoutPct: Son odemenin payout_ratio degeri
+      - grossPerShare: Son odemenin gross_dividend_per_share
+      - aiScore: 5..10 arasi (verim + streak basit hesaplama, gercek AI sonra)
+    """
+    from sqlalchemy import func as _func, and_
+
+    # Tum dividend_history (son 10 yil)
+    stmt = (
+        select(DividendHistory)
+        .where(DividendHistory.payment_year >= datetime.now().year - 10)
+        .order_by(DividendHistory.ticker, desc(DividendHistory.payment_year))
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    # Hisse bazinda topla
+    stocks: dict[str, dict] = {}
+    for r in rows:
+        if not r.ticker:
+            continue
+        if r.ticker not in stocks:
+            stocks[r.ticker] = {
+                "ticker": r.ticker,
+                "years": set(),
+                "latest": None,
+                "history": [],
+            }
+        s = stocks[r.ticker]
+        s["years"].add(r.payment_year)
+        s["history"].append(r)
+        if not s["latest"] or r.payment_year > s["latest"].payment_year:
+            s["latest"] = r
+
+    items = []
+    current_year = datetime.now().year
+    for ticker, s in stocks.items():
+        latest = s["latest"]
+        if not latest:
+            continue
+        # Pespese yil hesabi
+        years_sorted = sorted(s["years"], reverse=True)
+        consecutive = 0
+        expected = max(years_sorted) if years_sorted else current_year
+        for y in years_sorted:
+            if y == expected:
+                consecutive += 1
+                expected -= 1
+            else:
+                break
+
+        yield_pct = float(latest.dividend_yield_pct or 0)
+        gross_per_share = float(latest.gross_dividend_per_share or 0)
+        payout = float(latest.payout_ratio or 0)
+
+        # Basit aiScore: verim 0-10% -> 5-9 + streak bonus (max +1)
+        ai_score = 5.0 + min(yield_pct, 10) * 0.4 + min(consecutive, 10) * 0.1
+        ai_score = min(ai_score, 10.0)
+
+        items.append({
+            "ticker": ticker,
+            "company": ticker,  # company_name varsa Dividend tablosundan al (TODO)
+            "yieldPct": round(yield_pct, 2),
+            "consecutiveYears": consecutive,
+            "payoutPct": round(payout, 1),
+            "grossPerShare": round(gross_per_share, 4),
+            "aiScore": round(ai_score, 1),
+            "latest_year": latest.payment_year,
+        })
+
+    # Filtrele: En az 2 yil odeme yapanlar (sampiyon kriteri)
+    items = [it for it in items if it["consecutiveYears"] >= 2 and it["yieldPct"] > 0]
+
+    # Sirala
+    if sort_by == "streak":
+        items.sort(key=lambda x: (x["consecutiveYears"], x["yieldPct"]), reverse=True)
+    else:
+        items.sort(key=lambda x: (x["yieldPct"], x["consecutiveYears"]), reverse=True)
+
+    return {"count": len(items[:limit]), "items": items[:limit]}
+
+
+# -------------------------------------------------------
 # TEMETTU DETAY (v3.0.0)
 # -------------------------------------------------------
 
