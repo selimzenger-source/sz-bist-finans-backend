@@ -9980,44 +9980,90 @@ async def list_latest_bilancos(
     Tarih limiti yok — en eski bilanço da görülebilir.
     """
     # KAP bilanço bildirimleri (is_bilanco=TRUE, en yeniden eskiye)
+    # Sadece "Finansal Rapor" titleli olanlar — Sorumluluk Beyani ve Faaliyet Raporu hariç
     kap_result = await db.execute(
         select(KapAllDisclosure)
         .where(KapAllDisclosure.is_bilanco == True)
+        .where(KapAllDisclosure.title.ilike('%Finansal Rapor%'))
         .order_by(desc(KapAllDisclosure.published_at))
         .offset(offset)
         .limit(limit)
     )
     kap_items = list(kap_result.scalars().all())
 
+    def _f(v):
+        return float(v) if v is not None else None
+
     # Her bilanço bildirimi için finansal verileri birleştir
     items = []
     for kap in kap_items:
         ticker = kap.company_code
 
-        # Son finansal veri
+        # Son 5 dönem (quarterly chart için)
         fin_result = await db.execute(
             select(CompanyFinancial)
             .where(CompanyFinancial.ticker == ticker)
             .order_by(desc(CompanyFinancial.period))
-            .limit(1)
+            .limit(5)
         )
-        fin = fin_result.scalar_one_or_none()
+        finals = list(fin_result.scalars().all())
+        fin = finals[0] if finals else None
+        prev = finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None)
+        # Yıllık karşılaştırma için aynı çeyrek bir yıl önceki
+        prev_yoy = None
+        if fin and fin.period:
+            try:
+                year, q = fin.period.split('-')
+                prev_year_period = f"{int(year)-1}-{q}"
+                for f in finals:
+                    if f.period == prev_year_period:
+                        prev_yoy = f
+                        break
+            except Exception:
+                pass
+        prev_to_use = prev_yoy or prev
+
+        # Çeyreklik bars — eskiden yeniye sirala
+        quarterly = list(reversed(finals))
 
         items.append({
             "ticker": ticker,
             "title": kap.title,
             "published_at": kap.published_at.isoformat() if kap.published_at else None,
-            "ai_score": kap.ai_impact_score,
+            "ai_score": _f(kap.ai_impact_score),
             "ai_sentiment": kap.ai_sentiment,
             "ai_summary": kap.ai_summary[:200] if kap.ai_summary else None,
             "period": fin.period if fin else None,
-            "revenue": float(fin.revenue) if fin and fin.revenue else None,
-            "net_income": float(fin.net_income) if fin and fin.net_income else None,
-            "total_equity": float(fin.total_equity) if fin and fin.total_equity else None,
-            "net_debt": float(fin.net_debt) if fin and fin.net_debt else None,
-            "gross_margin_pct": float(fin.gross_margin_pct) if fin and fin.gross_margin_pct else None,
-            "net_margin_pct": float(fin.net_margin_pct) if fin and fin.net_margin_pct else None,
-            "roe_pct": float(fin.roe_pct) if fin and fin.roe_pct else None,
+            "prev_period": prev_to_use.period if prev_to_use else None,
+            # Mevcut donem
+            "revenue": _f(fin.revenue) if fin else None,
+            "gross_profit": _f(fin.gross_profit) if fin else None,
+            "operating_profit": _f(fin.operating_profit) if fin else None,
+            "ebitda": _f(fin.ebitda) if fin else None,
+            "net_income": _f(fin.net_income) if fin else None,
+            "current_assets": _f(fin.current_assets) if fin and hasattr(fin, 'current_assets') else None,
+            "non_current_assets": _f(fin.non_current_assets) if fin and hasattr(fin, 'non_current_assets') else None,
+            "total_assets": _f(fin.total_assets) if fin else None,
+            "total_equity": _f(fin.total_equity) if fin else None,
+            "total_debt": _f(fin.total_debt) if fin else None,
+            "net_debt": _f(fin.net_debt) if fin else None,
+            "cash_and_equivalents": _f(fin.cash_and_equivalents) if fin else None,
+            "gross_margin_pct": _f(fin.gross_margin_pct) if fin else None,
+            "net_margin_pct": _f(fin.net_margin_pct) if fin else None,
+            "roe_pct": _f(fin.roe_pct) if fin else None,
+            # Onceki donem (yyy ya da onceki ceyrek)
+            "revenue_prev": _f(prev_to_use.revenue) if prev_to_use else None,
+            "gross_profit_prev": _f(prev_to_use.gross_profit) if prev_to_use else None,
+            "ebitda_prev": _f(prev_to_use.ebitda) if prev_to_use else None,
+            "net_income_prev": _f(prev_to_use.net_income) if prev_to_use else None,
+            "total_assets_prev": _f(prev_to_use.total_assets) if prev_to_use else None,
+            "total_equity_prev": _f(prev_to_use.total_equity) if prev_to_use else None,
+            "net_debt_prev": _f(prev_to_use.net_debt) if prev_to_use else None,
+            # Ceyreklik bars
+            "quarterly": [
+                {"period": q.period, "revenue": _f(q.revenue), "ebitda": _f(q.ebitda), "net_income": _f(q.net_income)}
+                for q in quarterly
+            ],
         })
 
     return {
