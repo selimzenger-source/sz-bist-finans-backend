@@ -3495,29 +3495,11 @@ async def update_bist50_index_job():
 
 # ═══════════════════════════════════════════════════════
 # v3.0.0 — Bilanco/Temettu Job Fonksiyonlari
+# Bilanco/temettu KAP tetikli — sadece gcm takvimi gunluk otomatik.
+# IsYatirim ve temettuhisseleri scraper'lari sadece admin manuel tetikler:
+#   /api/v1/admin/trigger-isyatirim-scrape
+#   /api/v1/admin/trigger-temettu-scrape
 # ═══════════════════════════════════════════════════════
-
-
-async def _v3_isyatirim_weekly_job():
-    """Haftalik IsYatirim bilanco batch — tum BIST hisseleri (~90dk)."""
-    try:
-        from app.scrapers.isyatirim_scraper import scrape_all_financials
-        logger.info("v3 IsYatirim haftalik batch basliyor")
-        result = await scrape_all_financials()
-        logger.info("v3 IsYatirim haftalik batch tamamlandi: %s", result)
-    except Exception as e:
-        logger.exception("v3 IsYatirim haftalik batch hatasi: %s", e)
-
-
-async def _v3_temettuhisseleri_daily_job():
-    """Gunluk temettuhisseleri.com scrape — temettu zenginlestirme."""
-    try:
-        from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
-        logger.info("v3 temettuhisseleri gunluk scrape basliyor")
-        result = await scrape_temettuhisseleri()
-        logger.info("v3 temettuhisseleri tamamlandi: %s", result)
-    except Exception as e:
-        logger.exception("v3 temettuhisseleri hatasi: %s", e)
 
 
 async def _v3_gcm_calendar_daily_job():
@@ -3529,75 +3511,6 @@ async def _v3_gcm_calendar_daily_job():
         logger.info("v3 gcm earnings calendar tamamlandi: %s", result)
     except Exception as e:
         logger.exception("v3 gcm earnings calendar hatasi: %s", e)
-
-
-async def _v3_bilanco_queue_worker():
-    """KAP'tan bilanco bildirimleri tespit edilince IsYatirim'i tetikleyen worker.
-
-    Son 2 saatteki is_bilanco=TRUE kayitlari tarar. Eger ilgili hisse icin
-    CompanyFinancial tablosunda son donem yoksa, bilanco_pipeline.enqueue_bilanco
-    ile kuyruga ekler.
-
-    Worker queue'yu surekli isler, bu job sadece "kuyruga ekleme" yapar.
-    """
-    try:
-        from app.database import async_session
-        from app.models.kap_all_disclosure import KapAllDisclosure
-        from app.models.company_financial import CompanyFinancial
-        from app.services.bilanco_pipeline import enqueue_bilanco, start_bilanco_queue_worker
-        from sqlalchemy import select, and_
-
-        # Worker'i ilk cagirisinda baslat (idempotent)
-        import asyncio as _asyncio
-        try:
-            _asyncio.create_task(start_bilanco_queue_worker())
-        except Exception:
-            pass
-
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
-        async with async_session() as db:
-            # Son 2 saatteki bilanco bildirimleri
-            stmt = (
-                select(KapAllDisclosure)
-                .where(
-                    and_(
-                        KapAllDisclosure.is_bilanco == True,
-                        KapAllDisclosure.published_at >= cutoff,
-                    )
-                )
-                .order_by(KapAllDisclosure.published_at.desc())
-                .limit(50)
-            )
-            kap_items = (await db.execute(stmt)).scalars().all()
-
-            queued = 0
-            for kap in kap_items:
-                ticker = kap.company_code
-                if not ticker:
-                    continue
-
-                # Bu hisse icin son CompanyFinancial donemine bak
-                fin_stmt = (
-                    select(CompanyFinancial)
-                    .where(CompanyFinancial.ticker == ticker)
-                    .order_by(CompanyFinancial.scraped_at.desc())
-                    .limit(1)
-                )
-                latest_fin = (await db.execute(fin_stmt)).scalar_one_or_none()
-
-                # Eger son fetch 24 saatten daha yeniyse skip
-                if latest_fin and latest_fin.scraped_at:
-                    age = datetime.now(timezone.utc) - latest_fin.scraped_at.replace(tzinfo=timezone.utc) if latest_fin.scraped_at.tzinfo is None else datetime.now(timezone.utc) - latest_fin.scraped_at
-                    if age.total_seconds() < 24 * 3600:
-                        continue
-
-                await enqueue_bilanco(ticker, kap.title or "")
-                queued += 1
-
-            if queued:
-                logger.info("v3 bilanco worker: %d hisse kuyruga eklendi", queued)
-    except Exception as e:
-        logger.exception("v3 bilanco queue worker hatasi: %s", e)
 
 
 async def kap_ai_retry_job():
@@ -4913,32 +4826,15 @@ def _setup_scheduler_impl():
     )
 
     # ═══════════════════════════════════════════════════════
-    # v3.0.0 — Bilanco/Temettu/Takvim periyodik gorevler
+    # v3.0.0 — Bilanco/Temettu — direkt Telegram poller'dan beslenir
+    # IsYatirim haftalik ve temettuhisseleri gunluk batch'ler KAPATILDI.
+    # Telegram poller -> _route_to_calendars:
+    #   - is_dividend(title)  -> dividend_calendar_processor + dividend_history mirror
+    #   - is_bilanco_kap      -> bilanco_pipeline.enqueue_bilanco -> queue worker
+    # Sadece gcmyatirim takvimi gunluk otomatik calisir.
     # ═══════════════════════════════════════════════════════
 
-    # Haftalik IsYatirim bilanco batch — Pazar 06:00 TR (03:00 UTC)
-    scheduler.add_job(
-        _v3_isyatirim_weekly_job,
-        CronTrigger(day_of_week="sun", hour=3, minute=0),
-        id="v3_isyatirim_weekly",
-        name="IsYatirim Bilanco Batch (Haftalik Pazar 06:00 TR)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    # Gunluk temettuhisseleri.com scrape — her gun 22:00 UTC (01:00 TR)
-    scheduler.add_job(
-        _v3_temettuhisseleri_daily_job,
-        CronTrigger(hour=22, minute=0),
-        id="v3_temettu_daily",
-        name="Temettu Hisseleri Daily (01:00 TR)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
-
-    # Gunluk gcm bilanco takvimi scrape — her gun 04:00 UTC (07:00 TR)
+    # GCM Yatirim bilanco takvimi — her gun 07:00 TR (04:00 UTC)
     scheduler.add_job(
         _v3_gcm_calendar_daily_job,
         CronTrigger(hour=4, minute=0),
@@ -4949,16 +4845,15 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # KAP -> Bilanco Pipeline Worker — startup'ta baslat, surekli kuyruk dinler
-    scheduler.add_job(
-        _v3_bilanco_queue_worker,
-        IntervalTrigger(seconds=30),
-        id="v3_bilanco_queue",
-        name="Bilanco Pipeline Queue Worker (30sn)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-    )
+    # Bilanco queue worker — startup'ta bir kez baslat, surekli kuyrugu dinler.
+    # Telegram poller'dan enqueue_bilanco cagrildiginda bu worker isler.
+    try:
+        import asyncio as _asyncio
+        from app.services.bilanco_pipeline import start_bilanco_queue_worker
+        _asyncio.get_event_loop().create_task(start_bilanco_queue_worker())
+        logger.info("v3 bilanco queue worker startup task baslatildi")
+    except Exception as _e:
+        logger.warning("v3 bilanco queue worker startup hatasi: %s", _e)
 
     scheduler.start()
     logger.info(

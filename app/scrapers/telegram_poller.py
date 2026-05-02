@@ -430,6 +430,20 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→cautious hata (%s): %s", ticker, e)
 
+    # v3 — Bilanco/Finansal Rapor: KAP geldiginde aninda IsYatirim queue'ya at
+    # AI ile body'den anlik rakam parse + IsYatirim'den detayli veri (1-2 dk gecikme)
+    title_lower = (title or "").lower()
+    is_bilanco_kap = any(k in title_lower for k in [
+        "finansal rapor", "bilanço", "bilanco", "finansal tablo",
+        "sorumluluk beyanı", "mali tablo", "ara dönem finansal"
+    ])
+    if is_bilanco_kap:
+        try:
+            from app.services.bilanco_pipeline import enqueue_bilanco
+            await enqueue_bilanco(ticker, title or "")
+        except Exception as e:
+            logger.warning("Router→bilanco hata (%s): %s", ticker, e)
+
 
 # -------------------------------------------------------------------
 # Ana Poller Fonksiyonu
