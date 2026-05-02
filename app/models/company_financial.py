@@ -45,12 +45,12 @@ class CompanyFinancial(Base):
     net_debt: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Net Borc (TL)")
     cash_and_equivalents: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Nakit ve Benzerleri (TL)")
 
-    # Oranlar
-    current_ratio: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment="Cari Oran")
-    gross_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment="Brut Kar Marji (%)")
-    net_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment="Net Kar Marji (%)")
-    roe_pct: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment="Ozkaynak Karliligi (%)")
-    debt_to_equity: Mapped[Decimal | None] = mapped_column(Numeric(8, 2), comment="Borc/Ozkaynak")
+    # Oranlar — banka/sigorta gibi sektorlerde extreme degerler olabiliyor (>1M%)
+    current_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Cari Oran")
+    gross_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Brut Kar Marji (%)")
+    net_margin_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Net Kar Marji (%)")
+    roe_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Ozkaynak Karliligi (%)")
+    debt_to_equity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Borc/Ozkaynak")
 
     # Kaynak & zaman
     source: Mapped[str | None] = mapped_column(String(50), default="isyatirim", comment="Veri kaynagi")

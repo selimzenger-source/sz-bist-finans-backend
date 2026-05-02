@@ -59,15 +59,20 @@ _RATE_LIMIT_DELAY = 1.5  # saniye — istekler arasi bekleme
 # Bu mapping, onemli finansal kalemleri bizim DB field'larina esler.
 
 _BILANCO_ITEM_MAP = {
-    # Bilanco (Aktif / Pasif)
+    # Sanayi (XI_29)
     "1A": "current_assets",          # Donen Varliklar
     "1AK": "non_current_assets",     # Duran Varliklar
     "1BL": "total_assets",           # TOPLAM VARLIKLAR
     "2A": "short_term_liabilities",  # Kisa Vadeli Yukumlulukler
     "2B": "long_term_liabilities",   # Uzun Vadeli Yukumlulukler
-    "2N": "total_equity",            # Ozkaynaklar
-    # Nakit — birden fazla olasi itemCode
+    "2N": "total_equity",            # Ozkaynaklar (sanayi)
     "1AB": "cash_and_equivalents",   # Nakit ve Nakit Benzerleri
+
+    # Banka (UFRS_K) — farkli kodlar
+    "2O": "total_equity",            # XVI. OZKAYNAKLAR (banka)
+    "2Z": "total_assets",            # PASIF TOPLAMI (banka, = aktif toplami)
+    "3Z": "net_income",              # XXIII. NET DONEM KARI/ZARARI (banka)
+    "3ZA": "net_income_parent",      # 23.1 Grubun Kari/Zarari
 }
 
 _GELIR_ITEM_MAP = {
@@ -78,6 +83,128 @@ _GELIR_ITEM_MAP = {
     "3I": "profit_before_tax",       # Vergi Oncesi Kar
     "3L": "net_income",              # DONEM NET KARI
 }
+
+
+def _normalize_tr(s: str) -> str:
+    """Turkce karakterleri ASCII'ye cevir + uppercase. Match icin."""
+    if not s:
+        return ""
+    return (s.upper()
+            .replace("İ", "I").replace("I", "I")  # i kucuk -> I buyuk
+            .replace("Ş", "S").replace("Ğ", "G")
+            .replace("Ç", "C").replace("Ö", "O").replace("Ü", "U"))
+
+
+def _match_field_by_desc(desc: str, item_code: str = "") -> str | None:
+    """Universal description-based field matcher — TUM sektorler.
+
+    Sanayi (XI_29), Banka (UFRS_K), Sigorta, Holding, GMYO, Faktoring, Leasing,
+    Yatirim Ortakligi — hepsi farkli itemCode kullanir ama Turkce description'lari
+    benzer. Description-based match TUM'unu kapsar.
+
+    Oncelik: itemCode'da kesin match -> description'da kesin match -> fallback.
+    """
+    if not desc:
+        return None
+    d = _normalize_tr(desc).strip()
+
+    # ═══════════ NET KAR ═══════════
+    # Sanayi: "DÖNEM NET KÂRI"
+    # Banka:  "DÖNEM KARI/ZARARI" / "DÖNEM NET KARI"
+    # Sigorta: "DÖNEM KARI/ZARARI"
+    # GMYO/Holding: "ANA ORTAKLIK PAYLARI" (konsolide net kar payi)
+    if any(k in d for k in [
+        "DONEM NET KARI", "DONEM NET KAR/", "NET DONEM KARI",
+        "DONEM KARI/ZARARI", "NET DONEM KAR", "DONEM NET KAR",
+    ]) and "DAGITIM" not in d and "KARPAYI" not in d.replace(" ",""):
+        return "net_income"
+    # Holdingler: "Ana Ortaklik Paylari" net kar bolumu
+    if "ANA ORTAKLIK" in d and ("PAYLARI" in d or "PAY" in d) and ("KAR" in d or "ZARAR" in d):
+        return "net_income"
+
+    # ═══════════ HASILAT / GELIR ═══════════
+    # Sanayi: "Hasılat", "Satış Gelirleri"
+    # Banka: "Faiz Gelirleri" / "Toplam Faiz Geliri"
+    # Sigorta: "Brüt Yazılan Primler" / "Teknik Gelirler"
+    # Holding/Faktoring: "Esas Faaliyet Gelirleri"
+    if d == "HASILAT" or "SATIS GELIRLERI" in d or d == "GELIRLER":
+        return "revenue"
+    if "FAIZ GELIRLERI" in d and "NET" not in d.split("FAIZ")[0]:  # "Faiz Gelirleri" ama "Net Faiz" değil
+        return "revenue"
+    if "BRUT YAZILAN PRIM" in d or "TEKNIK GELIRLER" in d:
+        return "revenue"
+    if "ESAS FAALIYET GELIRLERI" in d:
+        return "revenue"
+
+    # ═══════════ BRUT KAR ═══════════
+    if d == "BRUT KAR" or d == "BRUT KAR (ZARAR)" or "BRUT KAR/" in d:
+        return "gross_profit"
+
+    # ═══════════ FAALIYET KARI ═══════════
+    if "FAALIYET KARI" in d and "ESAS" not in d and "DEVAM" not in d:
+        return "operating_profit"
+
+    # ═══════════ FAVOK / EBITDA ═══════════
+    if "FAVOK" in d or "EBITDA" in d:
+        return "ebitda"
+
+    # ═══════════ TOPLAM AKTIF / VARLIKLAR ═══════════
+    # Sanayi/holding/GMYO: "TOPLAM VARLIKLAR"
+    # Banka: "VI. AKTIF TOPLAMI" / "TOPLAM AKTIFLER"
+    # Sigorta: "AKTIF TOPLAMI" / "TOPLAM AKTIFLER"
+    if any(k in d for k in [
+        "TOPLAM AKTIFLER", "TOPLAM AKTIF", "TOPLAM VARLIKLAR",
+        "AKTIF TOPLAMI", "AKTIFLER TOPLAMI",
+    ]):
+        return "total_assets"
+
+    # ═══════════ OZKAYNAK ═══════════
+    # Sanayi: "Toplam Özkaynaklar"
+    # Banka: "XVI. ÖZKAYNAKLAR" (Roman numeral prefix, Standalone)
+    # Sigorta/Holding: "Özkaynaklar Toplamı"
+    if "AZINLIK" not in d and "KONTROL GUCU OLMAYAN" not in d and "PAY" not in d.split("OZKAYNAK")[0] if "OZKAYNAK" in d else True:
+        # Toplam/Genel kelimesiyle eslesim
+        if any(k in d for k in [
+            "OZKAYNAKLAR TOPLAMI", "OZKAYNAK GENEL TOPLAM", "OZKAYNAKLAR GENEL TOPLAM",
+            "TOPLAM OZKAYNAK", "OZSERMAYE TOPLAM", "OZ SERMAYE TOPLAM",
+            "OZKAYNAK TOPLAM",
+        ]):
+            return "total_equity"
+        # Banka: "XVI. ÖZKAYNAKLAR" — Roman numeral + ÖZKAYNAKLAR yalnız
+        # (yontemine, payi, sermaye ile eslesmemeli)
+        import re as _re
+        if _re.match(r"^[IVXL]+\.\s*OZKAYNAKLAR\s*$", d) or d == "OZKAYNAKLAR":
+            return "total_equity"
+
+    # ═══════════ DONEN VARLIKLAR (sanayi) ═══════════
+    if d == "DONEN VARLIKLAR" or "TOPLAM DONEN VARLIK" in d:
+        return "current_assets"
+    if d == "DURAN VARLIKLAR" or "TOPLAM DURAN VARLIK" in d:
+        return "non_current_assets"
+
+    # ═══════════ TOPLAM YUKUMLULUKLER / BORC ═══════════
+    if any(k in d for k in ["TOPLAM YUKUMLULUK", "TOPLAM PASIF", "TOPLAM BORC", "TOPLAM KAYNAKLAR"]):
+        if "OZKAYNAK" not in d:  # "Toplam Yükümlülükler ve Özkaynaklar" hariç
+            return "total_debt"
+
+    # ═══════════ NAKIT ═══════════
+    if "NAKIT VE NAKIT BENZER" in d or "NAKIT VE MERKEZ" in d:
+        return "cash_and_equivalents"
+    if d.startswith("I. NAKIT"):
+        return "cash_and_equivalents"
+
+    # ═══════════ KISA / UZUN VADELI YUKUMLULUK ═══════════
+    if "KISA VADELI YUKUMLULUK" in d:
+        return "short_term_liabilities"
+    if "UZUN VADELI YUKUMLULUK" in d:
+        return "long_term_liabilities"
+
+    return None
+
+
+# Geriye uyumluluk — eski cagrilar
+def _match_bank_field(desc: str) -> str | None:
+    return _match_field_by_desc(desc)
 
 # ─── Her ticker icin dogru financialGroup cache ───────────────────────────────
 _ticker_financial_group: dict[str, str] = {}
@@ -188,16 +315,18 @@ async def fetch_bilanco(
             # Bos response kontrolu — yanlis financialGroup olabilir
             values = data.get("value", [])
             if not values and fin_group == "XI_29":
-                # UFRS ile tekrar dene
-                params["financialGroup"] = "UFRS"
-                resp2 = await client.get(_MALI_TABLO_URL, params=params)
-                if resp2.status_code == 200:
-                    data2 = resp2.json()
-                    values = data2.get("value", [])
-                    if values:
-                        fin_group = "UFRS"
-                        _ticker_financial_group[ticker] = "UFRS"
-                        logger.info("%s icin UFRS kullaniliyor", ticker)
+                # UFRS ile tekrar dene (ardindan UFRS_K — banka)
+                for fb_group in ("UFRS", "UFRS_K"):
+                    params["financialGroup"] = fb_group
+                    resp2 = await client.get(_MALI_TABLO_URL, params=params)
+                    if resp2.status_code == 200:
+                        data2 = resp2.json()
+                        values = data2.get("value", [])
+                        if values:
+                            fin_group = fb_group
+                            _ticker_financial_group[ticker] = fb_group
+                            logger.info("%s icin %s kullaniliyor", ticker, fb_group)
+                            break
 
             if not values:
                 continue
@@ -208,12 +337,20 @@ async def fetch_bilanco(
             for row in values:
                 item_code = row.get("itemCode", "")
 
-                # Bilanco kalemleri
-                field = _BILANCO_ITEM_MAP.get(item_code) or _GELIR_ITEM_MAP.get(item_code)
+                # Description-based match ONCELIKLI — TUM sektorler icin guvenli
+                # (itemCode farkli sektorlerde farkli anlam tasiyor:
+                #  banka 1A=Nakit, sanayi 1A=Donen Varlik)
+                desc_raw = row.get("itemDescTr") or ""
+                field = _match_field_by_desc(desc_raw, item_code)
+
+                # Description match basarisizsa itemCode mapping (sanayi standardi)
                 if not field:
-                    # FAVOK icin ozel kontrol — itemDescTr icinde "FAVÖK" aranir
-                    desc = (row.get("itemDescTr") or "").upper()
-                    if "FAVÖK" in desc or "EBITDA" in desc.upper():
+                    field = _BILANCO_ITEM_MAP.get(item_code) or _GELIR_ITEM_MAP.get(item_code)
+
+                # FAVOK son cara
+                if not field:
+                    desc_upper = desc_raw.upper()
+                    if "FAVÖK" in desc_upper or "EBITDA" in desc_upper:
                         field = "ebitda"
 
                 if not field:
