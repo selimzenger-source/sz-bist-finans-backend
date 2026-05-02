@@ -8420,6 +8420,32 @@ async def admin_import_cautious_stocks(request: Request, payload: dict = Body(..
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/scrape-halkarz-capital")
+@limiter.limit("3/minute")
+async def admin_scrape_halkarz_capital(request: Request, payload: dict = Body(...)):
+    """halkarz.com/sermaye-artirimi sayfasını çek + CapitalIncrease tablosuna upsert."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    try:
+        from app.scrapers.halkarz_capital_scraper import fetch_halkarz_capital, upsert_capital_increases
+        from app.database import async_session
+
+        records = await fetch_halkarz_capital()
+        if not records:
+            return {"status": "ok", "fetched": 0, "message": "halkarz.com'dan kayit cekilemedi"}
+
+        async with async_session() as db:
+            stats = await upsert_capital_increases(db, records)
+            await db.commit()
+
+        return {"status": "ok", "fetched": len(records), **stats}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:500],
+                "traceback": traceback.format_exc()[-1000:] if not settings.is_production else None}
+
+
 @app.post("/api/v1/admin/backfill-calendars")
 @limiter.limit("1/minute")
 async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
