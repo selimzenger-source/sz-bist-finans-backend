@@ -45,6 +45,8 @@ from app.models import (
     FeatureInterest,
     DailyStockMarketStat,
     PendingTweet,
+    CompanyFinancial, FinancialRatio, IPOVote, AIAssistantUsage,
+    EarningsCalendar,
 )
 from app.schemas import (
     IPOListOut, IPODetailOut, IPOSectionsOut,
@@ -61,6 +63,11 @@ from app.schemas import (
     WalletBalanceOut, WalletEarnRequest, WalletSpendRequest,
     WalletCouponRequest, WalletTransactionOut,
     KapAllDisclosureOut, WatchlistItemOut, WatchlistAddRequest,
+    CompanyFinancialOut, FinancialRatioOut, BilancoListItem, BilancoAnalysisOut,
+    DividendHistoryOut, TemettuCalendarItem, TemettuDetailOut,
+    EarningsCalendarOut,
+    IPOVoteRequest, IPOVoteResultOut,
+    AIAssistantChatRequest, AIAssistantChatResponse,
 )
 from app.scheduler import setup_scheduler, shutdown_scheduler
 from app.admin.routes import router as admin_router
@@ -9899,5 +9906,540 @@ async def admin_trigger_kurum_scrape(request: Request, payload: dict = Body(...)
         from app.scheduler import scrape_kurum_onerileri
         await scrape_kurum_onerileri()
         return {"status": "ok", "message": "Kurum onerileri scrape tamamlandi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# v3.0.0 — BILANCO / TEMETTU / SIRKET KARTI / IPO ANKETI / TAKVIM
+# ═══════════════════════════════════════════════════════════════════
+# BILANCO (v3.0.0)
+# -------------------------------------------------------
+
+@app.get("/api/v1/bilanco/{ticker}", response_model=BilancoAnalysisOut)
+async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
+    """Hissenin bilanco verileri + oranlar + AI analizi."""
+    t = ticker.upper()
+
+    # Finansal veriler (son 20 donem = ~5 yil)
+    fin_result = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.ticker == t)
+        .order_by(desc(CompanyFinancial.period))
+        .limit(20)
+    )
+    financials = list(fin_result.scalars().all())
+
+    if not financials:
+        raise HTTPException(status_code=404, detail=f"Bilanco verisi bulunamadi: {ticker}")
+
+    # Son oranlar
+    ratio_result = await db.execute(
+        select(FinancialRatio)
+        .where(FinancialRatio.ticker == t)
+        .order_by(desc(FinancialRatio.date))
+        .limit(1)
+    )
+    ratio = ratio_result.scalar_one_or_none()
+
+    # Son AI analizi (varsa KAP bildirimlerinden)
+    ai_result = await db.execute(
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.company_code == t, KapAllDisclosure.is_bilanco == True)
+        .order_by(desc(KapAllDisclosure.published_at))
+        .limit(1)
+    )
+    ai_news = ai_result.scalar_one_or_none()
+    ai_analysis = None
+    if ai_news and ai_news.ai_summary:
+        ai_analysis = {
+            "summary": ai_news.ai_summary,
+            "sentiment": ai_news.ai_sentiment,
+            "impact_score": ai_news.ai_impact_score,
+            "analyzed_at": ai_news.ai_analyzed_at.isoformat() if ai_news.ai_analyzed_at else None,
+        }
+
+    return BilancoAnalysisOut(
+        ticker=t,
+        financials=financials,
+        ratios=ratio,
+        ai_analysis=ai_analysis,
+    )
+
+
+@app.get("/api/v1/bilanco")
+async def list_latest_bilancos(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Son aciklanan bilancolar — FIFO, hisse adedi bazli.
+
+    Fintables X tarzı: bilanço açıklandığı an, saat:dakika ile.
+    Son 50 bilanço (varsayılan), aşağı kaydırdıkça offset ile eski bilançolar.
+    Tarih limiti yok — en eski bilanço da görülebilir.
+    """
+    # KAP bilanço bildirimleri (is_bilanco=TRUE, en yeniden eskiye)
+    kap_result = await db.execute(
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.is_bilanco == True)
+        .order_by(desc(KapAllDisclosure.published_at))
+        .offset(offset)
+        .limit(limit)
+    )
+    kap_items = list(kap_result.scalars().all())
+
+    # Her bilanço bildirimi için finansal verileri birleştir
+    items = []
+    for kap in kap_items:
+        ticker = kap.company_code
+
+        # Son finansal veri
+        fin_result = await db.execute(
+            select(CompanyFinancial)
+            .where(CompanyFinancial.ticker == ticker)
+            .order_by(desc(CompanyFinancial.period))
+            .limit(1)
+        )
+        fin = fin_result.scalar_one_or_none()
+
+        items.append({
+            "ticker": ticker,
+            "title": kap.title,
+            "published_at": kap.published_at.isoformat() if kap.published_at else None,
+            "ai_score": kap.ai_impact_score,
+            "ai_sentiment": kap.ai_sentiment,
+            "ai_summary": kap.ai_summary[:200] if kap.ai_summary else None,
+            "period": fin.period if fin else None,
+            "revenue": float(fin.revenue) if fin and fin.revenue else None,
+            "net_income": float(fin.net_income) if fin and fin.net_income else None,
+            "total_equity": float(fin.total_equity) if fin and fin.total_equity else None,
+            "net_debt": float(fin.net_debt) if fin and fin.net_debt else None,
+            "gross_margin_pct": float(fin.gross_margin_pct) if fin and fin.gross_margin_pct else None,
+            "net_margin_pct": float(fin.net_margin_pct) if fin and fin.net_margin_pct else None,
+            "roe_pct": float(fin.roe_pct) if fin and fin.roe_pct else None,
+        })
+
+    return {
+        "count": len(items),
+        "offset": offset,
+        "items": items,
+    }
+
+
+# -------------------------------------------------------
+# TEMETTU DETAY (v3.0.0)
+# -------------------------------------------------------
+
+@app.get("/api/v1/temettu/{ticker}")
+async def get_temettu_detail(ticker: str, db: AsyncSession = Depends(get_db)):
+    """Hissenin temettu gecmisi + guncel beklenti + AI analizi."""
+    t = ticker.upper()
+
+    # Temettu gecmisi
+    hist_result = await db.execute(
+        select(DividendHistory)
+        .where(DividendHistory.ticker == t)
+        .order_by(desc(DividendHistory.payment_year))
+    )
+    history = list(hist_result.scalars().all())
+
+    # Guncel beklenti
+    div_result = await db.execute(
+        select(Dividend).where(Dividend.ticker == t)
+    )
+    current = div_result.scalar_one_or_none()
+
+    if not history and not current:
+        raise HTTPException(status_code=404, detail=f"Temettu verisi bulunamadi: {ticker}")
+
+    return {
+        "ticker": t,
+        "current": {
+            "expected_yield_pct": float(current.expected_dividend_yield_pct) if current and current.expected_dividend_yield_pct else None,
+            "last_year_yield_pct": float(current.last_year_yield_pct) if current and current.last_year_yield_pct else None,
+            "fk": float(current.fk) if current and current.fk else None,
+            "pd_dd": float(current.pd_dd) if current and current.pd_dd else None,
+        } if current else None,
+        "history": [
+            {
+                "year": h.payment_year,
+                "gross_per_share": float(h.gross_dividend_per_share) if h.gross_dividend_per_share else None,
+                "net_per_share": float(h.net_dividend_per_share) if h.net_dividend_per_share else None,
+                "yield_pct": float(h.dividend_yield_pct) if h.dividend_yield_pct else None,
+                "payment_date": h.payment_date,
+                "ex_dividend_date": h.ex_dividend_date if hasattr(h, 'ex_dividend_date') else None,
+            }
+            for h in history
+        ],
+    }
+
+
+@app.get("/api/v1/temettu-takvim")
+async def get_temettu_takvim(
+    year: int = Query(2026, ge=2020, le=2030),
+    status: str = Query("all", regex="^(all|yaklasan|odendi)$"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temettu takvimi — temettu.app tarzi yaklasan/odenen temettüler."""
+    from datetime import date as dt_date
+
+    today = dt_date.today()
+
+    result = await db.execute(
+        select(DividendHistory)
+        .where(DividendHistory.payment_year == year)
+        .order_by(desc(DividendHistory.payment_date))
+    )
+    all_items = list(result.scalars().all())
+
+    takvim = []
+    for h in all_items:
+        try:
+            payment_dt = None
+            if h.payment_date:
+                if isinstance(h.payment_date, str):
+                    payment_dt = datetime.strptime(h.payment_date, "%Y-%m-%d").date()
+                else:
+                    payment_dt = h.payment_date
+
+            item_status = "odendi" if payment_dt and payment_dt <= today else "yaklasan"
+
+            if status != "all" and item_status != status:
+                continue
+
+            takvim.append({
+                "ticker": h.ticker,
+                "year": h.payment_year,
+                "gross_per_share": float(h.gross_dividend_per_share) if h.gross_dividend_per_share else None,
+                "net_per_share": float(h.net_dividend_per_share) if h.net_dividend_per_share else None,
+                "yield_pct": float(h.dividend_yield_pct) if h.dividend_yield_pct else None,
+                "payment_date": str(h.payment_date) if h.payment_date else None,
+                "ex_dividend_date": str(h.ex_dividend_date) if hasattr(h, 'ex_dividend_date') and h.ex_dividend_date else None,
+                "status": item_status,
+            })
+        except Exception:
+            continue
+
+    # Istatistikler
+    yaklasan_count = sum(1 for t in takvim if t["status"] == "yaklasan")
+    odenen_count = sum(1 for t in takvim if t["status"] == "odendi")
+
+    return {
+        "year": year,
+        "stats": {
+            "toplam": len(takvim),
+            "yaklasan": yaklasan_count,
+            "odenen": odenen_count,
+        },
+        "items": takvim,
+    }
+
+
+# -------------------------------------------------------
+# ŞİRKET KARTI (v3.0.0) — Fintables tarzı tek endpoint
+# -------------------------------------------------------
+
+@app.get("/api/v1/sirket-karti/{ticker}")
+async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
+    """Şirket kartı — fiyat + bilanço + temettü + AI analiz birleşik endpoint.
+
+    15dk gecikmeli fiyat (DailyStockMarketStat) + son bilanço + temettü beklentisi.
+    Tüm BIST hisseleri için çalışır — AAGYO'dan itibaren.
+    """
+    t = ticker.upper()
+
+    # 1. Son fiyat (DailyStockMarketStat — en son işlem günü)
+    price_result = await db.execute(
+        select(DailyStockMarketStat)
+        .where(DailyStockMarketStat.ticker == t)
+        .order_by(desc(DailyStockMarketStat.date))
+        .limit(1)
+    )
+    price_row = price_result.scalar_one_or_none()
+
+    # 2. Son 2 dönem bilanço (karşılaştırma için)
+    fin_result = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.ticker == t)
+        .order_by(desc(CompanyFinancial.period))
+        .limit(2)
+    )
+    financials = list(fin_result.scalars().all())
+
+    # 3. Finansal oranlar (F/K, PD/DD)
+    ratio_result = await db.execute(
+        select(FinancialRatio)
+        .where(FinancialRatio.ticker == t)
+        .order_by(desc(FinancialRatio.date))
+        .limit(1)
+    )
+    ratio = ratio_result.scalar_one_or_none()
+
+    # 4. Temettü beklentisi
+    div_result = await db.execute(
+        select(Dividend).where(Dividend.ticker == t)
+    )
+    dividend = div_result.scalar_one_or_none()
+
+    # 5. Son 5 KAP bildirimi
+    kap_result = await db.execute(
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.company_code == t)
+        .order_by(desc(KapAllDisclosure.published_at))
+        .limit(5)
+    )
+    kap_news = list(kap_result.scalars().all())
+
+    # 6. Çeyreklik veriler (son 8 çeyrek — 2 yıl)
+    quarterly_result = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.ticker == t)
+        .order_by(desc(CompanyFinancial.period))
+        .limit(8)
+    )
+    quarterly = list(quarterly_result.scalars().all())
+
+    # 7. Fiyat geçmişi (son 6 ay kapanış)
+    from datetime import timedelta
+    six_months_ago = date.today() - timedelta(days=180)
+    price_hist_result = await db.execute(
+        select(DailyStockMarketStat)
+        .where(DailyStockMarketStat.ticker == t, DailyStockMarketStat.date >= six_months_ago)
+        .order_by(DailyStockMarketStat.date)
+    )
+    price_history = [float(r.close_price) for r in price_hist_result.scalars().all()]
+
+    if not price_row and not financials and not dividend:
+        raise HTTPException(status_code=404, detail=f"Şirket bulunamadı: {ticker}")
+
+    latest_fin = financials[0] if financials else None
+    prev_fin = financials[1] if len(financials) > 1 else None
+
+    def _pct(curr, prev):
+        if curr is None or prev is None or float(prev) == 0:
+            return None
+        return round((float(curr) - float(prev)) / abs(float(prev)) * 100, 1)
+
+    return {
+        "ticker": t,
+        "price": {
+            "close": float(price_row.close_price) if price_row else None,
+            "change_pct": float(price_row.percent_change) if price_row else None,
+            "date": str(price_row.date) if price_row else None,
+            "is_ceiling": price_row.is_ceiling if price_row else False,
+            "is_floor": price_row.is_floor if price_row else False,
+        },
+        "price_history": price_history[-30:],  # Son 30 gün
+        "ratios": {
+            "fk": float(ratio.fk) if ratio and ratio.fk else None,
+            "pddd": float(ratio.pddd) if ratio and ratio.pddd else None,
+            "fd_favok": float(ratio.fd_favok) if ratio and ratio.fd_favok else None,
+            "piyasa_degeri": float(ratio.piyasa_degeri) if ratio and ratio.piyasa_degeri else None,
+        } if ratio else None,
+        "financials": {
+            "period": latest_fin.period if latest_fin else None,
+            "prev_period": prev_fin.period if prev_fin else None,
+            "revenue": float(latest_fin.revenue) if latest_fin and latest_fin.revenue else None,
+            "revenue_prev": float(prev_fin.revenue) if prev_fin and prev_fin.revenue else None,
+            "revenue_change_pct": _pct(latest_fin.revenue if latest_fin else None, prev_fin.revenue if prev_fin else None),
+            "net_income": float(latest_fin.net_income) if latest_fin and latest_fin.net_income else None,
+            "net_income_prev": float(prev_fin.net_income) if prev_fin and prev_fin.net_income else None,
+            "net_income_change_pct": _pct(latest_fin.net_income if latest_fin else None, prev_fin.net_income if prev_fin else None),
+            "ebitda": float(latest_fin.ebitda) if latest_fin and latest_fin.ebitda else None,
+            "total_assets": float(latest_fin.total_assets) if latest_fin and latest_fin.total_assets else None,
+            "total_equity": float(latest_fin.total_equity) if latest_fin and latest_fin.total_equity else None,
+            "net_debt": float(latest_fin.net_debt) if latest_fin and latest_fin.net_debt else None,
+            "gross_margin_pct": float(latest_fin.gross_margin_pct) if latest_fin and latest_fin.gross_margin_pct else None,
+            "net_margin_pct": float(latest_fin.net_margin_pct) if latest_fin and latest_fin.net_margin_pct else None,
+            "roe_pct": float(latest_fin.roe_pct) if latest_fin and latest_fin.roe_pct else None,
+        } if latest_fin else None,
+        "quarterly": [
+            {
+                "period": q.period,
+                "revenue": float(q.revenue) if q.revenue else None,
+                "ebitda": float(q.ebitda) if q.ebitda else None,
+                "net_income": float(q.net_income) if q.net_income else None,
+            }
+            for q in reversed(quarterly)
+        ],
+        "dividend": {
+            "expected_yield_pct": float(dividend.expected_dividend_yield_pct) if dividend and dividend.expected_dividend_yield_pct else None,
+            "last_year_yield_pct": float(dividend.last_year_yield_pct) if dividend and dividend.last_year_yield_pct else None,
+            "fk": float(dividend.fk) if dividend and dividend.fk else None,
+        } if dividend else None,
+        "kap_news": [
+            {
+                "title": n.title,
+                "category": n.category,
+                "published_at": n.published_at.isoformat() if n.published_at else None,
+                "ai_sentiment": n.ai_sentiment,
+                "ai_summary": n.ai_summary[:150] if n.ai_summary else None,
+            }
+            for n in kap_news
+        ],
+    }
+
+
+@app.get("/api/v1/hisseler")
+async def list_hisseler(
+    q: str = Query("", min_length=0, max_length=20),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hisse arama — şirket kartı için ticker listesi.
+
+    Tüm BIST hisseleri aranabilir. q parametresi ile filtre.
+    """
+    from sqlalchemy import func, distinct
+
+    # DailyStockMarketStat'tan unique ticker'lar
+    query = select(distinct(DailyStockMarketStat.ticker))
+
+    if q:
+        query = query.where(DailyStockMarketStat.ticker.ilike(f"%{q.upper()}%"))
+
+    query = query.order_by(DailyStockMarketStat.ticker).limit(limit)
+    result = await db.execute(query)
+    tickers = [row[0] for row in result.all()]
+
+    return {"tickers": tickers, "count": len(tickers)}
+
+
+# -------------------------------------------------------
+# HALKA ARZ ANKETI (v3.0.0)
+# -------------------------------------------------------
+
+@app.post("/api/v1/ipos/{ipo_id}/vote")
+async def vote_on_ipo(
+    ipo_id: int,
+    payload: IPOVoteRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Halka arza katilim anketi — device_id veya IP ile tek oy."""
+    device_id = payload.device_id or ""
+    client_ip = request.client.host if request.client else ""
+
+    # Daha once oy verdi mi?
+    existing = await db.execute(
+        select(IPOVote).where(
+            IPOVote.ipo_id == ipo_id,
+            (IPOVote.device_id == device_id) if device_id else (IPOVote.ip_address == client_ip),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Bu ankete zaten oy verdiniz")
+
+    new_vote = IPOVote(
+        ipo_id=ipo_id,
+        device_id=device_id or None,
+        ip_address=client_ip,
+        vote=payload.vote,
+    )
+    db.add(new_vote)
+    await db.commit()
+
+    return {"status": "ok", "message": "Oyunuz kaydedildi"}
+
+
+@app.get("/api/v1/ipos/{ipo_id}/vote-results", response_model=IPOVoteResultOut)
+async def get_ipo_vote_results(ipo_id: int, db: AsyncSession = Depends(get_db)):
+    """Halka arz oylama sonuclari."""
+    from sqlalchemy import func
+
+    result = await db.execute(
+        select(
+            func.count(IPOVote.id).label("total"),
+            func.count(func.nullif(IPOVote.vote != "participate", True)).label("participate"),
+            func.count(func.nullif(IPOVote.vote != "skip", True)).label("skip_count"),
+        ).where(IPOVote.ipo_id == ipo_id)
+    )
+    row = result.one()
+    total = row.total or 0
+    participate = row.participate or 0
+    skip = row.skip_count or 0
+
+    return IPOVoteResultOut(
+        ipo_id=ipo_id,
+        total_votes=total,
+        participate_count=participate,
+        skip_count=skip,
+        participate_pct=round(participate / total * 100, 1) if total > 0 else 0,
+        skip_pct=round(skip / total * 100, 1) if total > 0 else 0,
+    )
+
+
+# -------------------------------------------------------
+# BILANCO TAKVIMI (v3.0.0) — gcmyatirim scraper'dan
+# -------------------------------------------------------
+
+@app.get("/api/v1/bilanco-takvim", response_model=list[EarningsCalendarOut])
+async def get_earnings_calendar(
+    days_ahead: int = Query(60, ge=1, le=180),
+    only_pending: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bilanco takvimi — onumuzdeki N gun beklenen aciklamalar."""
+    from datetime import date as dt_date, timedelta as _td
+    today = dt_date.today()
+    end = today + _td(days=days_ahead)
+
+    query = select(EarningsCalendar).where(
+        EarningsCalendar.expected_date >= today - _td(days=7),
+        EarningsCalendar.expected_date <= end,
+    )
+    if only_pending:
+        query = query.where(EarningsCalendar.is_announced == False)
+    query = query.order_by(EarningsCalendar.expected_date.asc())
+
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+# -------------------------------------------------------
+# ADMIN — v3 manuel tetikleyiciler
+# -------------------------------------------------------
+
+@app.post("/api/v1/admin/trigger-isyatirim-scrape")
+@limiter.limit("3/minute")
+async def admin_trigger_isyatirim(request: Request, payload: dict = Body(...)):
+    """IsYatirim batch bilanco scrape — tum BIST hisseleri."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scrapers.isyatirim_scraper import scrape_all_financials
+        import asyncio as _asyncio
+        _asyncio.create_task(scrape_all_financials())
+        return {"status": "ok", "message": "IsYatirim batch baslatildi (background)"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/trigger-temettu-scrape")
+@limiter.limit("3/minute")
+async def admin_trigger_temettu(request: Request, payload: dict = Body(...)):
+    """temettuhisseleri.com scraper — temettu zenginlestirme."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+        import asyncio as _asyncio
+        _asyncio.create_task(scrape_temettuhisseleri())
+        return {"status": "ok", "message": "Temettu scrape baslatildi (background)"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/trigger-earnings-calendar")
+@limiter.limit("3/minute")
+async def admin_trigger_earnings_calendar(request: Request, payload: dict = Body(...)):
+    """gcmyatirim bilanco takvimi scraper."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scrapers.gcm_earnings_calendar_scraper import scrape_earnings_calendar
+        result = await scrape_earnings_calendar()
+        return {"status": "ok", **result}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}

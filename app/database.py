@@ -709,6 +709,116 @@ async def init_db():
         except Exception:
             pass
 
+        # v52 migration: v3 Bilanco/Temettu altyapisi
+        # company_financials zaten DB'de var (8550 satir, 553 hisse)
+        # dividend_history zaten DB'de var (1450 satir)
+        # Sadece eksik tablolari ekliyoruz: financial_ratios, ipo_votes, ai_assistant_usage, earnings_calendar
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS financial_ratios (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(10) NOT NULL,
+                    fk NUMERIC(10,2),
+                    pddd NUMERIC(10,2),
+                    fd_favok NUMERIC(10,2),
+                    piyasa_degeri NUMERIC(20,2),
+                    sector VARCHAR(100),
+                    sector_avg_fk NUMERIC(10,2),
+                    sector_avg_pddd NUMERIC(10,2),
+                    date TIMESTAMPTZ NOT NULL,
+                    source VARCHAR(50) DEFAULT 'isyatirim',
+                    scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT uq_financial_ratio_ticker_date UNIQUE (ticker, date)
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fr_ticker ON financial_ratios(ticker)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fr_date ON financial_ratios(date)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_fr_sector ON financial_ratios(sector)"))
+        except Exception:
+            pass
+
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ipo_votes (
+                    id SERIAL PRIMARY KEY,
+                    ipo_id INTEGER NOT NULL,
+                    device_id VARCHAR(100),
+                    ip_address VARCHAR(45),
+                    vote VARCHAR(20) NOT NULL,
+                    source VARCHAR(10) DEFAULT 'app',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ipovote_ipo_id ON ipo_votes(ipo_id)"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipo_vote_device ON ipo_votes(ipo_id, device_id) WHERE device_id IS NOT NULL"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_ipo_vote_ip_source ON ipo_votes(ipo_id, ip_address, source) WHERE ip_address IS NOT NULL"
+            ))
+        except Exception:
+            pass
+
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ai_assistant_usage (
+                    id SERIAL PRIMARY KEY,
+                    device_id VARCHAR(100) NOT NULL,
+                    month VARCHAR(7) NOT NULL,
+                    usage_count INTEGER DEFAULT 0,
+                    last_used_at TIMESTAMPTZ,
+                    CONSTRAINT uq_ai_usage_device_month UNIQUE (device_id, month)
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ai_usage_device_id ON ai_assistant_usage(device_id)"))
+        except Exception:
+            pass
+
+        # earnings_calendar: gcmyatirim.com.tr/arastirma-analiz/yurt-ici-bilanco-takvimi'nden scrape
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS earnings_calendar (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(10) NOT NULL,
+                    company_name VARCHAR(200),
+                    period VARCHAR(10) NOT NULL,
+                    expected_date DATE,
+                    announced_date DATE,
+                    is_announced BOOLEAN DEFAULT FALSE,
+                    source VARCHAR(50) DEFAULT 'gcmyatirim',
+                    scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ,
+                    CONSTRAINT uq_earnings_calendar_ticker_period UNIQUE (ticker, period)
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ec_ticker ON earnings_calendar(ticker)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ec_expected ON earnings_calendar(expected_date)"))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_ec_period ON earnings_calendar(period)"))
+        except Exception:
+            pass
+
+        # dividend_history zenginleştirme (mevcut tablo, eksik kolonlar)
+        try:
+            await conn.execute(text("ALTER TABLE dividend_history ADD COLUMN IF NOT EXISTS payout_ratio NUMERIC(10,2)"))
+            await conn.execute(text("ALTER TABLE dividend_history ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'isyatirim'"))
+            await conn.execute(text("ALTER TABLE dividend_history ADD COLUMN IF NOT EXISTS scraped_at TIMESTAMPTZ DEFAULT NOW()"))
+        except Exception:
+            pass
+
+        # dividend_history unique constraint duzelt:
+        # Eski: (ticker, payment_year) — ayni yilda 2 odeme varsa duplicate hata
+        # Yeni: (ticker, payment_year, payment_date) — temettuhisseleri.com'da Q1/Q3 ayri kayitlar
+        try:
+            await conn.execute(text("ALTER TABLE dividend_history DROP CONSTRAINT IF EXISTS uq_divhist_ticker_year"))
+            # Pre-existing index ile cakismasin diye DROP IF EXISTS
+            await conn.execute(text("DROP INDEX IF EXISTS uq_divhist_ticker_year"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_divhist_ticker_year_date "
+                "ON dividend_history(ticker, payment_year, COALESCE(payment_date, '1900-01-01'::date))"
+            ))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

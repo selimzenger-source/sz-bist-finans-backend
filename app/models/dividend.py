@@ -127,7 +127,19 @@ class DividendHistory(Base):
         Date, comment="Kayit tarihi (record date)"
     )
 
+    # Ek metrikler (v3 — temettuhisseleri.com zenginlestirme)
+    payout_ratio: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2), comment="Dagitim orani (Net Kar'a oran %)"
+    )
+
+    source: Mapped[str | None] = mapped_column(
+        String(50), default="isyatirim", comment="Veri kaynagi: isyatirim, temettuhisseleri"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    scraped_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 

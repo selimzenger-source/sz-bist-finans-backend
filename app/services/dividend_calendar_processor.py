@@ -370,9 +370,84 @@ async def process_kap_disclosure(
             if v and not getattr(existing, k):
                 setattr(existing, k, v)
         logger.info("Dividend: odeme tarihi (%s, %s)", ticker, pay_dt)
+        # GK onayi/odeme tarihi -> dividend_history'ye de yansit (Temettu sayfasi besleme)
+        try:
+            if event_type in ("ga_approval", "payment") and existing:
+                await mirror_to_dividend_history(db, existing)
+        except Exception as _e:
+            logger.warning("dividend_history mirror hatasi (%s): %s", ticker, _e)
         return existing
 
+    # YKK ve diger event'lerde de mirror dene (amounts varsa)
+    try:
+        if existing and (existing.gross_amount_per_share or existing.net_amount_per_share):
+            await mirror_to_dividend_history(db, existing)
+    except Exception:
+        pass
     return existing
+
+
+async def mirror_to_dividend_history(db: AsyncSession, row: "DividendCalendar") -> bool:
+    """KAP'tan gelen GK temettu kararini dividend_history tablosuna da yansit.
+
+    Bu sayede:
+    - /api/v1/temettu/{ticker} endpoint'i bu odemeyi gosterir
+    - /api/v1/temettu-takvim takvimi bu odemeyi listeler
+    - temettuhisseleri.com batch'i ile cakismaz (source='kap_gk' ile ayri tutulur)
+
+    Args:
+        row: DividendCalendar satiri (process_kap_disclosure cikti)
+    """
+    from app.models.dividend import DividendHistory
+
+    if not row or not row.ticker:
+        return False
+
+    # Payment date veya GK date'den yili cikar
+    pay_dt = row.payment_date
+    year = (pay_dt.year if pay_dt else None) or (
+        row.general_assembly_date.year if row.general_assembly_date else None
+    ) or (row.ykk_date.year if row.ykk_date else None)
+    if not year:
+        return False
+
+    # Mevcut dividend_history kaydi var mi (ayni ticker+year+payment_date)
+    stmt = select(DividendHistory).where(
+        DividendHistory.ticker == row.ticker,
+        DividendHistory.payment_year == year,
+    )
+    if pay_dt is not None:
+        stmt = stmt.where(DividendHistory.payment_date == pay_dt)
+    existing = (await db.execute(stmt)).scalars().first()
+
+    gross = row.gross_amount_per_share
+    net = row.net_amount_per_share
+    yield_pct = row.gross_yield_pct
+
+    if existing:
+        if gross and not existing.gross_dividend_per_share:
+            existing.gross_dividend_per_share = gross
+        if net and not existing.net_dividend_per_share:
+            existing.net_dividend_per_share = net
+        if yield_pct and not existing.dividend_yield_pct:
+            existing.dividend_yield_pct = yield_pct
+        if pay_dt and not existing.payment_date:
+            existing.payment_date = pay_dt
+        # Source'u guncellenmis goster
+        if existing.source != "temettuhisseleri":
+            existing.source = "kap_gk"
+    else:
+        new_hist = DividendHistory(
+            ticker=row.ticker,
+            payment_year=year,
+            gross_dividend_per_share=gross,
+            net_dividend_per_share=net,
+            dividend_yield_pct=yield_pct,
+            payment_date=pay_dt,
+            source="kap_gk",
+        )
+        db.add(new_hist)
+    return True
 
 
 async def update_payment_statuses(db: AsyncSession) -> int:

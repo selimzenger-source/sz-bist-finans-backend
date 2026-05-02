@@ -673,3 +673,157 @@ class WatchlistAddRequest(BaseModel):
     """Takip listesine hisse ekleme istegi."""
     ticker: str
     notification_preference: str = "both"
+
+
+# -------------------------------------------------------
+# v3.0.0 Schemas — Bilanco, Temettu, Oranlar, Takvim, AI
+# -------------------------------------------------------
+
+class CompanyFinancialOut(BaseModel):
+    """Ceyreklik/yillik bilanco verisi."""
+    ticker: str
+    period: str
+    period_end_date: Optional[date] = None
+    revenue: Optional[Decimal] = None
+    gross_profit: Optional[Decimal] = None
+    operating_profit: Optional[Decimal] = None
+    net_income: Optional[Decimal] = None
+    ebitda: Optional[Decimal] = None
+    total_assets: Optional[Decimal] = None
+    total_equity: Optional[Decimal] = None
+    total_debt: Optional[Decimal] = None
+    net_debt: Optional[Decimal] = None
+    cash_and_equivalents: Optional[Decimal] = None
+    current_ratio: Optional[Decimal] = None
+    gross_margin_pct: Optional[Decimal] = None
+    net_margin_pct: Optional[Decimal] = None
+    roe_pct: Optional[Decimal] = None
+    debt_to_equity: Optional[Decimal] = None
+    scraped_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FinancialRatioOut(BaseModel):
+    """Gunluk finansal oranlar (F/K, PD/DD, FD/FAVOK)."""
+    ticker: str
+    fk: Optional[Decimal] = None
+    pddd: Optional[Decimal] = None
+    fd_favok: Optional[Decimal] = None
+    piyasa_degeri: Optional[Decimal] = None
+    sector: Optional[str] = None
+    sector_avg_fk: Optional[Decimal] = None
+    sector_avg_pddd: Optional[Decimal] = None
+    date: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BilancoListItem(BaseModel):
+    """Son bilancolar listesi icin ozet kart."""
+    ticker: str
+    company_name: Optional[str] = None
+    period: str
+    period_end_date: Optional[date] = None
+    published_at: Optional[datetime] = None
+    revenue: Optional[Decimal] = None
+    revenue_prev: Optional[Decimal] = None
+    revenue_change_pct: Optional[float] = None
+    net_income: Optional[Decimal] = None
+    net_income_prev: Optional[Decimal] = None
+    net_income_change_pct: Optional[float] = None
+    ebitda: Optional[Decimal] = None
+    ebitda_prev: Optional[Decimal] = None
+    ebitda_change_pct: Optional[float] = None
+    ai_summary: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BilancoAnalysisOut(BaseModel):
+    """Bilanco analizi — finansal veriler + oranlar + AI yorum."""
+    ticker: str
+    financials: list[CompanyFinancialOut] = []
+    ratios: Optional[FinancialRatioOut] = None
+    ai_analysis: Optional[dict] = None
+
+
+class DividendHistoryOut(BaseModel):
+    """Tek temettu odeme kaydi."""
+    ticker: str
+    payment_year: int
+    gross_dividend_per_share: Optional[Decimal] = None
+    net_dividend_per_share: Optional[Decimal] = None
+    dividend_yield_pct: Optional[Decimal] = None
+    payout_ratio: Optional[Decimal] = None
+    ex_dividend_date: Optional[date] = None
+    payment_date: Optional[date] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TemettuCalendarItem(BaseModel):
+    """Temettu takvimi listesi icin ozet."""
+    ticker: str
+    company_name: Optional[str] = None
+    payment_year: int
+    gross_dividend_per_share: Optional[Decimal] = None
+    dividend_yield_pct: Optional[Decimal] = None
+    ex_dividend_date: Optional[date] = None
+    payment_date: Optional[date] = None
+    status: str = "upcoming"  # upcoming, paid, ex
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TemettuDetailOut(BaseModel):
+    """Hisse temettu detayi — gecmis + analiz."""
+    ticker: str
+    company_name: Optional[str] = None
+    history: list[DividendHistoryOut] = []
+    avg_yield_pct: Optional[float] = None
+    consecutive_years: Optional[int] = None
+    ai_analysis: Optional[dict] = None
+
+
+class EarningsCalendarOut(BaseModel):
+    """Bilanco takvimi satiri."""
+    ticker: str
+    company_name: Optional[str] = None
+    period: str
+    expected_date: Optional[date] = None
+    announced_date: Optional[date] = None
+    is_announced: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class IPOVoteRequest(BaseModel):
+    """Halka arz oylama istegi."""
+    vote: str  # "participate" veya "skip"
+    device_id: Optional[str] = None
+
+
+class IPOVoteResultOut(BaseModel):
+    """Halka arz oylama sonuclari."""
+    ipo_id: int
+    total_votes: int
+    participate_count: int
+    skip_count: int
+    participate_pct: float
+    skip_pct: float
+
+
+class AIAssistantChatRequest(BaseModel):
+    """AI asistan soru istegi."""
+    device_id: str
+    ticker: Optional[str] = None
+    question: str
+    context_type: str = "genel"
+
+
+class AIAssistantChatResponse(BaseModel):
+    """AI asistan yanit."""
+    answer: str
+    sources: Optional[list[str]] = None
+    remaining_quota: int

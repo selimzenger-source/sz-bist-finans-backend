@@ -29,6 +29,8 @@ from app.models.share_type_conversion import ShareTypeConversion
 from app.models.block_trade import BlockTrade
 from app.models.cautious_stock import CautiousStock
 from app.models.business_deal import BusinessDeal
+from app.models.company_financial import CompanyFinancial, FinancialRatio, IPOVote, AIAssistantUsage
+from app.models.earnings_calendar import EarningsCalendar
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -60,4 +62,6 @@ __all__ = [
     "BlockTrade",
     "CautiousStock",
     "BusinessDeal",
+    "CompanyFinancial", "FinancialRatio", "IPOVote", "AIAssistantUsage",
+    "EarningsCalendar",
 ]
