@@ -322,6 +322,116 @@ def build_parsed_title(message_type: str, ticker: str | None) -> str:
 
 
 # -------------------------------------------------------------------
+# Router — 6 ozel takvime dagit
+# -------------------------------------------------------------------
+
+async def _route_to_calendars(
+    session,
+    *,
+    disclosure_id: int,
+    ticker: str,
+    company_name: str | None,
+    title: str,
+    body: str | None,
+    kap_url: str | None,
+    published_at,
+) -> None:
+    """Yeni KAP bildirimini sermaye artirimi + temettu state machine'lerine yonlendir.
+
+    Title pattern check yaparak hizlica filtreler. Sadece ilgili olanlar AI parse edilir.
+    Toptan/Tip/Pay zaten kap_all_disclosures.category alaninda — ayri tablo gerekmez.
+    Tedbirli ayri kaynaktan beslenir.
+    """
+    from app.services.capital_increase_processor import (
+        is_capital_increase, process_kap_disclosure as cap_process,
+    )
+    from app.services.dividend_calendar_processor import (
+        is_dividend, process_kap_disclosure as div_process,
+    )
+    from app.services.business_deal_processor import (
+        is_business_deal, process_kap_disclosure as deal_process,
+    )
+    from app.services.share_transaction_kap_processor import (
+        is_share_transaction, process_kap_disclosure as shtx_process,
+    )
+    from app.services.kap_category_processors import (
+        is_block_trade, process_block_trade,
+        is_type_conversion, process_type_conversion,
+        is_cautious, process_cautious,
+    )
+
+    if is_capital_increase(title):
+        try:
+            await cap_process(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
+
+    if is_dividend(title):
+        try:
+            await div_process(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→dividend hata (%s): %s", ticker, e)
+
+    if is_business_deal(title):
+        try:
+            await deal_process(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→business_deal hata (%s): %s", ticker, e)
+
+    if is_share_transaction(title):
+        try:
+            await shtx_process(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→share_transaction hata (%s): %s", ticker, e)
+
+    if is_block_trade(title):
+        try:
+            await process_block_trade(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→block_trade hata (%s): %s", ticker, e)
+
+    if is_type_conversion(title):
+        try:
+            await process_type_conversion(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→type_conversion hata (%s): %s", ticker, e)
+
+    if is_cautious(title):
+        try:
+            await process_cautious(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→cautious hata (%s): %s", ticker, e)
+
+
+# -------------------------------------------------------------------
 # Ana Poller Fonksiyonu
 # -------------------------------------------------------------------
 
@@ -639,6 +749,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
                                 ticker, ka_title[:50], ka_sentiment, ai_score,
                             )
+
+                            # ── ROUTER: 6 ozel takvime dagit ──
+                            # Sermaye Artirimi + Temettu state machine'lerini besle.
+                            # Toptan/Tip Donusum/Pay A.S. zaten category alaninda.
+                            # Tedbirli ayri kaynaktan gelir.
+                            try:
+                                async with session.begin_nested():
+                                    await _route_to_calendars(
+                                        session,
+                                        disclosure_id=kap_disc.id,
+                                        ticker=ticker,
+                                        company_name=None,
+                                        title=ka_title,
+                                        body=ai_summary,
+                                        kap_url=kap_url,
+                                        published_at=msg_date,
+                                    )
+                            except Exception as _route_err:
+                                logger.warning(
+                                    "KAP router hata (%s): %s", ticker, _route_err,
+                                )
                         except Exception as _flush_err:
                             logger.warning(
                                 "kap_all_disclosures yazma hatasi: %s — %s",

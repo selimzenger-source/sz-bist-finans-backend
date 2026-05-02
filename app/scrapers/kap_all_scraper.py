@@ -511,8 +511,23 @@ async def fetch_kap_page_content(kap_url: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _infer_category(title: str) -> str:
-    """Bildirim basligindan kategori cikarir."""
+    """Bildirim basligindan kategori cikarir.
+
+    Bildirim Turleri (frontend'de ayri sayfalar — VIP only):
+      - Toptan Alim Satim
+      - Tip Donusum
+      - Pay Alim Satim
+      - Tedbirli Hisseler (gunluk BIST listesinden, KAP basligindan degil)
+    """
     t = title.lower()
+    # ─── Bildirim Turleri (oncelikli — daha spesifik kaliplar once) ───
+    if any(k in t for k in ["toptan satış", "toptan alış", "toptan alim satım", "toptan alım satım", "toptan işlem"]):
+        return "Toptan Alım Satım"
+    if any(k in t for k in ["borsada işlem gören tipe dönüş", "tipe dönüşüm", "tipe donusum"]):
+        return "Tip Dönüşüm"
+    if any(k in t for k in ["pay alım satım bildirimi", "pay alim satim bildirimi", "pay alım satım", "pay alımı", "pay satışı", "geri alım"]):
+        return "Pay Alım Satım"
+    # ─── Standart kategoriler ───
     if any(k in t for k in ["finansal rapor", "bilanço", "finansal tablo", "sorumluluk beyanı", "mali tablo"]):
         return "Bilanço/Finansal Rapor"
     if any(k in t for k in ["temettü", "kar payı", "kâr payı"]):

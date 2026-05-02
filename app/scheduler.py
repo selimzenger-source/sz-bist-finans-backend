@@ -3710,6 +3710,45 @@ async def kap_uzmanpara_quick_job():
         logger.error("KAP Uzmanpara quick job hatasi: %s", e)
 
 
+async def _calendar_status_updater_job():
+    """Sabah seans oncesi (TR 09:00) takvim durumlarini guncelle.
+
+    - capital_increases: tarih_belli -> dagitiliyor (bugun) / tamamlandi (gecmis)
+    - dividend_calendar: tarih_belli -> odeniyor (bugun) / tamamlandi (gecmis)
+    - cautious_stocks: end_date < bugun -> is_active=False (tedbir bitenler)
+    """
+    try:
+        from datetime import date as _date
+        from sqlalchemy import select as _sel
+        from app.services.capital_increase_processor import update_distribution_statuses
+        from app.services.dividend_calendar_processor import update_payment_statuses
+        from app.models.cautious_stock import CautiousStock
+        async with async_session() as db:
+            cap_updated = await update_distribution_statuses(db)
+            div_updated = await update_payment_statuses(db)
+
+            # Tedbirli — bitenler is_active=False
+            today = _date.today()
+            stmt = _sel(CautiousStock).where(
+                CautiousStock.is_active == True,
+                CautiousStock.end_date.isnot(None),
+                CautiousStock.end_date < today,
+            )
+            expired = (await db.execute(stmt)).scalars().all()
+            for r in expired:
+                r.is_active = False
+            cautious_updated = len(expired)
+
+            await db.commit()
+            if cap_updated or div_updated or cautious_updated:
+                logger.info(
+                    "Takvim durum guncelleme: sermaye=%d, temettu=%d, tedbirli_bitti=%d",
+                    cap_updated, div_updated, cautious_updated,
+                )
+    except Exception as e:
+        logger.error("Takvim durum guncelleme hatasi: %s", e)
+
+
 async def expire_subscriptions():
     """Suresi dolan abonelikleri otomatik deaktif eder.
 
@@ -4193,6 +4232,19 @@ def _setup_scheduler_impl():
         id="coupon_cleanup",
         name="Kupon SKT Temizleyici",
         replace_existing=True,
+    )
+
+    # 7d2. Sermaye + Temettu takvim durum guncelleme — sabah seans oncesi (06:00 UTC = TR 09:00)
+    # tarih_belli -> dagitiliyor/odeniyor (bugune gelenler) ve tamamlandi (gecmis)
+    scheduler.add_job(
+        _calendar_status_updater_job,
+        CronTrigger(hour=6, minute=0),  # UTC 06:00 = TR 09:00 (seans 09:30 oncesi)
+        id="calendar_status_updater",
+        name="Sermaye+Temettu Takvim Durum Guncelleyici",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,  # 1 saat grace
     )
 
     # 7e. KAP haberleri FIFO 30 gun arsivi — her gece 03:00 TR (UTC 00:00)

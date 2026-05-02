@@ -22,6 +22,13 @@ from app.models.user_watchlist import UserWatchlist
 from app.models.daily_stock_market_stat import DailyStockMarketStat
 from app.models.kurum_oneri import KurumOneri
 from app.models.ipo_poll_vote import IPOPollVote
+from app.models.capital_increase import CapitalIncrease
+from app.models.dividend_calendar import DividendCalendar
+from app.models.share_transaction_detail import ShareTransactionDetail
+from app.models.share_type_conversion import ShareTypeConversion
+from app.models.block_trade import BlockTrade
+from app.models.cautious_stock import CautiousStock
+from app.models.business_deal import BusinessDeal
 
 __all__ = [
     "IPO", "IPOBroker", "IPOAllocation", "IPOCeilingTrack", "DeletedIPO",
@@ -46,4 +53,11 @@ __all__ = [
     "DailyStockMarketStat",
     "KurumOneri",
     "IPOPollVote",
+    "CapitalIncrease",
+    "DividendCalendar",
+    "ShareTransactionDetail",
+    "ShareTypeConversion",
+    "BlockTrade",
+    "CautiousStock",
+    "BusinessDeal",
 ]

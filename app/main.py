@@ -7853,6 +7853,7 @@ async def list_kap_all_disclosures(
     date: Optional[str] = Query(None, description="Belirli gun (YYYY-MM-DD). Bu gunun TR saatine gore tum haberlerini getirir."),
     min_score: Optional[float] = Query(None, ge=0, le=10, description="Minimum AI etki skoru (pozitif filtre icin 6.0)"),
     max_score: Optional[float] = Query(None, ge=0, le=10, description="Maksimum AI etki skoru (negatif filtre icin 5.0)"),
+    category: Optional[str] = Query(None, description="Kategori filtresi (orn: 'Toptan Alım Satım', 'Tip Dönüşüm', 'Pay Alım Satım'). CSV ile birden fazla kategori: 'a,b,c'"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -7865,12 +7866,31 @@ async def list_kap_all_disclosures(
     - date: Belirli gun (YYYY-MM-DD formatinda, TR saatine gore)
     - min_score: Minimum AI etki skoru (>=)
     - max_score: Maksimum AI etki skoru (<)
+    - category: Kategori adi (tek veya CSV)
     - limit/offset: Sayfalama
     """
     query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.created_at))
 
     if ticker:
         query = query.where(KapAllDisclosure.company_code == ticker.upper())
+
+    if category:
+        from sqlalchemy import or_, func as _sqlfunc
+        cats = [c.strip() for c in category.split(",") if c.strip()]
+        # Bildirim Turleri icin title-bazli pattern fallback (eski kayitlarin
+        # category alani None olabilir; backfill yapilmadan calismasi icin).
+        _CAT_PATTERNS = {
+            "Toptan Alım Satım":  ["toptan satış", "toptan alış", "toptan alim satım", "toptan alım satım", "toptan işlem"],
+            "Tip Dönüşüm":        ["borsada işlem gören tipe dönüş", "tipe dönüşüm", "tipe donusum"],
+            "Pay Alım Satım":     ["pay alım satım bildirimi", "pay alim satim bildirimi", "pay alım satım", "pay alımı", "pay satışı", "geri alım"],
+        }
+        cond_list = []
+        for c in cats:
+            cond_list.append(KapAllDisclosure.category == c)
+            for pat in _CAT_PATTERNS.get(c, []):
+                cond_list.append(_sqlfunc.lower(KapAllDisclosure.title).like(f"%{pat}%"))
+        if cond_list:
+            query = query.where(or_(*cond_list))
 
     # date filtresi hours'tan onceliklidir
     # NOT: published_at kullaniyoruz (gercek KAP yayin zamani),
@@ -7904,6 +7924,678 @@ async def list_kap_all_disclosures(
     query = query.limit(limit).offset(offset)
     result = await db.execute(query)
     return list(result.scalars().all())
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Sermaye Artirimi Takvimi — public, herkese acik (free)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/capital-increases")
+async def list_capital_increases(
+    type: Optional[str] = Query(None, description="bedelsiz | bedelli | tahsisli (yoksa hepsi)"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sermaye artirimi takvimi — KAP'tan beslenir, state machine sirasi.
+
+    Sort:
+      1. dagitiliyor (bugun bolunenler) en ustte
+      2. tarih_belli (gelecek tarih) ASC
+      3. spk_onayli (tarih bekleyen)
+      4. ykk_alindi (SPK bekleyen)
+      5. tamamlandi + reddedildi en altta (tarih DESC)
+    """
+    from app.models.capital_increase import CapitalIncrease
+
+    query = select(CapitalIncrease)
+    if type and type in ("bedelsiz", "bedelli", "tahsisli"):
+        query = query.where(CapitalIncrease.type == type)
+
+    # Status sira anahtari
+    status_order = {
+        "dagitiliyor": 0,
+        "tarih_belli": 1,
+        "spk_onayli": 2,
+        "ykk_alindi": 3,
+        "tamamlandi": 4,
+        "reddedildi": 5,
+    }
+
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+
+    today = date.today()
+
+    def sort_key(r):
+        rank = status_order.get(r.status, 99)
+        # Tarih onceligi: en yakin gelecek tarih en ustte
+        if r.distribution_date:
+            days_diff = (r.distribution_date - today).days
+            if days_diff < 0:
+                # Gecmis — en alta
+                date_key = abs(days_diff) + 100000
+            else:
+                date_key = days_diff
+        else:
+            date_key = 100000
+        return (rank, date_key)
+
+    rows.sort(key=sort_key)
+    rows = rows[:limit]
+
+    # Manuel serialize — Pydantic schema yok
+    return [
+        {
+            "id": r.id,
+            "ticker": r.ticker,
+            "company_name": r.company_name,
+            "type": r.type,
+            "percentage": r.percentage,
+            "amount_tl": r.amount_tl,
+            "ykk_date": r.ykk_date.isoformat() if r.ykk_date else None,
+            "ykk_kap_url": r.ykk_kap_url,
+            "spk_approval_date": r.spk_approval_date.isoformat() if r.spk_approval_date else None,
+            "spk_approval_kap_url": r.spk_approval_kap_url,
+            "distribution_date": r.distribution_date.isoformat() if r.distribution_date else None,
+            "distribution_kap_url": r.distribution_kap_url,
+            "rejected_at": r.rejected_at.isoformat() if r.rejected_at else None,
+            "rejection_kap_url": r.rejection_kap_url,
+            "status": r.status,
+            "is_today": r.distribution_date == today if r.distribution_date else False,
+        }
+        for r in rows
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Temettu Takvimi — public, herkese acik (free)
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/dividend-calendar")
+async def list_dividend_calendar(
+    filter: Optional[str] = Query(None, description="kesinlesen | bekleyen (yoksa hepsi)"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temettu takvimi — KAP'tan beslenir, state machine.
+
+    Frontend filtreleri:
+      kesinlesen — odeme tarihi belirlenmis (payment_date IS NOT NULL ve status tarih_belli/odeniyor/tamamlandi)
+      bekleyen   — odeme tarihi henuz yok (payment_date IS NULL veya status ykk_alindi/genel_kurul_onayli)
+
+    Sort:
+      1. odeniyor (bugun) en ustte
+      2. tarih_belli (gelecek) ASC
+      3. genel_kurul_onayli
+      4. ykk_alindi
+      5. tamamlandi + reddedildi en altta
+    """
+    from app.models.dividend_calendar import DividendCalendar
+    from sqlalchemy import or_
+
+    query = select(DividendCalendar)
+
+    today = date.today()
+
+    if filter == "kesinlesen":
+        # Tarihi belli — payment_date var VE durum aktif/odendi
+        query = query.where(DividendCalendar.payment_date.isnot(None))
+        query = query.where(DividendCalendar.status.in_(["tarih_belli", "odeniyor", "tamamlandi"]))
+    elif filter == "bekleyen":
+        # Tarih beklenıyor — payment_date yok veya status henuz olgunlasmamis
+        query = query.where(
+            or_(
+                DividendCalendar.payment_date.is_(None),
+                DividendCalendar.status.in_(["ykk_alindi", "genel_kurul_onayli"]),
+            )
+        )
+        query = query.where(DividendCalendar.status != "reddedildi")
+
+    status_order = {
+        "odeniyor": 0,
+        "tarih_belli": 1,
+        "genel_kurul_onayli": 2,
+        "ykk_alindi": 3,
+        "tamamlandi": 4,
+        "reddedildi": 5,
+    }
+
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+
+    def sort_key(r):
+        rank = status_order.get(r.status, 99)
+        if r.payment_date:
+            days_diff = (r.payment_date - today).days
+            if days_diff < 0:
+                date_key = abs(days_diff) + 100000
+            else:
+                date_key = days_diff
+        else:
+            date_key = 100000
+        return (rank, date_key)
+
+    rows.sort(key=sort_key)
+    rows = rows[:limit]
+
+    return [
+        {
+            "id": r.id,
+            "ticker": r.ticker,
+            "company_name": r.company_name,
+            "period": r.period,
+            "gross_amount_per_share": r.gross_amount_per_share,
+            "net_amount_per_share": r.net_amount_per_share,
+            "gross_yield_pct": r.gross_yield_pct,
+            "net_yield_pct": r.net_yield_pct,
+            "total_amount_tl": r.total_amount_tl,
+            "ykk_date": r.ykk_date.isoformat() if r.ykk_date else None,
+            "ykk_kap_url": r.ykk_kap_url,
+            "general_assembly_date": r.general_assembly_date.isoformat() if r.general_assembly_date else None,
+            "general_assembly_kap_url": r.general_assembly_kap_url,
+            "payment_date": r.payment_date.isoformat() if r.payment_date else None,
+            "payment_kap_url": r.payment_kap_url,
+            "rejected_at": r.rejected_at.isoformat() if r.rejected_at else None,
+            "rejection_kap_url": r.rejection_kap_url,
+            "status": r.status,
+            "is_today": r.payment_date == today if r.payment_date else False,
+        }
+        for r in rows
+    ]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Pay Alim Satim — public list + admin import
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/v1/share-transactions")
+async def list_share_transactions(
+    ticker: Optional[str] = Query(None),
+    transaction_type: Optional[str] = Query(None, description="alici | satici"),
+    days: int = Query(30, ge=1, le=365, description="Son kac gun"),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pay alim satim — yapilandirilmis kayitlar (kim ne zaman ne kadar aldı/sattı)."""
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from datetime import timedelta as _td
+
+    cutoff = date.today() - _td(days=days)
+    query = select(ShareTransactionDetail).where(
+        ShareTransactionDetail.transaction_date >= cutoff
+    )
+    if ticker:
+        query = query.where(ShareTransactionDetail.ticker == ticker.upper())
+    if transaction_type in ("alici", "satici"):
+        query = query.where(ShareTransactionDetail.transaction_type == transaction_type)
+
+    query = query.order_by(desc(ShareTransactionDetail.transaction_date), desc(ShareTransactionDetail.id))
+    query = query.limit(limit)
+
+    result = await db.execute(query)
+    rows = list(result.scalars().all())
+    return [
+        {
+            "id": r.id,
+            "ticker": r.ticker,
+            "company_name": r.company_name,
+            "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
+            "transaction_type": r.transaction_type,
+            "party_name": r.party_name,
+            "party_role": r.party_role,
+            "price_low": r.price_low,
+            "price_high": r.price_high,
+            "nominal_lot": r.nominal_lot,
+            "oy_hakki_pct": r.oy_hakki_pct,
+            "oy_hakki_change_pct": r.oy_hakki_change_pct,
+            "pay_orani_pct": r.pay_orani_pct,
+            "pay_orani_change_pct": r.pay_orani_change_pct,
+            "kap_url": r.kap_url,
+            "source": r.source,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/v1/share-type-conversions")
+async def list_share_type_conversions(
+    ticker: Optional[str] = Query(None),
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Borsada İşlem Gören Tipe Dönüşüm — public list."""
+    from app.models.share_type_conversion import ShareTypeConversion
+    from datetime import timedelta as _td
+    cutoff = date.today() - _td(days=days)
+    query = select(ShareTypeConversion).where(ShareTypeConversion.transaction_date >= cutoff)
+    if ticker:
+        query = query.where(ShareTypeConversion.ticker == ticker.upper())
+    query = query.order_by(desc(ShareTypeConversion.transaction_date), desc(ShareTypeConversion.id)).limit(limit)
+    rows = (await db.execute(query)).scalars().all()
+    return [{
+        "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
+        "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
+        "investor_name": r.investor_name, "converted_lot": r.converted_lot,
+        "kap_url": r.kap_url, "source": r.source,
+    } for r in rows]
+
+
+@app.get("/api/v1/block-trades")
+async def list_block_trades(
+    ticker: Optional[str] = Query(None),
+    transaction_type: Optional[str] = Query(None, description="alis | satis"),
+    days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Toptan Alım Satım — public list."""
+    from app.models.block_trade import BlockTrade
+    from datetime import timedelta as _td
+    cutoff = date.today() - _td(days=days)
+    query = select(BlockTrade).where(BlockTrade.transaction_date >= cutoff)
+    if ticker:
+        query = query.where(BlockTrade.ticker == ticker.upper())
+    if transaction_type in ("alis", "satis"):
+        query = query.where(BlockTrade.transaction_type == transaction_type)
+    query = query.order_by(desc(BlockTrade.transaction_date), desc(BlockTrade.id)).limit(limit)
+    rows = (await db.execute(query)).scalars().all()
+    return [{
+        "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
+        "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
+        "transaction_type": r.transaction_type, "broker": r.broker,
+        "counterparties": r.counterparties, "lot_amount": r.lot_amount,
+        "cost_price": r.cost_price, "kap_url": r.kap_url, "source": r.source,
+    } for r in rows]
+
+
+@app.get("/api/v1/cautious-stocks")
+async def list_cautious_stocks(
+    tag: Optional[str] = Query(None, description="KRD|ACS|BRT|EMR|PEM|VEY|TEK"),
+    active_only: bool = Query(True),
+    limit: int = Query(200, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tedbirli Hisseler — public list.
+
+    active_only=True (default) → sadece end_date >= bugün olanlar (is_active flag'ine
+    bakmaz, doğrudan tarih kontrolü — cron'a bağımlı değil, her zaman güncel).
+    """
+    from app.models.cautious_stock import CautiousStock
+    from sqlalchemy import or_ as _or
+    query = select(CautiousStock)
+    if active_only:
+        # Tarih bazli kontrol — bitiş tarihi bugün veya sonrası
+        # end_date null ise (tarih bilinmiyor) yine göster
+        today = date.today()
+        query = query.where(_or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)))
+    if tag:
+        query = query.where(CautiousStock.tags.like(f"%{tag.upper()}%"))
+    query = query.order_by(desc(CautiousStock.end_date), desc(CautiousStock.id)).limit(limit)
+    rows = (await db.execute(query)).scalars().all()
+    return [{
+        "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
+        "last_price": r.last_price, "pct_change": r.pct_change,
+        "start_date": r.start_date.isoformat() if r.start_date else None,
+        "end_date": r.end_date.isoformat() if r.end_date else None,
+        "tags": r.tags.split(",") if r.tags else [],
+        "is_active": r.is_active, "kap_url": r.kap_url, "source": r.source,
+    } for r in rows]
+
+
+@app.get("/api/v1/business-deals")
+async def list_business_deals(
+    period: str = Query("week", description="week|month|quarter"),
+    ticker: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Yeni İş Anlaşmaları — KAP'tan AI parse + TRY çevrim."""
+    from app.models.business_deal import BusinessDeal
+    from datetime import timedelta as _td
+    days_map = {"week": 7, "month": 30, "quarter": 90}
+    days = days_map.get(period, 7)
+    cutoff = date.today() - _td(days=days)
+    query = select(BusinessDeal).where(BusinessDeal.deal_date >= cutoff)
+    if ticker:
+        query = query.where(BusinessDeal.ticker == ticker.upper())
+    query = query.order_by(desc(BusinessDeal.amount_try), desc(BusinessDeal.deal_date)).limit(limit)
+    rows = (await db.execute(query)).scalars().all()
+    return [{
+        "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
+        "title": r.title, "summary": r.summary,
+        "amount_original": r.amount_original, "currency": r.currency,
+        "amount_try": r.amount_try, "exchange_rate_used": r.exchange_rate_used,
+        "deal_date": r.deal_date.isoformat() if r.deal_date else None,
+        "counterparty": r.counterparty,
+        "kap_url": r.kap_url, "source": r.source,
+    } for r in rows]
+
+
+@app.get("/api/v1/business-deals/leaderboard")
+async def business_deals_leaderboard(
+    period: str = Query("week", description="week|month|quarter"),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """En çok iş alanlar — ticker bazında SUM(amount_try) DESC."""
+    from app.models.business_deal import BusinessDeal
+    from sqlalchemy import func as _f
+    from datetime import timedelta as _td
+    days_map = {"week": 7, "month": 30, "quarter": 90}
+    days = days_map.get(period, 7)
+    cutoff = date.today() - _td(days=days)
+    stmt = (
+        select(
+            BusinessDeal.ticker,
+            BusinessDeal.company_name,
+            _f.sum(BusinessDeal.amount_try).label("total_try"),
+            _f.count(BusinessDeal.id).label("deal_count"),
+        )
+        .where(BusinessDeal.deal_date >= cutoff)
+        .where(BusinessDeal.amount_try.isnot(None))
+        .group_by(BusinessDeal.ticker, BusinessDeal.company_name)
+        .order_by(_f.sum(BusinessDeal.amount_try).desc())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).all()
+    return [{
+        "ticker": r.ticker, "company_name": r.company_name,
+        "total_try": float(r.total_try) if r.total_try else 0,
+        "deal_count": r.deal_count,
+    } for r in rows]
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Admin import endpoint'leri — text-based bulk import
+# ═══════════════════════════════════════════════════════════════════
+
+async def _import_records(records: list[dict], model_cls, dedup_keys: list[str], replace_existing: bool):
+    """Generic dedup + insert helper."""
+    from app.database import async_session
+    from sqlalchemy import select as _sel
+    inserted = 0
+    skipped = 0
+    updated = 0
+    errors: list[str] = []
+    async with async_session() as db:
+        for rec in records:
+            try:
+                conds = [getattr(model_cls, k) == rec[k] for k in dedup_keys if rec.get(k) is not None]
+                stmt = _sel(model_cls)
+                for c in conds:
+                    stmt = stmt.where(c)
+                stmt = stmt.limit(1)
+                existing = (await db.execute(stmt)).scalar_one_or_none()
+                if existing:
+                    if replace_existing:
+                        for k, v in rec.items():
+                            setattr(existing, k, v)
+                        updated += 1
+                    else:
+                        skipped += 1
+                    continue
+                db.add(model_cls(**rec, source="manual_import"))
+                inserted += 1
+            except Exception as inner_e:
+                errors.append(f"{rec.get('ticker', '?')}: {inner_e}")
+        await db.commit()
+    return inserted, updated, skipped, errors
+
+
+@app.post("/api/v1/admin/import-share-type-conversions")
+@limiter.limit("3/minute")
+async def admin_import_share_type_conversions(request: Request, payload: dict = Body(...)):
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    raw_text = payload.get("raw_text", "")
+    replace_existing = bool(payload.get("replace_existing", False))
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text gerekli")
+    try:
+        from app.services.category_text_parsers import parse_type_conversions
+        from app.models.share_type_conversion import ShareTypeConversion
+        records = parse_type_conversions(raw_text)
+        ins, upd, skp, errs = await _import_records(
+            records, ShareTypeConversion,
+            dedup_keys=["ticker", "transaction_date", "investor_name"],
+            replace_existing=replace_existing,
+        )
+        return {"status": "ok", "parsed": len(records), "inserted": ins, "updated": upd, "skipped_duplicates": skp, "errors": errs[:10]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/import-block-trades")
+@limiter.limit("3/minute")
+async def admin_import_block_trades(request: Request, payload: dict = Body(...)):
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    raw_text = payload.get("raw_text", "")
+    replace_existing = bool(payload.get("replace_existing", False))
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text gerekli")
+    try:
+        from app.services.category_text_parsers import parse_block_trades
+        from app.models.block_trade import BlockTrade
+        records = parse_block_trades(raw_text)
+        ins, upd, skp, errs = await _import_records(
+            records, BlockTrade,
+            dedup_keys=["ticker", "transaction_date", "transaction_type"],
+            replace_existing=replace_existing,
+        )
+        return {"status": "ok", "parsed": len(records), "inserted": ins, "updated": upd, "skipped_duplicates": skp, "errors": errs[:10]}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/import-cautious-stocks")
+@limiter.limit("3/minute")
+async def admin_import_cautious_stocks(request: Request, payload: dict = Body(...)):
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    raw_text = payload.get("raw_text", "")
+    if not raw_text:
+        raise HTTPException(status_code=400, detail="raw_text gerekli")
+    try:
+        from app.services.category_text_parsers import parse_cautious_stocks
+        from app.models.cautious_stock import CautiousStock
+        from app.database import async_session
+        from sqlalchemy import select as _sel
+        records = parse_cautious_stocks(raw_text)
+        # Tedbirli icin farkli dedup: sadece ticker (yeni cekiste eski kayit silinir)
+        # 'Replace all' modu — onceki tedbirli listeyi silip yeniden yukle (en pratik)
+        replace_all = bool(payload.get("replace_all", True))
+        async with async_session() as db:
+            if replace_all:
+                from sqlalchemy import delete as _del
+                await db.execute(_del(CautiousStock))
+            inserted = 0
+            for rec in records:
+                db.add(CautiousStock(**rec, source="manual_import"))
+                inserted += 1
+            await db.commit()
+        return {"status": "ok", "parsed": len(records), "inserted": inserted, "replaced_all": replace_all}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/backfill-calendars")
+@limiter.limit("1/minute")
+async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
+    """Admin: kap_all_disclosures'taki son N gün kayıtlarını state machine'lere besle.
+
+    Body:
+        admin_password: str
+        days: int (default 30, max 90)
+        targets: list[str] — ['capital','dividend','business'] hangileri (default hepsi)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    days = min(int(payload.get("days", 30)), 90)
+    targets = payload.get("targets") or ["capital", "dividend", "business", "pay", "block", "tipe", "cautious"]
+    max_records = min(int(payload.get("max_records", 500)), 2000)
+
+    try:
+        from datetime import datetime, timezone, timedelta
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from app.services.capital_increase_processor import is_capital_increase, process_kap_disclosure as cap_proc
+        from app.services.dividend_calendar_processor import is_dividend, process_kap_disclosure as div_proc
+        from app.services.business_deal_processor import is_business_deal, process_kap_disclosure as biz_proc
+        from app.services.share_transaction_kap_processor import is_share_transaction, process_kap_disclosure as shtx_proc
+        from app.services.kap_category_processors import (
+            is_block_trade, process_block_trade,
+            is_type_conversion, process_type_conversion,
+            is_cautious, process_cautious,
+        )
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        stats = {
+            "scanned": 0, "capital": 0, "dividend": 0, "business": 0,
+            "pay": 0, "block": 0, "tipe": 0, "cautious": 0, "errors": 0,
+        }
+
+        async with async_session() as db:
+            stmt = (
+                select(KapAllDisclosure)
+                .where(KapAllDisclosure.created_at >= cutoff)
+                .order_by(KapAllDisclosure.created_at.desc())
+                .limit(max_records)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            for r in rows:
+                stats["scanned"] += 1
+                title = r.title or ""
+                body = r.body or title
+                try:
+                    if "capital" in targets and is_capital_increase(title):
+                        if await cap_proc(db, disclosure_id=r.id, ticker=r.company_code,
+                                          company_name=None, title=title, body=body,
+                                          kap_url=r.kap_url, published_at=r.published_at):
+                            stats["capital"] += 1
+                    if "dividend" in targets and is_dividend(title):
+                        if await div_proc(db, disclosure_id=r.id, ticker=r.company_code,
+                                          company_name=None, title=title, body=body,
+                                          kap_url=r.kap_url, published_at=r.published_at):
+                            stats["dividend"] += 1
+                    if "business" in targets and is_business_deal(title):
+                        if await biz_proc(db, disclosure_id=r.id, ticker=r.company_code,
+                                          company_name=None, title=title, body=body,
+                                          kap_url=r.kap_url, published_at=r.published_at):
+                            stats["business"] += 1
+                    if "pay" in targets and is_share_transaction(title):
+                        if await shtx_proc(db, disclosure_id=r.id, ticker=r.company_code,
+                                           company_name=None, title=title, body=body,
+                                           kap_url=r.kap_url, published_at=r.published_at):
+                            stats["pay"] += 1
+                    if "block" in targets and is_block_trade(title):
+                        if await process_block_trade(db, disclosure_id=r.id, ticker=r.company_code,
+                                                     company_name=None, title=title, body=body,
+                                                     kap_url=r.kap_url, published_at=r.published_at):
+                            stats["block"] += 1
+                    if "tipe" in targets and is_type_conversion(title):
+                        if await process_type_conversion(db, disclosure_id=r.id, ticker=r.company_code,
+                                                         company_name=None, title=title, body=body,
+                                                         kap_url=r.kap_url, published_at=r.published_at):
+                            stats["tipe"] += 1
+                    if "cautious" in targets and is_cautious(title):
+                        if await process_cautious(db, disclosure_id=r.id, ticker=r.company_code,
+                                                  company_name=None, title=title, body=body,
+                                                  kap_url=r.kap_url, published_at=r.published_at):
+                            stats["cautious"] += 1
+                except Exception as inner_e:
+                    stats["errors"] += 1
+                    logger.warning("Backfill hata (id=%d): %s", r.id, inner_e)
+
+            await db.commit()
+
+        return {"status": "ok", **stats, "days": days, "targets": targets}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/import-share-transactions")
+@limiter.limit("3/minute")
+async def admin_import_share_transactions(request: Request, payload: dict = Body(...)):
+    """Admin: Ham metni parse edip share_transaction_details tablosuna yazar.
+
+    Body:
+        admin_password: str
+        raw_text: str — Ucretsizderinlikbot/KAP kopya-yapistir formati
+        replace_existing: bool (default False) — True ise ayni anahtarlilari overwrite eder
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    raw_text = payload.get("raw_text", "")
+    if not raw_text or not isinstance(raw_text, str):
+        raise HTTPException(status_code=400, detail="raw_text gerekli")
+
+    replace_existing = bool(payload.get("replace_existing", False))
+
+    try:
+        from app.services.share_transaction_parser import parse_records
+        from app.models.share_transaction_detail import ShareTransactionDetail
+        from app.database import async_session
+        from sqlalchemy import select as _sel
+
+        records = parse_records(raw_text)
+        if not records:
+            return {"status": "ok", "parsed": 0, "inserted": 0, "skipped": 0, "message": "Metinden kayit cikarilamadi"}
+
+        inserted = 0
+        skipped = 0
+        updated = 0
+        errors: list[str] = []
+
+        async with async_session() as db:
+            for rec in records:
+                try:
+                    stmt = _sel(ShareTransactionDetail).where(
+                        ShareTransactionDetail.ticker == rec["ticker"],
+                        ShareTransactionDetail.transaction_date == rec["transaction_date"],
+                        ShareTransactionDetail.transaction_type == rec["transaction_type"],
+                        ShareTransactionDetail.party_name == rec["party_name"],
+                    ).limit(1)
+                    existing = (await db.execute(stmt)).scalar_one_or_none()
+
+                    if existing:
+                        if replace_existing:
+                            for k, v in rec.items():
+                                setattr(existing, k, v)
+                            updated += 1
+                        else:
+                            skipped += 1
+                        continue
+
+                    new_row = ShareTransactionDetail(
+                        **rec,
+                        source="manual_import",
+                    )
+                    db.add(new_row)
+                    inserted += 1
+                except Exception as inner_e:
+                    errors.append(f"{rec.get('ticker', '?')}: {inner_e}")
+
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "parsed": len(records),
+            "inserted": inserted,
+            "updated": updated,
+            "skipped_duplicates": skipped,
+            "errors": errors[:10],
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "message": str(e)[:500],
+            "traceback": traceback.format_exc()[-1000:] if not settings.is_production else None,
+        }
 
 
 # -------------------------------------------------------
