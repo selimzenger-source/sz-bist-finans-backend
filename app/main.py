@@ -10370,7 +10370,7 @@ async def get_temettu_akisi(
 
 @app.get("/api/v1/temettu-takvim")
 async def get_temettu_takvim(
-    year: int = Query(2026, ge=2020, le=2030),
+    year: int = Query(2026, ge=2010, le=2030),
     status: str = Query("all", regex="^(all|yaklasan|odendi)$"),
     db: AsyncSession = Depends(get_db),
 ):
