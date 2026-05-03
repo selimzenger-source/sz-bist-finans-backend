@@ -8221,6 +8221,7 @@ async def list_block_trades(
 async def list_cautious_stocks(
     tag: Optional[str] = Query(None, description="KRD|ACS|BRT|EMR|PEM|VEY|TEK"),
     active_only: bool = Query(True),
+    sort: str = Query("start", description="start (başlangıç yeni→eski) | end (bitiş yakın→uzak)"),
     limit: int = Query(200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
@@ -8228,6 +8229,8 @@ async def list_cautious_stocks(
 
     active_only=True (default) → sadece end_date >= bugün olanlar (is_active flag'ine
     bakmaz, doğrudan tarih kontrolü — cron'a bağımlı değil, her zaman güncel).
+    sort='start' → başlangıç tarihi yeni→eski (varsayılan, son gelen üstte)
+    sort='end' → ceza bitimi yakın→uzak (yakında bitecekler üstte)
     """
     from app.models.cautious_stock import CautiousStock
     from sqlalchemy import or_ as _or
@@ -8239,7 +8242,14 @@ async def list_cautious_stocks(
         query = query.where(_or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)))
     if tag:
         query = query.where(CautiousStock.tags.like(f"%{tag.upper()}%"))
-    query = query.order_by(desc(CautiousStock.end_date), desc(CautiousStock.id)).limit(limit)
+    # Sıralama
+    if sort == "end":
+        # Ceza bitimi yakın → uzak (asc), null'lar sona
+        query = query.order_by(CautiousStock.end_date.asc().nullslast(), desc(CautiousStock.id))
+    else:
+        # Başlangıç tarihi yeni → eski (desc), null'lar sona
+        query = query.order_by(CautiousStock.start_date.desc().nullslast(), desc(CautiousStock.id))
+    query = query.limit(limit)
     rows = (await db.execute(query)).scalars().all()
     return [{
         "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
