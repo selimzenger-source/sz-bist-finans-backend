@@ -10217,6 +10217,103 @@ async def get_temettu_detail(ticker: str, db: AsyncSession = Depends(get_db)):
     }
 
 
+@app.get("/api/v1/temettu-akisi")
+async def get_temettu_akisi(
+    filter: str = Query("karar", regex="^(karar|dagitmama|odendi|all)$"),
+    days: int = Query(7, ge=1, le=90),
+    limit: int = Query(100, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """KAP temettu akisi — son N gun, 3 tip filtre.
+
+    filter:
+      - karar: Kar payi dagitim karari / temettu dagitim karari (Yonetim Kurulu)
+      - dagitmama: Temettu dagitmama / kar payi dagitmama karari
+      - odendi: Kar payi odeme / temettu odeme / dagitim gerceklesti
+      - all: hepsi (kategori bilgisiyle)
+
+    Veri: kap_all_disclosures.title bazli regex match.
+    """
+    from datetime import datetime, timezone, timedelta as _td
+    from sqlalchemy import or_, and_
+
+    cutoff = datetime.now(timezone.utc) - _td(days=days)
+
+    # title regex'leri (case-insensitive)
+    KARAR = [
+        "%kar pay%dağıt%karar%", "%kâr pay%dağıt%karar%",
+        "%temettü%dağıt%karar%", "%temettu%dagit%karar%",
+        "%kar pay%dağıt%öner%", "%kâr pay%dağıt%öner%",
+        "%kar pay%dağıt%teklif%",
+    ]
+    DAGITMAMA = [
+        "%dağıtmama%", "%dagitmama%", "%dağıtılmaması%", "%dagitilmamasi%",
+        "%kar pay%dağıt%yap%lmamas%", "%temettü%dağıt%yap%lmamas%",
+    ]
+    ODENDI = [
+        "%kar pay%öde%", "%kâr pay%öde%", "%temettü%öde%", "%temettu%ode%",
+        "%kar pay%hak%kullan%", "%temettü%hak%kullan%",
+        "%kar pay%dağıt%gerçekleş%", "%temettü%dağıt%gerçekleş%",
+    ]
+
+    def _patterns_for(f: str) -> list[str]:
+        if f == "karar": return KARAR
+        if f == "dagitmama": return DAGITMAMA
+        if f == "odendi": return ODENDI
+        return KARAR + DAGITMAMA + ODENDI
+
+    patterns = _patterns_for(filter)
+    title_conditions = [KapAllDisclosure.title.ilike(p) for p in patterns]
+
+    # Sadece temettu kategori veya title match
+    query = (
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.published_at >= cutoff)
+        .where(
+            and_(
+                # Title match
+                or_(*title_conditions),
+                # Olumsuz dahil etme - "Bedelsiz" gibi farkli kavramlari ele
+                ~KapAllDisclosure.title.ilike("%bedelsiz%"),
+            )
+        )
+        .order_by(desc(KapAllDisclosure.published_at))
+        .limit(limit)
+    )
+    rows = (await db.execute(query)).scalars().all()
+
+    # Tip etiketle
+    def _classify(title: str) -> str:
+        t = (title or "").lower().replace("ı", "i").replace("ğ", "g").replace("ş", "s") \
+            .replace("ç", "c").replace("ö", "o").replace("ü", "u")
+        if "dagitmama" in t or "dagitilmamasi" in t or "yapilmamas" in t:
+            return "dagitmama"
+        if "ode" in t or "hak kullan" in t or "gerceklesm" in t or "gerceklesti" in t:
+            return "odendi"
+        if "karar" in t or "oner" in t or "teklif" in t:
+            return "karar"
+        return "karar"
+
+    items = []
+    for r in rows:
+        items.append({
+            "ticker": r.company_code,
+            "title": r.title,
+            "type": _classify(r.title or ""),
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+            "kap_url": r.kap_url,
+            "ai_summary": r.ai_summary[:200] if r.ai_summary else None,
+            "ai_sentiment": r.ai_sentiment,
+        })
+
+    return {
+        "filter": filter,
+        "days": days,
+        "count": len(items),
+        "items": items,
+    }
+
+
 @app.get("/api/v1/temettu-takvim")
 async def get_temettu_takvim(
     year: int = Query(2026, ge=2020, le=2030),
@@ -10585,3 +10682,39 @@ async def admin_trigger_earnings_calendar(request: Request, payload: dict = Body
         return {"status": "ok", **result}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}
+
+
+# -------------------------------------------------------
+# PORTFÖY SCREENSHOT PARSE (Claude Vision)
+# -------------------------------------------------------
+
+@app.post("/api/v1/portfolio/parse-screenshot")
+@limiter.limit("10/minute")
+async def parse_portfolio_screenshot_endpoint(request: Request, payload: dict = Body(...)):
+    """Banka mobil ekran görüntüsünden hisse listesi çıkar (Claude Vision).
+
+    Request:
+      { "image_base64": "...", "media_type": "image/jpeg" }
+
+    Response:
+      { "stocks": [{ticker, lots, avgCost}], "confidence": "high|medium|low", "notes": "..." }
+    """
+    image_b64 = payload.get("image_base64", "")
+    media_type = payload.get("media_type", "image/jpeg")
+
+    if not image_b64:
+        raise HTTPException(status_code=400, detail="image_base64 gerekli")
+    if media_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(status_code=400, detail="Desteklenmeyen format (jpeg/png/webp)")
+    # Boyut sınırı — yaklaşık 10MB base64 ~7.5MB image
+    if len(image_b64) > 14_000_000:
+        raise HTTPException(status_code=413, detail="Görüntü çok büyük (max ~10MB)")
+
+    try:
+        from app.services.ai_portfolio_screenshot import parse_portfolio_screenshot
+        result = await parse_portfolio_screenshot(image_b64, media_type)
+        if not result:
+            return {"stocks": [], "confidence": "low", "notes": "AI yanıt vermedi"}
+        return result
+    except Exception as e:
+        return {"stocks": [], "confidence": "low", "notes": f"Hata: {str(e)[:200]}"}
