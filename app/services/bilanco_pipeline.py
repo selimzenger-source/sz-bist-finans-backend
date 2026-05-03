@@ -287,6 +287,7 @@ async def _save_bilanco_to_db(ticker: str, periods: list[dict]) -> bool:
                         "net_debt", "cash_and_equivalents", "current_ratio",
                         "gross_margin_pct", "net_margin_pct", "roe_pct",
                         "debt_to_equity",
+                        "current_assets", "non_current_assets",
                     ]:
                         val = p.get(field)
                         if val is not None:
@@ -308,6 +309,8 @@ async def _save_bilanco_to_db(ticker: str, periods: list[dict]) -> bool:
                         total_debt=p.get("total_debt"),
                         net_debt=p.get("net_debt"),
                         cash_and_equivalents=p.get("cash_and_equivalents"),
+                        current_assets=p.get("current_assets"),
+                        non_current_assets=p.get("non_current_assets"),
                         current_ratio=p.get("current_ratio"),
                         gross_margin_pct=p.get("gross_margin_pct"),
                         net_margin_pct=p.get("net_margin_pct"),

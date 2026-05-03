@@ -404,6 +404,9 @@ async def fetch_bilanco(
                     "total_debt": total_debt,
                     "net_debt": net_debt,
                     "cash_and_equivalents": cash,
+                    # Donen / Duran Varliklar — sanayi UFRS 1A / 1AK
+                    "current_assets": current_assets,
+                    "non_current_assets": pd.get("non_current_assets"),
                     # Oranlar
                     "current_ratio": _calc_ratio(current_assets, stl),
                     "gross_margin_pct": (

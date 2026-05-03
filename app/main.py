@@ -10740,14 +10740,40 @@ async def get_earnings_calendar(
 @app.post("/api/v1/admin/trigger-isyatirim-scrape")
 @limiter.limit("3/minute")
 async def admin_trigger_isyatirim(request: Request, payload: dict = Body(...)):
-    """IsYatirim batch bilanco scrape — tum BIST hisseleri."""
+    """IsYatirim batch bilanco scrape — tum BIST hisseleri (years=5).
+
+    700 hisse x 5 yil ~87 dk surer. Background'da calisir.
+    """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
     try:
-        from app.scrapers.isyatirim_scraper import scrape_all_financials
+        from app.scrapers.isyatirim_scraper import fetch_bilanco_batch
+        from app.services.bilanco_pipeline import save_isyatirim_data
+        from app.scrapers.bist_index_scraper import get_all_bist_tickers
         import asyncio as _asyncio
-        _asyncio.create_task(scrape_all_financials())
-        return {"status": "ok", "message": "IsYatirim batch baslatildi (background)"}
+
+        async def _run_full_scrape():
+            try:
+                tickers = await get_all_bist_tickers()
+                if not tickers:
+                    logger.warning("Isyatirim batch: ticker listesi bos")
+                    return
+                logger.info("Isyatirim batch: %d hisse, 5 yil", len(tickers))
+                results = await fetch_bilanco_batch(tickers, years=5)
+                logger.info("Isyatirim fetch tamam: %d hisse veri", len(results))
+                # DB'ye kaydet
+                saved = 0
+                for ticker, periods in results.items():
+                    if periods:
+                        ok = await save_isyatirim_data(ticker, periods)
+                        if ok:
+                            saved += 1
+                logger.info("Isyatirim batch tamamlandi: %d/%d kaydedildi", saved, len(results))
+            except Exception as e:
+                logger.exception("Isyatirim batch hata: %s", e)
+
+        _asyncio.create_task(_run_full_scrape())
+        return {"status": "ok", "message": "IsYatirim batch baslatildi (background, ~87 dk)"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}
 
