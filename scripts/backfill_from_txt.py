@@ -52,7 +52,7 @@ def parse_tr_short_date(s: str, year: int = 2026) -> date | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_toptan_satis(text_content: str) -> list[dict]:
-    """Format:
+    """Format (KAP URL ayri blok olabilir, sonraki kayda baglanir):
     TICKER
     COMPANY
     DD.MM.YYYY
@@ -61,18 +61,25 @@ def parse_toptan_satis(text_content: str) -> list[dict]:
     Aracı Kurum
     BROKER NAME
     Alıcılar veya Satıcılar
-    PARTIES (1 veya cok satir)
+    PARTY1, PARTY2, ... (10+ olabilir)
     Lot Miktarı
     NUMBER Lot
     Maliyet Fiyatı
     NUMBER TL
 
-    Bos satir kayitlari ayirir.
+    https://www.kap.org.tr/tr/Bildirim/XXX  <- ayri blok
     """
     blocks = re.split(r"\n\s*\n", text_content.strip())
     records = []
     for block in blocks:
         lines = [l.rstrip() for l in block.split("\n") if l.strip()]
+        if not lines:
+            continue
+        # Sadece KAP URL bloku - onceki kayda ekle
+        if len(lines) == 1 and re.match(r"^https?://(?:www\.)?kap\.org\.tr/", lines[0]):
+            if records and not records[-1].get("kap_url"):
+                records[-1]["kap_url"] = lines[0].rstrip(".,;)")
+            continue
         if len(lines) < 5:
             continue
         try:
@@ -126,7 +133,8 @@ def parse_toptan_satis(text_content: str) -> list[dict]:
                             break
                         parties_lines.append(lines[j].strip())
                         j += 1
-                    rec["counterparties"] = " ".join(parties_lines)[:500]
+                    # Counterparties tam liste — DB text type, sinirsiz
+                    rec["counterparties"] = " ".join(parties_lines)
                     i = j
                 elif line == "Lot Miktarı":
                     val = re.sub(r"[^\d]", "", next_line)
@@ -171,6 +179,13 @@ def parse_tip_donusum(text_content: str) -> list[dict]:
     records = []
     for block in blocks:
         lines = [l.strip() for l in block.split("\n") if l.strip()]
+        if not lines:
+            continue
+        # Sadece KAP URL bloku - onceki kayda ekle
+        if len(lines) == 1 and re.match(r"^https?://(?:www\.)?kap\.org\.tr/", lines[0]):
+            if records and not records[-1].get("kap_url"):
+                records[-1]["kap_url"] = lines[0].rstrip(".,;)")
+            continue
         if len(lines) < 4:
             continue
         try:
@@ -201,6 +216,8 @@ def parse_tip_donusum(text_content: str) -> list[dict]:
                     val = re.sub(r"[^\d]", "", lines[i + 1])
                     if val:
                         rec["lot_amount"] = int(val)
+            # Tum kayitlari parse et — filtre INSERT sirasinda
+            # (parse sirasinda eleme URL attach mantigini kirar)
             if rec["ticker"] and rec["conversion_date"]:
                 records.append(rec)
         except Exception as e:
@@ -502,10 +519,16 @@ async def upsert_pay_alim_satim(session, records: list[dict]) -> int:
 
 
 async def upsert_block_trades(session, records: list[dict]) -> int:
-    """block_trades — (ticker, transaction_date, lot_amount) bazinda dedup."""
+    """block_trades — son 90 gun REPLACE-ALL + yeni veri ile insert.
+    Eski 'manual_import' artiklari ve duplicate kayitlari temizler."""
+    await session.execute(text("""
+        DELETE FROM block_trades
+        WHERE transaction_date >= NOW() - INTERVAL '90 days'
+          AND source IN ('manual_import', 'manual_txt_import')
+    """))
     upserted = 0
     for r in records:
-        # Mevcut kayit var mi (ayni ticker + tarih + lot)
+        # Mevcut kayit var mi (ayni ticker + tarih + lot) — KAP'tan gelmis olabilir
         check = await session.execute(text("""
             SELECT id FROM block_trades
             WHERE ticker = :tk AND transaction_date = :dt
@@ -541,14 +564,18 @@ async def upsert_block_trades(session, records: list[dict]) -> int:
 
 
 async def upsert_tip_donusum(session, records: list[dict]) -> int:
-    """share_type_conversions: column 'transaction_date' (not conversion_date), 'converted_lot' (not lot_amount)."""
-    upserted = 0
+    """share_type_conversions: REPLACE-ALL — son 60 gun temizlenir, yeni veri ile degistirilir.
+    Min lot filtresi (>=10) burada uygulanir — parse zamani URL attach'i kirmamak icin."""
+    await session.execute(text("""
+        DELETE FROM share_type_conversions
+        WHERE transaction_date >= NOW() - INTERVAL '60 days'
+    """))
+    inserted = 0
+    skipped = 0
     for r in records:
-        check = await session.execute(text("""
-            SELECT id FROM share_type_conversions
-            WHERE ticker=:tk AND transaction_date=:dt AND COALESCE(investor_name,'')=:inv
-        """), {"tk": r["ticker"], "dt": r["conversion_date"], "inv": r["investor_name"] or ""})
-        if check.scalar():
+        # Insert zamani filtresi — kucuk lot (<10) onemsiz
+        if r.get("lot_amount") is not None and r["lot_amount"] < 10:
+            skipped += 1
             continue
         await session.execute(text("""
             INSERT INTO share_type_conversions(ticker, company_name, transaction_date,
@@ -558,8 +585,10 @@ async def upsert_tip_donusum(session, records: list[dict]) -> int:
             "tk": r["ticker"], "cn": r["company_name"], "dt": r["conversion_date"],
             "inv": r["investor_name"], "lot": r["lot_amount"], "kap": r.get("kap_url"),
         })
-        upserted += 1
-    return upserted
+        inserted += 1
+    if skipped:
+        print(f"  Skipped (lot<10): {skipped}")
+    return inserted
 
 
 async def replace_cautious(session, records: list[dict]) -> int:

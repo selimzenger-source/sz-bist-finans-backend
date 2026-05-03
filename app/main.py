@@ -10082,24 +10082,27 @@ async def list_latest_bilancos(
 @app.get("/api/v1/temettu/sampiyonlar")
 async def get_temettu_sampiyonlar(
     sort_by: str = Query("yield", regex="^(yield|streak)$"),
+    period: str = Query("5y", regex="^(1y|5y|10y)$"),
     limit: int = Query(50, ge=10, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Temettu sampiyonlari — en yuksek verim veya en uzun seri sirali.
+    """Temettu sampiyonlari — kumulatif verim veya en uzun seri sirali.
 
-    Hesaplama:
-      - yieldPct: Son yil dividend_yield_pct (en guncel)
-      - consecutiveYears: Pespese odeme yapilan yil sayisi
-      - payoutPct: Son odemenin payout_ratio degeri
-      - grossPerShare: Son odemenin gross_dividend_per_share
-      - aiScore: 5..10 arasi (verim + streak basit hesaplama, gercek AI sonra)
+    Period:
+      - 1y: sadece bu yil verimi
+      - 5y: son 5 yil kumulatif verim toplami (temettu.app paritesi)
+      - 10y: son 10 yil kumulatif verim toplami
+
+    Sirala 'streak' ise dagilim yapilan yil sayisina gore.
     """
-    from sqlalchemy import func as _func, and_
+    current_year = datetime.now().year
+    period_years = {"1y": 1, "5y": 5, "10y": 10}[period]
+    cutoff_year = current_year - period_years + 1  # inclusive
 
-    # Tum dividend_history (son 10 yil)
+    # Tum dividend_history (son 10 yil — streak hesabi icin)
     stmt = (
         select(DividendHistory)
-        .where(DividendHistory.payment_year >= datetime.now().year - 10)
+        .where(DividendHistory.payment_year >= current_year - 10)
         .order_by(DividendHistory.ticker, desc(DividendHistory.payment_year))
     )
     rows = (await db.execute(stmt)).scalars().all()
@@ -10112,24 +10115,24 @@ async def get_temettu_sampiyonlar(
         if r.ticker not in stocks:
             stocks[r.ticker] = {
                 "ticker": r.ticker,
-                "years": set(),
+                "years_set": set(),         # streak icin
+                "period_yields": [],         # secili period icindeki verim degerleri
                 "latest": None,
-                "history": [],
             }
         s = stocks[r.ticker]
-        s["years"].add(r.payment_year)
-        s["history"].append(r)
+        s["years_set"].add(r.payment_year)
+        if r.payment_year >= cutoff_year and r.dividend_yield_pct is not None:
+            s["period_yields"].append(float(r.dividend_yield_pct))
         if not s["latest"] or r.payment_year > s["latest"].payment_year:
             s["latest"] = r
 
     items = []
-    current_year = datetime.now().year
     for ticker, s in stocks.items():
         latest = s["latest"]
         if not latest:
             continue
-        # Pespese yil hesabi
-        years_sorted = sorted(s["years"], reverse=True)
+        # Streak hesabi
+        years_sorted = sorted(s["years_set"], reverse=True)
         consecutive = 0
         expected = max(years_sorted) if years_sorted else current_year
         for y in years_sorted:
@@ -10139,18 +10142,23 @@ async def get_temettu_sampiyonlar(
             else:
                 break
 
-        yield_pct = float(latest.dividend_yield_pct or 0)
+        # Kumulatif verim (period icinde)
+        cumulative_yield = round(sum(s["period_yields"]), 2)
+        # Kac yilda odeme yapilmis (period icinde)
+        period_payment_years = len([1 for v in s["period_yields"] if v > 0])
+
         gross_per_share = float(latest.gross_dividend_per_share or 0)
         payout = float(latest.payout_ratio or 0)
 
-        # Basit aiScore: verim 0-10% -> 5-9 + streak bonus (max +1)
-        ai_score = 5.0 + min(yield_pct, 10) * 0.4 + min(consecutive, 10) * 0.1
+        # aiScore: kumulatif verim + streak bonus
+        ai_score = 5.0 + min(cumulative_yield, 50) * 0.08 + min(consecutive, 10) * 0.1
         ai_score = min(ai_score, 10.0)
 
         items.append({
             "ticker": ticker,
-            "company": ticker,  # company_name varsa Dividend tablosundan al (TODO)
-            "yieldPct": round(yield_pct, 2),
+            "company": ticker,
+            "yieldPct": cumulative_yield,                     # kumulatif (period bazli)
+            "periodPaymentYears": period_payment_years,       # kac yil odeme oldu
             "consecutiveYears": consecutive,
             "payoutPct": round(payout, 1),
             "grossPerShare": round(gross_per_share, 4),
@@ -10158,8 +10166,12 @@ async def get_temettu_sampiyonlar(
             "latest_year": latest.payment_year,
         })
 
-    # Filtrele: En az 2 yil odeme yapanlar (sampiyon kriteri)
-    items = [it for it in items if it["consecutiveYears"] >= 2 and it["yieldPct"] > 0]
+    # Filtrele: secili period icinde en az bir odeme + verim > 0
+    items = [it for it in items if it["periodPaymentYears"] >= 1 and it["yieldPct"] > 0]
+
+    # 5y/10y'da streak >= 2 sarti (sampiyon olmasi icin)
+    if period in ("5y", "10y"):
+        items = [it for it in items if it["consecutiveYears"] >= 2]
 
     # Sirala
     if sort_by == "streak":
@@ -10167,7 +10179,7 @@ async def get_temettu_sampiyonlar(
     else:
         items.sort(key=lambda x: (x["yieldPct"], x["consecutiveYears"]), reverse=True)
 
-    return {"count": len(items[:limit]), "items": items[:limit]}
+    return {"period": period, "count": len(items[:limit]), "items": items[:limit]}
 
 
 # -------------------------------------------------------
