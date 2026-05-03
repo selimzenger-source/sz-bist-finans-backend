@@ -4856,15 +4856,17 @@ def _setup_scheduler_impl():
     # Sadece gcmyatirim takvimi gunluk otomatik calisir.
     # ═══════════════════════════════════════════════════════
 
-    # GCM Yatirim bilanco takvimi — her gun 07:00 TR (04:00 UTC)
+    # GCM Yatirim bilanco takvimi — her 2 saatte bir (gunde 12 kez)
+    # Yeni acıklanan bilancolar hizli yansisin diye sik tetikleme
     scheduler.add_job(
         _v3_gcm_calendar_daily_job,
-        CronTrigger(hour=4, minute=0),
+        IntervalTrigger(hours=2),
         id="v3_gcm_calendar",
-        name="GCM Bilanco Takvimi Daily (07:00 TR)",
+        name="GCM Bilanco Takvimi (her 2 saatte 1)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=600,
     )
 
     # Bilanco queue worker — startup'ta bir kez baslat, surekli kuyrugu dinler.
