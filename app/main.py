@@ -8231,15 +8231,28 @@ async def list_cautious_stocks(
     bakmaz, doğrudan tarih kontrolü — cron'a bağımlı değil, her zaman güncel).
     sort='start' → başlangıç tarihi yeni→eski (varsayılan, son gelen üstte)
     sort='end' → ceza bitimi yakın→uzak (yakında bitecekler üstte)
+
+    Filtreler:
+      - "01 Oca → 31 Ara" placeholder (yıl başı/sonu) kayıtları filtrelenir.
+        Bunlar belirli bir cezadan ziyade kalıcı durum bilgisi içerir.
     """
     from app.models.cautious_stock import CautiousStock
-    from sqlalchemy import or_ as _or
+    from sqlalchemy import or_ as _or, and_ as _and, not_ as _not, extract as _extract
     query = select(CautiousStock)
     if active_only:
         # Tarih bazli kontrol — bitiş tarihi bugün veya sonrası
         # end_date null ise (tarih bilinmiyor) yine göster
         today = date.today()
         query = query.where(_or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)))
+    # Placeholder filtresi — start=Jan 1 + end=Dec 31 olan kalıcı/yıl-genişliğinde kayıtları çıkar
+    query = query.where(
+        _not(_and(
+            _extract("month", CautiousStock.start_date) == 1,
+            _extract("day",   CautiousStock.start_date) == 1,
+            _extract("month", CautiousStock.end_date)   == 12,
+            _extract("day",   CautiousStock.end_date)   == 31,
+        ))
+    )
     if tag:
         query = query.where(CautiousStock.tags.like(f"%{tag.upper()}%"))
     # Sıralama
