@@ -81,6 +81,10 @@ async def upsert_dividend_history(session, ticker: str, payments: list[dict], co
     Anahtar: (ticker, payment_year, payment_date) — ayni yilda 2 odeme olabilir,
     bu yuzden tarih de anahtar parcasi.
     """
+    # Turkiye stopaj orani: 2024 sonrasi BIST hisseleri icin %15 (eski %10).
+    # Net = Brut * 0.85
+    WITHHOLDING_RATE = Decimal("0.85")
+
     inserted = 0
     for p in payments:
         try:
@@ -89,34 +93,62 @@ async def upsert_dividend_history(session, ticker: str, payments: list[dict], co
                 continue
             payment_dt = _parse_payment_date(year, p.get("month") or 1, p.get("day") or 1)
             yield_pct = _safe_decimal(p.get("amount"))  # "amount" verim yuzdesi
-            per_share = _safe_decimal(p.get("perstock"))  # TL/hisse (adjusted vs raw karisik — perstock raw)
+            per_share = _safe_decimal(p.get("perstock"))  # TL/hisse brut
             payout = _safe_decimal(p.get("payoutratio"))
+            # Net hesabi (stopaj sonrasi)
+            net_per_share = (per_share * WITHHOLDING_RATE).quantize(Decimal("0.0001")) if per_share is not None else None
 
-            # Mevcut kayit var mi? (year + payment_date veya year-only)
-            stmt = select(DividendHistory).where(
-                DividendHistory.ticker == ticker,
-                DividendHistory.payment_year == year,
-            )
+            # Mevcut kayit var mi? Once tam eslesen (year+date) ara, yoksa
+            # year+null aramasi yap (eski kayitlari guncellemek icin).
+            row = None
             if payment_dt is not None:
-                stmt = stmt.where(DividendHistory.payment_date == payment_dt)
+                exact = await session.execute(
+                    select(DividendHistory).where(
+                        DividendHistory.ticker == ticker,
+                        DividendHistory.payment_year == year,
+                        DividendHistory.payment_date == payment_dt,
+                    )
+                )
+                row = exact.scalars().first()
+                if not row:
+                    # Tarih null olan eski kaydi bul (ayni yil) — eski scrape'lerden kalmis olabilir
+                    legacy = await session.execute(
+                        select(DividendHistory).where(
+                            DividendHistory.ticker == ticker,
+                            DividendHistory.payment_year == year,
+                            DividendHistory.payment_date.is_(None),
+                        )
+                    )
+                    row = legacy.scalars().first()
             else:
-                stmt = stmt.where(DividendHistory.payment_date.is_(None))
-            existing = await session.execute(stmt)
-            row = existing.scalars().first()
+                null_match = await session.execute(
+                    select(DividendHistory).where(
+                        DividendHistory.ticker == ticker,
+                        DividendHistory.payment_year == year,
+                        DividendHistory.payment_date.is_(None),
+                    )
+                )
+                row = null_match.scalars().first()
 
             if row:
+                # ALANLARI SET ET (None gelirse mevcut deger korunur)
                 if yield_pct is not None:
                     row.dividend_yield_pct = yield_pct
                 if per_share is not None:
                     row.gross_dividend_per_share = per_share
+                if net_per_share is not None:
+                    row.net_dividend_per_share = net_per_share
                 if payout is not None:
                     row.payout_ratio = payout
+                if payment_dt is not None and row.payment_date != payment_dt:
+                    row.payment_date = payment_dt  # KRITIK: tarihi her zaman guncelle
                 row.source = "temettuhisseleri"
             else:
                 new_row = DividendHistory(
                     ticker=ticker,
                     payment_year=year,
                     gross_dividend_per_share=per_share,
+                    net_dividend_per_share=net_per_share,
                     dividend_yield_pct=yield_pct,
                     payout_ratio=payout,
                     payment_date=payment_dt,
