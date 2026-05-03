@@ -8658,7 +8658,12 @@ async def add_to_watchlist(
 ):
     """Takip listesine hisse ekle.
 
-    Free: max 3 hisse. VIP (ana_yildiz): sinirsiz.
+    v3.0.0 — Birleşik limit (portföy + watchlist):
+    - Free: 8 hisse toplam
+    - KAP AI PRO (ana_yildiz): 25 hisse toplam
+    - Diamond: sınırsız
+    NOT: portföy frontend-only AsyncStorage'da, backend sadece watchlist sayar.
+    Birleşik kontrol frontend'de yapılır; backend watchlist için tier limiti uygular.
     """
     ticker = body.ticker.upper().strip()
     if not ticker or len(ticker) < 2 or len(ticker) > 10:
@@ -8672,6 +8677,27 @@ async def add_to_watchlist(
     if not user:
         raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
 
+    # Tier kontrolü
+    is_diamond = False
+    is_vip = False
+    sub_result = await db.execute(
+        select(UserSubscription).where(
+            and_(
+                UserSubscription.user_id == user.id,
+                or_(
+                    UserSubscription.is_active == True,
+                    UserSubscription.expires_at > datetime.utcnow(),
+                ),
+            )
+        )
+    )
+    for sub in sub_result.scalars().all():
+        pkg = (sub.package or "").lower()
+        if "diamond" in pkg or "bilanco_temettu" in pkg:
+            is_diamond = True
+        if pkg == "ana_yildiz":
+            is_vip = True
+
     # Zaten takip ediliyor mu?
     existing = await db.execute(
         select(UserWatchlist).where(
@@ -8682,24 +8708,7 @@ async def add_to_watchlist(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Bu hisse zaten takip listenizde")
 
-    # VIP kontrolu — ana_yildiz abonesi mi? (is_active VEYA expires_at gelecekte)
-    is_vip = False
-    sub_result = await db.execute(
-        select(UserSubscription).where(
-            and_(
-                UserSubscription.user_id == user.id,
-                UserSubscription.package == "ana_yildiz",
-                or_(
-                    UserSubscription.is_active == True,
-                    UserSubscription.expires_at > datetime.utcnow(),
-                ),
-            )
-        )
-    )
-    if sub_result.scalar_one_or_none():
-        is_vip = True
-
-    # Limit kontrolu (Free: 5, VIP: 25)
+    # Limit kontrolu (Free: 8, VIP: 25, Diamond: ∞)
     count_result = await db.execute(
         select(func.count(UserWatchlist.id)).where(
             UserWatchlist.device_id == device_id
@@ -8707,17 +8716,19 @@ async def add_to_watchlist(
     )
     current_count = count_result.scalar() or 0
 
-    if is_vip:
+    if is_diamond:
+        pass  # sınırsız
+    elif is_vip:
         if current_count >= 25:
             raise HTTPException(
                 status_code=403,
-                detail="VIP kullanicilar en fazla 25 hisse takip edebilir."
+                detail="KAP AI PRO kullanıcılar toplam 25 hisse takip edebilir. Diamond ile sınırsız."
             )
     else:
-        if current_count >= 5:
+        if current_count >= 8:
             raise HTTPException(
                 status_code=403,
-                detail="Ucretsiz kullanicilar en fazla 5 hisse takip edebilir. VIP'e yukselin!"
+                detail="Ücretsiz kullanıcılar toplam 8 hisse takip edebilir. Daha fazlası için PRO veya Diamond."
             )
 
     pref = body.notification_preference if body.notification_preference in ("both", "positive_only", "negative_only", "all", "positive_negative") else "both"
@@ -8725,7 +8736,7 @@ async def add_to_watchlist(
     db.add(item)
     await db.flush()
 
-    return {"success": True, "ticker": ticker, "is_vip": is_vip}
+    return {"success": True, "ticker": ticker, "is_vip": is_vip, "is_diamond": is_diamond}
 
 
 @app.patch("/api/v1/users/{device_id}/kap-watchlist/{ticker}/preference")
@@ -8783,13 +8794,15 @@ async def trim_watchlist(
     device_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """VIP → Free geçişinde watchlist'i FREE limiti (5) ile sınırla.
+    """VIP/Diamond → Free geçişinde watchlist'i FREE limiti (8) ile sınırla.
 
+    v3.0.0: limit 5'ten 8'e çıkarıldı (birleşik limit).
     En eski eklenen hisseler korunur, fazlası silinir.
+    Diamond/PRO aktifse trim yapılmaz.
     """
-    FREE_LIMIT = 5
+    FREE_LIMIT = 8
 
-    # VIP kontrolü — hâlâ VIP ise trim yapma
+    # Tier kontrolü — hâlâ aktif aboneliği varsa trim yapma
     user_result = await db.execute(
         select(User).where(User.device_id == device_id)
     )
@@ -8801,7 +8814,6 @@ async def trim_watchlist(
         select(UserSubscription).where(
             and_(
                 UserSubscription.user_id == user.id,
-                UserSubscription.package == "ana_yildiz",
                 or_(
                     UserSubscription.is_active == True,
                     UserSubscription.expires_at > datetime.utcnow(),
@@ -8809,8 +8821,13 @@ async def trim_watchlist(
             )
         )
     )
-    if sub_result.scalar_one_or_none():
-        # Hâlâ VIP — trim gerekmiyor
+    has_paid = False
+    for sub in sub_result.scalars().all():
+        pkg = (sub.package or "").lower()
+        if pkg == "ana_yildiz" or "diamond" in pkg or "bilanco_temettu" in pkg:
+            has_paid = True
+            break
+    if has_paid:
         return {"trimmed": False, "remaining": -1}
 
     # Mevcut watchlist sayısı
