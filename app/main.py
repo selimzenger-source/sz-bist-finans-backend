@@ -10287,6 +10287,8 @@ async def list_latest_bilancos(
             "gross_profit_prev": _f(prev_to_use.gross_profit) if prev_to_use else None,
             "ebitda_prev": (_f(prev_to_use.ebitda) if prev_to_use and prev_to_use.ebitda is not None else (_f(prev_to_use.operating_profit) if prev_to_use else None)),
             "net_income_prev": _f(prev_to_use.net_income) if prev_to_use else None,
+            "current_assets_prev": _f(prev_to_use.current_assets) if prev_to_use and hasattr(prev_to_use, 'current_assets') else None,
+            "non_current_assets_prev": _f(prev_to_use.non_current_assets) if prev_to_use and hasattr(prev_to_use, 'non_current_assets') else None,
             "total_assets_prev": _f(prev_to_use.total_assets) if prev_to_use else None,
             "total_equity_prev": _f(prev_to_use.total_equity) if prev_to_use else None,
             "net_debt_prev": _f(prev_to_use.net_debt) if prev_to_use else None,
