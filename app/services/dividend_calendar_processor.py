@@ -423,18 +423,54 @@ async def mirror_to_dividend_history(db: AsyncSession, row: "DividendCalendar") 
     if not year:
         return False
 
-    # Mevcut dividend_history kaydi var mi (ayni ticker+year+payment_date)
-    stmt = select(DividendHistory).where(
-        DividendHistory.ticker == row.ticker,
-        DividendHistory.payment_year == year,
-    )
-    if pay_dt is not None:
-        stmt = stmt.where(DividendHistory.payment_date == pay_dt)
-    existing = (await db.execute(stmt)).scalars().first()
-
     gross = row.gross_amount_per_share
     net = row.net_amount_per_share
     yield_pct = row.gross_yield_pct
+
+    # Duplicate koruma stratejisi:
+    # 1. pay_dt VAR → exact (ticker+year+payment_date) eslesmesi ara, yoksa
+    #    null-date satirini guncelle (taksit varsa amount + yil ile dogrula)
+    # 2. pay_dt YOK → sadece null-date + ayni amount ile match (taksit ayrimi),
+    #    bulunamazsa yeni satir
+    existing = None
+    if pay_dt is not None:
+        # Önce tarih+yil ile ara (exact)
+        exact = await db.execute(select(DividendHistory).where(
+            DividendHistory.ticker == row.ticker,
+            DividendHistory.payment_year == year,
+            DividendHistory.payment_date == pay_dt,
+        ))
+        existing = exact.scalars().first()
+        if not existing:
+            # null-date kaydi varsa ve amount eslesirse uzerine yaz (taksit zenginlestirme)
+            null_q = await db.execute(select(DividendHistory).where(
+                DividendHistory.ticker == row.ticker,
+                DividendHistory.payment_year == year,
+                DividendHistory.payment_date.is_(None),
+            ))
+            for cand in null_q.scalars().all():
+                # Amount yakin (~%5) ise ayni odemedir varsayalim
+                if gross and cand.gross_dividend_per_share:
+                    diff = abs(float(cand.gross_dividend_per_share) - float(gross))
+                    if diff / max(float(gross), 0.0001) < 0.05:
+                        existing = cand
+                        break
+                elif not cand.gross_dividend_per_share:
+                    existing = cand
+                    break
+    else:
+        # pay_dt yok — sadece null-date + amount match ile birlestir, yoksa yeni
+        null_q = await db.execute(select(DividendHistory).where(
+            DividendHistory.ticker == row.ticker,
+            DividendHistory.payment_year == year,
+            DividendHistory.payment_date.is_(None),
+        ))
+        for cand in null_q.scalars().all():
+            if gross and cand.gross_dividend_per_share:
+                diff = abs(float(cand.gross_dividend_per_share) - float(gross))
+                if diff / max(float(gross), 0.0001) < 0.05:
+                    existing = cand
+                    break
 
     if existing:
         if gross and not existing.gross_dividend_per_share:
