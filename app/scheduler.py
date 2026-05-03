@@ -4276,6 +4276,26 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
+    # 7g. Mynet oranlari (F/K, PD/DD, FD/FAVOK, Piyasa Degeri) — gunluk 04:00 UTC (TR 07:00)
+    async def _mynet_ratios_daily():
+        try:
+            from app.scrapers.mynet_ratios_scraper import scrape_all_ratios
+            stats = await scrape_all_ratios()
+            logger.info("Gunluk mynet oranlari: %s", stats)
+        except Exception as e:
+            logger.error("Mynet oranlari hatasi: %s", e)
+
+    scheduler.add_job(
+        _mynet_ratios_daily,
+        CronTrigger(hour=4, minute=0),
+        id="mynet_ratios_daily",
+        name="Mynet Oranlari Gunluk (TR 07:00)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # 7f. temettuhisseleri.com haftalik tam refresh — Pazar 02:00 UTC (TR 05:00)
     # KAP'tan akan YKK/odeme olaylari anlik mirror ediliyor; bu job 605 hissenin
     # tum gecmisini haftalik tarayip eski payout/yield rakamlari guncel tutar.

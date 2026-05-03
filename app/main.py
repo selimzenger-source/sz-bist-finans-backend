@@ -10756,6 +10756,21 @@ async def admin_trigger_isyatirim(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/trigger-mynet-ratios")
+@limiter.limit("3/minute")
+async def admin_trigger_mynet_ratios(request: Request, payload: dict = Body(...)):
+    """Mynet finans oranlari batch — F/K, PD/DD, FD/FAVOK, Piyasa Degeri (~5 dk)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scrapers.mynet_ratios_scraper import scrape_all_ratios
+        import asyncio as _asyncio
+        _asyncio.create_task(scrape_all_ratios())
+        return {"status": "ok", "message": "Mynet oranlari scrape baslatildi (~5 dk)"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 @app.post("/api/v1/admin/trigger-temettu-scrape")
 @limiter.limit("3/minute")
 async def admin_trigger_temettu(request: Request, payload: dict = Body(...)):
