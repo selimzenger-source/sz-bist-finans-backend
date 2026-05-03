@@ -9917,6 +9917,125 @@ async def admin_trigger_kurum_scrape(request: Request, payload: dict = Body(...)
 # BILANCO (v3.0.0)
 # -------------------------------------------------------
 
+@app.get("/api/v1/bilanco/periods")
+async def list_bilanco_periods(db: AsyncSession = Depends(get_db)):
+    """Mevcut bilanço dönemlerini sayılarıyla döner — frontend tab seçici için.
+
+    Returns: [{period: "2026-Q1", count: 39, label: "2026/1"}, ...] (en yeniden eskiye)
+    """
+    result = await db.execute(
+        select(CompanyFinancial.period, func.count(CompanyFinancial.ticker))
+        .where(CompanyFinancial.period.isnot(None))
+        .group_by(CompanyFinancial.period)
+        .order_by(desc(CompanyFinancial.period))
+        .limit(8)
+    )
+    rows = result.all()
+    items = []
+    for period, count in rows:
+        # "2026-Q1" -> label "2026/1"
+        label = period
+        try:
+            year, q = period.split("-Q")
+            label = f"{year}/{q}"
+        except Exception:
+            pass
+        items.append({"period": period, "count": int(count), "label": label})
+    return {"periods": items}
+
+
+@app.get("/api/v1/bilanco/top")
+async def get_top_bilancos(
+    period: str = Query(..., description="2026-Q1 formatinda donem"),
+    limit: int = Query(50, ge=5, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Donemin en iyi AI puanli bilancolari — Top 10/25/50.
+
+    Mantik:
+    - CompanyFinancial.period == period olan tum hisseleri al
+    - Her hisse icin son KAP bildirimini join (is_bilanco=true)
+    - ai_impact_score DESC sort, limit
+    - Yeni bilanco geldigi anda otomatik liste guncellenir (KAP'tan akan veriyle)
+    """
+    # 1. Bu donemde bilanco aciklayan hisseler
+    fin_result = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.period == period)
+    )
+    finals = {f.ticker: f for f in fin_result.scalars().all()}
+    if not finals:
+        return {"period": period, "count": 0, "items": []}
+
+    tickers = list(finals.keys())
+
+    # 2. Her ticker icin en son KAP Finansal Rapor + ai_impact_score
+    kap_result = await db.execute(
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.is_bilanco == True)
+        .where(KapAllDisclosure.title.ilike('%Finansal Rapor%'))
+        .where(KapAllDisclosure.company_code.in_(tickers))
+        .order_by(KapAllDisclosure.company_code, desc(KapAllDisclosure.published_at))
+    )
+    kap_by_ticker: dict[str, KapAllDisclosure] = {}
+    for k in kap_result.scalars().all():
+        if k.company_code not in kap_by_ticker:
+            kap_by_ticker[k.company_code] = k
+
+    # 3. Ratio + price ekle
+    ratios_result = await db.execute(
+        select(FinancialRatio)
+        .where(FinancialRatio.ticker.in_(tickers))
+        .order_by(FinancialRatio.ticker, desc(FinancialRatio.date))
+    )
+    ratio_by_ticker: dict[str, FinancialRatio] = {}
+    for r in ratios_result.scalars().all():
+        if r.ticker not in ratio_by_ticker:
+            ratio_by_ticker[r.ticker] = r
+
+    price_result = await db.execute(
+        select(DailyStockMarketStat)
+        .where(DailyStockMarketStat.ticker.in_(tickers))
+        .order_by(DailyStockMarketStat.ticker, desc(DailyStockMarketStat.date))
+    )
+    price_by_ticker: dict[str, float] = {}
+    for p in price_result.scalars().all():
+        if p.ticker not in price_by_ticker and p.close_price:
+            price_by_ticker[p.ticker] = float(p.close_price)
+
+    def _f(v):
+        return float(v) if v is not None else None
+
+    # 4. Birlestir + ai score sirala
+    items = []
+    for ticker, fin in finals.items():
+        kap = kap_by_ticker.get(ticker)
+        ratio = ratio_by_ticker.get(ticker)
+        ai_score = float(kap.ai_impact_score) if kap and kap.ai_impact_score else None
+        items.append({
+            "ticker": ticker,
+            "period": fin.period,
+            "ai_score": ai_score,
+            "ai_summary": kap.ai_summary[:200] if kap and kap.ai_summary else None,
+            "ai_sentiment": kap.ai_sentiment if kap else None,
+            "published_at": kap.published_at.isoformat() if kap and kap.published_at else None,
+            "fk": _f(ratio.fk) if ratio else None,
+            "pddd": _f(ratio.pddd) if ratio else None,
+            "fd_favok": _f(ratio.fd_favok) if ratio else None,
+            "piyasa_degeri": _f(ratio.piyasa_degeri) if ratio else None,
+            "price": price_by_ticker.get(ticker),
+            "revenue": _f(fin.revenue),
+            "net_income": _f(fin.net_income),
+            "ebitda": _f(fin.ebitda) if fin.ebitda is not None else _f(fin.operating_profit),
+        })
+
+    # ai_score yoksa en sona at
+    items.sort(key=lambda x: (x["ai_score"] is None, -(x["ai_score"] or 0)))
+
+    items = items[:limit]
+    return {"period": period, "count": len(items), "items": items}
+
+
 @app.get("/api/v1/bilanco/{ticker}", response_model=BilancoAnalysisOut)
 async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
     """Hissenin bilanco verileri + oranlar + AI analizi."""
