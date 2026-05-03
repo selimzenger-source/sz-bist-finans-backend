@@ -10712,6 +10712,42 @@ async def admin_trigger_temettu(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/cleanup-dividend-duplicates")
+@limiter.limit("3/minute")
+async def admin_cleanup_dividend_duplicates(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """dividend_history'de ayni ticker+year icin payment_date=NULL VE
+    payment_date=BELIRLI olan kayitlar varsa, NULL olani siler.
+
+    Eski scraper bug'i nedeniyle olusan duplicate kayitlari temizler.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from sqlalchemy import text as sa_text
+        result = await db.execute(sa_text("""
+            DELETE FROM dividend_history
+            WHERE id IN (
+                SELECT n.id
+                FROM dividend_history n
+                WHERE n.payment_date IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM dividend_history d
+                    WHERE d.ticker = n.ticker
+                      AND d.payment_year = n.payment_year
+                      AND d.payment_date IS NOT NULL
+                  )
+            )
+        """))
+        await db.commit()
+        return {"status": "ok", "deleted": result.rowcount}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 @app.post("/api/v1/admin/trigger-earnings-calendar")
 @limiter.limit("3/minute")
 async def admin_trigger_earnings_calendar(request: Request, payload: dict = Body(...)):
