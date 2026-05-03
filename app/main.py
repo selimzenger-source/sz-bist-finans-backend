@@ -10224,86 +10224,98 @@ async def get_temettu_akisi(
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """KAP temettu akisi — son N gun, 3 tip filtre.
+    """Temettu akisi — dividend_calendar (state machine) + KAP yedek.
 
     filter:
-      - karar: Kar payi dagitim karari / temettu dagitim karari (Yonetim Kurulu)
-      - dagitmama: Temettu dagitmama / kar payi dagitmama karari
-      - odendi: Kar payi odeme / temettu odeme / dagitim gerceklesti
-      - all: hepsi (kategori bilgisiyle)
-
-    Veri: kap_all_disclosures.title bazli regex match.
+      - karar: ykk_alindi, genel_kurul_onayli, tarih_belli (dağıtım kararı verildi)
+      - dagitmama: reddedildi (genel kurul reddetti)
+      - odendi: odeniyor, tamamlandi (ödeme yapıldı/yapılıyor)
+      - all: hepsi
     """
     from datetime import datetime, timezone, timedelta as _td
-    from sqlalchemy import or_, and_
+    from app.models.dividend_calendar import DividendCalendar
 
-    cutoff = datetime.now(timezone.utc) - _td(days=days)
+    cutoff_dt = datetime.now(timezone.utc) - _td(days=days)
+    cutoff_d = cutoff_dt.date()
 
-    # title regex'leri (case-insensitive)
-    KARAR = [
-        "%kar pay%dağıt%karar%", "%kâr pay%dağıt%karar%",
-        "%temettü%dağıt%karar%", "%temettu%dagit%karar%",
-        "%kar pay%dağıt%öner%", "%kâr pay%dağıt%öner%",
-        "%kar pay%dağıt%teklif%",
-    ]
-    DAGITMAMA = [
-        "%dağıtmama%", "%dagitmama%", "%dağıtılmaması%", "%dagitilmamasi%",
-        "%kar pay%dağıt%yap%lmamas%", "%temettü%dağıt%yap%lmamas%",
-    ]
-    ODENDI = [
-        "%kar pay%öde%", "%kâr pay%öde%", "%temettü%öde%", "%temettu%ode%",
-        "%kar pay%hak%kullan%", "%temettü%hak%kullan%",
-        "%kar pay%dağıt%gerçekleş%", "%temettü%dağıt%gerçekleş%",
-    ]
+    STATUS_MAP = {
+        "karar": ["ykk_alindi", "genel_kurul_onayli", "tarih_belli"],
+        "dagitmama": ["reddedildi"],
+        "odendi": ["odeniyor", "tamamlandi"],
+    }
+    statuses = STATUS_MAP.get(filter)
 
-    def _patterns_for(f: str) -> list[str]:
-        if f == "karar": return KARAR
-        if f == "dagitmama": return DAGITMAMA
-        if f == "odendi": return ODENDI
-        return KARAR + DAGITMAMA + ODENDI
-
-    patterns = _patterns_for(filter)
-    title_conditions = [KapAllDisclosure.title.ilike(p) for p in patterns]
-
-    # Sadece temettu kategori veya title match
-    query = (
-        select(KapAllDisclosure)
-        .where(KapAllDisclosure.published_at >= cutoff)
-        .where(
-            and_(
-                # Title match
-                or_(*title_conditions),
-                # Olumsuz dahil etme - "Bedelsiz" gibi farkli kavramlari ele
-                ~KapAllDisclosure.title.ilike("%bedelsiz%"),
-            )
+    query = select(DividendCalendar)
+    if statuses:
+        query = query.where(DividendCalendar.status.in_(statuses))
+    # En son aktivite tarihi >= cutoff
+    query = query.where(
+        or_(
+            DividendCalendar.ykk_date >= cutoff_d,
+            DividendCalendar.general_assembly_date >= cutoff_d,
+            DividendCalendar.payment_date >= cutoff_d,
+            DividendCalendar.rejected_at >= cutoff_dt,
+            DividendCalendar.created_at >= cutoff_dt,
         )
-        .order_by(desc(KapAllDisclosure.published_at))
-        .limit(limit)
-    )
+    ).order_by(desc(DividendCalendar.updated_at), desc(DividendCalendar.created_at)).limit(limit)
+
     rows = (await db.execute(query)).scalars().all()
 
-    # Tip etiketle
-    def _classify(title: str) -> str:
-        t = (title or "").lower().replace("ı", "i").replace("ğ", "g").replace("ş", "s") \
-            .replace("ç", "c").replace("ö", "o").replace("ü", "u")
-        if "dagitmama" in t or "dagitilmamasi" in t or "yapilmamas" in t:
-            return "dagitmama"
-        if "ode" in t or "hak kullan" in t or "gerceklesm" in t or "gerceklesti" in t:
-            return "odendi"
-        if "karar" in t or "oner" in t or "teklif" in t:
-            return "karar"
+    def _type_for_status(st: str) -> str:
+        if st in ("odeniyor", "tamamlandi"): return "odendi"
+        if st == "reddedildi": return "dagitmama"
         return "karar"
+
+    def _title_for(st: str) -> str:
+        return {
+            "ykk_alindi": "Kâr Payı Dağıtım Kararı (YKK)",
+            "genel_kurul_onayli": "Genel Kurul Temettü Onayı",
+            "tarih_belli": "Temettü Ödeme Tarihi Belli",
+            "odeniyor": "Temettü Ödemesi Bugün",
+            "tamamlandi": "Temettü Ödendi",
+            "reddedildi": "Temettü Dağıtmama Kararı",
+        }.get(st, "Temettü Bildirimi")
+
+    def _latest_event_iso(r) -> str | None:
+        # En son hangi aktivite tarihi
+        candidates = [
+            (r.payment_date, "payment_date"),
+            (r.general_assembly_date, "general_assembly_date"),
+            (r.ykk_date, "ykk_date"),
+        ]
+        candidates = [(d, k) for d, k in candidates if d is not None]
+        if r.rejected_at is not None:
+            return r.rejected_at.isoformat()
+        if not candidates:
+            return r.created_at.isoformat() if r.created_at else None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][0].isoformat()
+
+    def _kap_url_for(r) -> str | None:
+        if r.status in ("odeniyor", "tamamlandi") and r.payment_kap_url:
+            return r.payment_kap_url
+        if r.status == "reddedildi" and r.rejection_kap_url:
+            return r.rejection_kap_url
+        if r.status == "genel_kurul_onayli" and r.general_assembly_kap_url:
+            return r.general_assembly_kap_url
+        return r.ykk_kap_url or r.general_assembly_kap_url or r.payment_kap_url
 
     items = []
     for r in rows:
         items.append({
-            "ticker": r.company_code,
-            "title": r.title,
-            "type": _classify(r.title or ""),
-            "published_at": r.published_at.isoformat() if r.published_at else None,
-            "kap_url": r.kap_url,
-            "ai_summary": r.ai_summary[:200] if r.ai_summary else None,
-            "ai_sentiment": r.ai_sentiment,
+            "ticker": r.ticker,
+            "company_name": r.company_name,
+            "title": _title_for(r.status or ""),
+            "type": _type_for_status(r.status or ""),
+            "status": r.status,
+            "published_at": _latest_event_iso(r),
+            "kap_url": _kap_url_for(r),
+            "period": r.period,
+            "gross_amount_per_share": float(r.gross_amount_per_share) if r.gross_amount_per_share else None,
+            "gross_yield_pct": float(r.gross_yield_pct) if r.gross_yield_pct else None,
+            "payment_date": r.payment_date.isoformat() if r.payment_date else None,
+            "ai_summary": None,
+            "ai_sentiment": None,
         })
 
     return {
