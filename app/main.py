@@ -11006,3 +11006,46 @@ async def parse_portfolio_screenshot_endpoint(request: Request, payload: dict = 
         return result
     except Exception as e:
         return {"stocks": [], "confidence": "low", "notes": f"Hata: {str(e)[:200]}"}
+
+
+# -------------------------------------------------------
+# PERSONALIZED FEED (v3.0.0) — kullanicinin hisselerine ozel
+# Ana sayfa marquee widget icin: KAP haberler birlestirilmis akis
+# -------------------------------------------------------
+
+@app.get("/api/v1/feed/personalized")
+async def get_personalized_feed(
+    tickers: str = Query("", description="Virgulle ayrilmis hisse kodlari (orn: TUPRS,ASELS)"),
+    limit: int = Query(10, ge=1, le=30),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin portfoy + watchlist hisselerine ait son haberler.
+
+    Su an sadece KapAllDisclosure tablosundan ceker (KAP haberleri, GK kararlari,
+    temettu aciklamalar, bilancolar — kategori alaninda mevcut).
+    """
+    ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not ticker_list:
+        return {"items": []}
+
+    result = await db.execute(
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.company_code.in_(ticker_list))
+        .order_by(KapAllDisclosure.published_at.desc().nullslast())
+        .limit(limit)
+    )
+    items = []
+    for d in result.scalars().all():
+        items.append({
+            "id": f"kap-{d.id}",
+            "kind": "kap",
+            "ticker": d.company_code,
+            "title": d.title,
+            "category": d.category,
+            "is_bilanco": d.is_bilanco,
+            "sentiment": d.ai_sentiment,
+            "ai_summary": d.ai_summary,
+            "published_at": d.published_at.isoformat() if d.published_at else None,
+            "url": d.kap_url,
+        })
+    return {"items": items}
