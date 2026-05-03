@@ -10075,7 +10075,9 @@ async def list_latest_bilancos(
             "revenue": _f(fin.revenue) if fin else None,
             "gross_profit": _f(fin.gross_profit) if fin else None,
             "operating_profit": _f(fin.operating_profit) if fin else None,
-            "ebitda": _f(fin.ebitda) if fin else None,
+            # EBITDA fallback: scraper bos cektiyse operating_profit kullan
+            # (FAVOK ≈ faaliyet kari + amortisman; amortisman ozel scrape gerek)
+            "ebitda": (_f(fin.ebitda) if fin and fin.ebitda is not None else (_f(fin.operating_profit) if fin else None)),
             "net_income": _f(fin.net_income) if fin else None,
             "current_assets": _f(fin.current_assets) if fin and hasattr(fin, 'current_assets') else None,
             "non_current_assets": _f(fin.non_current_assets) if fin and hasattr(fin, 'non_current_assets') else None,
@@ -10090,14 +10092,20 @@ async def list_latest_bilancos(
             # Onceki donem (yyy ya da onceki ceyrek)
             "revenue_prev": _f(prev_to_use.revenue) if prev_to_use else None,
             "gross_profit_prev": _f(prev_to_use.gross_profit) if prev_to_use else None,
-            "ebitda_prev": _f(prev_to_use.ebitda) if prev_to_use else None,
+            "ebitda_prev": (_f(prev_to_use.ebitda) if prev_to_use and prev_to_use.ebitda is not None else (_f(prev_to_use.operating_profit) if prev_to_use else None)),
             "net_income_prev": _f(prev_to_use.net_income) if prev_to_use else None,
             "total_assets_prev": _f(prev_to_use.total_assets) if prev_to_use else None,
             "total_equity_prev": _f(prev_to_use.total_equity) if prev_to_use else None,
             "net_debt_prev": _f(prev_to_use.net_debt) if prev_to_use else None,
             # Ceyreklik bars
             "quarterly": [
-                {"period": q.period, "revenue": _f(q.revenue), "ebitda": _f(q.ebitda), "net_income": _f(q.net_income)}
+                {
+                    "period": q.period,
+                    "revenue": _f(q.revenue),
+                    # EBITDA fallback to operating_profit (FAVOK ≈ faaliyet kari + amortisman)
+                    "ebitda": (_f(q.ebitda) if q.ebitda is not None else _f(q.operating_profit)),
+                    "net_income": _f(q.net_income),
+                }
                 for q in quarterly
             ],
         })
