@@ -1129,6 +1129,7 @@ async def health_check():
         "status": "ok",
         "service": "bist-finans-backend",
         "version": "2.0.0",
+        "deploy_marker": "v3-temettu-net-fix-2026-05-03",
     }
     # Dahili sistem bilgilerini sadece development'ta goster
     if not settings.is_production:
