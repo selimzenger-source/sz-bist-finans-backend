@@ -4267,13 +4267,35 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,  # 1 saat grace
     )
 
-    # 7e. KAP haberleri FIFO 30 gun arsivi — her gece 03:00 TR (UTC 00:00)
+    # 7e. KAP haberleri FIFO 365 gun arsivi — her gece 03:00 TR (UTC 00:00)
     scheduler.add_job(
         cleanup_old_kap_disclosures,
         CronTrigger(hour=0, minute=0),
         id="kap_fifo_cleanup",
-        name="KAP FIFO 30 Gun Cleanup",
+        name="KAP FIFO 365 Gun Cleanup",
         replace_existing=True,
+    )
+
+    # 7f. temettuhisseleri.com haftalik tam refresh — Pazar 02:00 UTC (TR 05:00)
+    # KAP'tan akan YKK/odeme olaylari anlik mirror ediliyor; bu job 605 hissenin
+    # tum gecmisini haftalik tarayip eski payout/yield rakamlari guncel tutar.
+    async def _weekly_temettu_refresh():
+        try:
+            from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+            stats = await scrape_temettuhisseleri()
+            logger.info("Haftalik temettu refresh: %s", stats)
+        except Exception as e:
+            logger.error("Haftalik temettu refresh hatasi: %s", e)
+
+    scheduler.add_job(
+        _weekly_temettu_refresh,
+        CronTrigger(day_of_week='sun', hour=2, minute=0),
+        id="weekly_temettu_refresh",
+        name="Haftalik temettuhisseleri.com tam refresh (Pazar 05:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
     )
 
     # 7c. Sabah Tweet Zamanlama — her 5 dakika (acilis saatine gore)
