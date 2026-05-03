@@ -400,6 +400,17 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→share_transaction hata (%s): %s", ticker, e)
 
+        # YENİ: KAP URL'den structured table fetch (oy_hakki/pay_orani değişimi)
+        if kap_url:
+            try:
+                from app.services.kap_pay_alim_satim_fetcher import upsert_pay_alim_satim_from_kap
+                await upsert_pay_alim_satim_from_kap(
+                    session, kap_url=kap_url, company_code=ticker,
+                    title=title, published_at=published_at, disclosure_id=disclosure_id,
+                )
+            except Exception as e:
+                logger.warning("Router→kap_pay_fetch hata (%s): %s", ticker, e)
+
     if is_block_trade(title):
         try:
             await process_block_trade(
