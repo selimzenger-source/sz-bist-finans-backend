@@ -10300,8 +10300,33 @@ async def get_temettu_akisi(
             return r.general_assembly_kap_url
         return r.ykk_kap_url or r.general_assembly_kap_url or r.payment_kap_url
 
+    # En son aktivite KAP disclosure_id'lerini topla → AI verilerini join et
+    def _latest_disclosure_id(r) -> int | None:
+        if r.status in ("odeniyor", "tamamlandi") and r.payment_kap_disclosure_id:
+            return r.payment_kap_disclosure_id
+        if r.status == "reddedildi" and r.rejection_kap_disclosure_id:
+            return r.rejection_kap_disclosure_id
+        if r.status == "genel_kurul_onayli" and r.general_assembly_kap_disclosure_id:
+            return r.general_assembly_kap_disclosure_id
+        return r.ykk_kap_disclosure_id or r.general_assembly_kap_disclosure_id or r.payment_kap_disclosure_id
+
+    disclosure_ids = [d for d in (_latest_disclosure_id(r) for r in rows) if d is not None]
+    ai_map: dict[int, dict] = {}
+    if disclosure_ids:
+        ai_rows = (await db.execute(
+            select(KapAllDisclosure).where(KapAllDisclosure.id.in_(disclosure_ids))
+        )).scalars().all()
+        for k in ai_rows:
+            ai_map[k.id] = {
+                "ai_summary": (k.ai_summary or "")[:300] if k.ai_summary else None,
+                "ai_sentiment": k.ai_sentiment,
+                "ai_impact_score": float(k.ai_impact_score) if k.ai_impact_score is not None else None,
+            }
+
     items = []
     for r in rows:
+        did = _latest_disclosure_id(r)
+        ai = ai_map.get(did or -1) or {"ai_summary": None, "ai_sentiment": None, "ai_impact_score": None}
         items.append({
             "ticker": r.ticker,
             "company_name": r.company_name,
@@ -10312,10 +10337,14 @@ async def get_temettu_akisi(
             "kap_url": _kap_url_for(r),
             "period": r.period,
             "gross_amount_per_share": float(r.gross_amount_per_share) if r.gross_amount_per_share else None,
+            "net_amount_per_share": float(r.net_amount_per_share) if r.net_amount_per_share else None,
             "gross_yield_pct": float(r.gross_yield_pct) if r.gross_yield_pct else None,
+            "net_yield_pct": float(r.net_yield_pct) if r.net_yield_pct else None,
+            "total_amount_tl": float(r.total_amount_tl) if r.total_amount_tl else None,
             "payment_date": r.payment_date.isoformat() if r.payment_date else None,
-            "ai_summary": None,
-            "ai_sentiment": None,
+            "ai_summary": ai["ai_summary"],
+            "ai_sentiment": ai["ai_sentiment"],
+            "ai_impact_score": ai["ai_impact_score"],
         })
 
     return {
