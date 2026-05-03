@@ -293,6 +293,12 @@ async def process_kap_disclosure(
             db.add(new_row)
             await db.flush()
             logger.info("Dividend: yeni YKK (%s, period=%s)", ticker, period)
+            # YKK'da amounts varsa hemen dividend_history'ye yansit
+            try:
+                if new_row.gross_amount_per_share or new_row.net_amount_per_share:
+                    await mirror_to_dividend_history(db, new_row)
+            except Exception as _e:
+                logger.warning("ykk mirror hatasi (%s): %s", ticker, _e)
             return new_row
         # Mevcudu zenginlestir
         for k in ("period", "gross_amount_per_share", "net_amount_per_share",
@@ -304,6 +310,12 @@ async def process_kap_disclosure(
             existing.ykk_date = ykk_dt
             existing.ykk_kap_disclosure_id = disclosure_id
             existing.ykk_kap_url = kap_url
+        # Guncellenmis amounts varsa mirror
+        try:
+            if existing.gross_amount_per_share or existing.net_amount_per_share:
+                await mirror_to_dividend_history(db, existing)
+        except Exception as _e:
+            logger.warning("ykk mirror hatasi (%s): %s", ticker, _e)
         return existing
 
     if event_type == "ga_approval":
