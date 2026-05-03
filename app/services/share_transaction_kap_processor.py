@@ -154,7 +154,25 @@ async def process_kap_disclosure(
 
     parsed = await ai_parse(ticker, title, body or "")
 
-    transaction_type = parsed.get("transaction_type") or "satici"
+    # transaction_type: AI > body keyword > heuristik (pay_orani_change_pct işareti)
+    transaction_type = parsed.get("transaction_type")
+    if transaction_type not in ("alici", "satici"):
+        # Body içinde "Alıcı"/"Satıcı" geçiyor mu? (KAP form alanı)
+        bl = lower_tr(body or "")
+        if "alıcı" in bl or "alici" in bl or "alimi" in bl or "alımı" in bl:
+            transaction_type = "alici"
+        elif "satıcı" in bl or "satici" in bl or "satışı" in bl or "satisi" in bl:
+            transaction_type = "satici"
+    if transaction_type not in ("alici", "satici"):
+        # Pay/oy oranı artıyorsa alıcı, azalıyorsa satıcı
+        pay_chg = parsed.get("pay_orani_change_pct")
+        oy_chg = parsed.get("oy_hakki_change_pct")
+        chg = pay_chg if isinstance(pay_chg, (int, float)) and pay_chg != 0 else (oy_chg if isinstance(oy_chg, (int, float)) else None)
+        if isinstance(chg, (int, float)):
+            transaction_type = "alici" if chg > 0 else "satici"
+        else:
+            transaction_type = "satici"  # son çare
+
     tx_date = parsed.get("transaction_date") or (published_at.date() if published_at else date.today())
     party_name = parsed.get("party_name") or "?"
 

@@ -8550,6 +8550,40 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/reclassify-share-transactions")
+@limiter.limit("3/minute")
+async def admin_reclassify_share_transactions(request: Request, payload: dict = Body(...)):
+    """Admin: Mevcut share_transaction_details kayitlarini pay/oy degisim isaretine
+    gore yeniden siniflandirir.
+
+    Kural: pay_orani_change_pct > 0 -> 'alici', < 0 -> 'satici'.
+    Eger pay degisimi yoksa oy_hakki_change_pct'e bakilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from app.database import async_session
+
+    fixed = 0
+    checked = 0
+    async with async_session() as db:
+        rows = (await db.execute(select(ShareTransactionDetail))).scalars().all()
+        for r in rows:
+            checked += 1
+            chg = r.pay_orani_change_pct
+            if chg is None or chg == 0:
+                chg = r.oy_hakki_change_pct
+            if chg is None or chg == 0:
+                continue
+            new_type = "alici" if chg > 0 else "satici"
+            if r.transaction_type != new_type:
+                r.transaction_type = new_type
+                fixed += 1
+        await db.commit()
+    return {"checked": checked, "fixed": fixed}
+
+
 @app.post("/api/v1/admin/import-share-transactions")
 @limiter.limit("3/minute")
 async def admin_import_share_transactions(request: Request, payload: dict = Body(...)):
