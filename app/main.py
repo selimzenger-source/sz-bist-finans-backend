@@ -8846,6 +8846,41 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.put("/api/v1/users/{device_id}/portfolio-tickers")
+async def update_portfolio_tickers(
+    device_id: str,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Frontend portföyündeki hisse kodlarını backend'e sync eder.
+
+    Body: { "tickers": ["TUPRS", "ASELS", ...] }
+
+    Bu liste KAP haber bildirimleri için kullanılır — kullanıcının
+    portföyündeki hisseler için de watchlist gibi push bildirimi gider.
+    """
+    raw = payload.get("tickers", [])
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="tickers list olmali")
+    # Sanitize — sadece A-Z0-9, max 10 chr
+    cleaned = []
+    for t in raw:
+        if isinstance(t, str):
+            t = t.strip().upper()
+            if 2 <= len(t) <= 10 and t.isalnum():
+                cleaned.append(t)
+    cleaned = list(dict.fromkeys(cleaned))  # uniq, sıra korunur
+
+    user_result = await db.execute(select(User).where(User.device_id == device_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+
+    user.portfolio_tickers = ",".join(cleaned) if cleaned else None
+    await db.flush()
+    return {"success": True, "count": len(cleaned), "tickers": cleaned}
+
+
 @app.post("/api/v1/users/{device_id}/kap-watchlist/trim")
 async def trim_watchlist(
     device_id: str,

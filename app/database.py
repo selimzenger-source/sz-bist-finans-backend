@@ -819,6 +819,14 @@ async def init_db():
         except Exception:
             pass
 
+        # v53 migration: users.portfolio_tickers (frontend portföy hisseleri — bildirim için)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS portfolio_tickers TEXT")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

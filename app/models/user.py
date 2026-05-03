@@ -42,6 +42,9 @@ class User(Base):
     notify_edo_free: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretsiz EDO %1 bildirimi")
     notify_kap_watchlist: Mapped[bool] = mapped_column(Boolean, default=True, comment="KAP takip listesi bildirimleri")
 
+    # Portfoy ticker'lari (frontend AsyncStorage'dan sync edilir, virgülle ayrılmış)
+    portfolio_tickers: Mapped[str | None] = mapped_column(Text, comment="Kullanıcının portföyündeki hisse kodları (KAP bildirimi için)")
+
     # Yeni ucretsiz bildirim tercihleri
     notify_news: Mapped[bool] = mapped_column(Boolean, default=True, comment="Piyasa haberleri bildirimi")
     notify_viop: Mapped[bool] = mapped_column(Boolean, default=True, comment="VIOP seans bildirimi")

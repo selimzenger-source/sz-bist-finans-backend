@@ -1314,13 +1314,33 @@ class NotificationService:
             "screen": "ai-kap",
         }
 
-        # Takip eden kullanicilari bul — tercihleriyle birlikte
+        # Takip eden kullanicilari bul — tercihleriyle birlikte (watchlist)
         watchlist_result = await self.db.execute(
             select(UserWatchlist.device_id, UserWatchlist.notification_preference).where(
                 UserWatchlist.ticker == ticker
             )
         )
-        watchlist_rows = watchlist_result.all()
+        watchlist_rows = list(watchlist_result.all())
+
+        # Portfoyunde bu ticker olan kullanicilari da ekle (notification preference 'all' kabul)
+        portfolio_result = await self.db.execute(
+            select(User.device_id).where(
+                User.portfolio_tickers.isnot(None),
+                or_(
+                    User.portfolio_tickers == ticker,
+                    User.portfolio_tickers.like(f"{ticker},%"),
+                    User.portfolio_tickers.like(f"%,{ticker},%"),
+                    User.portfolio_tickers.like(f"%,{ticker}"),
+                ),
+            )
+        )
+        portfolio_device_ids = {row[0] for row in portfolio_result.all()}
+        # Watchlist'tekileri set'e ekleme — duplicate önle
+        watchlist_device_ids = {row[0] for row in watchlist_rows}
+        portfolio_only = portfolio_device_ids - watchlist_device_ids
+        # Portfoy hisseleri için 'all' tercihi varsay
+        for did in portfolio_only:
+            watchlist_rows.append((did, "all"))
 
         if not watchlist_rows:
             return 0
