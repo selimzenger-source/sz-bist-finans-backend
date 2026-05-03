@@ -812,16 +812,16 @@ async def generate_missing_ipo_reports():
 
 
 async def cleanup_old_kap_disclosures():
-    """KAP haberleri FIFO 30 gun arsivi — 30 gunden eski kayitlari siler.
+    """KAP haberleri FIFO 365 gun arsivi — 1 yildan eski kayitlari siler.
 
     DB sismesin diye gunluk calisir. published_at NULL olanlar created_at'e gore silinir.
-    Yeni gelen haberler etkilenmez (bugun + son 30 gun her zaman korunur).
+    Yeni gelen haberler etkilenmez (son 365 gun her zaman korunur).
     """
     try:
         from datetime import datetime, timezone, timedelta
         from sqlalchemy import text as sa_text
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=365)
         async with async_session() as db:
             result = await db.execute(
                 sa_text(
@@ -833,7 +833,7 @@ async def cleanup_old_kap_disclosures():
             await db.commit()
             if result.rowcount > 0:
                 logger.info(
-                    "KAP FIFO cleanup: %d kayit silindi (30 gunden eski, cutoff=%s)",
+                    "KAP FIFO cleanup: %d kayit silindi (365 gunden eski, cutoff=%s)",
                     result.rowcount, cutoff.isoformat(),
                 )
     except Exception as e:
