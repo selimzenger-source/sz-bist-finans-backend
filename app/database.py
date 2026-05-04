@@ -839,6 +839,32 @@ async def init_db():
         except Exception:
             pass
 
+        # v55 migration: temel_analiz tablosu (yerel Excel sync ile beslenir, 2 saatte bir)
+        try:
+            await conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS temel_analiz (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(10) NOT NULL UNIQUE,
+                    sektor VARCHAR(100),
+                    dolasim_lot NUMERIC(18, 0),
+                    ozsermaye NUMERIC(20, 2),
+                    yat_fon_oran NUMERIC(10, 4),
+                    emeklilik_fon_oran NUMERIC(10, 4),
+                    piyasa_degeri NUMERIC(20, 2),
+                    defter_degeri NUMERIC(15, 4),
+                    fk NUMERIC(10, 4),
+                    pddd NUMERIC(10, 4),
+                    fd_favok NUMERIC(10, 4),
+                    pd_efk NUMERIC(10, 4),
+                    ihracat_yuzdesi NUMERIC(6, 2),
+                    source VARCHAR(30) DEFAULT 'excel_sync',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
+            await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_temel_ticker ON temel_analiz(ticker)"))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

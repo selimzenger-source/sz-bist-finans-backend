@@ -8849,6 +8849,72 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.post("/api/v1/admin/import-temel-analiz")
+@limiter.limit("3/minute")
+async def admin_import_temel_analiz(request: Request, payload: dict = Body(...)):
+    """Yerel Python sync scripti her 2 saatte cagiriyor.
+
+    Body: {
+      "admin_password": "...",
+      "rows": [
+        {"ticker":"TUPRS","sektor":"PETROL","dolasim_lot":250000000,"ozsermaye":85e9,
+         "yat_fon_oran":2.5,"emeklilik_fon_oran":1.8,"piyasa_degeri":650e9,
+         "defter_degeri":340.5,"fk":12.4,"pddd":1.92,"fd_favok":7.3,"pd_efk":11.2,
+         "ihracat_yuzdesi":85.0},
+         ...
+      ]
+    }
+    Eksik alanlar atlanir (None). Mevcut ticker upsert.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    rows = payload.get("rows", [])
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=400, detail="rows list olmali")
+
+    from app.models.temel_analiz import TemelAnaliz
+
+    inserted = 0
+    updated = 0
+    errors: list[str] = []
+    fields = [
+        "sektor", "dolasim_lot", "ozsermaye", "yat_fon_oran", "emeklilik_fon_oran",
+        "piyasa_degeri", "defter_degeri", "fk", "pddd", "fd_favok", "pd_efk",
+        "ihracat_yuzdesi",
+    ]
+
+    async with async_session() as db:
+        for r in rows:
+            t = (r.get("ticker") or "").strip().upper()
+            if not t or len(t) > 10:
+                continue
+            try:
+                existing = (await db.execute(
+                    select(TemelAnaliz).where(TemelAnaliz.ticker == t)
+                )).scalar_one_or_none()
+                if existing:
+                    for f in fields:
+                        v = r.get(f)
+                        if v is not None and v != "":
+                            setattr(existing, f, v)
+                    updated += 1
+                else:
+                    new_row = TemelAnaliz(ticker=t, **{f: r.get(f) for f in fields if r.get(f) is not None and r.get(f) != ""})
+                    db.add(new_row)
+                    inserted += 1
+            except Exception as e:
+                errors.append(f"{t}: {str(e)[:100]}")
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "received": len(rows),
+        "inserted": inserted,
+        "updated": updated,
+        "errors": errors[:10],
+    }
+
+
 @app.put("/api/v1/users/{device_id}/portfolio-tickers")
 async def update_portfolio_tickers(
     device_id: str,
@@ -10794,6 +10860,13 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
     )
     quarterly = list(quarterly_result.scalars().all())
 
+    # 7a. Temel analiz (yerel Excel sync ile beslenen ek veriler)
+    from app.models.temel_analiz import TemelAnaliz
+    temel_result = await db.execute(
+        select(TemelAnaliz).where(TemelAnaliz.ticker == t)
+    )
+    temel = temel_result.scalar_one_or_none()
+
     # 7. Fiyat geçmişi (son 6 ay kapanış)
     from datetime import timedelta
     six_months_ago = date.today() - timedelta(days=180)
@@ -10839,6 +10912,22 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
             "fd_favok": float(ratio.fd_favok) if ratio and ratio.fd_favok else None,
             "piyasa_degeri": float(ratio.piyasa_degeri) if ratio and ratio.piyasa_degeri else None,
         } if ratio else None,
+        # Temel analiz (yerel Excel sync) — eksik alanlar 0 kabul edilir
+        "temel_analiz": {
+            "sektor": temel.sektor if temel else None,
+            "dolasim_lot": float(temel.dolasim_lot) if temel and temel.dolasim_lot else 0,
+            "ozsermaye": float(temel.ozsermaye) if temel and temel.ozsermaye else 0,
+            "yat_fon_oran": float(temel.yat_fon_oran) if temel and temel.yat_fon_oran else 0,
+            "emeklilik_fon_oran": float(temel.emeklilik_fon_oran) if temel and temel.emeklilik_fon_oran else 0,
+            "piyasa_degeri": float(temel.piyasa_degeri) if temel and temel.piyasa_degeri else 0,
+            "defter_degeri": float(temel.defter_degeri) if temel and temel.defter_degeri else 0,
+            "fk": float(temel.fk) if temel and temel.fk else 0,
+            "pddd": float(temel.pddd) if temel and temel.pddd else 0,
+            "fd_favok": float(temel.fd_favok) if temel and temel.fd_favok else 0,
+            "pd_efk": float(temel.pd_efk) if temel and temel.pd_efk else 0,
+            "ihracat_yuzdesi": float(temel.ihracat_yuzdesi) if temel and temel.ihracat_yuzdesi else 0,
+            "updated_at": temel.updated_at.isoformat() if temel and temel.updated_at else None,
+        } if temel else None,
         "financials": {
             "period": latest_fin.period if latest_fin else None,
             "prev_period": prev_fin.period if prev_fin else None,
