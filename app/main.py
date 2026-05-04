@@ -10486,7 +10486,17 @@ async def list_latest_bilancos(
     kap_result = await db.execute(
         select(KapAllDisclosure)
         .where(KapAllDisclosure.is_bilanco == True)
-        .where(KapAllDisclosure.title.ilike('%Finansal Rapor%'))
+        .where(or_(
+            KapAllDisclosure.title.ilike('%Finansal Rapor%'),
+            KapAllDisclosure.title.ilike('%Finansal Durum Tablosu%'),
+            KapAllDisclosure.title.ilike('%Bilanço%'),
+            KapAllDisclosure.title.ilike('%Bilanco%'),
+            KapAllDisclosure.title.ilike('%Kar veya Zarar%'),
+            KapAllDisclosure.title.ilike('%Kâr veya Zarar%'),
+            KapAllDisclosure.title.ilike('%Finansal Tablo%'),
+            KapAllDisclosure.title.ilike('%Mali Tablo%'),
+            KapAllDisclosure.title.ilike('%Ara Dönem Finansal%'),
+        ))
         .order_by(desc(KapAllDisclosure.published_at))
         .offset(offset)
         .limit(limit)
