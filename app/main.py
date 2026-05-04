@@ -8850,7 +8850,7 @@ async def remove_from_watchlist(
 
 
 @app.post("/api/v1/admin/import-temel-analiz")
-@limiter.limit("3/minute")
+@limiter.limit("30/minute")
 async def admin_import_temel_analiz(request: Request, payload: dict = Body(...)):
     """Yerel Python sync scripti her 2 saatte cagiriyor.
 
