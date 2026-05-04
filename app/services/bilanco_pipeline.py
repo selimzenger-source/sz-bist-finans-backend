@@ -158,17 +158,36 @@ async def start_bilanco_queue_worker():
             ticker, kap_title = await asyncio.wait_for(
                 _bilanco_queue.get(), timeout=60
             )
+
+            # Render sitesini kasmamak için kuyruk büyüklüğüne göre dinamik bekleme:
+            #   queue >= 20 → 180 sn (3 dk) aralık (yoğun bilanço sezonu)
+            #   queue >= 10 → 120 sn (2 dk)
+            #   queue >= 5  → 60 sn  (1 dk)
+            #   queue >= 1  → 15 sn
+            #   queue 0     → 5 sn (rutin)
+            qsize = _bilanco_queue.qsize()
+
             await process_bilanco_bildirimi(ticker, kap_title)
             _bilanco_queue.task_done()
 
-            # Istekler arasi 5 sn bekleme (IsYatirim rate limit)
-            await asyncio.sleep(5)
+            if qsize >= 20:
+                delay = 180
+            elif qsize >= 10:
+                delay = 120
+            elif qsize >= 5:
+                delay = 60
+            elif qsize >= 1:
+                delay = 15
+            else:
+                delay = 5
+            logger.info("Bilanco queue: kalan=%d, sonraki bilanco icin %ds bekleme", qsize, delay)
+            await asyncio.sleep(delay)
 
         except asyncio.TimeoutError:
             continue  # Queue bos, bekle
         except Exception as e:
             logger.exception("Bilanco queue worker hatasi: %s", e)
-            await asyncio.sleep(10)
+            await asyncio.sleep(30)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
