@@ -10509,6 +10509,23 @@ async def list_latest_bilancos(
             if p.ticker not in prices_map and p.close_price:
                 prices_map[p.ticker] = float(p.close_price)
 
+    # Yahoo fallback — DB'de fiyati olmayan ticker'lar icin (paralel, concurrency=20)
+    missing = [t for t in unique_tickers if t not in prices_map]
+    if missing:
+        import asyncio as _asyncio
+        sem = _asyncio.Semaphore(20)
+
+        async def _fetch_one(t: str):
+            async with sem:
+                try:
+                    p = await _fetch_yahoo_v8(t)
+                    if p:
+                        prices_map[t] = float(p)
+                except Exception:
+                    pass
+
+        await _asyncio.gather(*[_fetch_one(t) for t in missing], return_exceptions=True)
+
     # Her bilanço bildirimi için finansal verileri birleştir
     items = []
     for kap in kap_items:
