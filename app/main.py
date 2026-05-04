@@ -8993,8 +8993,22 @@ async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...
         )
         disclosure = existing_q.scalar_one_or_none()
 
+        # is_bilanco / category — title'a göre otomatik
+        title_lower = title.lower()
+        is_bilanco_flag = any(k in title_lower for k in [
+            "finansal rapor", "bilanço", "bilanco", "finansal tablo",
+            "ara dönem finansal", "mali tablo"
+        ])
+        category_inferred = "Bilanço/Finansal Rapor" if is_bilanco_flag else None
+
         if disclosure:
             result["steps"].append(f"DB'de mevcut id={disclosure.id}")
+            # Mevcut kayitta is_bilanco set edilmemisse simdi yap
+            if is_bilanco_flag and not disclosure.is_bilanco:
+                disclosure.is_bilanco = True
+                if category_inferred and not disclosure.category:
+                    disclosure.category = category_inferred
+                result["steps"].append("is_bilanco=True olarak guncellendi")
         else:
             disclosure = KapAllDisclosure(
                 company_code=ticker,
@@ -9003,10 +9017,12 @@ async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...
                 kap_url=kap_url,
                 source="manual_admin",
                 published_at=_dt.now(_tz.utc),
+                is_bilanco=is_bilanco_flag,
+                category=category_inferred,
             )
             db.add(disclosure)
             await db.flush()
-            result["steps"].append(f"DB'ye eklendi id={disclosure.id}")
+            result["steps"].append(f"DB'ye eklendi id={disclosure.id} is_bilanco={is_bilanco_flag}")
 
         # 3. AI analiz (henuz yapilmadiysa)
         if not disclosure.ai_analyzed_at:
