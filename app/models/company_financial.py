@@ -44,6 +44,8 @@ class CompanyFinancial(Base):
     total_debt: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Toplam Borc (TL)")
     net_debt: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Net Borc (TL)")
     cash_and_equivalents: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Nakit ve Benzerleri (TL)")
+    current_assets: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Donen Varliklar (TL)")
+    non_current_assets: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Duran Varliklar (TL)")
 
     # Oranlar — banka/sigorta gibi sektorlerde extreme degerler olabiliyor (>1M%)
     current_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Cari Oran")

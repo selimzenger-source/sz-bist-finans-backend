@@ -827,6 +827,18 @@ async def init_db():
         except Exception:
             pass
 
+        # v54 migration: company_financials current_assets + non_current_assets
+        # (Donen/Duran Varliklar — model'de eklenmemisti)
+        try:
+            await conn.execute(
+                text("ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS current_assets NUMERIC(18, 2)")
+            )
+            await conn.execute(
+                text("ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS non_current_assets NUMERIC(18, 2)")
+            )
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))
