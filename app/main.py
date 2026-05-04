@@ -11705,7 +11705,7 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization", "dividend_rejection", "type_conversion"]
+    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization", "dividend_rejection", "type_conversion", "bilanco_enrich"]
     days = int(payload.get("days") or 90)
     limit_n = int(payload.get("limit") or 500)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -12013,6 +12013,85 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                     logger.info("DividendCalendar yanlis kayit silindi: %s id=%s (KAP id=%s)", r.ticker, r.id, kid)
             await db.flush()
             summary["updates"]["dividend_misclassified"] = {"scanned": len(dc_rows), "removed": removed}
+
+        # ─── 6. bilanco_enrich: company_financials 'da current_assets/non_current_assets/total_debt/cash NULL/0 olanlari KAP'tan parse edip doldur
+        if "bilanco_enrich" in cats:
+            from app.models.company_financial import CompanyFinancial
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap, save_parsed_bilanco
+            from sqlalchemy import select as _sel, or_ as _or
+
+            # NULL/0 current_assets veya non_current_assets olan kayitlar
+            stmt = (
+                _sel(CompanyFinancial)
+                .where(_or(
+                    CompanyFinancial.current_assets.is_(None),
+                    CompanyFinancial.current_assets == 0,
+                    CompanyFinancial.non_current_assets.is_(None),
+                    CompanyFinancial.non_current_assets == 0,
+                ))
+                .order_by(CompanyFinancial.updated_at.desc().nullslast())
+                .limit(limit_n)
+            )
+            cf_rows = (await db.execute(stmt)).scalars().all()
+
+            be_enriched = 0
+            be_skipped = 0
+            for r in cf_rows:
+                # Bu ticker+period icin KAP disclosure bul (Finansal Rapor / Bilanço)
+                kap = (await db.execute(
+                    _sel(KapAllDisclosure)
+                    .where(KapAllDisclosure.company_code == r.ticker)
+                    .where(KapAllDisclosure.is_bilanco == True)
+                    .order_by(KapAllDisclosure.published_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                if not kap or not kap.kap_url:
+                    be_skipped += 1
+                    continue
+
+                try:
+                    disc = await fetch_kap_disclosure(kap.kap_url)
+                    if not disc or not disc.get("full_text"):
+                        be_skipped += 1
+                        continue
+                    parsed = await parse_bilanco_from_kap(r.ticker, disc["full_text"])
+                    if not parsed:
+                        be_skipped += 1
+                        continue
+                    # Sadece bu kaydin period'una eslesirse enrich et
+                    if parsed.get("period") and parsed["period"] != r.period:
+                        # Farkli donem - direkt save_parsed_bilanco cagir
+                        await save_parsed_bilanco(r.ticker, parsed)
+                        be_enriched += 1
+                        continue
+                    # Ayni donem - manuel enrich
+                    enriched_any = False
+                    for field in ["current_assets", "non_current_assets",
+                                  "total_debt", "cash_and_equivalents",
+                                  "gross_profit", "operating_profit"]:
+                        val = parsed.get(field)
+                        if val is None or val == 0:
+                            continue
+                        existing_val = getattr(r, field, None)
+                        if existing_val is None or float(existing_val or 0) == 0:
+                            setattr(r, field, val)
+                            enriched_any = True
+                    if enriched_any:
+                        r.updated_at = datetime.now(timezone.utc)
+                        be_enriched += 1
+                    else:
+                        be_skipped += 1
+                except Exception:
+                    be_skipped += 1
+                    continue
+
+            await db.flush()
+            summary["updates"]["bilanco_enrich"] = {
+                "scanned": len(cf_rows),
+                "enriched": be_enriched,
+                "skipped": be_skipped,
+            }
 
         await db.commit()
 

@@ -320,19 +320,25 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
 
             if existing and existing.source == "isyatirim":
                 # IsYatirim verisi var ama current_assets/non_current_assets gibi
-                # alanlar IsYatirim'de YOK. KAP XBRL'de var → ENRICH et (NULL alanlari doldur).
+                # alanlari 0 olarak doluyor (None degil). KAP XBRL'de gercek deger var.
+                # NULL VEYA 0 olanlari KAP'tan ENRICH et.
                 from datetime import datetime, timezone
                 enriched = False
                 for field in ["current_assets", "non_current_assets",
-                              "total_debt", "cash_and_equivalents"]:
+                              "total_debt", "cash_and_equivalents",
+                              "gross_profit", "operating_profit"]:
                     val = parsed.get(field)
-                    if val is not None and getattr(existing, field, None) is None:
+                    if val is None or val == 0:
+                        continue
+                    existing_val = getattr(existing, field, None)
+                    # NULL veya 0 veya cok kucuk (anlamsiz) ise enrich et
+                    if existing_val is None or float(existing_val or 0) == 0:
                         setattr(existing, field, val)
                         enriched = True
                 if enriched:
                     existing.updated_at = datetime.now(timezone.utc)
                     await db.commit()
-                    logger.info("KAP parse ENRICH: %s %s — IsYatirim'de eksik alanlar dolduruldu", ticker, period)
+                    logger.info("KAP parse ENRICH: %s %s — IsYatirim'de NULL/0 alanlar dolduruldu", ticker, period)
                 else:
                     logger.info("KAP parse: %s %s — IsYatirim mevcut, enrich gerekmedi", ticker, period)
                 return enriched
