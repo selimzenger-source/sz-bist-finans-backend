@@ -10486,20 +10486,12 @@ async def list_latest_bilancos(
     # KAP'i en yeniden eskiye sirala, ticker bazli DISTINCT al
     # Aynı hisse için 'Finansal Rapor' + 'Finansal Durum Tablosu' + 'Kar Zarar' gibi
     # birden fazla KAP gelirse, yalnizca EN YENI'yi goster (ticker'a gore tek satir).
+    # Sadece is_bilanco=True flag'ine guven — title pattern'a takilma.
+    # ENJSA'nin Sorumluluk Beyanı / Faaliyet / Özkaynaklar bildirimlerinin hepsi
+    # is_bilanco=True ile yazilir, bu hisseler de listede gorunur.
     kap_result = await db.execute(
         select(KapAllDisclosure)
         .where(KapAllDisclosure.is_bilanco == True)
-        .where(or_(
-            KapAllDisclosure.title.ilike('%Finansal Rapor%'),
-            KapAllDisclosure.title.ilike('%Finansal Durum Tablosu%'),
-            KapAllDisclosure.title.ilike('%Bilanço%'),
-            KapAllDisclosure.title.ilike('%Bilanco%'),
-            KapAllDisclosure.title.ilike('%Kar veya Zarar%'),
-            KapAllDisclosure.title.ilike('%Kâr veya Zarar%'),
-            KapAllDisclosure.title.ilike('%Finansal Tablo%'),
-            KapAllDisclosure.title.ilike('%Mali Tablo%'),
-            KapAllDisclosure.title.ilike('%Ara Dönem Finansal%'),
-        ))
         .order_by(desc(KapAllDisclosure.published_at))
         .limit(limit * 5)  # ticker dedupe için fazladan çek
     )
