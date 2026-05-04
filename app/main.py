@@ -8849,6 +8849,39 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.post("/api/v1/admin/process-bilanco-from-kap")
+@limiter.limit("10/minute")
+async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(...)):
+    """Admin: KAP'tan yakalanan bilanço bildirimini AI ile parse edip
+    company_financials tablosuna kaydeder.
+
+    Body: { "admin_password": "...", "tickers": ["SDTTR","VKFYO"] }
+
+    Akis: process_bilanco_bildirimi(ticker) — KAP body'sini AI parse +
+    company_financials upsert. Tek hisse 5-15 saniye surer (AI cagrisi).
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    tickers = payload.get("tickers") or []
+    if not isinstance(tickers, list) or not tickers:
+        raise HTTPException(status_code=400, detail="tickers list olmali")
+
+    from app.services.bilanco_pipeline import process_bilanco_bildirimi
+
+    results: list[dict] = []
+    for raw in tickers:
+        ticker = str(raw).strip().upper()
+        if not ticker:
+            continue
+        try:
+            await process_bilanco_bildirimi(ticker, kap_title="manuel_admin")
+            results.append({"ticker": ticker, "status": "ok"})
+        except Exception as e:
+            results.append({"ticker": ticker, "status": "error", "msg": str(e)[:200]})
+
+    return {"processed": len(results), "results": results}
+
+
 @app.post("/api/v1/admin/inject-kap-disclosure")
 @limiter.limit("10/minute")
 async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...)):
