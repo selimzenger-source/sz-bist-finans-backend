@@ -407,6 +407,27 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→business_deal hata (%s): %s", ticker, e)
 
+    # Pay Geri Alımı (buyback) — share_transaction'dan ÖNCE check
+    try:
+        from app.services.buyback_processor import is_buyback, process_buyback
+        if is_buyback(title):
+            body_for_bb = body or ""
+            if (not body_for_bb or len(body_for_bb) < 200) and kap_url:
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    disc = await fetch_kap_disclosure(kap_url)
+                    if disc and disc.get("full_text"):
+                        body_for_bb = disc["full_text"]
+                except Exception:
+                    pass
+            await process_buyback(
+                session, ticker=ticker, body=body_for_bb,
+                kap_url=kap_url, disclosure_id=disclosure_id,
+                published_at=published_at,
+            )
+    except Exception as e:
+        logger.warning("Router→buyback hata (%s): %s", ticker, e)
+
     if is_share_transaction(title):
         try:
             await shtx_process(
