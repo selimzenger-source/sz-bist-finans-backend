@@ -169,7 +169,11 @@ def extract_party_name(body: str) -> Optional[str]:
 
 
 async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
-    """KAP URL'sinden Pay Alım Satım structured data fetch eder."""
+    """KAP URL'sinden Pay Alım Satım structured data fetch eder.
+
+    KAP Next.js (RSC) ile render ediyor; raw HTML'de <td> yok.
+    Önce RSC chunk'larını decode edip içindeki <td>'lerle çalış.
+    """
     url = _normalize_url(kap_url)
     own = client is None
     try:
@@ -178,6 +182,19 @@ async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncCli
         resp = await client.get(url)
         resp.raise_for_status()
         html = resp.text
+
+        # Önce RSC decode dene (yeni KAP)
+        try:
+            from app.scrapers.kap_disclosure_extractor import _decode_rsc_chunks
+            decoded = _decode_rsc_chunks(html)
+            if decoded and "<td" in decoded.lower():
+                result = parse_kap_html(decoded)
+                if result:
+                    return result
+        except Exception as de:
+            logger.debug("RSC decode hata, raw HTML'e düşülüyor: %s", de)
+
+        # Fallback: raw HTML
         return parse_kap_html(html)
     except Exception as e:
         logger.warning("KAP fetch hata (%s): %s", url, e)

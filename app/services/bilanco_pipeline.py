@@ -70,11 +70,24 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                 )
                 kap_news = kap_result.scalar_one_or_none()
 
-            if kap_news and kap_news.body:
-                kap_parsed = await parse_bilanco_from_kap(ticker, kap_news.body)
-                if kap_parsed:
-                    await save_parsed_bilanco(ticker, kap_parsed)
-                    logger.info("📊 KAP aninda parse OK: %s — Ciro: %s", ticker, kap_parsed.get("revenue"))
+            if kap_news:
+                # Body yoksa veya kısa kalmışsa yeni extractor ile çek
+                body_full = kap_news.body or ""
+                if (not body_full or len(body_full) < 500) and kap_news.kap_url:
+                    try:
+                        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                        disclosure = await fetch_kap_disclosure(kap_news.kap_url)
+                        if disclosure and disclosure.get("full_text"):
+                            body_full = disclosure["full_text"]
+                            logger.info("📊 KAP body fetched (RSC): %s — %d char", ticker, len(body_full))
+                    except Exception as fe:
+                        logger.warning("KAP body fetch hata %s: %s", ticker, fe)
+
+                if body_full:
+                    kap_parsed = await parse_bilanco_from_kap(ticker, body_full)
+                    if kap_parsed:
+                        await save_parsed_bilanco(ticker, kap_parsed)
+                        logger.info("📊 KAP aninda parse OK: %s — Ciro: %s", ticker, kap_parsed.get("revenue"))
         except Exception as kap_err:
             logger.warning("KAP aninda parse hatasi %s: %s", ticker, kap_err)
 

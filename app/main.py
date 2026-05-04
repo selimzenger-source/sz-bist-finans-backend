@@ -11488,3 +11488,146 @@ async def get_personalized_feed(
             "url": d.kap_url,
         })
     return {"items": items}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# KAP Disclosure Manuel Tetikleyici (admin)
+# Belirli bir KAP URL'sini extractor + uygun processor'a yönlendirir.
+# Test/backfill için.
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/admin/process-kap-disclosure")
+@limiter.limit("30/minute")
+async def admin_process_kap_disclosure(request: Request, payload: dict = Body(...)):
+    """Admin: KAP URL'sini extractor + processors'a gönder.
+
+    Body: {
+      "admin_password": "...",
+      "kap_url": "https://www.kap.org.tr/tr/Bildirim/1600207",
+      "ticker": "ALARK"   # opsiyonel hint
+    }
+
+    Çalışan processors (auto-detect):
+      - business_deal (regex amount extract)
+      - dividend_payment (Pay Başına Brüt Temettü pattern)
+      - mkk_capital_realization (bedelsiz gerçekleşme)
+      - bilanco (XBRL parse)
+      - pay_alim_satim (KAP table)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = (payload.get("kap_url") or "").strip()
+    ticker_hint = (payload.get("ticker") or "").upper().strip() or None
+
+    if not kap_url or "kap.org.tr" not in kap_url:
+        raise HTTPException(status_code=400, detail="Geçerli kap_url gerekli")
+
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.database import async_session as _async_session
+    from datetime import datetime as _dt, timezone as _tz
+
+    result: dict = {"kap_url": kap_url, "steps": [], "processors": {}}
+
+    # 1. Extractor — body
+    disclosure = await fetch_kap_disclosure(kap_url)
+    if not disclosure:
+        raise HTTPException(status_code=502, detail="KAP fetch başarısız")
+    body = disclosure.get("full_text", "")
+    result["body_length"] = len(body)
+    result["text_blocks"] = len(disclosure.get("text_blocks", []))
+    result["tables"] = len(disclosure.get("tables", []))
+    result["pdf_links"] = disclosure.get("pdf_links", [])
+    result["body_preview"] = body[:300]
+
+    if not ticker_hint:
+        # body tablesinden ilgili şirket çek
+        rel_match = re.search(r"İlgili\s+Şirketler[^\[]*\[([^\]]+)\]", body)
+        if rel_match:
+            tickers = [t.strip().upper() for t in rel_match.group(1).split(",") if t.strip()]
+            if tickers:
+                ticker_hint = tickers[0]
+
+    # 2. Tüm processors'ı dene
+    async with _async_session() as db:
+        # 2a. business_deal — regex
+        try:
+            from app.services.business_deal_processor import regex_extract_business_deal
+            bd_result = regex_extract_business_deal(body)
+            result["processors"]["business_deal_regex"] = {
+                k: v for k, v in bd_result.items() if v is not None
+            }
+        except Exception as e:
+            result["processors"]["business_deal_regex"] = {"error": str(e)}
+
+        # 2b. dividend_payment — regex + DB update
+        try:
+            from app.services.dividend_calendar_processor import (
+                is_dividend_payment_announcement,
+                process_dividend_payment_announcement,
+                parse_dividend_payment_announcement,
+            )
+            parsed = parse_dividend_payment_announcement(body)
+            if parsed:
+                proc_result = await process_dividend_payment_announcement(
+                    db, body=body, kap_url=kap_url,
+                    disclosure_id=None,
+                    published_at=_dt.now(_tz.utc),
+                )
+                result["processors"]["dividend_payment"] = {
+                    "parsed_items": parsed,
+                    "result": proc_result,
+                }
+            else:
+                result["processors"]["dividend_payment"] = {"matched": False}
+        except Exception as e:
+            result["processors"]["dividend_payment"] = {"error": str(e)}
+
+        # 2c. MKK realization — regex + DB update
+        try:
+            from app.services.capital_increase_processor import (
+                is_mkk_capital_realization,
+                process_mkk_capital_realization,
+                parse_mkk_capital_realization,
+            )
+            parsed = parse_mkk_capital_realization(body)
+            if parsed:
+                proc_result = await process_mkk_capital_realization(
+                    db, ticker_hint=ticker_hint, body=body,
+                    kap_url=kap_url, disclosure_id=None,
+                )
+                result["processors"]["mkk_realization"] = {
+                    "parsed": {
+                        "percentage": parsed.get("percentage"),
+                        "issuance_type": parsed.get("issuance_type"),
+                        "realization_date": str(parsed.get("realization_date")) if parsed.get("realization_date") else None,
+                    },
+                    "result": proc_result,
+                }
+            else:
+                result["processors"]["mkk_realization"] = {"matched": False}
+        except Exception as e:
+            result["processors"]["mkk_realization"] = {"error": str(e)}
+
+        # 2d. bilanço — XBRL scrape
+        try:
+            from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap
+            if ticker_hint:
+                bil_parsed = await parse_bilanco_from_kap(ticker_hint, body)
+                result["processors"]["bilanco"] = bil_parsed or {"parsed": None}
+            else:
+                result["processors"]["bilanco"] = {"skipped": "no_ticker_hint"}
+        except Exception as e:
+            result["processors"]["bilanco"] = {"error": str(e)}
+
+        # 2e. pay_alim_satim
+        try:
+            from app.services.kap_pay_alim_satim_fetcher import fetch_kap_pay_alim_satim
+            pay_parsed = await fetch_kap_pay_alim_satim(kap_url)
+            result["processors"]["pay_alim_satim"] = pay_parsed or {"parsed": None}
+        except Exception as e:
+            result["processors"]["pay_alim_satim"] = {"error": str(e)}
+
+        await db.commit()
+
+    return result

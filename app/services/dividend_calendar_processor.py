@@ -498,6 +498,133 @@ async def mirror_to_dividend_history(db: AsyncSession, row: "DividendCalendar") 
     return True
 
 
+# ═══════════════════════════════════════════════════════════════════
+# BIST/MKK Temettü Ödeme Duyurusu — RSC scrape (AI YOK)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Örnek: https://www.kap.org.tr/tr/Bildirim/1600207
+# Title: "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu"
+# Body : "ALARK.E Pay Başına Brüt Temettü: 3,185 TL Teorik Fiyat: 92,465 TL"
+#         "EGGUB.E Pay Başına Brüt Temettü: 2,5 TL Teorik Fiyat: 124,3 TL"
+#         "KFEIN.E Pay Başına Brüt Temettü: 0,0202531 TL Teorik Fiyat: 8,69 TL"
+#
+# Bu bildirim, temettü ödemesinin BIST sistemine düştüğünü gösterir.
+# DividendCalendar'da ilgili (ticker, gross_amount_per_share) kayıtlarını
+# 'tamamlandi' / 'odeniyor' duruma çek.
+
+_PAYMENT_RE = re.compile(
+    r"\b([A-Z]{2,6})\.E\s+(?:Pay\s+Başına\s+Brüt\s+Temettü|Gross\s+Dividend\s+Payment\s+per\s+share)\s*:\s*"
+    r"([0-9]+(?:[.,][0-9]+)?)\s*TL",
+    re.IGNORECASE,
+)
+
+
+def parse_dividend_payment_announcement(body: str) -> list[dict[str, Any]]:
+    """KAP/MKK pay piyasası duyurusundan ödenen temettüleri çıkar.
+
+    Returns:
+        [{"ticker": "ALARK", "gross_amount_per_share": 3.185}, ...]
+    """
+    if not body:
+        return []
+    seen: set[str] = set()
+    results: list[dict[str, Any]] = []
+    for m in _PAYMENT_RE.finditer(body):
+        ticker = m.group(1).upper()
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        raw_amt = m.group(2).replace(".", "").replace(",", ".")
+        try:
+            amount = float(raw_amt)
+        except ValueError:
+            continue
+        results.append({"ticker": ticker, "gross_amount_per_share": amount})
+    return results
+
+
+def is_dividend_payment_announcement(title: str, body: str) -> bool:
+    """Title + body üzerinden temettü ödeme duyurusu mu?"""
+    if not body:
+        return False
+    has_pattern = bool(_PAYMENT_RE.search(body))
+    return has_pattern
+
+
+async def process_dividend_payment_announcement(
+    db: AsyncSession,
+    *,
+    body: str,
+    kap_url: Optional[str],
+    disclosure_id: Optional[int],
+    published_at: Optional[datetime],
+) -> dict[str, Any]:
+    """Body'den ödenen ticker'ları çıkar, DividendCalendar status'ları güncelle.
+
+    Returns:
+        {"matched": N, "updated": N, "tickers": [...]}
+    """
+    items = parse_dividend_payment_announcement(body or "")
+    if not items:
+        return {"matched": 0, "updated": 0, "tickers": []}
+
+    today = published_at.date() if published_at else date.today()
+    updated_tickers: list[str] = []
+    not_found: list[str] = []
+
+    for item in items:
+        ticker = item["ticker"]
+        gross = item["gross_amount_per_share"]
+
+        # Eşleşme stratejisi: ticker + ±5% gross_amount toleransı
+        # En güncel tarih_belli/odeniyor kaydını al
+        stmt = (
+            select(DividendCalendar)
+            .where(DividendCalendar.ticker == ticker)
+            .where(DividendCalendar.status.in_(["tarih_belli", "odeniyor", "genel_kurul_onayli"]))
+            .order_by(DividendCalendar.payment_date.desc().nullslast())
+            .limit(5)
+        )
+        rows = (await db.execute(stmt)).scalars().all()
+
+        target = None
+        if rows:
+            # Önce gross_amount_per_share match (±%5)
+            for r in rows:
+                if r.gross_amount_per_share and abs(r.gross_amount_per_share - gross) / max(gross, 1e-9) < 0.05:
+                    target = r
+                    break
+            # Match yoksa en yeni payment_date olanı al
+            if target is None:
+                target = rows[0]
+
+        if target:
+            target.status = "tamamlandi"
+            if not target.gross_amount_per_share:
+                target.gross_amount_per_share = gross
+            if not target.payment_date:
+                target.payment_date = today
+            if disclosure_id and not target.payment_kap_disclosure_id:
+                target.payment_kap_disclosure_id = disclosure_id
+            if kap_url and not target.payment_kap_url:
+                target.payment_kap_url = kap_url
+            updated_tickers.append(ticker)
+            logger.info("DividendPayment: %s tamamlandi (gross=%s)", ticker, gross)
+        else:
+            not_found.append(ticker)
+            logger.warning("DividendPayment: %s için DividendCalendar kaydı bulunamadı", ticker)
+
+    if updated_tickers:
+        await db.flush()
+
+    return {
+        "matched": len(items),
+        "updated": len(updated_tickers),
+        "tickers": updated_tickers,
+        "not_found": not_found,
+    }
+
+
 async def update_payment_statuses(db: AsyncSession) -> int:
     """Gunluk gorev — odeme tarihi gelenleri 'odeniyor', gecmis tarihleri 'tamamlandi' yap."""
     today = date.today()

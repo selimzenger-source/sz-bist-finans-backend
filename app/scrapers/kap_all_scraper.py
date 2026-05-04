@@ -439,6 +439,17 @@ async def fetch_kap_page_content(kap_url: str) -> str:
 
     bildirim_id = m.group(1)
 
+    # YENI: Once RSC extractor (Next.js render — gerçek bildirim icerigi)
+    try:
+        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+        extracted = await fetch_kap_disclosure(kap_url)
+        if extracted and extracted.get("full_text") and len(extracted["full_text"]) > 100:
+            ft = extracted["full_text"]
+            logger.info("KAP sayfa icerigi alindi (RSC primary): %s (%d karakter)", bildirim_id, len(ft))
+            return ft[:60000]
+    except Exception as ex_e:
+        logger.warning("KAP RSC extractor primary hatasi (%s): %s", bildirim_id, ex_e)
+
     # KAP API endpoint — bildirim detay JSON
     # kap.org.tr/tr/Bildirim/XXXXX sayfasi React/Angular — direkt HTML yetersiz
     # Bunun yerine KAP'in arka plan API'sini deneriz
@@ -493,13 +504,34 @@ async def fetch_kap_page_content(kap_url: str) -> str:
                         body_parts.append(page_text)  # Tam body — bilanço için 30K+ char gerekli
 
                 body = "\n".join(body_parts).strip()
-                if body and len(body) > 20:
-                    logger.info("KAP sayfa icerigi alindi: %s (%d karakter)", bildirim_id, len(body))
+                if body and len(body) > 200:
+                    logger.info("KAP sayfa icerigi alindi (legacy): %s (%d karakter)", bildirim_id, len(body))
                     return body[:60000]  # Max 60K karakter (Finansal Rapor için yeterli; AI tarafı ayrıca kısaltır)
+                # Legacy bos/yetersiz dondu — yeni RSC-decode extractor'a dus
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    extracted = await fetch_kap_disclosure(kap_url, client=client)
+                    if extracted and extracted.get("full_text"):
+                        ft = extracted["full_text"]
+                        logger.info("KAP sayfa icerigi alindi (RSC): %s (%d karakter)", bildirim_id, len(ft))
+                        return ft[:60000]
+                except Exception as ex_e:
+                    logger.warning("KAP RSC extractor hatasi (%s): %s", bildirim_id, ex_e)
 
             except Exception as exc:
                 logger.debug("KAP sayfa hatasi (%s): %s", bildirim_id, exc)
                 continue
+
+    # Legacy tum denemeler basarisiz — yeni extractor'a son sans
+    try:
+        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+        extracted = await fetch_kap_disclosure(kap_url)
+        if extracted and extracted.get("full_text"):
+            ft = extracted["full_text"]
+            logger.info("KAP sayfa icerigi alindi (RSC fallback): %s (%d karakter)", bildirim_id, len(ft))
+            return ft[:60000]
+    except Exception as ex_e:
+        logger.warning("KAP RSC extractor son sans hatasi (%s): %s", bildirim_id, ex_e)
 
     logger.debug("KAP sayfa icerigi alinamadi: %s", bildirim_id)
     return ""

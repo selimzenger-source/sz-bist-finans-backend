@@ -548,3 +548,136 @@ async def update_distribution_statuses(db: AsyncSession) -> int:
     if updated:
         await db.flush()
     return updated
+
+
+# ═══════════════════════════════════════════════════════════════════
+# MKK Bedelsiz/Sermaye Artırım GERÇEKLEŞME duyurusu (regex, AI YOK)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Örnek: https://www.kap.org.tr/tr/Bildirim/1600267
+# Title : "Merkezi Kayıt Kuruluşu A.Ş. Duyurusu"
+# Body  : "SÜMER VARLIK YÖNETİM A.Ş. 'nin 29.04.2026 tarihinde başlayan
+#          %408,47457 oranındaki bedelsiz sermaye artırım işleminde,
+#          kaydileşmiş pay senetlerinin artırım karşılıkları ilgili üyelerin
+#          müşteri alt hesaplarına 04.05.2026 tarihinde alacak kaydedilmiştir."
+#
+# Bu bildirim → ilgili capital_increase kaydını 'tamamlandi' yap.
+
+_MKK_REALIZATION_RE = re.compile(
+    r"%\s*([\d.,]+)\s*oran(?:ı|i)ndaki\s+(bedelsiz|bedelli|tahsisli)\s+sermaye\s+art(?:ı|i)r(?:ı|i)m"
+    r".{0,400}?"  # arada metin
+    r"(\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})\s+tarihinde\s+alacak\s+kaydedil",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def parse_mkk_capital_realization(body: str) -> Optional[dict[str, Any]]:
+    """MKK bedelsiz gerçekleşme duyurusunu regex ile parse et."""
+    if not body:
+        return None
+    m = _MKK_REALIZATION_RE.search(body)
+    if not m:
+        return None
+
+    raw_pct = m.group(1).replace(".", "").replace(",", ".")
+    try:
+        pct = float(raw_pct)
+    except ValueError:
+        pct = None
+
+    issuance_type = m.group(2).lower()
+    realization_date_str = m.group(3)
+    real_date = None
+    for fmt in ("%d.%m.%Y", "%d-%m-%Y", "%d/%m/%Y"):
+        try:
+            real_date = datetime.strptime(realization_date_str, fmt).date()
+            break
+        except ValueError:
+            continue
+
+    return {
+        "percentage": pct,
+        "issuance_type": issuance_type,
+        "realization_date": real_date,
+    }
+
+
+def is_mkk_capital_realization(title: str, body: str) -> bool:
+    """MKK gerçekleşme duyurusu mu?"""
+    if not body:
+        return False
+    return bool(_MKK_REALIZATION_RE.search(body))
+
+
+async def process_mkk_capital_realization(
+    db: AsyncSession,
+    *,
+    ticker_hint: Optional[str],
+    body: str,
+    kap_url: Optional[str],
+    disclosure_id: Optional[int],
+) -> dict[str, Any]:
+    """MKK gerçekleşme bildirimini işle: ilgili capital_increase kaydı 'tamamlandi'.
+
+    ticker_hint: KAP başlığındaki ticker (varsa)
+    """
+    parsed = parse_mkk_capital_realization(body or "")
+    if not parsed:
+        return {"matched": False, "reason": "regex_no_match"}
+
+    # Ticker bul: hint > body'den çıkar
+    target_ticker = (ticker_hint or "").upper().strip()
+    if not target_ticker:
+        # Body'de İlgili Şirketler [SMRVA] gibi
+        rel_match = re.search(r"İlgili\s+Şirketler[^\[]*\[([^\]]+)\]", body)
+        if rel_match:
+            tickers = [t.strip() for t in rel_match.group(1).split(",") if t.strip()]
+            if tickers:
+                target_ticker = tickers[0].upper()
+
+    if not target_ticker:
+        return {"matched": False, "reason": "no_ticker"}
+
+    pct = parsed.get("percentage")
+    real_date = parsed.get("realization_date")
+    issuance_type = parsed.get("issuance_type")
+
+    # En yakın eşleşen capital_increase kaydını bul (ticker + tip + tarih_belli/dagitiliyor)
+    stmt = (
+        select(CapitalIncrease)
+        .where(CapitalIncrease.ticker == target_ticker)
+        .where(CapitalIncrease.status.in_(["tarih_belli", "dagitiliyor", "spk_onayli", "ykk_alindi"]))
+        .order_by(CapitalIncrease.distribution_date.desc().nullslast())
+        .limit(5)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    target = None
+    if rows and pct is not None:
+        # Yüzde match (±%2)
+        for r in rows:
+            if r.percentage and abs(r.percentage - pct) < 2.0:
+                target = r
+                break
+    if target is None and rows:
+        target = rows[0]
+
+    if target is None:
+        return {"matched": False, "reason": "no_capital_increase_row", "ticker": target_ticker}
+
+    target.status = "tamamlandi"
+    if real_date and (not target.distribution_date or target.distribution_date != real_date):
+        target.distribution_date = real_date
+    if kap_url:
+        # Distribution KAP url alanı yoksa sadece logla
+        pass
+    await db.flush()
+    logger.info("MKK Realization: %s tamamlandi (%%%s, %s)", target_ticker, pct, real_date)
+    return {
+        "matched": True,
+        "ticker": target_ticker,
+        "percentage": pct,
+        "realization_date": str(real_date) if real_date else None,
+        "issuance_type": issuance_type,
+        "capital_increase_id": target.id,
+    }

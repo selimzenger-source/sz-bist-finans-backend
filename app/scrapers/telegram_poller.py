@@ -470,6 +470,63 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→cautious hata (%s): %s", ticker, e)
 
+    # ════════════════════════════════════════════════════════════════
+    # MKK/BIST DUYURULARI — title generic, body'ye bakmak gerek
+    # 1. Temettü ödeme duyurusu (BIST sistemine düştü) → DividendCalendar 'tamamlandi'
+    # 2. Bedelsiz/Sermaye artırım gerçekleşme → CapitalIncrease 'tamamlandi'
+    # ════════════════════════════════════════════════════════════════
+    title_lo = (title or "").lower()
+    needs_body_check = any(k in title_lo for k in [
+        "merkezi kayıt", "merkezi kayit", "mkk",
+        "bistech", "pay piyasası", "pay piyasasi",
+        "alım satım sistemi", "alim satim sistemi",
+        "duyurusu", "kamuyu aydınlatma platformu",
+    ])
+
+    if needs_body_check:
+        # Body yoksa KAP'tan çek
+        body_for_check = body or ""
+        if (not body_for_check or len(body_for_check) < 200) and kap_url:
+            try:
+                from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                disclosure = await fetch_kap_disclosure(kap_url)
+                if disclosure and disclosure.get("full_text"):
+                    body_for_check = disclosure["full_text"]
+            except Exception as e:
+                logger.debug("Router→body fetch hata (%s): %s", ticker, e)
+
+        # 1. Temettü ödeme
+        try:
+            from app.services.dividend_calendar_processor import (
+                is_dividend_payment_announcement,
+                process_dividend_payment_announcement,
+            )
+            if is_dividend_payment_announcement(title, body_for_check):
+                result = await process_dividend_payment_announcement(
+                    session, body=body_for_check, kap_url=kap_url,
+                    disclosure_id=disclosure_id, published_at=published_at,
+                )
+                if result.get("updated"):
+                    logger.info("Router→DividendPayment: %s ticker güncellendi", result["updated"])
+        except Exception as e:
+            logger.warning("Router→DividendPayment hata: %s", e)
+
+        # 2. MKK gerçekleşme
+        try:
+            from app.services.capital_increase_processor import (
+                is_mkk_capital_realization,
+                process_mkk_capital_realization,
+            )
+            if is_mkk_capital_realization(title, body_for_check):
+                result = await process_mkk_capital_realization(
+                    session, ticker_hint=ticker, body=body_for_check,
+                    kap_url=kap_url, disclosure_id=disclosure_id,
+                )
+                if result.get("matched"):
+                    logger.info("Router→MKK Realization: %s tamamlandi", result.get("ticker"))
+        except Exception as e:
+            logger.warning("Router→MKK Realization hata: %s", e)
+
     # v3 — Bilanco/Finansal Rapor: KAP geldiginde aninda IsYatirim queue'ya at
     # AI ile body'den anlik rakam parse + IsYatirim'den detayli veri (1-2 dk gecikme)
     title_lower = (title or "").lower()

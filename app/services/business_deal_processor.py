@@ -85,12 +85,116 @@ KURALLAR:
 """
 
 
-async def ai_parse_business_deal(ticker: str, title: str, body: str) -> dict[str, Any]:
-    """KAP body'sinden iş anlaşması yapılandırılmış veri çıkar."""
+_AMOUNT_RE = re.compile(
+    r"""(?:İhale\s*bedeli|sözleşme\s*bedeli|sözleşme\s*tutarı|toplam\s*bedel|sözleşme\s*değeri|işin\s*bedeli|alım\s*bedeli|satım\s*bedeli|tutarı|bedeli)
+        [\s:]*
+        (?:KDV\s*hariç|KDV\s*dahil|net|brüt)?[\s:]*
+        ([\d]{1,3}(?:[.\s]\d{3})*(?:,\d+)?|[\d]+(?:,\d+)?)
+        \s*
+        (TL|TRY|USD|EUR|GBP|\$|€|£|TÜRK\s*LİRASI|Türk\s*Lirası|Amerikan\s*Doları|Avro|Euro)
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+# Geniş fallback: "12.100.000 TL" gibi serbest amount-currency
+_AMOUNT_FALLBACK_RE = re.compile(
+    r"([\d]{1,3}(?:[.\s]\d{3})+(?:,\d+)?|[\d]+(?:[.,]\d{3})+(?:,\d+)?)\s*(TL|TRY|USD|EUR|GBP|\$|€|£)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_currency(raw: str) -> str:
+    if not raw:
+        return "TRY"
+    r = raw.upper().replace(" ", "").replace(".", "")
+    if r in ("TL", "TRY", "TÜRKLIRASI", "TÜRKLİRASI", "TURKLIRASI", "₺") or "LIRA" in r or "LİRA" in r:
+        return "TRY"
+    if r in ("USD", "$", "AMERIKANDOLARI") or "DOLAR" in r:
+        return "USD"
+    if r in ("EUR", "€", "AVRO", "EURO"):
+        return "EUR"
+    if r in ("GBP", "£") or "STERLİN" in r or "STERLIN" in r:
+        return "GBP"
+    return "TRY"
+
+
+def _parse_tr_number(raw: str) -> Optional[float]:
+    """Türkçe sayı (12.100.000,50) → float."""
+    if not raw:
+        return None
+    s = raw.strip().replace(" ", "")
+    # 12.100.000,50 → 12100000.50
+    if "," in s:
+        # Son virgülden sonrası ondalık
+        int_part, dec_part = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec_part}")
+        except ValueError:
+            return None
+    # 12.100.000 (sadece nokta — binlik ayraç)
+    s = s.replace(".", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def regex_extract_business_deal(body: str) -> dict[str, Any]:
+    """AI ÇAĞIRMADAN body'den miktar+para birimi+karşı taraf çıkar.
+
+    KAP iş anlaşması bildirimleri ÇOĞUNLUKLA "İhale bedeli KDV hariç X TL'dir" gibi
+    sabit kalıplar içerir. Bu fonksiyon onları regex ile yakalar.
+    """
     out: dict[str, Any] = {
         "amount_original": None, "currency": None,
-        "deal_date": None, "counterparty": None, "summary": None,
+        "counterparty": None, "summary": None, "deal_date": None,
     }
+    if not body:
+        return out
+
+    # 1) Yapılandırılmış pattern: "ihale bedeli ... 12.100.000 TL"
+    m = _AMOUNT_RE.search(body)
+    if not m:
+        # 2) Fallback: herhangi büyük sayı + para birimi (binlik ayırıcılı)
+        m = _AMOUNT_FALLBACK_RE.search(body)
+
+    if m:
+        amount = _parse_tr_number(m.group(1))
+        currency = _normalize_currency(m.group(2))
+        if amount and amount >= 1000:  # 1000 TL altı şüpheli
+            out["amount_original"] = amount
+            out["currency"] = currency
+
+    # Karşı taraf (Müşterinin Adı / Tedarikçinin Adı)
+    cp = re.search(r"(?:Müşterinin|Tedarikçinin)[^:]*?:\s*([^\n\r]{5,200}?)(?:\n|Varsa|İş İlişkisinin|$)", body, re.IGNORECASE)
+    if cp:
+        cp_clean = cp.group(1).strip().rstrip(",.")
+        if 5 < len(cp_clean) < 250:
+            out["counterparty"] = cp_clean
+
+    # Özet — ilk anlamlı paragraf
+    first_para = body.strip().split("\n")[0][:300]
+    if len(first_para) > 30:
+        out["summary"] = first_para
+
+    return out
+
+
+async def ai_parse_business_deal(ticker: str, title: str, body: str) -> dict[str, Any]:
+    """KAP body'sinden iş anlaşması yapılandırılmış veri çıkar.
+
+    Önce regex (deterministik). AI sadece eksik kalan alanlar için fallback.
+    """
+    # ÖNCELİK 1: Regex
+    out = regex_extract_business_deal(body or "")
+    # Eğer amount + currency varsa AI'a hiç gerek yok
+    if out.get("amount_original") and out.get("currency"):
+        logger.info("BusinessDeal regex parse OK: %s %s", out["amount_original"], out["currency"])
+        # Devam etme — AI'a gitmeye gerek yok (counterparty/summary regex'ten geldi)
+        return out
+
+    # ÖNCELİK 2: AI fallback (sadece amount yoksa)
     gemini_key = _get_gemini_key()
     if not gemini_key or not body:
         return out
@@ -254,14 +358,14 @@ async def process_kap_disclosure(
         if existing and existing.amount_try is not None:
             return existing  # Tutar dolu — atla
 
-    # Body bossa KAP URL'den canli cek
+    # Body bossa KAP URL'den canli cek (yeni RSC-aware extractor)
     if (not body or len(body) < 200) and kap_url:
         try:
-            from app.scrapers.kap_all_scraper import fetch_kap_page_content
-            fetched = await fetch_kap_page_content(kap_url)
-            if fetched and len(fetched) > 200:
-                body = fetched
-                logger.info("BusinessDeal body fetched: %s — %d char", ticker, len(body))
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            disclosure = await fetch_kap_disclosure(kap_url)
+            if disclosure and disclosure.get("full_text") and len(disclosure["full_text"]) > 100:
+                body = disclosure["full_text"]
+                logger.info("BusinessDeal body fetched (RSC): %s — %d char", ticker, len(body))
         except Exception as fe:
             logger.warning("BusinessDeal body fetch hata (%s): %s", ticker, fe)
 
