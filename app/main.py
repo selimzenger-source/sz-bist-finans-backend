@@ -8849,10 +8849,11 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
-@app.post("/api/v1/admin/test-kap-notification")
+@app.post("/api/v1/admin/inject-kap-disclosure")
 @limiter.limit("10/minute")
-async def admin_test_kap_notification(request: Request, payload: dict = Body(...)):
-    """Admin: Belirli bir KAP bildirimini manuel olarak isle ve push gonder.
+async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli bir KAP bildirimini manuel olarak DB'ye ekle, AI analiz et,
+    watchlist + portfoy kullanicilarına push gonder.
 
     Body: {
       "admin_password": "...",
@@ -8863,7 +8864,7 @@ async def admin_test_kap_notification(request: Request, payload: dict = Body(...
       "force_send": true  (DB'de varsa bile push at)
     }
 
-    Test akisi: kap_all_disclosures'a ekle/getir → AI analiz → push bildirim
+    Tam akis: kap_all_disclosures'a ekle/getir → AI analiz → notify_kap_watchlist
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
