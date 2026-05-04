@@ -296,6 +296,21 @@ async def _fetch_from_frankfurter(currency: str) -> Optional[float]:
     return None
 
 
+async def _fetch_from_open_er_api(currency: str) -> Optional[float]:
+    """open.er-api.com — ücretsiz, auth'suz, 1500 req/ay limit."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(f"https://open.er-api.com/v6/latest/{currency}")
+            if r.status_code == 200:
+                data = r.json()
+                rate = data.get("rates", {}).get("TRY")
+                if isinstance(rate, (int, float)) and rate > 0:
+                    return float(rate)
+    except Exception as e:
+        logger.debug("open.er-api fail (%s): %s", currency, e)
+    return None
+
+
 async def get_exchange_rate(currency: str) -> tuple[Optional[float], Optional[date]]:
     """Anlık kur (TRY karşılığı) — cache'li.
 
@@ -315,9 +330,18 @@ async def get_exchange_rate(currency: str) -> tuple[Optional[float], Optional[da
 
     # Önce exchangerate.host
     rate = await _fetch_from_exchangerate_host(currency)
-    # Yedek: Frankfurter
+    # Yedek 1: Frankfurter
     if not rate:
         rate = await _fetch_from_frankfurter(currency)
+    # Yedek 2: open.er-api.com
+    if not rate:
+        rate = await _fetch_from_open_er_api(currency)
+    # Son cihat — TCMB statik fallback (yaklaşık değerler)
+    if not rate:
+        STATIC_FALLBACK = {"USD": 38.0, "EUR": 41.0, "GBP": 48.0, "CHF": 43.0}
+        rate = STATIC_FALLBACK.get(currency)
+        if rate:
+            logger.warning("Statik kur fallback kullaniliyor: %s = %s TRY", currency, rate)
 
     if rate:
         _RATES_CACHE[currency] = (rate, now)

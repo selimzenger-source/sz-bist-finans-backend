@@ -8303,6 +8303,11 @@ async def list_business_deals(
         "deal_date": r.deal_date.isoformat() if r.deal_date else None,
         "counterparty": r.counterparty,
         "kap_url": r.kap_url, "source": r.source,
+        # Frontend için kullanıcı dostu etiket (tutar yoksa)
+        "amount_label": (
+            None if r.amount_try
+            else "Tutar belirtilmemiş"
+        ),
     } for r in rows]
 
 
@@ -11704,10 +11709,12 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                         r.amount_try = amt
                         r.exchange_rate_used = 1.0
                     else:
+                        # Yabanci para — amount_original/currency her durumda yaz
+                        # (kur fetch basarisiz olsa bile orjinal tutar kayit olsun)
+                        r.amount_original = amt
+                        r.currency = cur
                         rate, rdate = await get_exchange_rate(cur)
                         if rate:
-                            r.amount_original = amt
-                            r.currency = cur
                             r.amount_try = amt * rate
                             r.exchange_rate_used = rate
                             r.rate_date = rdate
