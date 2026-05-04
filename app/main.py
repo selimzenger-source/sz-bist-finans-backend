@@ -8873,6 +8873,7 @@ async def admin_import_temel_analiz(request: Request, payload: dict = Body(...))
         raise HTTPException(status_code=400, detail="rows list olmali")
 
     from app.models.temel_analiz import TemelAnaliz
+    from app.database import async_session as _async_session
 
     inserted = 0
     updated = 0
@@ -8883,7 +8884,7 @@ async def admin_import_temel_analiz(request: Request, payload: dict = Body(...))
         "ihracat_yuzdesi",
     ]
 
-    async with async_session() as db:
+    async with _async_session() as db:
         for r in rows:
             t = (r.get("ticker") or "").strip().upper()
             if not t or len(t) > 10:
