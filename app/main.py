@@ -11554,21 +11554,32 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
     async with async_session() as db:
-        # 1) Once silinecek bad id'leri tespit et
+        # Bad kayit: '?' / 'Bilinmiyor' / NULL party_name VEYA nominal_lot=0/NULL
+        # Sil kosulu: ya ayni kap_url'da saglikli kayit var, ya da ayni (ticker,date)'te saglikli kayit var
         ids_result = await db.execute(sa_text("""
-            SELECT bad.id, bad.ticker, bad.transaction_date
+            SELECT bad.id, bad.ticker, bad.transaction_date, bad.kap_url, bad.party_name, bad.source
             FROM share_transaction_details bad
             WHERE (bad.party_name IS NULL
                    OR bad.party_name IN ('?', 'Bilinmiyor', '')
                    OR COALESCE(bad.nominal_lot, 0) = 0)
-              AND EXISTS (
-                  SELECT 1 FROM share_transaction_details good
-                  WHERE good.ticker = bad.ticker
-                    AND good.transaction_date = bad.transaction_date
-                    AND good.id <> bad.id
-                    AND good.party_name IS NOT NULL
-                    AND good.party_name NOT IN ('?', 'Bilinmiyor', '')
-                    AND COALESCE(good.nominal_lot, 0) > 0
+              AND (
+                  EXISTS (
+                      SELECT 1 FROM share_transaction_details g1
+                      WHERE g1.kap_url = bad.kap_url
+                        AND g1.id <> bad.id
+                        AND g1.party_name IS NOT NULL
+                        AND g1.party_name NOT IN ('?', 'Bilinmiyor', '')
+                        AND COALESCE(g1.nominal_lot, 0) > 0
+                  )
+                  OR EXISTS (
+                      SELECT 1 FROM share_transaction_details g2
+                      WHERE g2.ticker = bad.ticker
+                        AND g2.transaction_date = bad.transaction_date
+                        AND g2.id <> bad.id
+                        AND g2.party_name IS NOT NULL
+                        AND g2.party_name NOT IN ('?', 'Bilinmiyor', '')
+                        AND COALESCE(g2.nominal_lot, 0) > 0
+                  )
               )
         """))
         bad_rows = ids_result.fetchall()
@@ -11583,7 +11594,7 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
             await db.commit()
     return {
         "deleted_count": deleted_count,
-        "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2])} for r in bad_rows[:50]],
+        "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2]), "kap": r[3], "party": r[4], "source": r[5]} for r in bad_rows[:80]],
     }
 
 
@@ -11719,12 +11730,13 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
             from datetime import datetime as _dt2, timezone as _tz2
             pay_parsed = await fetch_kap_pay_alim_satim(kap_url)
             result["processors"]["pay_alim_satim"] = pay_parsed or {"parsed": None}
-            # Eger ticker bulunduysa DB'ye kaydet
-            if pay_parsed and pay_parsed.get("ticker"):
+            # Ticker: fetcher'dan veya payload hint'inden
+            tx_ticker = (pay_parsed.get("ticker") if pay_parsed else None) or ticker_hint
+            if pay_parsed and tx_ticker:
                 try:
                     saved = await upsert_pay_alim_satim_from_kap(
                         db, kap_url=kap_url,
-                        company_code=pay_parsed["ticker"],
+                        company_code=tx_ticker,
                         title="Pay Alım Satım Bildirimi",
                         published_at=_dt2.now(_tz2.utc),
                         disclosure_id=None,
