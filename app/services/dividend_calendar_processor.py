@@ -98,6 +98,42 @@ def classify_event(title: str) -> str:
     return "unknown"
 
 
+def classify_event_with_body(title: str, body: str) -> str:
+    """Title yetersizse BODY'ye bakarak siniflandir.
+
+    KAP basliklari coğunlukla generic ("Kar Payı Dağıtım İşlemlerine İlişkin Bildirim"),
+    fakat body'de "kar payı dağıtılmamasına karar verilmiştir" / "dağıtım yapılmasına"
+    gibi acik ifadeler var.
+    """
+    # Once title-based classify
+    by_title = classify_event(title or "")
+
+    # Title net 'rejection' veya 'payment' dediyse o
+    if by_title in ("rejection", "payment", "ga_approval"):
+        return by_title
+
+    # Body'de dağıtmama ipucu ara
+    if body:
+        b = lower_tr(body)
+        if any(p in b for p in _PATTERN_REJECTION):
+            return "rejection"
+        # Body'de "dağıtılmaması", "dağıtmama", "kar payı dağıtmama" vb.
+        rejection_phrases = [
+            "kar payı dağıtılmama", "kar payi dagitilmama",
+            "kâr dağıtılmama", "kar dagitilmama",
+            "dağıtılmamasına karar", "dagitilmamasina karar",
+            "dağıtılmaması", "dagitilmamasi",
+            "dağıtmama kararı", "dagitmama karari",
+            "kar payı dağıtmama", "kar payi dagitmama",
+            "temettü dağıtılmaya", "temettu dagitilmaya",
+            "kar payı dağıtım yapılmama", "kar payi dagitim yapilmama",
+        ]
+        if any(p in b for p in rejection_phrases):
+            return "rejection"
+
+    return by_title
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Gemini AI parser
 # ═══════════════════════════════════════════════════════════════════
@@ -259,7 +295,8 @@ async def process_kap_disclosure(
     if not is_dividend(title):
         return None
 
-    event_type = classify_event(title)
+    # Title yetersizse body'ye bak (dağıtmama coğunlukla body'de gizli)
+    event_type = classify_event_with_body(title, body or "")
     if event_type == "unknown":
         event_type = "ykk"
 

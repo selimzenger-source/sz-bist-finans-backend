@@ -11653,7 +11653,7 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization"]
+    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization", "dividend_rejection"]
     days = int(payload.get("days") or 90)
     limit_n = int(payload.get("limit") or 500)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -11783,6 +11783,55 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                 summary["updates"]["dividend_payment"] = {"scanned": len(rows), "updated": div_updated}
             if "mkk_realization" in cats:
                 summary["updates"]["mkk_realization"] = {"scanned": len(rows), "updated": mkk_updated}
+
+        # ─── 3. dividend_rejection: existing DividendCalendar rows + KAP body re-classify
+        if "dividend_rejection" in cats:
+            from app.services.dividend_calendar_processor import classify_event_with_body
+            from app.models.dividend_calendar import DividendCalendar
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from sqlalchemy import select as _sel
+
+            # Tüm DividendCalendar reddedildi olmayan kayıtlar
+            dc_rows = (await db.execute(
+                _sel(DividendCalendar)
+                .where(DividendCalendar.status != "reddedildi")
+                .where(DividendCalendar.created_at >= cutoff)
+                .limit(limit_n)
+            )).scalars().all()
+
+            updated_rej = 0
+            for r in dc_rows:
+                # KAP disclosure linkini bul
+                kid = r.ykk_kap_disclosure_id or r.general_assembly_kap_disclosure_id
+                if not kid:
+                    continue
+                kap = (await db.execute(
+                    _sel(KapAllDisclosure).where(KapAllDisclosure.id == kid).limit(1)
+                )).scalar_one_or_none()
+                if not kap:
+                    continue
+
+                body = kap.body or ""
+                if (not body or len(body) < 200) and kap.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(kap.kap_url)
+                        if disc and disc.get("full_text"):
+                            body = disc["full_text"]
+                    except Exception:
+                        continue
+
+                event = classify_event_with_body(kap.title or "", body)
+                if event == "rejection":
+                    r.status = "reddedildi"
+                    if kid and not r.rejection_kap_disclosure_id:
+                        r.rejection_kap_disclosure_id = kid
+                    if kap.kap_url and not r.rejection_kap_url:
+                        r.rejection_kap_url = kap.kap_url
+                    if not r.rejected_at:
+                        r.rejected_at = kap.published_at or datetime.now(timezone.utc)
+                    updated_rej += 1
+            await db.flush()
+            summary["updates"]["dividend_rejection"] = {"scanned": len(dc_rows), "updated": updated_rej}
 
         await db.commit()
 
