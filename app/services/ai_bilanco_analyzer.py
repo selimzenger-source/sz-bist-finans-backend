@@ -328,7 +328,8 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
             if existing:
                 # AI parse verisini güncelle (henüz IsYatirim gelmemişse)
                 for field in ["revenue", "gross_profit", "operating_profit", "net_income",
-                              "ebitda", "total_assets", "total_equity", "total_debt",
+                              "ebitda", "total_assets", "current_assets", "non_current_assets",
+                              "total_equity", "total_debt",
                               "net_debt", "cash_and_equivalents"]:
                     val = parsed.get(field)
                     if val is not None:
@@ -345,6 +346,8 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                     net_income=parsed.get("net_income"),
                     ebitda=parsed.get("ebitda"),
                     total_assets=parsed.get("total_assets"),
+                    current_assets=parsed.get("current_assets"),
+                    non_current_assets=parsed.get("non_current_assets"),
                     total_equity=parsed.get("total_equity"),
                     total_debt=parsed.get("total_debt"),
                     net_debt=parsed.get("net_debt"),
