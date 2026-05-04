@@ -12052,7 +12052,10 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
 
             be_enriched = 0
             be_skipped = 0
+            import asyncio as _asyncio_be
             for r in cf_rows:
+                # KAP rate-limit: her fetch arasinda 3 sn bekle
+                await _asyncio_be.sleep(3)
                 # Bu ticker+period icin KAP disclosure bul (Finansal Rapor / Bilanço)
                 kap = (await db.execute(
                     _sel(KapAllDisclosure)
