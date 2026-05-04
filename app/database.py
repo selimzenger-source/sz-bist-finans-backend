@@ -839,6 +839,18 @@ async def init_db():
         except Exception:
             pass
 
+        # v55b migration: temel_analiz numeric precision genisletme (banka/sigorta extreme degerler)
+        try:
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fk TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pddd TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fd_favok TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pd_efk TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN yat_fon_oran TYPE NUMERIC(15, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN emeklilik_fon_oran TYPE NUMERIC(15, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN defter_degeri TYPE NUMERIC(20, 4)"))
+        except Exception:
+            pass
+
         # v55 migration: temel_analiz tablosu (yerel Excel sync ile beslenir, 2 saatte bir)
         try:
             await conn.execute(text("""
