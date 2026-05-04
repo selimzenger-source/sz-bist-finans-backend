@@ -839,19 +839,8 @@ async def init_db():
         except Exception:
             pass
 
-        # v55b migration: temel_analiz numeric precision genisletme (banka/sigorta extreme degerler)
-        try:
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fk TYPE NUMERIC(20, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pddd TYPE NUMERIC(20, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fd_favok TYPE NUMERIC(20, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pd_efk TYPE NUMERIC(20, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN yat_fon_oran TYPE NUMERIC(15, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN emeklilik_fon_oran TYPE NUMERIC(15, 4)"))
-            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN defter_degeri TYPE NUMERIC(20, 4)"))
-        except Exception:
-            pass
-
         # v55 migration: temel_analiz tablosu (yerel Excel sync ile beslenir, 2 saatte bir)
+        # ÖNCE CREATE, SONRA ALTER (v55b)
         try:
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS temel_analiz (
@@ -860,20 +849,32 @@ async def init_db():
                     sektor VARCHAR(100),
                     dolasim_lot NUMERIC(18, 0),
                     ozsermaye NUMERIC(20, 2),
-                    yat_fon_oran NUMERIC(10, 4),
-                    emeklilik_fon_oran NUMERIC(10, 4),
+                    yat_fon_oran NUMERIC(15, 4),
+                    emeklilik_fon_oran NUMERIC(15, 4),
                     piyasa_degeri NUMERIC(20, 2),
-                    defter_degeri NUMERIC(15, 4),
-                    fk NUMERIC(10, 4),
-                    pddd NUMERIC(10, 4),
-                    fd_favok NUMERIC(10, 4),
-                    pd_efk NUMERIC(10, 4),
+                    defter_degeri NUMERIC(20, 4),
+                    fk NUMERIC(20, 4),
+                    pddd NUMERIC(20, 4),
+                    fd_favok NUMERIC(20, 4),
+                    pd_efk NUMERIC(20, 4),
                     ihracat_yuzdesi NUMERIC(6, 2),
                     source VARCHAR(30) DEFAULT 'excel_sync',
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """))
             await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_temel_ticker ON temel_analiz(ticker)"))
+        except Exception:
+            pass
+
+        # v55b migration: mevcut tablo eski precision ile olusmus olabilir → ALTER
+        try:
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fk TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pddd TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN fd_favok TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN pd_efk TYPE NUMERIC(20, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN yat_fon_oran TYPE NUMERIC(15, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN emeklilik_fon_oran TYPE NUMERIC(15, 4)"))
+            await conn.execute(text("ALTER TABLE temel_analiz ALTER COLUMN defter_degeri TYPE NUMERIC(20, 4)"))
         except Exception:
             pass
 
