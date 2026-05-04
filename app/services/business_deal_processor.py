@@ -94,7 +94,7 @@ async def ai_parse_business_deal(ticker: str, title: str, body: str) -> dict[str
     gemini_key = _get_gemini_key()
     if not gemini_key or not body:
         return out
-    prompt = _PARSE_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:4000])
+    prompt = _PARSE_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:30000])
     try:
         async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
             resp = await client.post(
@@ -246,12 +246,13 @@ async def process_kap_disclosure(
     if not is_business_deal(title):
         return None
 
-    # Mevcut kayıt — aynı disclosure_id'den varsa skip
+    # Mevcut kayit — varsa amount_try doluysa skip, bossa re-parse + UPDATE
+    existing = None
     if disclosure_id:
         stmt = select(BusinessDeal).where(BusinessDeal.kap_disclosure_id == disclosure_id).limit(1)
         existing = (await db.execute(stmt)).scalar_one_or_none()
-        if existing:
-            return existing
+        if existing and existing.amount_try is not None:
+            return existing  # Tutar dolu — atla
 
     parsed = await ai_parse_business_deal(ticker, title, body or "")
 
@@ -271,6 +272,22 @@ async def process_kap_disclosure(
             rate_used, rate_date = await get_exchange_rate(currency)
             if rate_used:
                 amount_try = amount_original * rate_used
+
+    # Mevcut kaydi UPDATE et — yeni AI parse sonucuyla
+    if existing:
+        if amount_original is not None:
+            existing.amount_original = amount_original
+            existing.currency = currency
+            existing.amount_try = amount_try
+            existing.exchange_rate_used = rate_used
+            existing.rate_date = rate_date
+        if parsed.get("counterparty") and not existing.counterparty:
+            existing.counterparty = parsed["counterparty"]
+        if parsed.get("summary") and not existing.summary:
+            existing.summary = parsed["summary"]
+        await db.flush()
+        logger.info("BusinessDeal: UPDATE (%s, %s %s)", ticker, amount_original, currency)
+        return existing
 
     new_row = BusinessDeal(
         ticker=ticker,
