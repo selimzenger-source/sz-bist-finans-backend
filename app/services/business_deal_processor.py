@@ -254,6 +254,17 @@ async def process_kap_disclosure(
         if existing and existing.amount_try is not None:
             return existing  # Tutar dolu — atla
 
+    # Body bossa KAP URL'den canli cek
+    if (not body or len(body) < 200) and kap_url:
+        try:
+            from app.scrapers.kap_all_scraper import fetch_kap_page_content
+            fetched = await fetch_kap_page_content(kap_url)
+            if fetched and len(fetched) > 200:
+                body = fetched
+                logger.info("BusinessDeal body fetched: %s — %d char", ticker, len(body))
+        except Exception as fe:
+            logger.warning("BusinessDeal body fetch hata (%s): %s", ticker, fe)
+
     parsed = await ai_parse_business_deal(ticker, title, body or "")
 
     deal_date = parsed.get("deal_date") or (published_at.date() if published_at else date.today())
