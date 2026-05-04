@@ -490,13 +490,12 @@ async def fetch_kap_page_content(kap_url: str) -> str:
                     page_text = soup.get_text(" ", strip=True)
                     # Sadece anlamli kisimlari al (min 50 karakter)
                     if page_text and len(page_text) > 50:
-                        # Cok uzun ise ilk 3000 karakteri al
-                        body_parts.append(page_text[:3000])
+                        body_parts.append(page_text)  # Tam body — bilanço için 30K+ char gerekli
 
                 body = "\n".join(body_parts).strip()
                 if body and len(body) > 20:
                     logger.info("KAP sayfa icerigi alindi: %s (%d karakter)", bildirim_id, len(body))
-                    return body[:4000]  # Max 4000 karakter (AI prompt siniri)
+                    return body[:60000]  # Max 60K karakter (Finansal Rapor için yeterli; AI tarafı ayrıca kısaltır)
 
             except Exception as exc:
                 logger.debug("KAP sayfa hatasi (%s): %s", bildirim_id, exc)

@@ -250,10 +250,11 @@ async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
         logger.warning("KAP parse: %s — içerik çok kısa", ticker)
         return None
 
+    # Finansal Rapor body'i 30K+ karakter olabilir — AI prompt limitine sığsın diye 30K cap
     user_message = (
-        f"Aşağıdaki {ticker} hissesinin KAP bildirimi metninden "
+        f"Aşağıdaki {ticker} hissesinin KAP Finansal Rapor metninden "
         f"bilanço/gelir tablosu rakamlarını çıkar:\n\n"
-        f"---\n{kap_content[:8000]}\n---"
+        f"---\n{kap_content[:30000]}\n---"
     )
 
     content = await _call_ai_abacus(_PARSE_SYSTEM_PROMPT, user_message)
