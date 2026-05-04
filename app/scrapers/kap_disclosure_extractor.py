@@ -256,3 +256,4 @@ if __name__ == "__main__":
             print(f"full_text head: {result['full_text'][:300]}")
 
     asyncio.run(main())
+# trigger deploy 2026-05-04 17:59:31.703445
