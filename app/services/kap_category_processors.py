@@ -199,44 +199,130 @@ KURALLAR: Bilinmeyenler null. SADECE JSON.
 """
 
 
+def _parse_tc_table(body: str) -> list[dict]:
+    """KAP Tipe Dönüşüm tablosundan TÜM satırları çıkar.
+
+    Tablo formatı (RSC decoded, " | " ayraçlı):
+      Borsa Kodu | Sıra No | Pay Unvanı | Grubu | Yatırımcı | Nominal Tutar (TL)
+
+    Örnek satır:
+      CEMZY | 1 | CEM ZEYTİN A..Ş. | E | ERKAN AKTAŞ | 6.620.814,900
+
+    Returns: [{"ticker", "company_name", "investor_name", "nominal_tl"}, ...]
+    """
+    if not body:
+        return []
+
+    # Pattern: <TICKER (3-6 büyük harf)> | <sira_no (1-3 digit)> | <şirket adı> | <grup> | <yatırımcı> | <nominal>
+    # nominal: 6.620.814,900 / 13,000 / 100.000,000
+    pattern = re.compile(
+        r"\b([A-Z]{3,6})\s*\|\s*"            # Borsa Kodu
+        r"(\d{1,4})\s*\|\s*"                   # Sıra No
+        r"([^|]{3,200}?)\s*\|\s*"              # Pay Unvanı (şirket)
+        r"([A-Z])\s*\|\s*"                     # Grubu (E/Y vb.)
+        r"([^|]{2,100}?)\s*\|\s*"              # Yatırımcı
+        r"([\d.]+(?:,\d+)?)"                   # Nominal Tutar
+    )
+
+    results = []
+    seen = set()
+    for m in pattern.finditer(body):
+        ticker = m.group(1).strip().upper()
+        company_name = m.group(3).strip().rstrip(".")
+        investor = m.group(5).strip()
+        nominal_raw = m.group(6).strip()
+        # Nominal: "6.620.814,900" → 6620814.9
+        try:
+            nominal_val = float(nominal_raw.replace(".", "").replace(",", "."))
+        except ValueError:
+            nominal_val = None
+
+        key = (ticker, m.group(2), investor)  # ticker + sıra + yatırımcı eşleştirme
+        if key in seen:
+            continue
+        seen.add(key)
+
+        results.append({
+            "ticker": ticker,
+            "company_name": company_name[:255],
+            "investor_name": investor[:255],
+            "nominal_tl": nominal_val,
+            "row_no": int(m.group(2)),
+        })
+
+    return results
+
+
 async def process_type_conversion(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],
-) -> Optional[ShareTypeConversion]:
+) -> Optional[list[ShareTypeConversion]]:
+    """KAP Tipe Dönüşüm bildirimi → tablodaki TÜM satırları işle (multi-ticker, multi-investor)."""
     if not is_type_conversion(title):
         return None
-    if kap_url:
-        stmt = select(ShareTypeConversion).where(ShareTypeConversion.kap_url == kap_url).limit(1)
-        if (await db.execute(stmt)).scalar_one_or_none():
-            return None
 
-    parsed = await _call_gemini(_TC_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:3000])) or {}
-
-    tx_date = None
-    if isinstance(parsed.get("transaction_date"), str):
+    # Body yoksa RSC extractor'dan canli cek
+    body_text = body or ""
+    if (not body_text or len(body_text) < 200) and kap_url:
         try:
-            tx_date = date.fromisoformat(parsed["transaction_date"])
-        except ValueError:
-            pass
-    if not tx_date:
-        tx_date = published_at.date() if published_at else date.today()
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            disclosure = await fetch_kap_disclosure(kap_url)
+            if disclosure and disclosure.get("full_text"):
+                body_text = disclosure["full_text"]
+        except Exception as e:
+            logger.warning("TypeConversion body fetch hata: %s", e)
 
-    investor = parsed.get("investor_name") or "?"
-    converted = parsed.get("converted_lot")
+    # Tablodaki TÜM satırları parse et
+    rows_data = _parse_tc_table(body_text)
+    if not rows_data:
+        # Tablo bulunamadı — eski tek-ticker AI fallback
+        logger.warning("TypeConversion: tablo parse boş, AI fallback (%s)", kap_url)
+        parsed = await _call_gemini(_TC_PROMPT.format(ticker=ticker, title=title or "", body=body_text[:3000])) or {}
+        investor = parsed.get("investor_name") or "?"
+        converted = parsed.get("converted_lot")
+        rows_data = [{
+            "ticker": ticker,
+            "company_name": company_name or "",
+            "investor_name": str(investor)[:255],
+            "nominal_tl": float(converted) if isinstance(converted, (int, float)) else None,
+            "row_no": 1,
+        }]
 
-    new_row = ShareTypeConversion(
-        ticker=ticker,
-        company_name=company_name,
-        transaction_date=tx_date,
-        investor_name=str(investor)[:255],
-        converted_lot=(int(converted) if isinstance(converted, (int, float)) else None),
-        kap_url=kap_url,
-        source="kap_ai_parse",
-    )
-    db.add(new_row)
-    await db.flush()
-    logger.info("TypeConversion: yeni (%s, %s)", ticker, investor[:30])
-    return new_row
+    # Tarih
+    tx_date = published_at.date() if published_at else date.today()
+
+    inserted_rows: list[ShareTypeConversion] = []
+    for d in rows_data:
+        # Duplicate kontrolü: kap_url + ticker + investor + nominal kombinasyonu
+        if kap_url:
+            check = await db.execute(
+                select(ShareTypeConversion).where(
+                    ShareTypeConversion.kap_url == kap_url,
+                    ShareTypeConversion.ticker == d["ticker"],
+                    ShareTypeConversion.investor_name == d["investor_name"],
+                ).limit(1)
+            )
+            if check.scalar_one_or_none():
+                continue  # zaten var
+
+        new_row = ShareTypeConversion(
+            ticker=d["ticker"],
+            company_name=d.get("company_name"),
+            transaction_date=tx_date,
+            investor_name=d["investor_name"],
+            converted_lot=int(d["nominal_tl"]) if d.get("nominal_tl") else None,
+            kap_url=kap_url,
+            source="kap_table_parse",
+        )
+        db.add(new_row)
+        inserted_rows.append(new_row)
+
+    if inserted_rows:
+        await db.flush()
+        tickers = [r.ticker for r in inserted_rows]
+        logger.info("TypeConversion: %d satir eklendi - tickers=%s", len(inserted_rows), tickers)
+
+    return inserted_rows
 
 
 # ═══════════════════════════════════════════════════════════════════

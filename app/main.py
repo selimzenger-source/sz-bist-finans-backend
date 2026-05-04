@@ -11663,7 +11663,7 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization", "dividend_rejection"]
+    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization", "dividend_rejection", "type_conversion"]
     days = int(payload.get("days") or 90)
     limit_n = int(payload.get("limit") or 500)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -11844,6 +11844,74 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                     updated_rej += 1
             await db.flush()
             summary["updates"]["dividend_rejection"] = {"scanned": len(dc_rows), "updated": updated_rej}
+
+        # ─── 5. type_conversion: KAP body'deki tabloyu yeniden parse et,
+        # eski tek-satirli yanlis kayitlari sil + yeni tum satirlari ekle
+        if "type_conversion" in cats:
+            from app.services.kap_category_processors import (
+                is_type_conversion, _parse_tc_table,
+            )
+            from app.models.share_type_conversion import ShareTypeConversion
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from sqlalchemy import select as _sel, delete as _del
+
+            # Tipe Dönüşüm KAP haberleri
+            kap_rows = (await db.execute(
+                _sel(KapAllDisclosure)
+                .where(KapAllDisclosure.published_at >= cutoff)
+                .where(or_(
+                    KapAllDisclosure.title.ilike("%tipe dönüşüm%"),
+                    KapAllDisclosure.title.ilike("%tipe donusum%"),
+                    KapAllDisclosure.title.ilike("%borsada işlem gören tipe%"),
+                ))
+                .limit(limit_n)
+            )).scalars().all()
+
+            tc_added = 0
+            tc_removed = 0
+            for kap in kap_rows:
+                body = kap.body or ""
+                if (not body or len(body) < 200) and kap.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(kap.kap_url)
+                        if disc and disc.get("full_text"):
+                            body = disc["full_text"]
+                    except Exception:
+                        continue
+
+                rows_data = _parse_tc_table(body)
+                if not rows_data:
+                    continue
+
+                # Eski tek-satirli yanlis kayitlari sil (kap_url match ama satir sayisi az ise)
+                existing = (await db.execute(
+                    _sel(ShareTypeConversion)
+                    .where(ShareTypeConversion.kap_url == kap.kap_url)
+                )).scalars().all()
+                if len(existing) < len(rows_data):
+                    for old in existing:
+                        await db.delete(old)
+                        tc_removed += 1
+
+                    # Tum satirlari ekle
+                    for d in rows_data:
+                        new_row = ShareTypeConversion(
+                            ticker=d["ticker"],
+                            company_name=d.get("company_name"),
+                            transaction_date=kap.published_at.date() if kap.published_at else None,
+                            investor_name=d["investor_name"],
+                            converted_lot=int(d["nominal_tl"]) if d.get("nominal_tl") else None,
+                            kap_url=kap.kap_url,
+                            source="kap_table_parse",
+                        )
+                        db.add(new_row)
+                        tc_added += 1
+            await db.flush()
+            summary["updates"]["type_conversion"] = {
+                "scanned": len(kap_rows),
+                "removed": tc_removed,
+                "added": tc_added,
+            }
 
         # ─── 4. dividend_misclassified: 'Hak Kullanımı' başlıklı KAP'lar için
         # body bedelsiz sermaye artırımıysa ilgili DividendCalendar kaydını sil
