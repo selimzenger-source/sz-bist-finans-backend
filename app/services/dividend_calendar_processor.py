@@ -576,27 +576,30 @@ async def process_dividend_payment_announcement(
         ticker = item["ticker"]
         gross = item["gross_amount_per_share"]
 
-        # Eşleşme stratejisi: ticker + ±5% gross_amount toleransı
-        # En güncel tarih_belli/odeniyor kaydını al
+        # Eşleşme stratejisi: ticker — TÜM statuslerden son kaydı al
+        # (Eskiden sadece tarih_belli/odeniyor — ama ya hiç YKK girilmemişse?)
+        # ±%5 gross match önce, yoksa en güncel kayıt.
         stmt = (
             select(DividendCalendar)
             .where(DividendCalendar.ticker == ticker)
-            .where(DividendCalendar.status.in_(["tarih_belli", "odeniyor", "genel_kurul_onayli"]))
-            .order_by(DividendCalendar.payment_date.desc().nullslast())
-            .limit(5)
+            .order_by(DividendCalendar.created_at.desc())
+            .limit(10)
         )
         rows = (await db.execute(stmt)).scalars().all()
 
         target = None
         if rows:
-            # Önce gross_amount_per_share match (±%5)
+            # Önce ±%5 gross match
             for r in rows:
                 if r.gross_amount_per_share and abs(r.gross_amount_per_share - gross) / max(gross, 1e-9) < 0.05:
                     target = r
                     break
-            # Match yoksa en yeni payment_date olanı al
+            # Match yoksa en yeni kaydı al — AMA tamamlandi/reddedildi DEĞİL
             if target is None:
-                target = rows[0]
+                for r in rows:
+                    if r.status not in ("tamamlandi", "reddedildi"):
+                        target = r
+                        break
 
         if target:
             target.status = "tamamlandi"
@@ -611,8 +614,18 @@ async def process_dividend_payment_announcement(
             updated_tickers.append(ticker)
             logger.info("DividendPayment: %s tamamlandi (gross=%s)", ticker, gross)
         else:
-            not_found.append(ticker)
-            logger.warning("DividendPayment: %s için DividendCalendar kaydı bulunamadı", ticker)
+            # Hiç DividendCalendar kaydı yok — yeni satır oluştur
+            new_row = DividendCalendar(
+                ticker=ticker,
+                gross_amount_per_share=gross,
+                payment_date=today,
+                payment_kap_disclosure_id=disclosure_id,
+                payment_kap_url=kap_url,
+                status="tamamlandi",
+            )
+            db.add(new_row)
+            updated_tickers.append(ticker)
+            logger.info("DividendPayment: %s YENİ tamamlandi kayıt (gross=%s)", ticker, gross)
 
     if updated_tickers:
         await db.flush()

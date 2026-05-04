@@ -293,10 +293,6 @@ async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
     )
     return result
 
-    except json.JSONDecodeError:
-        logger.warning("KAP bilanço parse JSON hatası: %s", ticker)
-        return None
-
 
 async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
     """
