@@ -11871,8 +11871,9 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
             tc_removed = 0
             tc_debug = []
             for kap in kap_rows:
-                body = kap.body or ""
-                if (not body or len(body) < 200) and kap.kap_url:
+                # Tipe donusum tablosu icin daima full RSC body gerekli (>5K char)
+                body = ""
+                if kap.kap_url:
                     try:
                         disc = await fetch_kap_disclosure(kap.kap_url)
                         if disc and disc.get("full_text"):
