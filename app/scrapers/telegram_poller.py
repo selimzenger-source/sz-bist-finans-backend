@@ -429,25 +429,28 @@ async def _route_to_calendars(
         logger.warning("Router→buyback hata (%s): %s", ticker, e)
 
     if is_share_transaction(title):
-        try:
-            await shtx_process(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
-                kap_url=kap_url, published_at=published_at,
-            )
-        except Exception as e:
-            logger.warning("Router→share_transaction hata (%s): %s", ticker, e)
-
-        # YENİ: KAP URL'den structured table fetch (oy_hakki/pay_orani değişimi)
+        # ÖNCE: KAP URL'den structured table fetch (deterministik, daha güvenilir)
+        kap_fetch_ok = False
         if kap_url:
             try:
                 from app.services.kap_pay_alim_satim_fetcher import upsert_pay_alim_satim_from_kap
-                await upsert_pay_alim_satim_from_kap(
+                kap_fetch_ok = await upsert_pay_alim_satim_from_kap(
                     session, kap_url=kap_url, company_code=ticker,
                     title=title, published_at=published_at, disclosure_id=disclosure_id,
                 )
             except Exception as e:
                 logger.warning("Router→kap_pay_fetch hata (%s): %s", ticker, e)
+
+        # SADECE yeni fetcher fail olursa AI parser fallback (duplicate önlenir)
+        if not kap_fetch_ok:
+            try:
+                await shtx_process(
+                    session, disclosure_id=disclosure_id, ticker=ticker,
+                    company_name=company_name, title=title, body=body,
+                    kap_url=kap_url, published_at=published_at,
+                )
+            except Exception as e:
+                logger.warning("Router→share_transaction hata (%s): %s", ticker, e)
 
     if is_block_trade(title):
         try:

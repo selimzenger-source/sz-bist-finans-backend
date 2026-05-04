@@ -147,6 +147,103 @@ def _extract_body_text(html: str) -> str:
     return text[:2000]
 
 
+def extract_price_range(body: str) -> tuple[Optional[float], Optional[float]]:
+    """Body'den fiyat aralığı çikarir.
+
+    Ornekler:
+      "15,45-15,80 TL fiyat aralığından" -> (15.45, 15.80)
+      "21 TL fiyattan" -> (21.0, 21.0)
+      "15,73 - 15,90 TL araliginda" -> (15.73, 15.90)
+    """
+    if not body:
+        return (None, None)
+    # Range: "X,XX-Y,YY TL" or "X,XX - Y,YY TL"
+    m = re.search(r"(\d{1,4}(?:[.,]\d{1,4})?)\s*[-–]\s*(\d{1,4}(?:[.,]\d{1,4})?)\s*TL", body)
+    if m:
+        lo = _parse_tr_decimal(m.group(1))
+        hi = _parse_tr_decimal(m.group(2))
+        if lo is not None and hi is not None and 0 < lo <= hi < 100000:
+            return (lo, hi)
+    # Single: "21 TL fiyattan" / "X,XX TL fiyat"
+    m = re.search(r"(\d{1,4}(?:[.,]\d{1,4})?)\s*TL\s*fiyat", body, re.IGNORECASE)
+    if m:
+        v = _parse_tr_decimal(m.group(1))
+        if v is not None and 0 < v < 100000:
+            return (v, v)
+    return (None, None)
+
+
+def extract_nominal_from_body(body: str) -> Optional[int]:
+    """Body'den nominal lot/adet çikar (tablo yoksa fallback).
+
+    "1.154.631 adet payın" -> 1154631
+    "30.925.229,00 TL toplam nominal" -> 30925229 (TL ise lot ozdes)
+    """
+    if not body:
+        return None
+    m = re.search(r"([\d\.]{4,20})\s*adet\s*pay", body, re.IGNORECASE)
+    if m:
+        v = _parse_tr_int(m.group(1))
+        if v and v > 100:
+            return v
+    m = re.search(r"([\d\.]{4,20})(?:,\d+)?\s*TL\s*toplam\s*nominal", body, re.IGNORECASE)
+    if m:
+        v = _parse_tr_int(m.group(1))
+        if v and v > 100:
+            return v
+    return None
+
+
+def extract_party_from_html_header(html: str) -> Optional[str]:
+    """KAP HTML'inden 'Bildirimi Yapan' şirket adını cek.
+
+    KAP Next.js href slug'undan veya direkt başlık'tan.
+    href: /tr/sirket-bilgileri/ozet/2354-atlas-portfoy-yonetimi-a-s
+    -> ATLAS PORTFÖY YÖNETİMİ A.Ş.
+    """
+    if not html:
+        return None
+    # Slug'lardan firma adı (ozet/XXXX-slug-name)
+    m = re.search(r"/sirket-bilgileri/ozet/\d+-([a-z0-9\-]+)", html)
+    if m:
+        slug = m.group(1)
+        # slug -> Title Case + TR replace
+        words = slug.replace("-", " ").split()
+        # Bilinen kisaltma map
+        map_short = {"a": "A.", "s": "Ş.", "as": "A.Ş.", "ltd": "Ltd.", "sti": "Şti."}
+        out = []
+        i = 0
+        while i < len(words):
+            w = words[i]
+            # "a s" -> "A.Ş."
+            if w == "a" and i + 1 < len(words) and words[i+1] == "s":
+                out.append("A.Ş.")
+                i += 2
+                continue
+            if w in map_short:
+                out.append(map_short[w])
+            else:
+                out.append(w.upper())  # Türkçe karakter eşlemesi yapay zekanın yerine kelime küçük gelirse capitalize yeter
+            i += 1
+        name = " ".join(out)
+        # Common TR substitutions in slug
+        name = name.replace("YONETIMI", "YÖNETİMİ").replace("YONETIM", "YÖNETİM")
+        name = name.replace("PORTFOY", "PORTFÖY").replace("ISYATIRIM", "İŞ YATIRIM")
+        name = name.replace("TICARET", "TİCARET").replace("URETIM", "ÜRETİM")
+        name = name.replace("INSAAT", "İNŞAAT").replace("SANAYI", "SANAYİ")
+        name = name.replace("ELEKTRIK", "ELEKTRİK").replace("KIMYA", "KİMYA")
+        name = name.replace("TURIZM", "TURİZM").replace("ITHALAT", "İTHALAT")
+        name = name.replace("IHRACAT", "İHRACAT").replace("ISLETME", "İŞLETME")
+        name = name.replace("ISLETMELERI", "İŞLETMELERİ")
+        name = name.replace("DENIZCILIK", "DENİZCİLİK")
+        name = name.replace("HIZMETLERI", "HİZMETLERİ")
+        if "A.Ş." not in name and "AŞ" not in name:
+            name += " A.Ş."
+        if 5 <= len(name) <= 200:
+            return name
+    return None
+
+
 def extract_party_name(body: str) -> Optional[str]:
     """Body metninden party adını çıkar (basit regex).
 
@@ -186,18 +283,24 @@ async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncCli
         html = resp.text
 
         # Önce RSC decode dene (yeni KAP)
+        decoded_html = None
         try:
             from app.scrapers.kap_disclosure_extractor import _decode_rsc_chunks
-            decoded = _decode_rsc_chunks(html)
-            if decoded and "<td" in decoded.lower():
-                result = parse_kap_html(decoded)
-                if result:
-                    return result
+            decoded_html = _decode_rsc_chunks(html)
         except Exception as de:
-            logger.debug("RSC decode hata, raw HTML'e düşülüyor: %s", de)
+            logger.debug("RSC decode hata: %s", de)
 
-        # Fallback: raw HTML
-        return parse_kap_html(html)
+        result = None
+        if decoded_html and "<td" in decoded_html.lower():
+            result = parse_kap_html(decoded_html)
+        if result is None:
+            # Fallback: raw HTML
+            result = parse_kap_html(html)
+        if result is None:
+            result = {"body_text": _extract_body_text(decoded_html or html), "_no_table": True}
+        # Header'dan party (slug bazli) — body fail olursa kullanilacak
+        result["party_name_header"] = extract_party_from_html_header(decoded_html or html)
+        return result
     except Exception as e:
         logger.warning("KAP fetch hata (%s): %s", url, e)
         return None
@@ -253,20 +356,57 @@ async def upsert_pay_alim_satim_from_kap(
 
     nominal_lot = int(parsed.get("alim_nominal") or parsed.get("satim_nominal") or 0)
     body = parsed.get("body_text") or ""
-    party_name = extract_party_name(body)
-    # Fallback patterns — "Ortağı XXX'den gelen yazı" / "XXX A.Ş. tarafından"
-    if not party_name:
-        import re as _re
-        m = _re.search(r"Ortağı\s+([^'’]{5,150}?)['’]?(?:den|dan)\s+gelen", body, _re.IGNORECASE)
+    # Tablo yoksa body'den nominal cek
+    if not nominal_lot:
+        nb = extract_nominal_from_body(body)
+        if nb:
+            nominal_lot = nb
+
+    # Sira: 1) Ortagi/kurucu spesifik patterns, 2) generic body, 3) header slug, 4) Bilinmiyor
+    party_name = None
+    import re as _re
+    # 1) Ortagi/kurucu/araciliyla — KAP body'nin standart kalibi
+    body_clean = body.replace("\xa0", " ")
+    for pat in [
+        r"Ortağı\s+([A-ZÇĞİÖŞÜ][^'’\.]{4,120}?(?:A\.\s*Ş\.?|AŞ|Holding|Ltd\.?))['’]?(?:den|dan)\s+gelen",
+        r"kurucusu\s+olduğu(?:muz)?\s+([A-ZÇĞİÖŞÜ][^.]{5,120}?(?:A\.\s*Ş\.?|AŞ|Holding|Fon))",
+        r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{4,80}?\s+(?:A\.\s*Ş\.?|AŞ\.?|Holding))['’]?(?:nin|nın|in|ın)\s+kurucu",
+    ]:
+        m = _re.search(pat, body_clean, _re.IGNORECASE)
         if m:
-            party_name = m.group(1).strip()
-        else:
-            m = _re.search(r"([A-ZÇĞİÖŞÜ][^.]{5,150}?(?:A\.Ş|Holding|Ltd\.))", body)
-            if m:
-                party_name = m.group(1).strip()
-    # Son care fallback — NOT NULL constraint için
+            party_name = m.group(1).strip().rstrip(".,;")
+            if "A.Ş" not in party_name and "AŞ" not in party_name and "Holding" not in party_name:
+                party_name += " A.Ş."
+            break
+    # 2) Generic body pattern (eski extract_party_name) — sadece kısa match'ler
+    if not party_name:
+        cand = extract_party_name(body_clean)
+        if cand and len(cand) < 80 and not _re.match(r"^(TL|adet|payın|oranı)", cand, _re.IGNORECASE):
+            party_name = cand
+    # 3) Header slug — ama ticker'in kendi ismine denk geliyorsa skip et
+    if not party_name:
+        hdr = parsed.get("party_name_header")
+        if hdr and ticker:
+            # Header company adı + ticker — ticker harfleri header'da varsa muhtemelen kendi şirketi
+            hdr_collapsed = _re.sub(r"[^A-ZÇĞİÖŞÜ]", "", hdr.upper())
+            if ticker not in hdr_collapsed[:len(ticker)+3]:
+                party_name = hdr
+        elif hdr:
+            party_name = hdr
+    # 4) Son care fallback — NOT NULL constraint için
     if not party_name:
         party_name = "Bilinmiyor"
+
+    # Body'den fiyat aralığı
+    price_low, price_high = extract_price_range(body)
+
+    # Tx type body fallback
+    if not (alim or satim):
+        body_lower = body.lower()
+        if "alış" in body_lower or "alis " in body_lower or "satin alma" in body_lower:
+            tx_type = "alis"
+        elif "satış" in body_lower or "satis " in body_lower:
+            tx_type = "satis"
 
     # Oranlar — gun sonu degerleri "current"
     end_pay = parsed.get("end_pay_oran_pct")
@@ -280,19 +420,39 @@ async def upsert_pay_alim_satim_from_kap(
     if not tx_date:
         return False
 
-    # UPSERT
+    # UPSERT — once kap_url'a gore ara (ayni KAP iki kez insert olmasin)
     check = await db.execute(sa_text("""
         SELECT id FROM share_transaction_details
-        WHERE ticker=:tk AND transaction_date=:dt
-          AND COALESCE(party_name,'')=:pn
-    """), {"tk": ticker, "dt": tx_date, "pn": party_name or ""})
+        WHERE kap_url=:kap
+        ORDER BY id DESC LIMIT 1
+    """), {"kap": kap_url})
     existing_id = check.scalar()
+    # Eski kayit ayni gun + ayni party varsa onu da yakala (kap_url eksik olabilir)
+    if not existing_id:
+        check2 = await db.execute(sa_text("""
+            SELECT id FROM share_transaction_details
+            WHERE ticker=:tk AND transaction_date=:dt
+              AND COALESCE(party_name,'')=:pn
+            ORDER BY id DESC LIMIT 1
+        """), {"tk": ticker, "dt": tx_date, "pn": party_name or ""})
+        existing_id = check2.scalar()
+    # Hala yok? Ayni gun + "?"/Bilinmiyor placeholder kayit varsa onu OVERWRITE et
+    if not existing_id:
+        check3 = await db.execute(sa_text("""
+            SELECT id FROM share_transaction_details
+            WHERE ticker=:tk AND transaction_date=:dt
+              AND (party_name IN ('?', 'Bilinmiyor', '') OR party_name IS NULL)
+            ORDER BY id DESC LIMIT 1
+        """), {"tk": ticker, "dt": tx_date})
+        existing_id = check3.scalar()
 
     if existing_id:
         await db.execute(sa_text("""
             UPDATE share_transaction_details
-            SET transaction_type=:tt, party_name=COALESCE(:pn, party_name),
+            SET transaction_type=:tt, party_name=:pn,
                 nominal_lot=:lot,
+                price_low=COALESCE(:plo, price_low),
+                price_high=COALESCE(:phi, price_high),
                 oy_hakki_pct=:oy, oy_hakki_change_pct=:oyc,
                 pay_orani_pct=:po, pay_orani_change_pct=:poc,
                 kap_url=:kap, kap_disclosure_id=COALESCE(:did, kap_disclosure_id),
@@ -301,6 +461,7 @@ async def upsert_pay_alim_satim_from_kap(
         """), {
             "id": existing_id, "tt": tx_type, "pn": party_name,
             "lot": nominal_lot or None,
+            "plo": price_low, "phi": price_high,
             "oy": end_oy, "oyc": oy_change, "po": end_pay, "poc": pay_change,
             "kap": kap_url, "did": disclosure_id, "raw": body[:1000],
         })
@@ -308,14 +469,16 @@ async def upsert_pay_alim_satim_from_kap(
         await db.execute(sa_text("""
             INSERT INTO share_transaction_details(ticker, transaction_date,
                 transaction_type, party_name, nominal_lot,
+                price_low, price_high,
                 oy_hakki_pct, oy_hakki_change_pct,
                 pay_orani_pct, pay_orani_change_pct,
                 kap_url, kap_disclosure_id, source, raw_excerpt, created_at)
-            VALUES(:tk, :dt, :tt, :pn, :lot, :oy, :oyc, :po, :poc,
+            VALUES(:tk, :dt, :tt, :pn, :lot, :plo, :phi, :oy, :oyc, :po, :poc,
                    :kap, :did, 'kap_auto', :raw, NOW())
         """), {
             "tk": ticker, "dt": tx_date, "tt": tx_type, "pn": party_name,
             "lot": nominal_lot or None,
+            "plo": price_low, "phi": price_high,
             "oy": end_oy, "oyc": oy_change, "po": end_pay, "poc": pay_change,
             "kap": kap_url, "did": disclosure_id, "raw": body[:1000],
         })

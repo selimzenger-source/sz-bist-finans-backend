@@ -11540,6 +11540,47 @@ async def get_personalized_feed(
 # Test/backfill için.
 # ═════════════════════════════════════════════════════════════════════════════
 
+@app.post("/api/v1/admin/cleanup-share-tx-duplicates")
+@limiter.limit("10/minute")
+async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Body(...)):
+    """Admin: share_transaction_details'te '?'/'Bilinmiyor' party_name'li duplicate kayitlari sil.
+
+    Ayni (ticker, transaction_date) icin saglikli kayit varsa, "?" / "Bilinmiyor" / NULL party'li
+    olanlari siler. Saglikli kayit yoksa hicbirini silmez.
+
+    Body: { "admin_password": "..." }
+    """
+    if payload.get("admin_password") != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    async with async_session() as db:
+        # Saglikli kayit var olan (ticker, date) gruplarini bul
+        result = await db.execute(sa_text("""
+            DELETE FROM share_transaction_details
+            WHERE id IN (
+                SELECT bad.id
+                FROM share_transaction_details bad
+                JOIN share_transaction_details good
+                  ON good.ticker = bad.ticker
+                 AND good.transaction_date = bad.transaction_date
+                 AND good.id <> bad.id
+                 AND good.party_name IS NOT NULL
+                 AND good.party_name NOT IN ('?', 'Bilinmiyor', '')
+                 AND COALESCE(good.nominal_lot, 0) > 0
+                WHERE bad.party_name IS NULL
+                   OR bad.party_name IN ('?', 'Bilinmiyor', '')
+                   OR COALESCE(bad.nominal_lot, 0) = 0
+            )
+            RETURNING id, ticker, transaction_date
+        """))
+        deleted = result.fetchall()
+        await db.commit()
+    return {
+        "deleted_count": len(deleted),
+        "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2])} for r in deleted[:50]],
+    }
+
+
 @app.post("/api/v1/admin/process-kap-disclosure")
 @limiter.limit("30/minute")
 async def admin_process_kap_disclosure(request: Request, payload: dict = Body(...)):
