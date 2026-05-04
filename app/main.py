@@ -11870,21 +11870,26 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
             tc_added = 0
             tc_removed = 0
             tc_debug = []
+            import asyncio as _asyncio
             for kap in kap_rows:
                 # Tipe donusum tablosu icin daima full RSC body gerekli (>5K char)
                 body = ""
+                tables_count = 0
                 if kap.kap_url:
                     try:
                         disc = await fetch_kap_disclosure(kap.kap_url)
                         if disc and disc.get("full_text"):
                             body = disc["full_text"]
+                            tables_count = len(disc.get("tables", []))
                     except Exception as ex:
                         tc_debug.append(f"{kap.kap_url}: fetch error {ex}")
                         continue
+                    # KAP rate limit: her fetch arasinda 2 sn bekle
+                    await _asyncio.sleep(2)
 
                 rows_data = _parse_tc_table(body)
                 if not rows_data:
-                    tc_debug.append(f"{kap.kap_url}: no rows parsed (body={len(body)})")
+                    tc_debug.append(f"{kap.kap_url}: tables={tables_count} body={len(body)} parse=0")
                     continue
 
                 # Eski tek-satirli yanlis kayitlari sil
