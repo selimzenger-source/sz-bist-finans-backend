@@ -762,7 +762,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     elif ai_score < 4.5:
                         ka_sentiment = "Olumsuz"
                     else:
-                        ka_sentiment = "Notr"
+                        ka_sentiment = "Nötr"
 
                     # Title — yeni bot "Baslik:" satirindan, fallback matched_kw
                     ka_title = (news_title or matched_kw or title or "")[:500]

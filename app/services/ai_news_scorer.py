@@ -511,7 +511,7 @@ STRONG POSITIVE (8.0-10.0):
 "bilgi"   → administrative/procedural: sorumluluk beyani, faaliyet raporu, genel kurul,
             yonetim komiteleri, esas sozlesme tadili, bilgi formu, bagimsiz denetim,
             sermaye piyasasi araci notu, imza sirkuleri, atama (rutin), tescil
-            → No price impact. Sentiment="Notr", score=4.8-5.2.
+            → No price impact. Sentiment="Nötr", score=4.8-5.2.
 
 ═══ CONTRACT/IHALE AMOUNT SCALING (CRITICAL) ═══
 

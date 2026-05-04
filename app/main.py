@@ -9717,7 +9717,7 @@ async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)
     Body:
         admin_password: str
         ids: list[int] — guncellenecek kayit ID'leri
-        sentiment: str (default "Notr") — "Olumlu" | "Olumsuz" | "Notr"
+        sentiment: str (default "Nötr") — "Olumlu" | "Olumsuz" | "Nötr"
         impact_score: float (default 5.0) — 1.0-10.0
         summary: str | None (default None) — AI ozet (null = temizle)
     """
@@ -9730,9 +9730,9 @@ async def admin_kap_disclosure_reset(request: Request, payload: dict = Body(...)
     if len(ids) > 50:
         raise HTTPException(status_code=400, detail="Tek seferde max 50 kayit")
 
-    sentiment = payload.get("sentiment", "Notr")
-    if sentiment not in ("Olumlu", "Olumsuz", "Notr"):
-        sentiment = "Notr"
+    sentiment = payload.get("sentiment", "Nötr")
+    if sentiment not in ("Olumlu", "Olumsuz", "Nötr"):
+        sentiment = "Nötr"
     impact_score = float(payload.get("impact_score", 5.0))
     if not (1.0 <= impact_score <= 10.0):
         impact_score = 5.0

@@ -1371,7 +1371,7 @@ class NotificationService:
                 filtered_device_ids.append(device_id)
             elif pref == "negative_only" and sentiment == "Olumsuz":
                 filtered_device_ids.append(device_id)
-            # "Notr" → sadece "all"/"both" tercih edenler alir (yukarida yakalandi)
+            # "Nötr" → sadece "all"/"both" tercih edenler alir (yukarida yakalandi)
 
         if skipped_spam > 0:
             logger.info("KAP Watchlist spam korumasi: %s — %d kullanici 5dk cooldown icinde, atlandilar", ticker, skipped_spam)

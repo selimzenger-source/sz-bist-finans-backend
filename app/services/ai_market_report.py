@@ -1366,7 +1366,7 @@ def _format_full_context(
         lines.append("=" * 50)
         if high_impact_kap:
             for d in high_impact_kap:
-                sentiment_icon = {"Olumlu": "📈", "Olumsuz": "📉", "Notr": "~"}.get(d.get("sentiment", ""), "❓")
+                sentiment_icon = {"Olumlu": "📈", "Olumsuz": "📉", "Nötr": "~"}.get(d.get("sentiment", ""), "❓")
                 lines.append(
                     f"  {sentiment_icon} #{d['ticker']} — {d['title']} "
                     f"(Skor: {d.get('score', '?'):.1f}/10, {d.get('sentiment', '?')}, {d.get('category', '?')})"

@@ -81,7 +81,7 @@ STRONG POSITIVE (8.0-10.0):
 "bilgi"   → administrative/procedural: sorumluluk beyani, faaliyet raporu, genel kurul,
             yonetim komiteleri, esas sozlesme tadili, bilgi formu, bagimsiz denetim,
             sermaye piyasasi araci notu, imza sirkuleri, atama (rutin), tescil
-            → No price impact. Sentiment="Notr", score=4.8-5.2.
+            → No price impact. Sentiment="Nötr", score=4.8-5.2.
 
 ═══ CONTRACT/IHALE AMOUNT SCALING (CRITICAL) ═══
 
@@ -529,7 +529,7 @@ def _rule_based_analyze(title: str, body: str) -> dict:
     # Oncelikle rutin/notr haber mi kontrol et
     neutral_hit = sum(1 for kw in _NEUTRAL_KEYWORDS if kw in text)
     if neutral_hit > 0:
-        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
+        return {"sentiment": "Nötr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
 
     pos = sum(1 for kw in _POSITIVE_KEYWORDS if kw in text)
     neg = sum(1 for kw in _NEGATIVE_KEYWORDS if kw in text)
@@ -538,7 +538,7 @@ def _rule_based_analyze(title: str, body: str) -> dict:
         return {"sentiment": "Olumlu", "impact_score": 6.5, "summary": None, "category": "finansal", "hashtags": []}
     elif neg > pos:
         return {"sentiment": "Olumsuz", "impact_score": 3.5, "summary": None, "category": "finansal", "hashtags": []}
-    return {"sentiment": "Notr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
+    return {"sentiment": "Nötr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -626,7 +626,7 @@ async def analyze_disclosure(
 
     Returns:
         {
-            "sentiment": "Olumlu" | "Olumsuz" | "Notr",
+            "sentiment": "Olumlu" | "Olumsuz" | "Nötr",
             "impact_score": float (1.0-10.0),
             "summary": str | None,
         }
@@ -634,14 +634,14 @@ async def analyze_disclosure(
     # Bilanco bildirimleri icin AI atla — ilerleyen safhada eklenecek
     if is_bilanco:
         logger.info("KAP Analyzer: Bilanco bildirimi, AI atla (%s)", company_code)
-        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
+        return {"sentiment": "Nötr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
 
     # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
     combined_text = f"{title} {body}".lower()
     if "devre kesici" in combined_text or "tek fiyat emir toplama" in combined_text:
         logger.info("KAP Analyzer: Devre kesici tespit edildi, AI atla (%s)", company_code)
         return {
-            "sentiment": "Notr",
+            "sentiment": "Nötr",
             "impact_score": 5.0,
             "summary": f"{company_code} hissesinde seans icinde devre kesici devreye girmistir.",
             "category": "bilgi",
@@ -657,7 +657,7 @@ async def analyze_disclosure(
             company_code, title[:60],
         )
         return {
-            "sentiment": "Notr",
+            "sentiment": "Nötr",
             "impact_score": 5.0,
             "summary": f"{company_code} tarafindan yapilan {title.strip()} bildirimi rutin/idari bir formalitedir. Hisse fiyatina dogrudan etkisi beklenmemektedir.",
             "category": "bilgi",
@@ -710,13 +710,13 @@ async def analyze_disclosure(
                     elif impact_score < 4.5:
                         sentiment = "Olumsuz"
                     else:
-                        sentiment = "Notr"
+                        sentiment = "Nötr"
 
                     return {
                         "sentiment": sentiment,
                         "impact_score": impact_score,
                         "summary": recent_news.ai_summary,
-                        "category": "finansal" if sentiment != "Notr" else "bilgi",
+                        "category": "finansal" if sentiment != "Nötr" else "bilgi",
                         "hashtags": [],
                     }
 
@@ -736,7 +736,7 @@ async def analyze_disclosure(
 
     content = f"{title}\n\n{body}".strip()[:4000]
     if not content:
-        return {"sentiment": "Notr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
+        return {"sentiment": "Nötr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
 
     # ── Temettu Bildirimi ise: hisse fiyatini cek + verim hesabi ekle ──
     dividend_context = ""
@@ -777,7 +777,7 @@ Hisse: {company_code}
 GOREV: Bu KAP bildirimini yatirimci bakis acisiyla analiz et. (Detayli rubrik system prompt'unda.)
 
 CIKTI ALANLARI:
-1. sentiment: "Olumlu" | "Olumsuz" | "Notr"
+1. sentiment: "Olumlu" | "Olumsuz" | "Nötr"
 2. impact_score: 1.0-10.0 arasi 0.1 hassasiyetle (sysem prompt'undaki rubrik)
 3. category: "finansal" | "strateji" | "bilgi"
 4. summary: 3-5 cumle Turkce ozet (tweet-ready). Ne oldugunu, sirket icin ne anlama geldigini,
@@ -885,9 +885,9 @@ SADECE asagidaki JSON formatinda yanit ver:
                       provider_used, company_code, ai_text[:150])
         return _rule_based_analyze(title, body)
 
-    sentiment = result.get("sentiment", "Notr")
-    if sentiment not in ("Olumlu", "Olumsuz", "Notr"):
-        sentiment = "Notr"
+    sentiment = result.get("sentiment", "Nötr")
+    if sentiment not in ("Olumlu", "Olumsuz", "Nötr"):
+        sentiment = "Nötr"
 
     impact_score = result.get("impact_score")
     if isinstance(impact_score, (int, float)) and 1.0 <= impact_score <= 10.0:
