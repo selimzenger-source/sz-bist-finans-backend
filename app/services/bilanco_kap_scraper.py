@@ -1,0 +1,179 @@
+"""KAP Finansal Rapor Scraper — XBRL etiketleri uzerinden regex parse.
+
+AI'ya gerek yok. KAP body'sinde her satir su patternde:
+    XBRL_etiket|http://..label
+    Turkce aciklama (opsiyonel)
+    Dipnot referansi (opsiyonel sayi)
+    Cari Donem rakami
+    Onceki Donem rakami
+
+XBRL etiketi sabit (ifrs-full_*, kap-fr_*) — etiket bulunduktan sonra
+satir sonrasinda gelen ilk 2 sayi cari/onceki donem.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+
+# ── XBRL etiket eslesmeleri ──────────────────────────────────────────────────
+# Etiket adina gore hangi DB alanina gidecegi
+TAG_TO_FIELD: dict[str, str] = {
+    # Bilanço (Finansal Durum Tablosu)
+    "ifrs-full_Assets|": "total_assets",
+    "ifrs-full_CurrentAssets|": "current_assets",
+    "ifrs-full_NoncurrentAssets|": "non_current_assets",
+    "ifrs-full_Equity|": "total_equity",
+    "ifrs-full_Liabilities|": "total_debt",
+    "ifrs-full_CashAndCashEquivalents|": "cash_and_equivalents",
+    # Gelir Tablosu
+    "ifrs-full_Revenue|": "revenue",
+    "ifrs-full_GrossProfit|": "gross_profit",
+    "ifrs-full_ProfitLossFromOperatingActivities|": "operating_profit",
+    "ifrs-full_ProfitLoss|": "net_income",
+    "ifrs-full_ProfitLossAttributableToOwnersOfParent|": "net_income_parent",
+}
+
+# Sayi formati — Turkce 1.234.567,89
+_NUM_RE = re.compile(r"-?\d{1,3}(?:\.\d{3})+|-?\d+,\d+|-?\d+")
+
+
+def _parse_number(s: str) -> Optional[float]:
+    """'506.840.805' → 506840805.0 / '12,34' → 12.34 / '0' → 0.0"""
+    s = s.strip()
+    if not s:
+        return None
+    # Yuzde isaretli olabilir
+    s = s.replace("%", "").strip()
+    # Türk formati: nokta = binlik ayraci, virgul = ondalik
+    if "," in s and "." in s:
+        # 1.234,56 → 1234.56
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        # 12,34 → 12.34
+        s = s.replace(",", ".")
+    elif "." in s:
+        # 1.234 (binlik) veya 1.5 (ondalik)?
+        # Eger en sondaki gruptan sonra 3 hane varsa binlik ayraci
+        parts = s.split(".")
+        if all(len(p) == 3 for p in parts[1:]):
+            s = "".join(parts)
+        # else: tek ondalik nokta — olduğu gibi bırak
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _detect_period(body: str) -> Optional[str]:
+    """Body'de 'Cari Dönem 01.01.2026 - 31.03.2026' kalibindan donem cikar."""
+    # Once "Cari Donem" sonrasi tarih ara
+    pat = re.compile(r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2})\.(\d{2})\.(\d{4})", re.IGNORECASE)
+    m = pat.search(body)
+    end_month = end_year = None
+    if m:
+        end_month = int(m.group(5))
+        end_year = int(m.group(6))
+    else:
+        # Bilanço sadece tek tarih: "Cari Dönem 31.03.2026"
+        pat2 = re.compile(r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})", re.IGNORECASE)
+        m2 = pat2.search(body)
+        if m2:
+            end_month = int(m2.group(2))
+            end_year = int(m2.group(3))
+
+    if not end_month or not end_year:
+        return None
+
+    q = {3: "Q1", 6: "Q2", 9: "Q3", 12: "Q4"}.get(end_month)
+    if not q:
+        return None
+    return f"{end_year}-{q}"
+
+
+def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
+    """XBRL etiketi gecen yerden sonraki ilk sayiyi (Cari Donem) cikar.
+
+    Pattern: tag → birkac satir aciklama/dipnot → ilk sayi (Cari Donem)
+    """
+    idx = body.find(tag)
+    if idx == -1:
+        return None
+
+    # Etiketten sonraki ~500 karaktere bak
+    chunk = body[idx + len(tag): idx + len(tag) + 800]
+
+    # İlk sayıyı bul
+    nums = _NUM_RE.findall(chunk)
+    # Filter: en az 1 anlamli sayi (1+ digit, dipnot referansi olmasin: dipnot 1-99 arasi)
+    for n in nums:
+        v = _parse_number(n)
+        if v is None:
+            continue
+        # Dipnot referanslarini at: cok kucuk pozitif int (1-100 arasi, decimal yok)
+        if 1 <= v <= 100 and "." not in n and "," not in n and len(n) <= 3:
+            continue
+        return v
+    return None
+
+
+def parse_kap_finansal_rapor(body: str) -> dict:
+    """KAP Finansal Rapor body'sinden Cari Donem finansal verilerini cikar.
+
+    Returns: dict — period + tum DB alanlari (eksikler None)
+    """
+    out: dict = {
+        "period": None,
+        "revenue": None,
+        "gross_profit": None,
+        "operating_profit": None,
+        "net_income": None,
+        "ebitda": None,  # KAP Finansal Rapor'da direkt yok, operating_profit fallback
+        "total_assets": None,
+        "current_assets": None,
+        "non_current_assets": None,
+        "total_equity": None,
+        "total_debt": None,
+        "net_debt": None,
+        "cash_and_equivalents": None,
+        "source": "kap_xbrl_scrape",
+        "confidence": "low",
+    }
+
+    if not body or len(body) < 100:
+        return out
+
+    out["period"] = _detect_period(body)
+
+    # XBRL etiketlerini tek tek çek
+    for tag, field in TAG_TO_FIELD.items():
+        v = _extract_value_after_tag(body, tag)
+        if v is None:
+            continue
+        if field == "net_income_parent":
+            # Eger ana net_income yoksa parent kullan
+            if out.get("net_income") is None:
+                out["net_income"] = v
+        else:
+            out[field] = v
+
+    # net_debt hesabi
+    if out["total_debt"] is not None and out["cash_and_equivalents"] is not None:
+        out["net_debt"] = out["total_debt"] - out["cash_and_equivalents"]
+
+    # ebitda fallback: operating_profit
+    if out["ebitda"] is None and out["operating_profit"] is not None:
+        out["ebitda"] = out["operating_profit"]
+
+    # Confidence — kac alan dolduruldu?
+    filled = sum(1 for k in ("revenue", "net_income", "total_assets", "total_equity") if out.get(k) is not None)
+    if filled >= 3:
+        out["confidence"] = "high"
+    elif filled >= 1:
+        out["confidence"] = "medium"
+
+    return out

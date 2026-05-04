@@ -201,96 +201,97 @@ async def analyze_bilanco(ticker: str, financials: list[dict], ratios: dict | No
 #  KAP BİLDİRİMİNDEN BİLANÇO RAKAMLARINI PARSE ET
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_PARSE_SYSTEM_PROMPT = """Sen bir finansal veri çıkarma uzmanısın.
-KAP bildiriminin metin içeriğinden bilanço ve gelir tablosu rakamlarını çıkarmalısın.
+_PARSE_SYSTEM_PROMPT = """Sen KAP Finansal Rapor metinlerinden bilanço ve gelir tablosu rakamlarını çıkaran bir uzmansın.
+
+KAP Finansal Rapor formatı:
+- "Cari Dönem 31.03.2026" (SOL kolon — bu güncel veriler, BUNU AL)
+- "Önceki Dönem 31.12.2025" veya "01.01.2025-31.03.2025" (SAĞ kolon — KULLANMA)
+- XBRL etiketleri: ifrs-full_..., kap-fr_...
+- Her satırda: Etiket | Türkçe açıklama | Dipnot | Cari Dönem | Önceki Dönem
+
+ÖNEMLİ EŞLEŞMELER (Cari Dönem rakamını al):
+- "Hasılat" / "Revenue" / ifrs-full_Revenue → revenue
+- "BRÜT KAR (ZARAR)" / ifrs-full_GrossProfit → gross_profit
+- "ESAS FAALİYET KARI (ZARARI)" / ifrs-full_ProfitLossFromOperatingActivities → operating_profit
+- "DÖNEM KARI (ZARARI)" / ifrs-full_ProfitLoss → net_income
+  (Eğer "Ana Ortaklık Payları" satırı varsa onu kullan)
+- "TOPLAM VARLIKLAR" / ifrs-full_Assets → total_assets
+- "TOPLAM ÖZKAYNAKLAR" / ifrs-full_Equity → total_equity
+- "TOPLAM YÜKÜMLÜLÜKLER" / ifrs-full_Liabilities → total_debt
+- "Nakit ve Nakit Benzerleri" / ifrs-full_CashAndCashEquivalents → cash_and_equivalents
+- net_debt = total_debt - cash_and_equivalents (hesapla)
+- "FAVÖK" varsa al, yoksa operating_profit + amortisman düzeltmesi (eğer "Amortisman ve İtfa Gideri" varsa ekle)
+
+DÖNEM TESPİTİ:
+- "01.01.2026 - 31.03.2026" → "2026-Q1"
+- "01.01.2026 - 30.06.2026" → "2026-Q2"
+- "01.01.2026 - 30.09.2026" → "2026-Q3"
+- "01.01.2026 - 31.12.2026" → "2026-Q4"
+- Sadece bilanço (durum tablosu) için: 31.03 → Q1, 30.06 → Q2 vb.
 
 KURALLAR:
-- Sadece metinde geçen rakamları kullan, uydurma.
-- Rakamlar TL cinsindendir. Bin TL, milyon TL gibi birimleri tam TL'ye çevir.
-- Eğer metinde rakam bulunamıyorsa o alan için null döndür.
-- Sadece SON döneme ait verileri çıkar (en güncel bilanço).
+- Rakamları nokta/virgül ayraçlardan temizle: "506.840.805" → 506840805
+- Negatif rakamlar parantezli/eksili olabilir: "-77.861.972" → -77861972
+- Rakam bulunamazsa null. Tahmin etme.
+- Sadece Cari Dönem (sol kolon) — Önceki Dönem KULLANMA
+- TL cinsinden olduğu varsayılır
 
-ÇIKTI FORMATI (JSON, sadece bu formatı döndür):
+ÇIKTI (sadece JSON):
 {
-    "period": "2025-Q4",
-    "revenue": null veya rakam (TL),
-    "gross_profit": null veya rakam,
-    "operating_profit": null veya rakam,
-    "net_income": null veya rakam,
-    "ebitda": null veya rakam,
-    "total_assets": null veya rakam,
-    "total_equity": null veya rakam,
-    "total_debt": null veya rakam,
-    "net_debt": null veya rakam,
-    "cash_and_equivalents": null veya rakam,
-    "confidence": "high" veya "medium" veya "low"
+    "period": "2026-Q1",
+    "revenue": 506840805,
+    "gross_profit": 202479726,
+    "operating_profit": 129117739,
+    "net_income": 13935214,
+    "ebitda": null,
+    "total_assets": 4529098206,
+    "total_equity": 2696607818,
+    "total_debt": 1832490388,
+    "net_debt": null,
+    "cash_and_equivalents": 160349649,
+    "confidence": "high"
 }
 
-Eğer bildirim bir bilanço/faaliyet raporu DEĞİLSE: {"error": "not_bilanco"}
+Bilanço/Finansal Rapor DEĞİLSE: {"error": "not_bilanco"}
 """
 
 
 async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
     """
-    KAP bildirim metninden bilanço rakamlarını AI ile parse eder.
+    KAP Finansal Rapor body'sinden bilanço/gelir tablosu rakamlarını cıkarır.
 
-    Kullanım: KAP'ta bilanço bildirimi yakalandığında, IsYatirim'den veri gelmeden
-    ÖNCE bu fonksiyon çağrılır → anında rakamlar DB'ye yazılır.
-
-    IsYatirim verisi 1-2 gün sonra geldiğinde doğrulama yapılır ve güncellenir.
+    Yöntem: AI YOK — XBRL etiketleri uzerinden regex scraper.
+    Hızlı, deterministik, ücretsiz.
 
     Args:
         ticker: Hisse kodu
         kap_content: KAP bildirim metin içeriği (body)
 
     Returns:
-        dict — Parse edilmiş bilanço rakamları veya None
+        dict — Parse edilmis bilanço rakamlari veya None
     """
     if not kap_content or len(kap_content) < 50:
         logger.warning("KAP parse: %s — içerik çok kısa", ticker)
         return None
 
-    # Finansal Rapor body'i 30K+ karakter olabilir — AI prompt limitine sığsın diye 30K cap
-    user_message = (
-        f"Aşağıdaki {ticker} hissesinin KAP Finansal Rapor metninden "
-        f"bilanço/gelir tablosu rakamlarını çıkar:\n\n"
-        f"---\n{kap_content[:30000]}\n---"
-    )
+    from app.services.bilanco_kap_scraper import parse_kap_finansal_rapor
+    result = parse_kap_finansal_rapor(kap_content)
 
-    content = await _call_ai_abacus(_PARSE_SYSTEM_PROMPT, user_message)
-    if not content:
-        content = await _call_ai_anthropic(_PARSE_SYSTEM_PROMPT, user_message)
-
-    if not content:
-        logger.error("KAP bilanço parse başarısız: %s", ticker)
+    # Period yoksa veya en kritik alanlardan hicbiri yoksa null don
+    if not result.get("period") and not result.get("total_assets") and not result.get("revenue"):
+        logger.warning("KAP scrape: %s — XBRL etiketleri bulunamadi", ticker)
         return None
 
-    try:
-        clean = content.strip()
-        if clean.startswith("```"):
-            clean = clean.split("\n", 1)[1]
-            clean = clean.rsplit("```", 1)[0]
-        result = json.loads(clean)
+    result["ticker"] = ticker
+    result["needs_verification"] = result.get("confidence") != "high"
 
-        if result.get("error") == "not_bilanco":
-            logger.info("KAP parse: %s — bilanço bildirimi değil", ticker)
-            return None
-
-        # Confidence kontrolü
-        confidence = result.get("confidence", "low")
-        if confidence == "low":
-            logger.warning("KAP parse: %s — düşük güvenilirlik, doğrulama gerekli", ticker)
-
-        result["ticker"] = ticker
-        result["source"] = "kap_ai_parse"
-        result["needs_verification"] = True  # IsYatirim ile doğrulanacak
-
-        logger.info(
-            "KAP bilanço parse OK: %s %s — Ciro: %s, Net Kâr: %s (güven: %s)",
-            ticker, result.get("period", "?"),
-            result.get("revenue"), result.get("net_income"), confidence,
-        )
-        return result
+    logger.info(
+        "KAP bilanco scrape: %s %s — Ciro: %s, Net Kar: %s, Top.Varlik: %s (guven: %s)",
+        ticker, result.get("period", "?"),
+        result.get("revenue"), result.get("net_income"),
+        result.get("total_assets"), result.get("confidence"),
+    )
+    return result
 
     except json.JSONDecodeError:
         logger.warning("KAP bilanço parse JSON hatası: %s", ticker)
