@@ -10647,8 +10647,16 @@ async def get_temettu_takvim(
     status: str = Query("all", regex="^(all|yaklasan|odendi)$"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Temettu takvimi — temettu.app tarzi yaklasan/odenen temettüler."""
+    """Temettu takvimi — temettu.app tarzi yaklasan/odenen temettüler.
+
+    Status mantigi:
+      - dividend_calendar.status='tamamlandi' (KAP odeme bildirimi geldi) → odendi
+      - Aksi takdirde: payment_date < today → odendi (varsayim, KAP bildirimi
+        gelmemis olabilir ama gun gecti)
+      - Bugun veya gelecek → yaklasan (KAP bildirimi olmadan ödendi yazma)
+    """
     from datetime import date as dt_date
+    from app.models.dividend_calendar import DividendCalendar
 
     today = dt_date.today()
 
@@ -10658,6 +10666,13 @@ async def get_temettu_takvim(
         .order_by(desc(DividendHistory.payment_date))
     )
     all_items = list(result.scalars().all())
+
+    # KAP'tan ödeme tamamlandi onayi gelen ticker+date kombinasyonlarini cek
+    cal_result = await db.execute(
+        select(DividendCalendar.ticker, DividendCalendar.payment_date)
+        .where(DividendCalendar.status == "tamamlandi", DividendCalendar.payment_date.isnot(None))
+    )
+    confirmed_paid = {(r[0].upper(), r[1]) for r in cal_result.all()}
 
     takvim = []
     for h in all_items:
@@ -10669,7 +10684,17 @@ async def get_temettu_takvim(
                 else:
                     payment_dt = h.payment_date
 
-            item_status = "odendi" if payment_dt and payment_dt <= today else "yaklasan"
+            # KAP onayli odendi mi? (en kesin)
+            is_kap_confirmed = payment_dt and (h.ticker.upper(), payment_dt) in confirmed_paid
+
+            if is_kap_confirmed:
+                item_status = "odendi"
+            elif payment_dt and payment_dt < today:
+                # Tarih gecti, KAP bildirimi gelmemis — gun bitti varsayalim
+                item_status = "odendi"
+            else:
+                # Bugun veya gelecek (KAP onayi olmadan 'odendi' yazma)
+                item_status = "yaklasan"
 
             if status != "all" and item_status != status:
                 continue
