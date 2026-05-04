@@ -8868,13 +8868,14 @@ async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(..
     if not ticker or not kap_url:
         raise HTTPException(status_code=400, detail="ticker ve kap_url gerekli")
 
-    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
     from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap, save_parsed_bilanco
 
     steps: list[str] = []
     try:
-        body = await fetch_kap_page_content(kap_url)
-        steps.append(f"KAP body fetched: {len(body or '')} chars")
+        disclosure = await fetch_kap_disclosure(kap_url)
+        body = disclosure.get("full_text", "") if disclosure else ""
+        steps.append(f"KAP body fetched (RSC): {len(body or '')} chars")
         if not body:
             return {"status": "error", "ticker": ticker, "steps": steps, "msg": "KAP body bos"}
 
