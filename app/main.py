@@ -11647,11 +11647,27 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
         except Exception as e:
             result["processors"]["bilanco"] = {"error": str(e)}
 
-        # 2e. pay_alim_satim
+        # 2e. pay_alim_satim — fetch + DB save
         try:
-            from app.services.kap_pay_alim_satim_fetcher import fetch_kap_pay_alim_satim
+            from app.services.kap_pay_alim_satim_fetcher import (
+                fetch_kap_pay_alim_satim, upsert_pay_alim_satim_from_kap,
+            )
+            from datetime import datetime as _dt2, timezone as _tz2
             pay_parsed = await fetch_kap_pay_alim_satim(kap_url)
             result["processors"]["pay_alim_satim"] = pay_parsed or {"parsed": None}
+            # Eger ticker bulunduysa DB'ye kaydet
+            if pay_parsed and pay_parsed.get("ticker"):
+                try:
+                    saved = await upsert_pay_alim_satim_from_kap(
+                        db, kap_url=kap_url,
+                        company_code=pay_parsed["ticker"],
+                        title="Pay Alım Satım Bildirimi",
+                        published_at=_dt2.now(_tz2.utc),
+                        disclosure_id=None,
+                    )
+                    result["processors"]["pay_alim_satim"]["db_saved"] = bool(saved)
+                except Exception as save_err:
+                    result["processors"]["pay_alim_satim"]["save_error"] = str(save_err)[:200]
         except Exception as e:
             result["processors"]["pay_alim_satim"] = {"error": str(e)}
 

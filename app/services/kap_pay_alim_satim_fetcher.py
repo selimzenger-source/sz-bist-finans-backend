@@ -90,13 +90,15 @@ def parse_kap_html(html: str) -> Optional[dict]:
     tds = re.findall(r"<td[^>]*>(.*?)</td>", html, re.DOTALL)
     cleaned = [re.sub(r"<[^>]+>", "", t).replace("\xa0", " ").strip() for t in tds]
 
-    # İlgili Şirketler — ticker
+    # İlgili Şirketler — ticker (UPPERCASE only — IGNORECASE kucuk 'div' falan yakalardi)
     ticker = None
-    m = re.search(r"İlgili\s+Şirketler.*?\[?\s*([A-Z]{3,6})", html, re.IGNORECASE | re.DOTALL)
+    # Once "İlgili Şirketler [TICKER]" pattern (kose parantezli)
+    m = re.search(r"İlgili\s+Şirketler[^\[]{0,30}\[([A-Z]{2,6})", html, re.DOTALL)
     if m:
         ticker = m.group(1).strip()
-    else:
-        m = re.search(r"\[([A-Z]{3,6})\]", html)
+    if not ticker:
+        # Fallback: ilk kose parantezli ticker
+        m = re.search(r"\[([A-Z]{2,6})(?:\s*,|\])", html)
         if m:
             ticker = m.group(1).strip()
 
