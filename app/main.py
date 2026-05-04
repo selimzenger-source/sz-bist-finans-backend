@@ -11869,6 +11869,7 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
 
             tc_added = 0
             tc_removed = 0
+            tc_debug = []
             for kap in kap_rows:
                 body = kap.body or ""
                 if (not body or len(body) < 200) and kap.kap_url:
@@ -11876,22 +11877,29 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                         disc = await fetch_kap_disclosure(kap.kap_url)
                         if disc and disc.get("full_text"):
                             body = disc["full_text"]
-                    except Exception:
+                    except Exception as ex:
+                        tc_debug.append(f"{kap.kap_url}: fetch error {ex}")
                         continue
 
                 rows_data = _parse_tc_table(body)
                 if not rows_data:
+                    tc_debug.append(f"{kap.kap_url}: no rows parsed (body={len(body)})")
                     continue
 
-                # Eski tek-satirli yanlis kayitlari sil (kap_url match ama satir sayisi az ise)
+                # Eski tek-satirli yanlis kayitlari sil
                 existing = (await db.execute(
                     _sel(ShareTypeConversion)
                     .where(ShareTypeConversion.kap_url == kap.kap_url)
                 )).scalars().all()
+                tc_debug.append(f"{kap.kap_url}: parsed={len(rows_data)} existing={len(existing)}")
+
                 if len(existing) < len(rows_data):
-                    for old in existing:
-                        await db.delete(old)
-                        tc_removed += 1
+                    # Tum eski kayitlari sil
+                    if existing:
+                        await db.execute(
+                            _del(ShareTypeConversion).where(ShareTypeConversion.kap_url == kap.kap_url)
+                        )
+                        tc_removed += len(existing)
 
                     # Tum satirlari ekle
                     for d in rows_data:
@@ -11911,6 +11919,7 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
                 "scanned": len(kap_rows),
                 "removed": tc_removed,
                 "added": tc_added,
+                "debug": tc_debug[:20],
             }
 
         # ─── 4. dividend_misclassified: 'Hak Kullanımı' başlıklı KAP'lar için
