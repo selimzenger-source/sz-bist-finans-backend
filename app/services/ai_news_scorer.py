@@ -619,6 +619,67 @@ MANAGEMENT CHANGE:
 CIRCUIT BREAKER (Devre Kesici):
   ALWAYS 5.0 neutral — automatic mechanism, unrelated to fundamentals.
 
+DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4):
+  Bu KAP bildirimleri sirketin BORC alma yetkisi/uygulamasi icindir — gelir
+  veya kar getirmez, fiyat etkisi sinirlidir. Asla "olumlu haber" sayilmamalidir.
+  Hisse fiyatina dogrudan pozitif etkisi yoktur; aksine seyreltme/borc yuku
+  sinyali olabilir.
+
+  Triggering keywords/patterns in title or body:
+    • "Tertip Ihrac Belgesi" / "ihrac belgesi"
+    • "Borclanma Araci Ihrac Limiti / Tavani"
+    • "Finansman Bonosu" ihraci / itfa
+    • "Ozel Sektor Tahvili" ihraci
+    • "Banka Bonosu" ihraci
+    • "Kira Sertifikasi" ihraci (sukuk)
+    • "VDMK" / "Varliga Dayali Menkul Kiymet"
+    • "Bono / Tahvil ihrac" yetki / SPK basvuru
+    • "Borclanma Araci Ihracina Iliskin Yonetim Kurulu Karari"
+
+  Score: 4.7-5.3 (Notr). NEVER above 5.5.
+  Summary should clarify: bu bir borclanma araci (borc) ihracidir, ciroya/kara
+  dogrudan etkisi yoktur; finansman ihtiyacini karsilamak icin yapilir.
+
+  Examples:
+  Ex.D: "TMSN Tertip Ihrac Belgesi (1 milyar TL)" → 5.0
+       Summary: "Sirketin borclanma araci ihracina iliskin SPK belgesi;
+                 ek finansman saglar fakat ciro/kar artisi degildir, fiyata
+                 dogrudan pozitif etkisi beklenmez."
+  Ex.E: "ABCD 500M TL finansman bonosu ihraci" → 4.9
+       Summary: "Kisa vadeli borclanma; yatirimci icin notr — borc maliyeti
+                 ve geri odeme riski yaratabilir."
+
+EXECUTION-STAGE / IMPLEMENTATION DISCLOSURES (CRITICAL — neutral 5.0-5.4):
+  These are NOT first-time decisions; they are the implementation/registration
+  of an already-announced and previously-priced corporate action. Score 5.0-5.4
+  (Notr). Do NOT confuse with the original decision — that one is scored on its
+  own merits when it first arrives.
+
+  Triggering patterns in title:
+    • "...Islemlerine Iliskin Bildirim" (implementation notification):
+       — "Kar Payi Dagitim Islemlerine Iliskin Bildirim"
+       — "Sermaye Artirimi Islemlerine Iliskin Bildirim"
+       — "Bedelsiz Pay Dagitim Islemlerine Iliskin Bildirim"
+       — "Pay Bolunmesi Islemlerine Iliskin Bildirim"
+    • "Merkezi Kayit Kurulusu Duyurusu" (MKK registration of pre-decided action)
+    • "BISTECH" / "Pay Piyasasi Alim Satim Sistemi Duyurusu" (exchange ops)
+    • "Kamuyu Aydinlatma Platformu Duyurusu" (KAP system notice)
+    • SPK basvuru onayi/tescil for previously-announced corporate action
+
+  Reason: market already absorbed the news at the original decision; the
+  execution/registration step alone does not add new information.
+
+  Examples:
+  Ex.A: "Kar Payi Dagitim Islemlerine Iliskin Bildirim" → 5.1
+       Summary: "Onceden ilan edilen temettu dagitiminin uygulama asamasi;
+                 karar zaten fiyatlanmis, ek etki beklenmemektedir."
+  Ex.B: "Merkezi Kayit Kurulusu Duyurusu (pay bolunmesi tescili)" → 5.1
+       Summary: "Pay bolunmesinin MKK kayit asamasi — ilk karar degil,
+                 uygulama adimi. Hisse fiyatina ek etkisi beklenmemektedir."
+  Ex.C: "BISTECH Pay Piyasasi Alim Satim Sistemi Duyurusu" → 5.0
+       Summary: "Borsa Istanbul sistem operasyon duyurusu; sirket temellerine
+                 iliskin gelisme degildir."
+
 INDEX MEMBERSHIP:
   Index inclusion → 6.5-7.5 | Removal → 3.5-4.5 | Periodic review (no change) → 5.0
 

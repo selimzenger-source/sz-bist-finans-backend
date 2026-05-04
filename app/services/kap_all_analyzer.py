@@ -395,6 +395,70 @@ _ROUTINE_TITLE_PATTERNS = [
 ]
 
 
+# ═══════════════════════════════════════════════════════════════════
+# EXECUTION-STAGE / SISTEM DUYURULARI — financial override'i bypass et
+# Bunlar daha onceden alinmis kararin UYGULANMASI / KAYIT TESCILI veya
+# borsa/KAP sistem operasyon bildirimi. Ilk haber degil; fiyat etkisi
+# minimal/zaten fiyatlanmis. Bu pattern'lar `_FINANCIAL_OVERRIDE_KEYWORDS`
+# kontrolunden ONCE bakilir — yani "kar payi" / "sermaye artirim" gibi
+# kelimeler iceren execution bildirimleri bile rutin/notr sayilir.
+# ═══════════════════════════════════════════════════════════════════
+_EXECUTION_STAGE_PATTERNS = [
+    # Borsa Istanbul sistem duyurulari (sirket-spesifik degil)
+    "bistech",
+    "pay piyasası alım satım sistemi",
+    "pay piyasasi alim satim sistemi",
+    "alım satım sistemi duyuru",
+    "alim satim sistemi duyuru",
+
+    # KAP genel sistem duyurulari
+    "kamuyu aydınlatma platformu duyuru",
+    "kamuyu aydinlatma platformu duyuru",
+
+    # Merkezi Kayit Kurulusu — pay bolunmesi/kayit tescili gibi onceden
+    # alinmis kararlarin uygulama/kayit asamasi
+    "merkezi kayıt kuruluşu",
+    "merkezi kayit kurulusu",
+    "mkk duyuru",
+
+    # Temettu / sermaye artirimi / bedelsiz UYGULAMA asamasi
+    # "Genel Kurul Karari" / "Yonetim Kurulu Karari" iceren basliklar
+    # ilk karar oldugu icin bu listeye DAHIL EDILMEDI — onlar AI'a gider.
+    "kar payı dağıtım işlemlerine ilişkin",
+    "kar payi dagitim islemlerine iliskin",
+    "kâr payı dağıtım işlemlerine ilişkin",
+    "temettü ödemelerine ilişkin",
+    "temettu odemelerine iliskin",
+    "sermaye artırımı işlemlerine ilişkin",
+    "sermaye artirimi islemlerine iliskin",
+    "bedelsiz pay dağıtım işlemlerine ilişkin",
+    "bedelsiz pay dagitim islemlerine iliskin",
+    "pay bölünmesi işlemlerine ilişkin",
+    "pay bolunmesi islemlerine iliskin",
+
+    # ── BORCLANMA ARACI IHRACI ──
+    # Bunlar sirketin BORC alma yetkisi/uygulamasi icindir — gelir/kar
+    # getirmez, fiyata pozitif etki yoktur. AI yanlislikla "yeni finansman"
+    # diye olumlu puanlayabiliyor; bu yuzden pre-filter'da Notr/5.0.
+    "tertip ihraç belgesi",
+    "tertip ihrac belgesi",
+    "ihraç belgesi",
+    "ihrac belgesi",
+    "borçlanma aracı",
+    "borclanma araci",
+    "finansman bonosu",
+    "özel sektör tahvili",
+    "ozel sektor tahvili",
+    "banka bonosu",
+    "kira sertifikası",
+    "kira sertifikasi",
+    "varlığa dayalı menkul kıymet",
+    "varliga dayali menkul kiymet",
+    "vdmk ihrac",
+    "vdmk ihraç",
+]
+
+
 # İSTİSNA — bu kelimeler basliktaysa "rutin" sayma, AI'a gitsin
 # Ornek: "Kar Payi Dagitimina Iliskin Genel Kurul Karari" — "genel kurul" geciyor
 # ama "kar payi" istisna ile kurtaracagiz, AI temettu olarak puanlayacak.
@@ -418,20 +482,32 @@ _FINANCIAL_OVERRIDE_KEYWORDS = [
 def _is_routine_admin_disclosure(title: str, body: str = "") -> bool:
     """Rutin/idari bildirim mi? AI'a gitmeden Notr/5.0 donmek icin.
 
-    1. Title routine pattern'i match ediyorsa → rutin (AI atla)
-    2. AMA: financial override kelimesi varsa → rutin DEGIL, AI'a git
-       (Ornek: "Kar Payi Dagitimina Iliskin Genel Kurul Karari" → temettu, AI'a git)
+    Oncelik sirasi:
+    1. EXECUTION-STAGE / SISTEM DUYURUSU → kesin rutin (financial override
+       bypass edilir). Ornek: "Merkezi Kayit Kurulusu Duyurusu", "BISTECH
+       Pay Piyasasi Duyurusu", "Kar Payi Dagitim Islemlerine Iliskin Bildirim".
+       Bunlar onceden alinmis kararin uygulama asamasi → fiyat etkisi yok.
+    2. Title routine pattern'i match ediyorsa → rutin (AI atla)
+    3. AMA: financial override kelimesi varsa → rutin DEGIL, AI'a git
+       (Ornek: "Kar Payi Dagitimina Iliskin Genel Kurul Karari" → ilk karar,
+        AI'a git ve temettu olarak puanla)
     """
     if not title:
         return False
-    title_norm = title.lower().strip()
+    # Turkce 'İ' .lower() ile 'i̇' (i + birlesik ust nokta) verir.
+    # Pattern'larla eslesme icin bu birlesik isareti kaldiriyoruz.
+    title_norm = title.lower().replace("̇", "").strip()
 
-    # Once routine pattern var mi
+    # 1) Execution-stage / sistem duyurusu — financial override'i bypass et
+    if any(pattern in title_norm for pattern in _EXECUTION_STAGE_PATTERNS):
+        return True
+
+    # 2) Once routine pattern var mi
     is_routine = any(pattern in title_norm for pattern in _ROUTINE_TITLE_PATTERNS)
     if not is_routine:
         return False
 
-    # Routine ama financial override kelimesi varsa: AI'a git
+    # 3) Routine ama financial override kelimesi varsa: AI'a git
     has_financial_signal = any(kw in title_norm for kw in _FINANCIAL_OVERRIDE_KEYWORDS)
     if has_financial_signal:
         return False  # AI'a gitsin — onemli karar var

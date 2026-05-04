@@ -172,16 +172,45 @@ def detect_message_type(text: str) -> str | None:
 
 
 def parse_ticker(text: str) -> str | None:
-    """Mesajdan hisse kodunu cikart. 'Sembol: XXXXX' formatinda arar."""
+    """Mesajdan ILK hisse kodunu cikart. 'Sembol: XXXXX' formatinda arar.
+
+    Cok-sembollu mesajlarda sadece ilk ticker'i doner. Tum semboller icin
+    parse_tickers() kullanin.
+    """
+    tickers = parse_tickers(text)
+    return tickers[0] if tickers else None
+
+
+def parse_tickers(text: str) -> list[str]:
+    """Mesajdan TUM hisse kodlarini cikart. 'Sembol: XX,YY,ZZ' formatinda arar.
+
+    KAP bazi bildirimleri (BISTECH, MKK, KAP genel duyurulari) birden fazla
+    sembolu virgulle ayirarak yayinlar. Bu fonksiyon hepsini parse eder.
+
+    Ornek girdiler:
+        "Sembol: ALARK,EGGUB,KFEIN"  → ["ALARK", "EGGUB", "KFEIN"]
+        "Sembol: THYAO"               → ["THYAO"]
+        "Sembol: AAA, BBB , CCC"     → ["AAA", "BBB", "CCC"]
+    """
+    # Sembol satirini bul — sonraki satira kadar (\n ile durur)
     patterns = [
-        r"Sembol:\s*([A-Z]{3,10})",
-        r"Semb[oö]l:\s*([A-Z]{3,10})",
+        r"Sembol:\s*([A-Z0-9 ,]+?)(?:\n|$)",
+        r"Semb[oö]l:\s*([A-Z0-9 ,]+?)(?:\n|$)",
     ]
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            return match.group(1).upper()
-    return None
+            raw = match.group(1).strip()
+            # Virgulle ayrilmis sembolleri parcala, bosluk/duplicate temizle
+            tickers: list[str] = []
+            for part in raw.split(","):
+                tk = part.strip().upper()
+                # Sadece harf+rakam (3-10 karakter), gecerli ticker formati
+                if tk and re.fullmatch(r"[A-Z][A-Z0-9]{2,9}", tk) and tk not in tickers:
+                    tickers.append(tk)
+            if tickers:
+                return tickers
+    return []
 
 
 def parse_price(text: str, label: str = "Fiyat") -> Decimal | None:
@@ -547,17 +576,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 )
                 continue
 
-            # Parse
-            ticker = parse_ticker(text)
+            # Parse — TUM tickerlari al (cok-sembollu KAP duyurulari icin)
+            all_tickers = parse_tickers(text)
+            # Endeks / BIST'te olmayan ticker'lari ele (XU100, XU030, vs.)
+            all_tickers = [t for t in all_tickers if _is_valid_bist_ticker(t)]
 
-            # ── Ticker Validation: Endeks / BIST'te olmayan ticker'lari atla ──
-            # XU100, XU030 (endeksler) + GATEG gibi BIST listesinde olmayanlar.
-            if ticker and not _is_valid_bist_ticker(ticker):
+            # Birincil ticker — AI/router/push icin kullanilir
+            ticker = all_tickers[0] if all_tickers else None
+
+            if not ticker:
+                # Sembol parse edilemedi veya hicbiri gecerli BIST hissesi degil
                 logger.info(
-                    "Telegram: Ticker BIST'te yok veya endeks (msg_id=%s, ticker=%s) — atlandi",
-                    telegram_message_id, ticker,
+                    "Telegram: Gecerli ticker bulunamadi (msg_id=%s) — atlandi",
+                    telegram_message_id,
                 )
                 continue
+
+            if len(all_tickers) > 1:
+                logger.info(
+                    "Telegram: Cok-sembollu bildirim (msg_id=%s) — %d ticker: %s",
+                    telegram_message_id, len(all_tickers), ",".join(all_tickers),
+                )
 
             # Fiyat bilgisi KAYDEDILMEZ (veri ihlali)
             kap_id = parse_kap_id(text)
@@ -733,26 +772,29 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ka_category = _infer_category(ka_title)
                     ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
 
-                    # ── BASIT DUPLICATE KONTROLU: kap_url uzerinden ──
-                    # Her KAP bildiriminin unique URL'si var (Bildirim/XXXXX).
-                    # Ayni URL DB'de yoksa yaz, varsa atla. Bu kadar.
-                    is_duplicate = False
-                    if kap_url:
-                        existing_check = await session.execute(
-                            _sa_select(KapAllDisclosure.id).where(
-                                KapAllDisclosure.kap_url == kap_url,
-                            ).limit(1)
-                        )
-                        is_duplicate = existing_check.scalar_one_or_none() is not None
+                    # ── DUPLICATE KONTROLU: (kap_url + company_code) uzerinden ──
+                    # Cok-sembollu bildirimlerde ayni kap_url N farkli ticker icin
+                    # yazilir, bu yuzden ticker'i da kontrole dahil ediyoruz.
+                    for _tk in all_tickers:
+                        is_duplicate = False
+                        if kap_url:
+                            existing_check = await session.execute(
+                                _sa_select(KapAllDisclosure.id).where(
+                                    KapAllDisclosure.kap_url == kap_url,
+                                    KapAllDisclosure.company_code == _tk,
+                                ).limit(1)
+                            )
+                            is_duplicate = existing_check.scalar_one_or_none() is not None
 
-                    if is_duplicate:
-                        logger.debug(
-                            "kap_all_disclosures duplicate atlandi: %s — %s",
-                            ticker, ka_title[:50],
-                        )
-                    else:
+                        if is_duplicate:
+                            logger.debug(
+                                "kap_all_disclosures duplicate atlandi: %s — %s",
+                                _tk, ka_title[:50],
+                            )
+                            continue
+
                         kap_disc = KapAllDisclosure(
-                            company_code=ticker,
+                            company_code=_tk,
                             title=ka_title,
                             body=ai_summary,
                             category=ka_category,
@@ -772,19 +814,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 await session.flush()
                             logger.info(
                                 "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
-                                ticker, ka_title[:50], ka_sentiment, ai_score,
+                                _tk, ka_title[:50], ka_sentiment, ai_score,
                             )
 
                             # ── ROUTER: 6 ozel takvime dagit ──
-                            # Sermaye Artirimi + Temettu state machine'lerini besle.
-                            # Toptan/Tip Donusum/Pay A.S. zaten category alaninda.
-                            # Tedbirli ayri kaynaktan gelir.
                             try:
                                 async with session.begin_nested():
                                     await _route_to_calendars(
                                         session,
                                         disclosure_id=kap_disc.id,
-                                        ticker=ticker,
+                                        ticker=_tk,
                                         company_name=None,
                                         title=ka_title,
                                         body=ai_summary,
@@ -793,33 +832,29 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                     )
                             except Exception as _route_err:
                                 logger.warning(
-                                    "KAP router hata (%s): %s", ticker, _route_err,
+                                    "KAP router hata (%s): %s", _tk, _route_err,
                                 )
 
-                            # ── BILANCO PIPELINE: KAP body'sinden AI parse + company_financials ──
-                            # is_bilanco=True ise (Finansal Durum Tablosu, Kar/Zarar, Faaliyet Raporu...)
-                            # bilanco_pipeline tetiklenir — KAP body parse edilip DB'ye yazilir.
-                            # IsYatirim'a dokunmaz (sadece initial seed icindi).
+                            # ── BILANCO PIPELINE ──
                             if ka_is_bilanco:
                                 try:
                                     from app.services.bilanco_pipeline import process_bilanco_bildirimi
-                                    # Async fire-and-forget — gateway timeout'a takilmasin
                                     import asyncio as _asyncio
                                     _asyncio.create_task(
-                                        process_bilanco_bildirimi(ticker, kap_title=ka_title)
+                                        process_bilanco_bildirimi(_tk, kap_title=ka_title)
                                     )
                                     logger.info(
                                         "Bilanco pipeline tetiklendi: %s — '%s'",
-                                        ticker, ka_title[:50],
+                                        _tk, ka_title[:50],
                                     )
                                 except Exception as _bil_err:
                                     logger.warning(
-                                        "Bilanco pipeline tetikleme hata (%s): %s", ticker, _bil_err,
+                                        "Bilanco pipeline tetikleme hata (%s): %s", _tk, _bil_err,
                                     )
                         except Exception as _flush_err:
                             logger.warning(
                                 "kap_all_disclosures yazma hatasi: %s — %s",
-                                ticker, _flush_err,
+                                _tk, _flush_err,
                             )
                 except Exception as _ka_err:
                     logger.warning(
@@ -873,6 +908,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 )
                 session.add(news)
                 new_count += 1
+
+            # ──────────────────────────────────────────────────────────────────
+            # PER-MESSAGE COMMIT — duplicate push'i onler
+            # Push/tweet harici side-effect'ten ONCE commit ediyoruz. Boylece
+            # commit sonrasi push basarisiz olsa bile, telegram_message_id
+            # zaten DB'de duplicate olarak isaretli — sonraki poll'da tekrar
+            # islenmez, "ayni hisseye 3 kez bildirim" sorunu cozulur.
+            # ──────────────────────────────────────────────────────────────────
+            try:
+                await session.commit()
+            except Exception as _commit_err:
+                logger.error(
+                    "Per-message commit hatasi (msg_id=%s, ticker=%s): %s",
+                    telegram_message_id, ticker, _commit_err,
+                )
+                # Commit basarisizsa rollback edip bu mesaji atla — push da gonderme
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
+                continue
 
             # Push bildirim — sadece should_notify True ise
             if not should_notify:
