@@ -10964,7 +10964,7 @@ async def get_temettu_akisi(
     # Son bildirim → en eski sıralaması (latest_event_iso DESC)
     # SQL updated_at sıralaması yetersiz çünkü backfill eski kayıtlari yenileyip basa cikarir.
     # Burada gercek olay tarihine gore yeniden sirala.
-    items.sort(key=lambda x: x.get("latest_event_iso") or x.get("payment_date") or "", reverse=True)
+    items.sort(key=lambda x: x.get("published_at") or x.get("payment_date") or "", reverse=True)
 
     return {
         "filter": filter,
