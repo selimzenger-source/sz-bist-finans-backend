@@ -10483,6 +10483,9 @@ async def list_latest_bilancos(
     """
     # KAP bilanço bildirimleri (is_bilanco=TRUE, en yeniden eskiye)
     # Sadece "Finansal Rapor" titleli olanlar — Sorumluluk Beyani ve Faaliyet Raporu hariç
+    # KAP'i en yeniden eskiye sirala, ticker bazli DISTINCT al
+    # Aynı hisse için 'Finansal Rapor' + 'Finansal Durum Tablosu' + 'Kar Zarar' gibi
+    # birden fazla KAP gelirse, yalnizca EN YENI'yi goster (ticker'a gore tek satir).
     kap_result = await db.execute(
         select(KapAllDisclosure)
         .where(KapAllDisclosure.is_bilanco == True)
@@ -10498,10 +10501,19 @@ async def list_latest_bilancos(
             KapAllDisclosure.title.ilike('%Ara Dönem Finansal%'),
         ))
         .order_by(desc(KapAllDisclosure.published_at))
-        .offset(offset)
-        .limit(limit)
+        .limit(limit * 5)  # ticker dedupe için fazladan çek
     )
-    kap_items = list(kap_result.scalars().all())
+    all_items = list(kap_result.scalars().all())
+    # Ticker bazli dedupe — ilk gorulen (en yeni) kalir
+    seen_tickers = set()
+    kap_items: list[KapAllDisclosure] = []
+    for k in all_items:
+        if k.company_code in seen_tickers:
+            continue
+        seen_tickers.add(k.company_code)
+        kap_items.append(k)
+    # Offset + limit uygula
+    kap_items = kap_items[offset:offset + limit]
 
     def _f(v):
         return float(v) if v is not None else None
