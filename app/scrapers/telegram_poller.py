@@ -795,6 +795,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 logger.warning(
                                     "KAP router hata (%s): %s", ticker, _route_err,
                                 )
+
+                            # ── BILANCO PIPELINE: KAP body'sinden AI parse + company_financials ──
+                            # is_bilanco=True ise (Finansal Durum Tablosu, Kar/Zarar, Faaliyet Raporu...)
+                            # bilanco_pipeline tetiklenir — KAP body parse edilip DB'ye yazilir.
+                            # IsYatirim'a dokunmaz (sadece initial seed icindi).
+                            if ka_is_bilanco:
+                                try:
+                                    from app.services.bilanco_pipeline import process_bilanco_bildirimi
+                                    # Async fire-and-forget — gateway timeout'a takilmasin
+                                    import asyncio as _asyncio
+                                    _asyncio.create_task(
+                                        process_bilanco_bildirimi(ticker, kap_title=ka_title)
+                                    )
+                                    logger.info(
+                                        "Bilanco pipeline tetiklendi: %s — '%s'",
+                                        ticker, ka_title[:50],
+                                    )
+                                except Exception as _bil_err:
+                                    logger.warning(
+                                        "Bilanco pipeline tetikleme hata (%s): %s", ticker, _bil_err,
+                                    )
                         except Exception as _flush_err:
                             logger.warning(
                                 "kap_all_disclosures yazma hatasi: %s — %s",
