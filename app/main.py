@@ -10476,8 +10476,10 @@ async def list_latest_bilancos(
 
     # Tum unique ticker'lar icin financial_ratios + son fiyat'i once topluca cek
     from app.models.company_financial import FinancialRatio
+    from app.models.temel_analiz import TemelAnaliz
     unique_tickers = list({k.company_code for k in kap_items if k.company_code})
     ratios_map: dict[str, FinancialRatio] = {}
+    temel_map: dict[str, TemelAnaliz] = {}
     if unique_tickers:
         # Her ticker icin en son ratio kaydi
         rr = await db.execute(
@@ -10488,6 +10490,13 @@ async def list_latest_bilancos(
         for r in rr.scalars().all():
             if r.ticker not in ratios_map:
                 ratios_map[r.ticker] = r
+
+        # Yerel Excel sync (TemelAnaliz) — fallback fk/pddd/fd_favok/piyasa
+        tr = await db.execute(
+            select(TemelAnaliz).where(TemelAnaliz.ticker.in_(unique_tickers))
+        )
+        for t in tr.scalars().all():
+            temel_map[t.ticker] = t
     # Son fiyat — DailyStockMarketStat'tan
     prices_map: dict[str, float] = {}
     if unique_tickers:
@@ -10533,7 +10542,19 @@ async def list_latest_bilancos(
         quarterly = list(reversed(finals))
 
         ratio = ratios_map.get(ticker)
+        temel = temel_map.get(ticker)
         price_now = prices_map.get(ticker)
+
+        # Degerlik fallback: önce financial_ratios (mynet), boşsa temel_analiz (Excel sync)
+        def _r(r_val, t_val):
+            if r_val is not None and r_val != 0:
+                return _f(r_val)
+            return _f(t_val) if t_val is not None and t_val != 0 else None
+
+        fk_val = _r(ratio.fk if ratio else None, temel.fk if temel else None)
+        pddd_val = _r(ratio.pddd if ratio else None, temel.pddd if temel else None)
+        fd_favok_val = _r(ratio.fd_favok if ratio else None, temel.fd_favok if temel else None)
+        piyasa_val = _r(ratio.piyasa_degeri if ratio else None, temel.piyasa_degeri if temel else None)
 
         items.append({
             "ticker": ticker,
@@ -10544,11 +10565,11 @@ async def list_latest_bilancos(
             "ai_summary": kap.ai_summary[:200] if kap.ai_summary else None,
             "period": fin.period if fin else None,
             "prev_period": prev_to_use.period if prev_to_use else None,
-            # Degerlik (financial_ratios + canli fiyat)
-            "fk": _f(ratio.fk) if ratio else None,
-            "pddd": _f(ratio.pddd) if ratio else None,
-            "fd_favok": _f(ratio.fd_favok) if ratio else None,
-            "piyasa_degeri": _f(ratio.piyasa_degeri) if ratio else None,
+            # Degerlik (financial_ratios -> temel_analiz fallback)
+            "fk": fk_val,
+            "pddd": pddd_val,
+            "fd_favok": fd_favok_val,
+            "piyasa_degeri": piyasa_val,
             "price": price_now,
             # Mevcut donem
             "revenue": _f(fin.revenue) if fin else None,
