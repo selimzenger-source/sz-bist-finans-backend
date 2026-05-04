@@ -105,37 +105,24 @@ _INDEX_TICKERS = {
 def _is_valid_bist_ticker(ticker: str) -> bool:
     """Ticker BIST'te islem goren bir hisse mi?
 
-    1. Endeks ticker'larini reddet (XU100, XU030, XBANK...)
-    2. BigPara'nin BIST hisse listesinde var mi kontrol et
-    3. Listede yoksa ATLA — KAP bazi BIST'te islem gormeyen sirketleri de
-       icerir (bagli ortakliklar, halka acik olmayanlar). Bunlari islemiyoruz.
+    DEGISIM (2026-05-04): BigPara whitelist kontrolu KALDIRILDI. Cunku:
+    - Yeni listelenen hisseler (RUBNS, IZENR vb.) cache'de olmayabiliyor
+    - BigPara cache'i 2 gun, yeni hisseyi 2 gune kadar yakalamaz
+    - KAP'in kendisi gecerli ticker listesi sagliyor (Sembol: alani)
+    - Cok-sembollu bildirimlerde (BISTECH/MKK) gecerli sembolleri filtrelemek
+      veri kaybina yol aciyordu (PGSUS gibi major hisseler bile filtreleniyordu)
+
+    Yalnizca endeks ticker'larini reddet (XU100, XU030, XBANK vs.).
     """
     if not ticker:
         return False
     tk = ticker.upper().strip()
 
-    # Endeksler
+    # Endeksler — bunlar hisse degil
     if tk in _INDEX_TICKERS or tk.startswith("XU0") or tk.startswith("XU1"):
         return False
 
-    # BigPara whitelist
-    try:
-        from app.services.twitter_service import _get_bist_ticker_cache
-        ticker_lines = _get_bist_ticker_cache()
-        if not ticker_lines:
-            # Cache bos donerse riske girme — geciyor say (false negative onle)
-            return True
-        # Format: "Sirket Adi → #TICKER"
-        valid_set = set()
-        for line in ticker_lines:
-            m = re.search(r"#([A-Z0-9]+)\s*$", line)
-            if m:
-                valid_set.add(m.group(1).upper())
-        if not valid_set:
-            return True  # parse hatasi — riske girme
-        return tk in valid_set
-    except Exception:
-        return True  # hata durumunda blokla degil, gecsin
+    return True
 
 
 def detect_message_type(text: str) -> str | None:
