@@ -108,6 +108,50 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                             ticker, kap_parsed.get("revenue"), kap_parsed.get("total_assets"))
             else:
                 logger.warning("📊 KAP XBRL bulunamadi (%d KAP denendi): %s", len(kap_news_list), ticker)
+                # FALLBACK: telegram_news tablosundan ticker'in son matriks_id'lerini al
+                # ve TradingView uzerinden direkt KAP URL'leri bul. Telegram poller atlamis
+                # KAP'lara erisim icin (ENJSA/KAREL gibi multi-burst KAP'larda kayip mesajlar).
+                try:
+                    from app.models.telegram_news import TelegramNews
+                    from sqlalchemy import select as _sel, desc as _desc
+                    async with async_session() as db2:
+                        # Ticker'in son 24 saat icindeki tum telegram mesajlarini al (en yeniden eskiye)
+                        cutoff_tg = datetime.now(timezone.utc) - _td(hours=24)
+                        tg_result = await db2.execute(
+                            _sel(TelegramNews)
+                            .where(TelegramNews.ticker == ticker)
+                            .where(TelegramNews.created_at >= cutoff_tg)
+                            .order_by(_desc(TelegramNews.created_at))
+                            .limit(20)
+                        )
+                        tg_msgs = list(tg_result.scalars().all())
+
+                    # Her telegram mesaji icin matriks_id varsa → TradingView'dan KAP URL ara
+                    from app.services.ai_news_scorer import fetch_tradingview_content
+                    for msg in tg_msgs:
+                        if not msg.matriks_id:
+                            continue
+                        try:
+                            tv = await fetch_tradingview_content(msg.matriks_id)
+                            tv_kap_url = tv.get("real_kap_url") if tv else None
+                            if not tv_kap_url:
+                                continue
+                            # Bu KAP URL'sini fetch + parse et
+                            disc = await fetch_kap_disclosure(tv_kap_url)
+                            if not disc or not disc.get("full_text"):
+                                continue
+                            parsed = await parse_bilanco_from_kap(ticker, disc["full_text"])
+                            if parsed and (parsed.get("total_assets") or parsed.get("revenue")):
+                                await save_parsed_bilanco(ticker, parsed)
+                                logger.info("📊 TradingView fallback OK: %s — matriks=%s → %s (Ciro: %s)",
+                                            ticker, msg.matriks_id, tv_kap_url, parsed.get("revenue"))
+                                kap_parsed = parsed
+                                break
+                        except Exception as tv_err:
+                            logger.debug("TradingView fallback hata %s/%s: %s", ticker, msg.matriks_id, tv_err)
+                            continue
+                except Exception as fb_err:
+                    logger.warning("KAP fallback hatasi (%s): %s", ticker, fb_err)
         except Exception as kap_err:
             logger.warning("KAP aninda parse hatasi %s: %s", ticker, kap_err)
 
