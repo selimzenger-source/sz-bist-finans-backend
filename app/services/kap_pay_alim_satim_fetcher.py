@@ -254,6 +254,19 @@ async def upsert_pay_alim_satim_from_kap(
     nominal_lot = int(parsed.get("alim_nominal") or parsed.get("satim_nominal") or 0)
     body = parsed.get("body_text") or ""
     party_name = extract_party_name(body)
+    # Fallback patterns — "Ortağı XXX'den gelen yazı" / "XXX A.Ş. tarafından"
+    if not party_name:
+        import re as _re
+        m = _re.search(r"Ortağı\s+([^'’]{5,150}?)['’]?(?:den|dan)\s+gelen", body, _re.IGNORECASE)
+        if m:
+            party_name = m.group(1).strip()
+        else:
+            m = _re.search(r"([A-ZÇĞİÖŞÜ][^.]{5,150}?(?:A\.Ş|Holding|Ltd\.))", body)
+            if m:
+                party_name = m.group(1).strip()
+    # Son care fallback — NOT NULL constraint için
+    if not party_name:
+        party_name = "Bilinmiyor"
 
     # Oranlar — gun sonu degerleri "current"
     end_pay = parsed.get("end_pay_oran_pct")
