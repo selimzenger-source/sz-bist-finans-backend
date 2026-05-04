@@ -8849,6 +8849,103 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.post("/api/v1/admin/test-kap-notification")
+@limiter.limit("10/minute")
+async def admin_test_kap_notification(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli bir KAP bildirimini manuel olarak isle ve push gonder.
+
+    Body: {
+      "admin_password": "...",
+      "ticker": "SDTTR",
+      "title": "Finansal Rapor",
+      "kap_url": "https://www.kap.org.tr/tr/Bildirim/1600155",
+      "body": null  (otomatik fetch),
+      "force_send": true  (DB'de varsa bile push at)
+    }
+
+    Test akisi: kap_all_disclosures'a ekle/getir → AI analiz → push bildirim
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ticker = (payload.get("ticker") or "").upper().strip()
+    title = (payload.get("title") or "Finansal Rapor").strip()
+    kap_url = payload.get("kap_url")
+    body_text = payload.get("body")
+    force_send = bool(payload.get("force_send", False))
+
+    if not ticker or not kap_url:
+        raise HTTPException(status_code=400, detail="ticker ve kap_url gerekli")
+
+    from app.database import async_session as _async_session
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+    from app.services.kap_all_analyzer import analyze_disclosure
+    from app.services.notification import NotificationService
+    from datetime import datetime as _dt, timezone as _tz
+
+    result: dict = {"ticker": ticker, "kap_url": kap_url, "steps": []}
+
+    # 1. Body içeriği fetch
+    if not body_text:
+        try:
+            body_text = await fetch_kap_page_content(kap_url)
+            result["steps"].append(f"KAP body fetched ({len(body_text or '')} chars)")
+        except Exception as e:
+            result["steps"].append(f"KAP body fetch hatasi: {e}")
+
+    async with _async_session() as db:
+        # 2. DB'de var mi
+        existing_q = await db.execute(
+            select(KapAllDisclosure).where(
+                KapAllDisclosure.company_code == ticker,
+                KapAllDisclosure.title == title,
+            ).limit(1)
+        )
+        disclosure = existing_q.scalar_one_or_none()
+
+        if disclosure:
+            result["steps"].append(f"DB'de mevcut id={disclosure.id}")
+        else:
+            disclosure = KapAllDisclosure(
+                company_code=ticker,
+                title=title,
+                body=body_text or "",
+                kap_url=kap_url,
+                source="manual_admin",
+                published_at=_dt.now(_tz.utc),
+            )
+            db.add(disclosure)
+            await db.flush()
+            result["steps"].append(f"DB'ye eklendi id={disclosure.id}")
+
+        # 3. AI analiz (henuz yapilmadiysa)
+        if not disclosure.ai_analyzed_at:
+            try:
+                await analyze_disclosure(db, disclosure)
+                result["steps"].append(
+                    f"AI analiz: sentiment={disclosure.ai_sentiment}, score={disclosure.ai_impact_score}"
+                )
+            except Exception as e:
+                result["steps"].append(f"AI hata: {str(e)[:200]}")
+        else:
+            result["steps"].append(
+                f"AI mevcut: sentiment={disclosure.ai_sentiment}, score={disclosure.ai_impact_score}"
+            )
+
+        await db.commit()
+
+        # 4. Bildirim
+        if force_send or not disclosure.ai_analyzed_at:
+            notif = NotificationService(db)
+            try:
+                sent = await notif.notify_kap_watchlist(disclosure)
+                result["steps"].append(f"Push bildirim: {sent} kullaniciya gitti")
+            except Exception as e:
+                result["steps"].append(f"Push hata: {str(e)[:200]}")
+
+    return result
+
+
 @app.post("/api/v1/admin/import-temel-analiz")
 @limiter.limit("30/minute")
 async def admin_import_temel_analiz(request: Request, payload: dict = Body(...)):
