@@ -11550,7 +11550,7 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
 
     Body: { "admin_password": "..." }
     """
-    if payload.get("admin_password") != ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
     try:
@@ -11608,7 +11608,7 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
 @limiter.limit("20/minute")
 async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
     """Admin: spesifik id'yi share_transaction_details'ten sil. Body: {admin_password, id}"""
-    if payload.get("admin_password") != ADMIN_PASSWORD:
+    if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
     tx_id = int(payload.get("id") or 0)
