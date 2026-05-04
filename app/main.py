@@ -8193,13 +8193,16 @@ async def list_share_type_conversions(
 async def list_block_trades(
     ticker: Optional[str] = Query(None),
     transaction_type: Optional[str] = Query(None, description="alis | satis"),
-    days: int = Query(30, ge=1, le=365),
+    days: int = Query(365, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
-    """Toptan Alım Satım — public list."""
+    """Toptan Alım Satım — public list (default son 1 yil)."""
     from app.models.block_trade import BlockTrade
     from datetime import timedelta as _td
+    # Eski client'larin gonderdigi kucuk days degerini de override et — son 50 her zaman gosterilsin
+    if days < 180:
+        days = 365
     cutoff = date.today() - _td(days=days)
     query = select(BlockTrade).where(BlockTrade.transaction_date >= cutoff)
     if ticker:
