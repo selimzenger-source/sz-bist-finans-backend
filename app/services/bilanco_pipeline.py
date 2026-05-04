@@ -62,32 +62,52 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
             from sqlalchemy import select, desc
 
             async with async_session() as db:
+                # ENJSA gibi tickerlarda Sorumluluk + Faaliyet + Özkaynaklar gelir,
+                # ama gerçek "Finansal Durum Tablosu (Bilanço)" KAP'ı kayıp olabilir.
+                # Bu yüzden son 7 gündeki TÜM is_bilanco=True KAP'lara bakıp
+                # XBRL içereni bulana kadar dene.
+                from datetime import timedelta as _td
+                cutoff = datetime.now(timezone.utc) - _td(days=7)
                 kap_result = await db.execute(
                     select(KapAllDisclosure)
-                    .where(KapAllDisclosure.company_code == ticker, KapAllDisclosure.is_bilanco == True)
+                    .where(KapAllDisclosure.company_code == ticker)
+                    .where(KapAllDisclosure.is_bilanco == True)
+                    .where(KapAllDisclosure.published_at >= cutoff)
                     .order_by(desc(KapAllDisclosure.published_at))
-                    .limit(1)
+                    .limit(10)
                 )
-                kap_news = kap_result.scalar_one_or_none()
+                kap_news_list = list(kap_result.scalars().all())
 
-            if kap_news:
-                # Body yoksa veya kısa kalmışsa yeni extractor ile çek
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            best_parsed = None
+            for kap_news in kap_news_list:
                 body_full = kap_news.body or ""
                 if (not body_full or len(body_full) < 500) and kap_news.kap_url:
                     try:
-                        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
                         disclosure = await fetch_kap_disclosure(kap_news.kap_url)
                         if disclosure and disclosure.get("full_text"):
                             body_full = disclosure["full_text"]
-                            logger.info("📊 KAP body fetched (RSC): %s — %d char", ticker, len(body_full))
                     except Exception as fe:
-                        logger.warning("KAP body fetch hata %s: %s", ticker, fe)
+                        logger.debug("KAP body fetch hata %s: %s", ticker, fe)
+                        continue
 
-                if body_full:
-                    kap_parsed = await parse_bilanco_from_kap(ticker, body_full)
-                    if kap_parsed:
-                        await save_parsed_bilanco(ticker, kap_parsed)
-                        logger.info("📊 KAP aninda parse OK: %s — Ciro: %s", ticker, kap_parsed.get("revenue"))
+                if not body_full:
+                    continue
+
+                parsed = await parse_bilanco_from_kap(ticker, body_full)
+                # Sadece XBRL'i çıkaran (revenue/total_assets dolu) KAP kabul
+                if parsed and (parsed.get("total_assets") or parsed.get("revenue")):
+                    best_parsed = parsed
+                    logger.info("📊 KAP XBRL bulundu: %s — %s (%s)", ticker, kap_news.title[:30], kap_news.kap_url)
+                    break
+
+            if best_parsed:
+                kap_parsed = best_parsed
+                await save_parsed_bilanco(ticker, kap_parsed)
+                logger.info("📊 KAP aninda parse OK: %s — Ciro: %s, Varlik: %s",
+                            ticker, kap_parsed.get("revenue"), kap_parsed.get("total_assets"))
+            else:
+                logger.warning("📊 KAP XBRL bulunamadi (%d KAP denendi): %s", len(kap_news_list), ticker)
         except Exception as kap_err:
             logger.warning("KAP aninda parse hatasi %s: %s", ticker, kap_err)
 
