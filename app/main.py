@@ -11553,7 +11553,8 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
     if payload.get("admin_password") != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
-    async with async_session() as db:
+    try:
+      async with async_session() as db:
         # Bad kayit: '?' / 'Bilinmiyor' / NULL party_name VEYA nominal_lot=0/NULL
         # Sil kosulu: ya ayni kap_url'da saglikli kayit var, ya da ayni (ticker,date)'te saglikli kayit var
         ids_result = await db.execute(sa_text("""
@@ -11593,10 +11594,30 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
             deleted_count += 1
         if deleted_count:
             await db.commit()
-    return {
+      return {
         "deleted_count": deleted_count,
         "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2]), "kap": r[3], "party": r[4], "source": r[5]} for r in bad_rows[:80]],
-    }
+      }
+    except Exception as e:
+      import traceback
+      logger.error("cleanup-share-tx-duplicates failed: %s\n%s", e, traceback.format_exc())
+      return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
+
+
+@app.post("/api/v1/admin/delete-share-tx")
+@limiter.limit("20/minute")
+async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
+    """Admin: spesifik id'yi share_transaction_details'ten sil. Body: {admin_password, id}"""
+    if payload.get("admin_password") != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    tx_id = int(payload.get("id") or 0)
+    if not tx_id:
+        return {"error": "id required"}
+    async with async_session() as db:
+        await db.execute(sa_text("DELETE FROM share_transaction_details WHERE id=:id"), {"id": tx_id})
+        await db.commit()
+    return {"deleted_id": tx_id}
 
 
 @app.post("/api/v1/admin/process-kap-disclosure")
