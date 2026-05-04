@@ -10449,7 +10449,7 @@ async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/v1/bilanco")
 async def list_latest_bilancos(
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=800),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
