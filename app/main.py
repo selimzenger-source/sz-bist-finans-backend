@@ -11631,3 +11631,158 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
         await db.commit()
 
     return result
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# BACKFILL — Geçmiş KAP kayıtlarını yeni processor'larla tekrar işle
+# ═════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/admin/backfill-kap-processors")
+@limiter.limit("3/minute")
+async def admin_backfill_kap_processors(request: Request, payload: dict = Body(...)):
+    """Admin: Eksik kalan KAP işlemlerini geçmişe dönük doldur.
+
+    Body: {
+      "admin_password": "...",
+      "categories": ["business_deal", "dividend_payment", "mkk_realization"],
+      "days": 90,    # Son N gün
+      "limit": 500   # Max kayıt
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    cats = payload.get("categories") or ["business_deal", "dividend_payment", "mkk_realization"]
+    days = int(payload.get("days") or 90)
+    limit_n = int(payload.get("limit") or 500)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    from app.database import async_session as _async_session
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.business_deal import BusinessDeal
+
+    summary = {"categories": cats, "days": days, "limit": limit_n,
+               "processed": 0, "updates": {}}
+
+    async with _async_session() as db:
+        # ─── 1. business_deal: amount_try IS NULL kayıtları
+        if "business_deal" in cats:
+            from app.services.business_deal_processor import (
+                regex_extract_business_deal, get_exchange_rate,
+            )
+            stmt = (
+                select(BusinessDeal)
+                .where(BusinessDeal.amount_try.is_(None))
+                .order_by(BusinessDeal.deal_date.desc().nullslast())
+                .limit(limit_n)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            updated = 0
+            for r in rows:
+                if not r.kap_url:
+                    continue
+                try:
+                    disc = await fetch_kap_disclosure(r.kap_url)
+                    if not disc or not disc.get("full_text"):
+                        continue
+                    body = disc["full_text"]
+                    parsed = regex_extract_business_deal(body)
+                    amt = parsed.get("amount_original")
+                    cur = parsed.get("currency") or "TRY"
+                    if amt is None:
+                        continue
+                    if cur == "TRY":
+                        r.amount_original = amt
+                        r.currency = "TRY"
+                        r.amount_try = amt
+                        r.exchange_rate_used = 1.0
+                    else:
+                        rate, rdate = await get_exchange_rate(cur)
+                        if rate:
+                            r.amount_original = amt
+                            r.currency = cur
+                            r.amount_try = amt * rate
+                            r.exchange_rate_used = rate
+                            r.rate_date = rdate
+                    if parsed.get("counterparty") and not r.counterparty:
+                        r.counterparty = parsed["counterparty"]
+                    updated += 1
+                except Exception as e:
+                    logger.warning("Backfill business_deal hata (%s): %s", r.ticker, e)
+            await db.flush()
+            summary["updates"]["business_deal"] = {"scanned": len(rows), "updated": updated}
+
+        # ─── 2. dividend_payment + mkk_realization: kap_all_disclosures üzerinden
+        if "dividend_payment" in cats or "mkk_realization" in cats:
+            from app.services.dividend_calendar_processor import (
+                is_dividend_payment_announcement,
+                process_dividend_payment_announcement,
+            )
+            from app.services.capital_increase_processor import (
+                is_mkk_capital_realization,
+                process_mkk_capital_realization,
+            )
+
+            stmt = (
+                select(KapAllDisclosure)
+                .where(KapAllDisclosure.published_at >= cutoff)
+                .where(or_(
+                    KapAllDisclosure.title.ilike("%merkezi kayıt%"),
+                    KapAllDisclosure.title.ilike("%merkezi kayit%"),
+                    KapAllDisclosure.title.ilike("%MKK%"),
+                    KapAllDisclosure.title.ilike("%BISTECH%"),
+                    KapAllDisclosure.title.ilike("%Pay Piyasası%"),
+                    KapAllDisclosure.title.ilike("%Pay Piyasasi%"),
+                    KapAllDisclosure.title.ilike("%hak kullanım%"),
+                    KapAllDisclosure.title.ilike("%hak kullanim%"),
+                ))
+                .order_by(KapAllDisclosure.published_at.desc())
+                .limit(limit_n)
+            )
+            rows = (await db.execute(stmt)).scalars().all()
+            div_updated = 0
+            mkk_updated = 0
+            for d in rows:
+                body = d.body or ""
+                if (not body or len(body) < 200) and d.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(d.kap_url)
+                        if disc and disc.get("full_text"):
+                            body = disc["full_text"]
+                    except Exception:
+                        continue
+
+                if "dividend_payment" in cats:
+                    try:
+                        if is_dividend_payment_announcement(d.title or "", body):
+                            res = await process_dividend_payment_announcement(
+                                db, body=body, kap_url=d.kap_url,
+                                disclosure_id=d.id, published_at=d.published_at,
+                            )
+                            if res.get("updated"):
+                                div_updated += res["updated"]
+                    except Exception as e:
+                        logger.warning("Backfill div_payment hata (id=%s): %s", d.id, e)
+
+                if "mkk_realization" in cats:
+                    try:
+                        if is_mkk_capital_realization(d.title or "", body):
+                            res = await process_mkk_capital_realization(
+                                db, ticker_hint=d.company_code, body=body,
+                                kap_url=d.kap_url, disclosure_id=d.id,
+                            )
+                            if res.get("matched"):
+                                mkk_updated += 1
+                    except Exception as e:
+                        logger.warning("Backfill mkk hata (id=%s): %s", d.id, e)
+
+            await db.flush()
+            if "dividend_payment" in cats:
+                summary["updates"]["dividend_payment"] = {"scanned": len(rows), "updated": div_updated}
+            if "mkk_realization" in cats:
+                summary["updates"]["mkk_realization"] = {"scanned": len(rows), "updated": mkk_updated}
+
+        await db.commit()
+
+    return summary

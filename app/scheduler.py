@@ -4318,6 +4318,134 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,
     )
 
+    # 7g. KAP Processor Backfill — günde 1 kez (gece 03:30 UTC = TR 06:30)
+    # Geçmiş 3 günü tarar, eksik kalan business_deal tutarlarını ve
+    # MKK/temettü ödeme duyurularını yeni RSC extractor ile günceller.
+    async def _kap_processor_backfill():
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from sqlalchemy import select as _select, or_
+        try:
+            from app.database import async_session
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from app.models.business_deal import BusinessDeal
+            from app.services.business_deal_processor import (
+                regex_extract_business_deal, get_exchange_rate,
+            )
+            from app.services.dividend_calendar_processor import (
+                is_dividend_payment_announcement,
+                process_dividend_payment_announcement,
+            )
+            from app.services.capital_increase_processor import (
+                is_mkk_capital_realization,
+                process_mkk_capital_realization,
+            )
+
+            cutoff = _dt.now(_tz.utc) - _td(days=3)
+            stats = {"business_deal_updated": 0, "dividend_payment_updated": 0, "mkk_realization_updated": 0}
+
+            async with async_session() as db:
+                # business_deal NULL amount fix
+                bd_rows = (await db.execute(
+                    _select(BusinessDeal)
+                    .where(BusinessDeal.amount_try.is_(None))
+                    .where(BusinessDeal.deal_date >= cutoff.date() - _td(days=10))
+                    .limit(100)
+                )).scalars().all()
+                for r in bd_rows:
+                    if not r.kap_url:
+                        continue
+                    try:
+                        disc = await fetch_kap_disclosure(r.kap_url)
+                        if not disc or not disc.get("full_text"):
+                            continue
+                        parsed = regex_extract_business_deal(disc["full_text"])
+                        if parsed.get("amount_original") is None:
+                            continue
+                        cur = parsed.get("currency") or "TRY"
+                        amt = parsed["amount_original"]
+                        if cur == "TRY":
+                            r.amount_original = amt
+                            r.currency = "TRY"
+                            r.amount_try = amt
+                            r.exchange_rate_used = 1.0
+                        else:
+                            rate, rdate = await get_exchange_rate(cur)
+                            if rate:
+                                r.amount_original = amt
+                                r.currency = cur
+                                r.amount_try = amt * rate
+                                r.exchange_rate_used = rate
+                                r.rate_date = rdate
+                        if parsed.get("counterparty") and not r.counterparty:
+                            r.counterparty = parsed["counterparty"]
+                        stats["business_deal_updated"] += 1
+                    except Exception:
+                        continue
+
+                # MKK/BIST duyurular (son 3 gün)
+                kap_rows = (await db.execute(
+                    _select(KapAllDisclosure)
+                    .where(KapAllDisclosure.published_at >= cutoff)
+                    .where(or_(
+                        KapAllDisclosure.title.ilike("%merkezi kayıt%"),
+                        KapAllDisclosure.title.ilike("%merkezi kayit%"),
+                        KapAllDisclosure.title.ilike("%MKK%"),
+                        KapAllDisclosure.title.ilike("%BISTECH%"),
+                        KapAllDisclosure.title.ilike("%Pay Piyasası%"),
+                        KapAllDisclosure.title.ilike("%Pay Piyasasi%"),
+                    ))
+                    .limit(200)
+                )).scalars().all()
+
+                for d in kap_rows:
+                    body = d.body or ""
+                    if (not body or len(body) < 200) and d.kap_url:
+                        try:
+                            disc = await fetch_kap_disclosure(d.kap_url)
+                            if disc and disc.get("full_text"):
+                                body = disc["full_text"]
+                        except Exception:
+                            continue
+
+                    if is_dividend_payment_announcement(d.title or "", body):
+                        try:
+                            res = await process_dividend_payment_announcement(
+                                db, body=body, kap_url=d.kap_url,
+                                disclosure_id=d.id, published_at=d.published_at,
+                            )
+                            stats["dividend_payment_updated"] += res.get("updated", 0)
+                        except Exception:
+                            pass
+
+                    if is_mkk_capital_realization(d.title or "", body):
+                        try:
+                            res = await process_mkk_capital_realization(
+                                db, ticker_hint=d.company_code, body=body,
+                                kap_url=d.kap_url, disclosure_id=d.id,
+                            )
+                            if res.get("matched"):
+                                stats["mkk_realization_updated"] += 1
+                        except Exception:
+                            pass
+
+                await db.commit()
+
+            logger.info("KAP processor backfill: %s", stats)
+        except Exception as e:
+            logger.error("KAP processor backfill hatasi: %s", e)
+
+    scheduler.add_job(
+        _kap_processor_backfill,
+        CronTrigger(hour=0, minute=30),  # her gun 00:30 UTC = TR 03:30
+        id="kap_processor_backfill",
+        name="KAP Processor Backfill (gunluk, son 3 gun)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # 7c. Sabah Tweet Zamanlama — her 5 dakika (acilis saatine gore)
     # Dagitim sabah tweeti + son gun sabah tweeti — IPO'nun acilis saatine 1 saat kala
     scheduler.add_job(
