@@ -398,16 +398,28 @@ _ROUTINE_TITLE_PATTERNS = [
 # ═══════════════════════════════════════════════════════════════════
 # PRE-FILTER NOTR PATTERNS — financial override'i bypass et
 #
-# DIKKAT: "Kar Payi Dagitim Islemlerine Iliskin Bildirim" / "Sermaye
-# Artirimi Islemlerine Iliskin Bildirim" / MKK / BISTECH gibi basliklar
-# BU LISTEDE OLMAMALIDIR. Cunku bu basliklar altinda KESIN temettu/sermaye
-# rakamlari (Pay Basina Brut Temettu, Teorik Fiyat) yayinlanir — yani
-# BIRINCIL haber niteligindedir. AI'a gitsin, icerige bakip puanlasin.
+# Bu listedeki basliklar Notr/5.0 atanir, AI'a hic gitmez.
 #
-# Bu listede sadece sirket icerigine HIC bagli olmayan saf operasyonel/
-# debt-issuance basliklari yer almali.
+# DAHIL EDILEN:
+# - Borsa/MKK/KAP operasyonel sistem duyurulari: temettu/sermaye rakami
+#   icerse bile bu zaten ONCEDEN ilan edilmis, bu sadece ex-div gunu /
+#   kayit tescili / teknik fiyat adjusti. Tekrar haber degil → fiyat
+#   etkisi yok.
+# - Borclanma araci ihraci: gelir/kar getirmez.
+#
+# DAHIL EDILMEYEN (AI'a gider):
+# - "...Islemlerine Iliskin Bildirim" — sirketin kendi resmi bildirimi
+#   olabilir, icerikte ilk karar (ornegin "kar payi dagitilmamasi") yer
+#   alabilir. Icerige bakilmali, AI puanlamalidir.
+# - "Genel Kurul Karari" / "Yonetim Kurulu Karari" — ilk karar.
 # ═══════════════════════════════════════════════════════════════════
 _EXECUTION_STAGE_PATTERNS = [
+    # NOT: BISTECH / MKK / KAP / Takasbank sistem duyurulari pre-filter'da
+    # YOK — cunku icerikte sirkete ozgu temettu/teorik fiyat rakami olabilir
+    # ve AI bunlari "onceden ilan edilmis ex-div gunu bildirimi" olarak
+    # anlamli bir notr ozet uretebilsin. Pre-filter default text "rutin/idari
+    # bildirim" yetersiz kaliyordu. AI prompt'unda BISTECH/MKK kurali var.
+
     # ── BORCLANMA ARACI IHRACI ──
     # Sirketin BORC alma yetkisi/uygulamasi — gelir/kar getirmez, fiyata
     # pozitif etki yoktur. AI yanlislikla "yeni finansman" diye olumlu

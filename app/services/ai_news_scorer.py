@@ -619,6 +619,33 @@ MANAGEMENT CHANGE:
 CIRCUIT BREAKER (Devre Kesici):
   ALWAYS 5.0 neutral — automatic mechanism, unrelated to fundamentals.
 
+BISTECH / PAY PIYASASI / MKK / KAP SISTEM DUYURULARI (CRITICAL — neutral 5.0-5.4):
+  Title patterns:
+    • "BISTECH Pay Piyasasi Alim Satim Sistemi Duyurusu"
+    • "Pay Piyasasi Alim Satim Sistemi Duyurusu"
+    • "Merkezi Kayit Kurulusu Duyurusu" (MKK)
+    • "Kamuyu Aydinlatma Platformu Duyurusu" (sistem-genel)
+    • "Takasbank Duyurusu"
+
+  Bu basliklar borsa/saklama-kurulus operasyonel duyurulari. Icerikte
+  temettu (Pay Basina Brut Temettu), teorik fiyat, bedelsiz orani,
+  pay bolunmesi orani gibi rakamlar GORULSE BILE bunlar SIRKET
+  TARAFINDAN ZATEN HAFTALAR/AYLAR ONCE ILAN EDILMIS, fiyatlanmistir.
+  Bu duyuru sadece ex-div gunu / kayit tescili / teknik fiyat adjusti.
+
+  Score: ALWAYS 5.0-5.4 (Nötr). NEVER higher, even if dividend yield is high.
+  Summary kisaca aciklamali (3-4 cumle): bu duyuru borsanin/MKK'nin teknik
+  bildirimi olup, temettu/bedelsiz/bolunme miktari ZATEN onceden ilan
+  edilmistir. Bu yuzden hisse fiyatina ek pozitif etki beklenmemektedir.
+
+  Examples:
+  Ex.F: "ALARK BISTECH duyurusu — Pay Basina Brut Temettu: 3.185 TL,
+        Teorik Fiyat: 92.465 TL"
+        → 5.1 (Nötr — temettu zaten onceden ilan, bu sadece ex-div gunu
+        teorik fiyat bildirimi)
+  Ex.G: "MKK Duyurusu — pay bolunmesi tescili"
+        → 5.1 (Nötr — kayit tescili, ilk karar degil)
+
 DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4):
   Bu KAP bildirimleri sirketin BORC alma yetkisi/uygulamasi icindir — gelir
   veya kar getirmez, fiyat etkisi sinirlidir. Asla "olumlu haber" sayilmamalidir.
@@ -649,36 +676,36 @@ DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4)
        Summary: "Kisa vadeli borclanma; yatirimci icin notr — borc maliyeti
                  ve geri odeme riski yaratabilir."
 
-EXECUTION-STAGE / IMPLEMENTATION DISCLOSURES (CRITICAL — neutral 5.0-5.4):
-  These are NOT first-time decisions; they are the implementation/registration
-  of an already-announced and previously-priced corporate action. Score 5.0-5.4
-  (Notr). Do NOT confuse with the original decision — that one is scored on its
-  own merits when it first arrives.
+"ISLEMLERINE ILISKIN BILDIRIM" HEADERS — READ THE CONTENT:
+  Titles like "Kar Payi Dagitim Islemlerine Iliskin Bildirim", "Sermaye
+  Artirimi Islemlerine Iliskin Bildirim", "Bedelsiz Pay Dagitim Islemlerine
+  Iliskin Bildirim", "Pay Bolunmesi Islemlerine Iliskin Bildirim" are
+  generic — score by CONTENT, not title.
 
-  Triggering patterns in title:
-    • "...Islemlerine Iliskin Bildirim" (implementation notification):
-       — "Kar Payi Dagitim Islemlerine Iliskin Bildirim"
-       — "Sermaye Artirimi Islemlerine Iliskin Bildirim"
-       — "Bedelsiz Pay Dagitim Islemlerine Iliskin Bildirim"
-       — "Pay Bolunmesi Islemlerine Iliskin Bildirim"
-    • "Merkezi Kayit Kurulusu Duyurusu" (MKK registration of pre-decided action)
-    • "BISTECH" / "Pay Piyasasi Alim Satim Sistemi Duyurusu" (exchange ops)
-    • "Kamuyu Aydinlatma Platformu Duyurusu" (KAP system notice)
-    • SPK basvuru onayi/tescil for previously-announced corporate action
+  CRITICAL: Bu basliklar altinda sirket ya:
+    (a) ILK KEZ kararini ilan ediyor olabilir (ornegin "Yonetim Kurulu kar
+        payi DAGITILMAMASINI onayladi" → bu yeni karar, AI puanla); veya
+    (b) Onceden ilan edilen miktarin uygulamasi/tekrari olabilir (zaten
+        fiyatlanmis → notr-yakin).
 
-  Reason: market already absorbed the news at the original decision; the
-  execution/registration step alone does not add new information.
+  Eger icerik:
+    • Pay Basina Brut Temettu X TL veriyor → DIVIDEND yield-based scoring
+      AMA content "ay/hafta once ilan edildi" / "GK karari uyarinca" gibi
+      tekrar sinyali iceriyorsa → 5.0-5.6 (zaten fiyatlanmis)
+    • "kar payi dagitilmamasi" / "dagitmama" karari → 3.5-4.5 (NEGATIVE —
+      temettu beklentisi olan yatirimci icin olumsuz)
+    • Bedelsiz X% / Bedelli X% YENI orani → CAPITAL INCREASE scoring
+    • Sadece prosedur, somut rakam yok → 5.0-5.4 (Notr)
 
   Examples:
-  Ex.A: "Kar Payi Dagitim Islemlerine Iliskin Bildirim" → 5.1
-       Summary: "Onceden ilan edilen temettu dagitiminin uygulama asamasi;
-                 karar zaten fiyatlanmis, ek etki beklenmemektedir."
-  Ex.B: "Merkezi Kayit Kurulusu Duyurusu (pay bolunmesi tescili)" → 5.1
-       Summary: "Pay bolunmesinin MKK kayit asamasi — ilk karar degil,
-                 uygulama adimi. Hisse fiyatina ek etkisi beklenmemektedir."
-  Ex.C: "BISTECH Pay Piyasasi Alim Satim Sistemi Duyurusu" → 5.0
-       Summary: "Borsa Istanbul sistem operasyon duyurusu; sirket temellerine
-                 iliskin gelisme degildir."
+  Ex.A: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
+        "Yonetim Kurulu 2025 yili kar payi DAGITILMAMASINI onaylamistir"
+        → 3.8 (NEGATIVE — yeni karar, sifir verim)
+  Ex.B: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
+        "X tarihinde aciklanan brut Y TL temettu odemesi gerceklesecektir"
+        → 5.2 (NOTR — onceden ilan edilen miktarin uygulamasi)
+  Ex.C: Title "Sermaye Artirimi Islemlerine Iliskin Bildirim" + content
+        ilk kez bedelsiz %50 oran aciklamasi → 8.5 (positive)
 
 INDEX MEMBERSHIP:
   Index inclusion → 6.5-7.5 | Removal → 3.5-4.5 | Periodic review (no change) → 5.0
@@ -819,9 +846,12 @@ Kaynak: {source_info}
 --- ICERIK BITIS ---
 
 GOREV:
-1. Haberi yatirimci bakis acisiyla Turkce EN AZ 3, EN FAZLA 5 cumle ile ozetle.
+1. Haberi yatirimci bakis acisiyla Turkce ozetle. Cumle sayisi PUANA gore:
+   • POZITIF (score >= 6.0) veya NEGATIF (score < 4.5): 7-8 cumle (detayli analiz)
+   • NOTR (score 4.5-5.9): 3-4 cumle (kisa, oz)
 2. Onemli rakamlari ozete dahil et (tutar, oran, yuzde).
 3. Haberin ne oldugunu, sirket icin ne anlama geldigini ve yatirimci icin neden onemli oldugunu acikla.
+4. Notr durumda sadece "ne oldugu" + "neden notr/etkisiz" yeterli — gereksiz uzatma.
 
 HASHTAG KURALLARI:
 - 2-3 adet Twitter hashtag uret (# isareti OLMADAN)

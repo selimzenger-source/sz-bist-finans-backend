@@ -49,8 +49,15 @@ _PATTERN_GA_APPROVAL = [
     "genel kurulda kabul",
 ]
 _PATTERN_REJECTION = [
-    "reddedil", "iptal edil", "vazgeç",
+    "reddedil", "iptal edil", "vazgeç", "vazgec",
     "dağıtılmamasına", "dagitilmamasina",
+    "dağıtmama kararı", "dagitmama karari",
+    "dağıtmaması", "dagitmamasi",
+    "dağıtılmaması", "dagitilmamasi",
+    "dağıtım yapılmaması", "dagitim yapilmamasi",
+    "kar payı dağıtılmama", "kar payi dagitilmama",
+    "temettü dağıtılmama", "temettu dagitilmama",
+    "kar dağıtmama", "kar dagitmama",
 ]
 _PATTERN_PAYMENT = [
     "ödeme tarihi", "odeme tarihi",
