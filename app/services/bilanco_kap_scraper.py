@@ -95,30 +95,54 @@ def _detect_period(body: str) -> Optional[str]:
     return f"{end_year}-{q}"
 
 
-def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
-    """XBRL etiketi gecen yerden sonraki ilk sayiyi (Cari Donem) cikar.
+_BIG_NUM_RE = re.compile(r"-?\d{1,3}(?:\.\d{3})+(?:,\d+)?|-?\d{4,}(?:,\d+)?")
+# Yalnizca binlik ayracli (1.234.567) veya 4+ haneli (1234) sayilar — XBRL URL'sindeki
+# "2003" yil rakami eslesmesin diye buyuk_num pattern.
 
-    Pattern: tag → birkac satir aciklama/dipnot → ilk sayi (Cari Donem)
+# Sonraki XBRL etiketi (yeni satir baslangici) — bu noktadan sonra ilerleme dur
+_NEXT_TAG_RE = re.compile(r"\n(?:ifrs-full_|kap-fr_)\w+\|", re.IGNORECASE)
+
+
+def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
+    """XBRL etiketi gecen yerden sonra Cari Donem sayisini cikar.
+
+    KAP Finansal Rapor body formati:
+      tag|http://...role/totalLabel |  | TUR aciklama |  |  | TUR | EN |  |  |  | CARI | ONCEKI
+
+    Cari Donem = pipe-ayrali son 2 sayidan ILKI (sondan ikinci sayi).
+    Sayi formati: 353.794.589 (binlik ayraci) veya 353.794.589,50 (ondalik).
+
+    XBRL URL'sindeki "2003" yil rakamlarini eslesmemek icin _BIG_NUM_RE kullanilir
+    (en az 4 hane veya binlik ayraci).
     """
     idx = body.find(tag)
     if idx == -1:
         return None
 
-    # Etiketten sonraki ~500 karaktere bak
-    chunk = body[idx + len(tag): idx + len(tag) + 800]
+    # Etiketten sonraki bolume bak (sonraki XBRL etiketine kadar)
+    after = body[idx + len(tag):]
+    next_tag = _NEXT_TAG_RE.search(after)
+    chunk = after[:next_tag.start()] if next_tag else after[:1500]
 
-    # İlk sayıyı bul
-    nums = _NUM_RE.findall(chunk)
-    # Filter: en az 1 anlamli sayi (1+ digit, dipnot referansi olmasin: dipnot 1-99 arasi)
-    for n in nums:
+    # Buyuk sayilari topla (URL'deki '2003' yil eslesmesin)
+    big_nums = _BIG_NUM_RE.findall(chunk)
+
+    valid = []
+    for n in big_nums:
         v = _parse_number(n)
         if v is None:
             continue
-        # Dipnot referanslarini at: cok kucuk pozitif int (1-100 arasi, decimal yok)
-        if 1 <= v <= 100 and "." not in n and "," not in n and len(n) <= 3:
-            continue
-        return v
-    return None
+        valid.append(v)
+
+    if not valid:
+        return None
+
+    # KAP formati: ... | Cari | Onceki
+    # Genellikle son 2 sayi cari/onceki donem. Cari = sondan 2.
+    if len(valid) >= 2:
+        return valid[-2]
+    # Tek sayi varsa onu kullan
+    return valid[-1]
 
 
 def parse_kap_finansal_rapor(body: str) -> dict:

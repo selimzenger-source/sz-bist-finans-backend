@@ -396,50 +396,22 @@ _ROUTINE_TITLE_PATTERNS = [
 
 
 # ═══════════════════════════════════════════════════════════════════
-# EXECUTION-STAGE / SISTEM DUYURULARI — financial override'i bypass et
-# Bunlar daha onceden alinmis kararin UYGULANMASI / KAYIT TESCILI veya
-# borsa/KAP sistem operasyon bildirimi. Ilk haber degil; fiyat etkisi
-# minimal/zaten fiyatlanmis. Bu pattern'lar `_FINANCIAL_OVERRIDE_KEYWORDS`
-# kontrolunden ONCE bakilir — yani "kar payi" / "sermaye artirim" gibi
-# kelimeler iceren execution bildirimleri bile rutin/notr sayilir.
+# PRE-FILTER NOTR PATTERNS — financial override'i bypass et
+#
+# DIKKAT: "Kar Payi Dagitim Islemlerine Iliskin Bildirim" / "Sermaye
+# Artirimi Islemlerine Iliskin Bildirim" / MKK / BISTECH gibi basliklar
+# BU LISTEDE OLMAMALIDIR. Cunku bu basliklar altinda KESIN temettu/sermaye
+# rakamlari (Pay Basina Brut Temettu, Teorik Fiyat) yayinlanir — yani
+# BIRINCIL haber niteligindedir. AI'a gitsin, icerige bakip puanlasin.
+#
+# Bu listede sadece sirket icerigine HIC bagli olmayan saf operasyonel/
+# debt-issuance basliklari yer almali.
 # ═══════════════════════════════════════════════════════════════════
 _EXECUTION_STAGE_PATTERNS = [
-    # Borsa Istanbul sistem duyurulari (sirket-spesifik degil)
-    "bistech",
-    "pay piyasası alım satım sistemi",
-    "pay piyasasi alim satim sistemi",
-    "alım satım sistemi duyuru",
-    "alim satim sistemi duyuru",
-
-    # KAP genel sistem duyurulari
-    "kamuyu aydınlatma platformu duyuru",
-    "kamuyu aydinlatma platformu duyuru",
-
-    # Merkezi Kayit Kurulusu — pay bolunmesi/kayit tescili gibi onceden
-    # alinmis kararlarin uygulama/kayit asamasi
-    "merkezi kayıt kuruluşu",
-    "merkezi kayit kurulusu",
-    "mkk duyuru",
-
-    # Temettu / sermaye artirimi / bedelsiz UYGULAMA asamasi
-    # "Genel Kurul Karari" / "Yonetim Kurulu Karari" iceren basliklar
-    # ilk karar oldugu icin bu listeye DAHIL EDILMEDI — onlar AI'a gider.
-    "kar payı dağıtım işlemlerine ilişkin",
-    "kar payi dagitim islemlerine iliskin",
-    "kâr payı dağıtım işlemlerine ilişkin",
-    "temettü ödemelerine ilişkin",
-    "temettu odemelerine iliskin",
-    "sermaye artırımı işlemlerine ilişkin",
-    "sermaye artirimi islemlerine iliskin",
-    "bedelsiz pay dağıtım işlemlerine ilişkin",
-    "bedelsiz pay dagitim islemlerine iliskin",
-    "pay bölünmesi işlemlerine ilişkin",
-    "pay bolunmesi islemlerine iliskin",
-
     # ── BORCLANMA ARACI IHRACI ──
-    # Bunlar sirketin BORC alma yetkisi/uygulamasi icindir — gelir/kar
-    # getirmez, fiyata pozitif etki yoktur. AI yanlislikla "yeni finansman"
-    # diye olumlu puanlayabiliyor; bu yuzden pre-filter'da Notr/5.0.
+    # Sirketin BORC alma yetkisi/uygulamasi — gelir/kar getirmez, fiyata
+    # pozitif etki yoktur. AI yanlislikla "yeni finansman" diye olumlu
+    # puanlayabildiginden pre-filter'da Notr/5.0.
     "tertip ihraç belgesi",
     "tertip ihrac belgesi",
     "ihraç belgesi",

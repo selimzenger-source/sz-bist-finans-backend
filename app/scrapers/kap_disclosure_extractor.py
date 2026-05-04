@@ -207,11 +207,11 @@ async def fetch_kap_disclosure(
         return {
             "bildirim_id": bildirim_id,
             "url": canonical_url,
-            "raw_decoded": decoded[:200000],  # Cap to avoid memory blow
+            "raw_decoded": decoded[:300000],  # Cap to avoid memory blow
             "text_blocks": text_blocks,
             "tables": tables,
             "pdf_links": pdf_links,
-            "full_text": full_text[:60000],
+            "full_text": full_text[:200000],  # Bilanço için tam: balance sheet + income statement
             "html_length": len(html),
         }
     finally:
