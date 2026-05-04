@@ -11583,14 +11583,15 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
               )
         """))
         bad_rows = ids_result.fetchall()
-        bad_ids = [r[0] for r in bad_rows]
+        bad_ids = [int(r[0]) for r in bad_rows]
         deleted_count = 0
-        if bad_ids:
+        for bid in bad_ids:
             await db.execute(
-                sa_text("DELETE FROM share_transaction_details WHERE id = ANY(:ids)"),
-                {"ids": bad_ids},
+                sa_text("DELETE FROM share_transaction_details WHERE id = :id"),
+                {"id": bid},
             )
-            deleted_count = len(bad_ids)
+            deleted_count += 1
+        if deleted_count:
             await db.commit()
     return {
         "deleted_count": deleted_count,
