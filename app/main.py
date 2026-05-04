@@ -8849,6 +8849,56 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.post("/api/v1/admin/parse-bilanco-from-url")
+@limiter.limit("10/minute")
+async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(...)):
+    """Admin: Verilen KAP URL'sinden body'i cek, AI ile parse et,
+    company_financials'a kaydet. IsYatirim'a hic dokunmaz.
+
+    Body: {
+      "admin_password": "...",
+      "ticker": "SDTTR",
+      "kap_url": "https://www.kap.org.tr/tr/Bildirim/1600155"
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    ticker = (payload.get("ticker") or "").upper().strip()
+    kap_url = (payload.get("kap_url") or "").strip()
+    if not ticker or not kap_url:
+        raise HTTPException(status_code=400, detail="ticker ve kap_url gerekli")
+
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+    from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap, save_parsed_bilanco
+
+    steps: list[str] = []
+    try:
+        body = await fetch_kap_page_content(kap_url)
+        steps.append(f"KAP body fetched: {len(body or '')} chars")
+        if not body:
+            return {"status": "error", "ticker": ticker, "steps": steps, "msg": "KAP body bos"}
+
+        parsed = await parse_bilanco_from_kap(ticker, body)
+        if not parsed:
+            return {"status": "error", "ticker": ticker, "steps": steps + ["AI parse: bos sonuc"], "msg": "AI bilanco verisi cikartamadi"}
+
+        steps.append(f"AI parsed: revenue={parsed.get('revenue')}, net_income={parsed.get('net_income')}, period={parsed.get('period')}")
+
+        await save_parsed_bilanco(ticker, parsed)
+        steps.append("save_parsed_bilanco OK -> company_financials")
+
+        return {"status": "ok", "ticker": ticker, "steps": steps, "parsed": parsed}
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "ticker": ticker,
+            "steps": steps,
+            "msg": str(e)[:300],
+            "trace": traceback.format_exc()[-500:],
+        }
+
+
 @app.post("/api/v1/admin/process-bilanco-from-kap")
 @limiter.limit("10/minute")
 async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(...)):
