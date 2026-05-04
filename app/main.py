@@ -11554,30 +11554,36 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
     async with async_session() as db:
-        # Saglikli kayit var olan (ticker, date) gruplarini bul
-        result = await db.execute(sa_text("""
-            DELETE FROM share_transaction_details
-            WHERE id IN (
-                SELECT bad.id
-                FROM share_transaction_details bad
-                JOIN share_transaction_details good
-                  ON good.ticker = bad.ticker
-                 AND good.transaction_date = bad.transaction_date
-                 AND good.id <> bad.id
-                 AND good.party_name IS NOT NULL
-                 AND good.party_name NOT IN ('?', 'Bilinmiyor', '')
-                 AND COALESCE(good.nominal_lot, 0) > 0
-                WHERE bad.party_name IS NULL
+        # 1) Once silinecek bad id'leri tespit et
+        ids_result = await db.execute(sa_text("""
+            SELECT bad.id, bad.ticker, bad.transaction_date
+            FROM share_transaction_details bad
+            WHERE (bad.party_name IS NULL
                    OR bad.party_name IN ('?', 'Bilinmiyor', '')
-                   OR COALESCE(bad.nominal_lot, 0) = 0
-            )
-            RETURNING id, ticker, transaction_date
+                   OR COALESCE(bad.nominal_lot, 0) = 0)
+              AND EXISTS (
+                  SELECT 1 FROM share_transaction_details good
+                  WHERE good.ticker = bad.ticker
+                    AND good.transaction_date = bad.transaction_date
+                    AND good.id <> bad.id
+                    AND good.party_name IS NOT NULL
+                    AND good.party_name NOT IN ('?', 'Bilinmiyor', '')
+                    AND COALESCE(good.nominal_lot, 0) > 0
+              )
         """))
-        deleted = result.fetchall()
-        await db.commit()
+        bad_rows = ids_result.fetchall()
+        bad_ids = [r[0] for r in bad_rows]
+        deleted_count = 0
+        if bad_ids:
+            await db.execute(
+                sa_text("DELETE FROM share_transaction_details WHERE id = ANY(:ids)"),
+                {"ids": bad_ids},
+            )
+            deleted_count = len(bad_ids)
+            await db.commit()
     return {
-        "deleted_count": len(deleted),
-        "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2])} for r in deleted[:50]],
+        "deleted_count": deleted_count,
+        "deleted": [{"id": r[0], "ticker": r[1], "date": str(r[2])} for r in bad_rows[:50]],
     }
 
 
