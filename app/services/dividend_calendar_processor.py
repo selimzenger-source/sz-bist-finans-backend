@@ -71,11 +71,34 @@ _PATTERN_YKK = [
 ]
 
 
-def is_dividend(title: str) -> bool:
-    """Title temettu ile ilgili mi?"""
+def is_dividend(title: str, body: str = "") -> bool:
+    """Title temettu ile ilgili mi?
+
+    "Hak Kullanımı" generic — hem temettü hem bedelsiz sermaye artırımı için kullanılıyor.
+    Bu durumda body'ye bakıp ayırt et.
+    """
     if not title:
         return False
     t = lower_tr(title)
+
+    # Body sermaye artırımı sinyali veriyorsa temettü değil
+    if body:
+        b = lower_tr(body)
+        capital_signals = [
+            "bedelsiz pay alma orani", "bedelsiz pay alma oranı",
+            "rüçhan hakkı kullan", "ruchan hakki kullan",
+            "sermaye azaltım oranı", "sermaye azaltim orani",
+            "sermaye artırımı karşılığı", "sermaye artirimi karsiligi",
+        ]
+        # Body'de "Pay Başına Brüt Temettü" yoksa AMA bedelsiz sinyali varsa → temettü değil
+        is_capital_payload = any(s in b for s in capital_signals)
+        is_dividend_payload = any(s in b for s in [
+            "pay başına brüt temettü", "pay basina brut temettu",
+            "kar payı", "kar payi", "kâr payı", "temettü", "temettu",
+        ])
+        if is_capital_payload and not is_dividend_payload:
+            return False
+
     return any(p in t for p in _DIVIDEND_TITLE_PATTERNS)
 
 

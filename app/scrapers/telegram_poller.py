@@ -399,7 +399,8 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
 
-    if is_dividend(title):
+    # is_dividend body-aware: 'Hak Kullanımı' generic - bedelsiz sermaye artırımıysa skip
+    if is_dividend(title, body or ""):
         try:
             await div_process(
                 session, disclosure_id=disclosure_id, ticker=ticker,

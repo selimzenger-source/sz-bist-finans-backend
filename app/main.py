@@ -11833,6 +11833,50 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
             await db.flush()
             summary["updates"]["dividend_rejection"] = {"scanned": len(dc_rows), "updated": updated_rej}
 
+        # ─── 4. dividend_misclassified: 'Hak Kullanımı' başlıklı KAP'lar için
+        # body bedelsiz sermaye artırımıysa ilgili DividendCalendar kaydını sil
+        if "dividend_misclassified" in cats:
+            from app.services.dividend_calendar_processor import is_dividend as _is_div
+            from app.models.dividend_calendar import DividendCalendar
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from sqlalchemy import select as _sel, delete as _del
+
+            dc_rows = (await db.execute(
+                _sel(DividendCalendar)
+                .where(DividendCalendar.created_at >= cutoff)
+                .limit(limit_n)
+            )).scalars().all()
+
+            removed = 0
+            for r in dc_rows:
+                kid = r.ykk_kap_disclosure_id or r.general_assembly_kap_disclosure_id or r.payment_kap_disclosure_id
+                if not kid:
+                    continue
+                kap = (await db.execute(
+                    _sel(KapAllDisclosure).where(KapAllDisclosure.id == kid).limit(1)
+                )).scalar_one_or_none()
+                if not kap:
+                    continue
+
+                body = kap.body or ""
+                if (not body or len(body) < 200) and kap.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(kap.kap_url)
+                        if disc and disc.get("full_text"):
+                            body = disc["full_text"]
+                    except Exception:
+                        continue
+
+                # body-aware is_dividend false dönerse → yanlış kayıt, sil
+                if not _is_div(kap.title or "", body):
+                    await db.execute(
+                        _del(DividendCalendar).where(DividendCalendar.id == r.id)
+                    )
+                    removed += 1
+                    logger.info("DividendCalendar yanlis kayit silindi: %s id=%s (KAP id=%s)", r.ticker, r.id, kid)
+            await db.flush()
+            summary["updates"]["dividend_misclassified"] = {"scanned": len(dc_rows), "removed": removed}
+
         await db.commit()
 
     return summary
