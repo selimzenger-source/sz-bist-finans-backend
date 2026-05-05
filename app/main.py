@@ -7942,6 +7942,7 @@ async def list_kap_all_disclosures(
 async def list_capital_increases(
     type: Optional[str] = Query(None, description="bedelsiz | bedelli | tahsisli (yoksa hepsi)"),
     status: Optional[str] = Query(None, description="ykk_alindi | spk_onayli | tarih_belli | dagitiliyor | tamamlandi | reddedildi (yoksa hepsi)"),
+    year: Optional[int] = Query(None, ge=2024, le=2100, description="Filtrelenecek yil (distribution_date ya da ykk_date yili)"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
@@ -7961,6 +7962,19 @@ async def list_capital_increases(
         query = query.where(CapitalIncrease.type == type)
     if status and status in ("ykk_alindi", "spk_onayli", "tarih_belli", "dagitiliyor", "tamamlandi", "reddedildi"):
         query = query.where(CapitalIncrease.status == status)
+    if year:
+        # Yil filtresi: distribution_date varsa o, yoksa spk_approval_date, yoksa ykk_date
+        from sqlalchemy import or_, extract, and_
+        query = query.where(
+            or_(
+                extract("year", CapitalIncrease.distribution_date) == year,
+                and_(CapitalIncrease.distribution_date.is_(None),
+                     extract("year", CapitalIncrease.spk_approval_date) == year),
+                and_(CapitalIncrease.distribution_date.is_(None),
+                     CapitalIncrease.spk_approval_date.is_(None),
+                     extract("year", CapitalIncrease.ykk_date) == year),
+            )
+        )
 
     # Status sira anahtari
     status_order = {
