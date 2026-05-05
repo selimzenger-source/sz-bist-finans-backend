@@ -179,6 +179,16 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
             else:
                 logger.warning("Bilanco pipeline: %s icin veri cekilemedi", ticker)
                 return
+        else:
+            # IsYatirim verisi geldi AMA KAP'ta yeni donem (orn 2026-Q1) varsa onu garantile
+            # IsYatirim 1-2 gun gecikmeli — yeni donemi mutlaka KAP'tan al
+            if kap_parsed and kap_parsed.get("period"):
+                kap_period = kap_parsed["period"]
+                isy_periods = {p.get("period") for p in bilanco_data["periods"]}
+                if kap_period not in isy_periods:
+                    logger.info("Bilanco pipeline: %s — KAP'tan yeni donem %s eklendi (IsYatirim'de yok)",
+                                ticker, kap_period)
+                    bilanco_data["periods"] = [kap_parsed] + bilanco_data["periods"]
 
         # 2. DB'ye kaydet (IsYatirim verisi gelirse KAP parse uzerine yazar)
         saved = await _save_bilanco_to_db(ticker, bilanco_data["periods"])
