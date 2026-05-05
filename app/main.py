@@ -12364,56 +12364,74 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
             be_enriched = 0
             be_skipped = 0
             import asyncio as _asyncio_be
+            import gc as _gc
+            # ticker bazli KAP listesi cache (her ticker icin son ~10 KAP)
+            ticker_kap_cache: dict[str, list] = {}
             for r in cf_rows:
-                # KAP rate-limit: her fetch arasinda 3 sn bekle
-                await _asyncio_be.sleep(3)
-                # Bu ticker+period icin KAP disclosure bul (Finansal Rapor / Bilanço)
-                kap = (await db.execute(
-                    _sel(KapAllDisclosure)
-                    .where(KapAllDisclosure.company_code == r.ticker)
-                    .where(KapAllDisclosure.is_bilanco == True)
-                    .order_by(KapAllDisclosure.published_at.desc())
-                    .limit(1)
-                )).scalar_one_or_none()
-                if not kap or not kap.kap_url:
+                # KAP rate-limit: her fetch arasinda 2 sn bekle
+                await _asyncio_be.sleep(2)
+                # Bu ticker icin TUM is_bilanco KAP'larini cache'le (1 sefer)
+                if r.ticker not in ticker_kap_cache:
+                    kaps = (await db.execute(
+                        _sel(KapAllDisclosure)
+                        .where(KapAllDisclosure.company_code == r.ticker)
+                        .where(KapAllDisclosure.is_bilanco == True)
+                        .order_by(KapAllDisclosure.published_at.desc())
+                        .limit(15)
+                    )).scalars().all()
+                    ticker_kap_cache[r.ticker] = list(kaps)
+
+                kaps = ticker_kap_cache.get(r.ticker, [])
+                if not kaps:
                     be_skipped += 1
                     continue
 
-                try:
-                    disc = await fetch_kap_disclosure(kap.kap_url)
-                    if not disc or not disc.get("full_text"):
-                        be_skipped += 1
+                # Her KAP'i sirayla dene — period match olani bul
+                enriched_for_this = False
+                for kap in kaps:
+                    if not kap.kap_url:
                         continue
-                    parsed = await parse_bilanco_from_kap(r.ticker, disc["full_text"])
-                    if not parsed:
-                        be_skipped += 1
-                        continue
-                    # Sadece bu kaydin period'una eslesirse enrich et
-                    if parsed.get("period") and parsed["period"] != r.period:
-                        # Farkli donem - direkt save_parsed_bilanco cagir
-                        await save_parsed_bilanco(r.ticker, parsed)
-                        be_enriched += 1
-                        continue
-                    # Ayni donem - manuel enrich
-                    enriched_any = False
-                    for field in ["current_assets", "non_current_assets",
-                                  "total_debt", "cash_and_equivalents",
-                                  "gross_profit", "operating_profit"]:
-                        val = parsed.get(field)
-                        if val is None or val == 0:
+                    try:
+                        disc = await fetch_kap_disclosure(kap.kap_url)
+                        if not disc or not disc.get("full_text"):
                             continue
-                        existing_val = getattr(r, field, None)
-                        if existing_val is None or float(existing_val or 0) == 0:
-                            setattr(r, field, val)
-                            enriched_any = True
-                    if enriched_any:
-                        r.updated_at = datetime.now(timezone.utc)
-                        be_enriched += 1
-                    else:
-                        be_skipped += 1
-                except Exception:
+                        body = disc["full_text"]
+                        del disc  # memory free
+                        parsed = await parse_bilanco_from_kap(r.ticker, body)
+                        del body
+                        _gc.collect()
+                        if not parsed:
+                            continue
+                        # Period match kontrolu
+                        if parsed.get("period") != r.period:
+                            # Farkli donem - kayit varsa save_parsed_bilanco
+                            # (baska bir cf_row icin enrich olabilir)
+                            try:
+                                await save_parsed_bilanco(r.ticker, parsed)
+                            except Exception:
+                                pass
+                            continue
+                        # Ayni donem - eksik alanlari doldur
+                        any_filled = False
+                        for field in ["current_assets", "non_current_assets",
+                                      "total_debt", "cash_and_equivalents",
+                                      "gross_profit", "operating_profit", "net_debt"]:
+                            val = parsed.get(field)
+                            if val is None or val == 0:
+                                continue
+                            existing_val = getattr(r, field, None)
+                            if existing_val is None or float(existing_val or 0) == 0:
+                                setattr(r, field, val)
+                                any_filled = True
+                        if any_filled:
+                            r.updated_at = datetime.now(timezone.utc)
+                            be_enriched += 1
+                            enriched_for_this = True
+                        break  # Period match bulundu, bu cf_row icin yeter
+                    except Exception:
+                        continue
+                if not enriched_for_this:
                     be_skipped += 1
-                    continue
 
             await db.flush()
             summary["updates"]["bilanco_enrich"] = {
