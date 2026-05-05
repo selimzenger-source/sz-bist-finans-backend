@@ -12115,6 +12115,105 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
     return {"inserted": inserted, "skipped": skipped, "errors": errors}
 
 
+@app.post("/api/v1/admin/backfill-dividend-classify")
+@limiter.limit("3/minute")
+async def admin_backfill_dividend_classify(request: Request, payload: dict = Body(...)):
+    """ykk_alindi statusunde olan dividend_calendar kayitlarini yeniden siniflandir.
+
+    Her kayit icin:
+      1. KAP body fetch
+      2. rejection pattern kontrol -> status='reddedildi'
+      3. degilse AI parse -> gross_amount, period, payment_date dolduru
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    limit = int(payload.get("limit") or 30)
+    only_ticker = (payload.get("ticker") or "").upper().strip() or None
+    from sqlalchemy import select as _sel, text as sa_text
+    from app.database import async_session
+    from app.models.dividend_calendar import DividendCalendar
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.dividend_calendar_processor import (
+        classify_event_with_body, ai_parse_dividend, _PARSE_PROMPT,
+    )
+    from datetime import datetime as _dt2, timezone as _tz2, date as _date2
+
+    def _to_date(s):
+        if not s: return None
+        if hasattr(s, "year"): return s
+        try:
+            parts = str(s).split("-")
+            return _date2(int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception: return None
+
+    reclassified_rejected = 0
+    parsed_filled = 0
+    skipped = 0
+    errors = []
+
+    async with async_session() as db:
+        q = _sel(DividendCalendar).where(DividendCalendar.status == "ykk_alindi").limit(limit)
+        if only_ticker:
+            q = _sel(DividendCalendar).where(
+                DividendCalendar.ticker == only_ticker,
+                DividendCalendar.status.in_(["ykk_alindi", "reddedildi", "genel_kurul_onayli", "tarih_belli", "odeniyor"]),
+            ).limit(limit)
+        rows = (await db.execute(q)).scalars().all()
+
+        for r in rows:
+            kap_url = r.ykk_kap_url or r.general_assembly_kap_url or r.payment_kap_url
+            if not kap_url:
+                skipped += 1
+                continue
+            try:
+                disc = await fetch_kap_disclosure(kap_url)
+                if not disc:
+                    skipped += 1
+                    continue
+                body = disc.get("full_text") or ""
+                title = disc.get("title") or ""
+                ev = classify_event_with_body(title, body)
+                if ev == "rejection":
+                    r.status = "reddedildi"
+                    r.rejected_at = _dt2.now(_tz2.utc)
+                    r.rejection_kap_url = kap_url
+                    reclassified_rejected += 1
+                    continue
+                # ykk veya genel parse - AI ile detaylari doldur
+                parsed = await ai_parse_dividend(r.ticker, title, body)
+                if parsed:
+                    if parsed.get("gross_amount_per_share") and not r.gross_amount_per_share:
+                        r.gross_amount_per_share = parsed.get("gross_amount_per_share")
+                    if parsed.get("net_amount_per_share") and not r.net_amount_per_share:
+                        r.net_amount_per_share = parsed.get("net_amount_per_share")
+                    if parsed.get("gross_yield_pct") and not r.gross_yield_pct:
+                        r.gross_yield_pct = parsed.get("gross_yield_pct")
+                    if parsed.get("net_yield_pct") and not r.net_yield_pct:
+                        r.net_yield_pct = parsed.get("net_yield_pct")
+                    if parsed.get("total_amount_tl") and not r.total_amount_tl:
+                        r.total_amount_tl = parsed.get("total_amount_tl")
+                    if parsed.get("period") and not r.period:
+                        r.period = parsed.get("period")
+                    pd = _to_date(parsed.get("payment_date"))
+                    if pd and not r.payment_date:
+                        r.payment_date = pd
+                    gad = _to_date(parsed.get("general_assembly_date"))
+                    if gad and not r.general_assembly_date:
+                        r.general_assembly_date = gad
+                    parsed_filled += 1
+            except Exception as e:
+                errors.append({"ticker": r.ticker, "err": str(e)[:200]})
+        await db.commit()
+
+    return {
+        "reclassified_rejected": reclassified_rejected,
+        "parsed_filled": parsed_filled,
+        "skipped": skipped,
+        "errors": errors[:5],
+        "total_processed": len(rows),
+    }
+
+
 @app.post("/api/v1/admin/wipe-capital-increases")
 @limiter.limit("3/minute")
 async def admin_wipe_capital_increases(request: Request, payload: dict = Body(...)):
