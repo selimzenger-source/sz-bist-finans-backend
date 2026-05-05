@@ -225,16 +225,24 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
     )
     if cp:
         cp_clean = cp.group(1).strip().rstrip(",.").strip()
-    # 1b) "Yurtdışı Müşteri" ise gercek ulke "Hangi Ülke" alanindan (varsa)
+    # 1b) "Yurtdışı Müşteri" ise gercek ulke: a) "Hangi Ülke" alani b) Baslik/Ozet'te "-X Pazari/Ülkesi"
     if cp_clean and re.search(r"yurtd[ıi]ş[ıi]\s*(?:müşteri|tedarikçi)", cp_clean, re.IGNORECASE):
+        country = None
         country_m = re.search(
             r"(?:Yurtd[ıi]ş[ıi].*?Hangi\s*Ülke|Hangi\s*Ülke|Ülke(?:si)?)[^\n:]*?[:\s]+([A-ZÇĞİÖŞÜA-Za-zÇĞİÖŞÜçğıöşü][^\n\r]{2,60})",
             body, re.IGNORECASE,
         )
         if country_m:
-            country = country_m.group(1).strip().rstrip(",.")
-            if country and country.lower() not in ("evet", "hayır", "hayir", "-", "yok"):
-                cp_clean = country
+            cand = country_m.group(1).strip().rstrip(",.")
+            if cand and cand.lower() not in ("evet", "hayır", "hayir", "-", "yok"):
+                country = cand
+        if not country:
+            # Baslik/ilk satir: "Yeni İş İlişkisi -Japonya Pazarı"
+            title_m = re.search(r"-\s*([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü]{2,30})\s*(?:Pazar[ıi]|Ülkesi|Müşteris[ıi])", body[:500])
+            if title_m:
+                country = title_m.group(1).strip()
+        if country:
+            cp_clean = country
     # 2) Body'den: "Şirketimiz ile X arasında" / "X ile yapılan/imzalanan"
     if not cp_clean or len(cp_clean) < 4:
         m = re.search(r"[Şş]irketimiz\s+ile\s+([A-ZÇĞİÖŞÜ][^\s,]{2,80}?(?:\s+[A-ZÇĞİÖŞÜ][^\s,]{2,40}){0,5})\s+aras[ıi]nda", body)
