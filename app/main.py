@@ -9116,6 +9116,75 @@ async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(..
         }
 
 
+@app.post("/api/v1/admin/batch-bilanco-recent-kap")
+@limiter.limit("3/minute")
+async def admin_batch_bilanco_recent_kap(request: Request, payload: dict = Body(...)):
+    """Son N gunde gelen bilanço KAP'larini tarayip her birini direct URL ile parse + save eder.
+
+    Body: { admin_password, days (default=7), tickers? (filtre opsiyonel) }
+    Pipeline'in kap_all_disclosures lookup'una bagli kalmadan, direkt company_code+kap_url uzerinden calisir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from datetime import timedelta as _td2, timezone as _tz3, datetime as _dt3
+    from sqlalchemy import select as _sel2, desc as _desc2
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap, save_parsed_bilanco
+    from app.database import async_session as _as2
+
+    days = int(payload.get("days") or 7)
+    tickers_filter = payload.get("tickers")
+    cutoff = _dt3.now(_tz3.utc) - _td2(days=days)
+
+    BILANCO_TITLE_KEYS = ["finansal durum", "bilanço", "bilanco", "finansal rapor", "finansal tablo", "kar veya zarar tablosu"]
+
+    processed = 0
+    saved = 0
+    skipped = 0
+    errors: list[str] = []
+    seen = set()
+
+    async with _as2() as db:
+        q = _sel2(KapAllDisclosure).where(KapAllDisclosure.published_at >= cutoff).order_by(_desc2(KapAllDisclosure.published_at)).limit(500)
+        rows = (await db.execute(q)).scalars().all()
+
+    for r in rows:
+        title_lo = (r.title or "").lower()
+        if not any(k in title_lo for k in BILANCO_TITLE_KEYS):
+            continue
+        ticker = (r.company_code or "").upper().strip()
+        if not ticker:
+            continue
+        if tickers_filter and ticker not in [t.upper() for t in tickers_filter]:
+            continue
+        if ticker in seen:
+            continue
+        seen.add(ticker)
+        if not r.kap_url:
+            continue
+        processed += 1
+        try:
+            disc = await fetch_kap_disclosure(r.kap_url)
+            body = disc.get("full_text", "") if disc else ""
+            if not body:
+                skipped += 1
+                continue
+            parsed = await parse_bilanco_from_kap(ticker, body)
+            if not parsed or not parsed.get("period"):
+                skipped += 1
+                continue
+            await save_parsed_bilanco(ticker, parsed)
+            saved += 1
+        except Exception as e:
+            errors.append(f"{ticker}: {str(e)[:120]}")
+            skipped += 1
+        if processed >= 30:
+            break
+
+    return {"processed": processed, "saved": saved, "skipped": skipped, "errors": errors[:5]}
+
+
 @app.post("/api/v1/admin/process-bilanco-from-kap")
 @limiter.limit("10/minute")
 async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(...)):
