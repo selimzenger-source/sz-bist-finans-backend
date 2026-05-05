@@ -8854,6 +8854,26 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.get("/api/v1/admin/raw-cf/{ticker}")
+async def admin_raw_cf(ticker: str):
+    """Debug: raw SQL ile company_financials sorgula."""
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    async with async_session() as db:
+        res = await db.execute(sa_text("""
+            SELECT period, current_assets, non_current_assets, net_debt, total_debt, source, updated_at
+            FROM company_financials
+            WHERE ticker = :tk
+            ORDER BY period DESC LIMIT 6
+        """), {"tk": ticker.upper()})
+        rows = res.fetchall()
+    return [{"period": r[0], "curr_assets": float(r[1]) if r[1] else None,
+             "noncurr": float(r[2]) if r[2] else None,
+             "net_debt": float(r[3]) if r[3] else None,
+             "total_debt": float(r[4]) if r[4] else None,
+             "source": r[5], "updated_at": str(r[6])} for r in rows]
+
+
 @app.post("/api/v1/admin/refresh-isyatirim-bilanco")
 @limiter.limit("2/minute")
 async def admin_refresh_isyatirim_bilanco(request: Request, payload: dict = Body(...)):
