@@ -12053,6 +12053,7 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
 
     inserted = 0
     skipped = 0
+    errors: list = []
     async with async_session() as db:
         for r in records:
             ticker = (r.get("ticker") or "").upper().strip()
@@ -12098,11 +12099,10 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
                 inserted += 1
             except Exception as e:
                 skipped += 1
-                if skipped <= 3:
-                    import logging as _lg
-                    _lg.getLogger(__name__).warning("seed_cap_inc skip %s: %s", ticker, str(e)[:200])
+                if len(errors) < 3:
+                    errors.append({"ticker": ticker, "err": str(e)[:300]})
         await db.commit()
-    return {"inserted": inserted, "skipped": skipped}
+    return {"inserted": inserted, "skipped": skipped, "errors": errors}
 
 
 @app.post("/api/v1/admin/wipe-capital-increases")
