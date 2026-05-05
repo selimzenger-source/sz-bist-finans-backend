@@ -168,6 +168,15 @@ def classify_event_with_body(title: str, body: str) -> str:
             "kar payı dağıtmama", "kar payi dagitmama",
             "temettü dağıtılmaya", "temettu dagitilmaya",
             "kar payı dağıtım yapılmama", "kar payi dagitim yapilmama",
+            # YENI — "kar dağıtımı yapılmamasına" tipi
+            "dağıtımı yapılmamasına", "dagitimi yapilmamasina",
+            "dağıtım yapılmamasına", "dagitim yapilmamasina",
+            "dağıtılmaya", "dagitilmaya",
+            "dağıtılmasına yer verilmemesi", "dagitilmasina yer verilmemesi",
+            "kar payı dağıtılmamasına", "kar payi dagitilmamasina",
+            "kâr payı dağıtılmamasına", "kar payi dagitilmamasina",
+            "sıfır temettü", "sifir temettu",
+            "temettü dağıtmama", "temettu dagitmama",
         ]
         if any(p in b for p in rejection_phrases):
             return "rejection"
