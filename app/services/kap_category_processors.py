@@ -542,15 +542,17 @@ async def process_cautious_bistech_multi(
             cur_tags = set((existing.tags or "").split(",")) - {""}
             new_set = cur_tags | set(valid_tags)
             existing.tags = ",".join(sorted(new_set)) if new_set else None
-            if start_date and not existing.start_date:
+            # start_date — yeni KAP'tan gelen daha yeni ise gunceller (en son
+            # tedbir aksiyonunun tarihi). NULL kontrolu degil.
+            if start_date and (not existing.start_date or start_date > existing.start_date):
                 existing.start_date = start_date
             if end_date:
                 existing.end_date = end_date
                 existing.is_active = end_date >= today
-            if kap_url and not existing.kap_url:
-                existing.kap_url = kap_url
+            if kap_url:
+                existing.kap_url = kap_url  # her zaman en son KAP linki
             results.append(existing)
-            logger.info("BISTECH VBTS merge: %s tags=%s end=%s", tk, sorted(new_set), end_date)
+            logger.info("BISTECH VBTS merge: %s tags=%s start=%s end=%s", tk, sorted(new_set), start_date, end_date)
         else:
             new_row = CautiousStock(
                 ticker=tk,
