@@ -12181,7 +12181,16 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
             # Title check — sadece "Pay Alım Satım Bildirimi" KAP'larina pay_alim_satim uygula
             # CCOLA gibi bilanco KAP'larin yanlislikla buraya dusmesini engelle
             title_lo = (disclosure.get("title") or "").lower() if disclosure else ""
-            is_pay_alim_satim = "pay alım satım" in title_lo or "pay alim satim" in title_lo or "pay alım bildirim" in title_lo or "alım satım bildirim" in title_lo
+            body_lo = (body or "").lower()[:2000]
+            # Title bos olabiliyor — body'de "Pay Alım Satım Bildirimi" basligi varsa da kabul et
+            is_pay_alim_satim = (
+                "pay alım satım" in title_lo or "pay alim satim" in title_lo
+                or "pay alım bildirim" in title_lo or "alım satım bildirim" in title_lo
+                or "pay alım satım bildirimi" in body_lo or "pay alim satim bildirimi" in body_lo
+            )
+            # Bilanco/finansal tablo KAP'larini explicit olarak hariç tut
+            if "finansal rapor" in title_lo or "finansal tablo" in title_lo or "bilanço" in title_lo:
+                is_pay_alim_satim = False
             pay_parsed = await fetch_kap_pay_alim_satim(kap_url) if is_pay_alim_satim else None
             result["processors"]["pay_alim_satim"] = pay_parsed or {"skipped": "title_not_pay_alim_satim", "title": title_lo[:80]}
             # Ticker: fetcher'dan veya payload hint'inden
