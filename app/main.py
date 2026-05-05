@@ -12051,6 +12051,16 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
     if not isinstance(records, list) or not records:
         raise HTTPException(status_code=400, detail="records bos")
 
+    from datetime import date as _date
+    def _parse_date(s):
+        if not s: return None
+        if hasattr(s, "year"): return s
+        try:
+            parts = str(s).split("-")
+            return _date(int(parts[0]), int(parts[1]), int(parts[2]))
+        except Exception:
+            return None
+
     inserted = 0
     skipped = 0
     errors: list = []
@@ -12092,9 +12102,9 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
                     "bedelsiz": bedelsiz,
                     "tahsisli": tahsisli,
                     "sermaye": r.get("bolunme_sonrasi_sermaye_tl"),
-                    "ykk_date": r.get("ykk_date"),
-                    "spk_date": r.get("spk_approval_date"),
-                    "dist_date": r.get("distribution_date"),
+                    "ykk_date": _parse_date(r.get("ykk_date")),
+                    "spk_date": _parse_date(r.get("spk_approval_date")),
+                    "dist_date": _parse_date(r.get("distribution_date")),
                 })
                 inserted += 1
             except Exception as e:
