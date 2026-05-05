@@ -11622,6 +11622,79 @@ async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
     return {"deleted_id": tx_id}
 
 
+@app.post("/api/v1/admin/backfill-business-deals")
+@limiter.limit("3/minute")
+async def admin_backfill_business_deals(request: Request, payload: dict = Body(...)):
+    """Admin: business_deals tablosundaki amount=NULL kayitlari yeniden parse et, DB'yi guncelle.
+
+    Body: { "admin_password": "...", "limit": 50 }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.business_deal_processor import ai_parse_business_deal
+    limit = int(payload.get("limit") or 30)
+    fixed = []
+    skipped = []
+    async with async_session() as db:
+        result = await db.execute(sa_text("""
+            SELECT id, ticker, kap_url, title FROM business_deals
+            WHERE (amount_original IS NULL OR currency IS NULL)
+              AND kap_url IS NOT NULL
+            ORDER BY id DESC LIMIT :lim
+        """), {"lim": limit})
+        rows = result.fetchall()
+        for row in rows:
+            bd_id, ticker, kap_url, title = row[0], row[1], row[2], row[3]
+            try:
+                disc = await fetch_kap_disclosure(kap_url)
+                body = (disc or {}).get("full_text") or ""
+                if not body:
+                    skipped.append({"id": bd_id, "reason": "no_body"})
+                    continue
+                parsed = await ai_parse_business_deal(ticker, title or "", body)
+                if not parsed.get("amount_original"):
+                    skipped.append({"id": bd_id, "ticker": ticker, "reason": "no_amount", "cp": parsed.get("counterparty")})
+                    # Counterparty/summary bulunduysa onlari bile yaz
+                    if parsed.get("counterparty") or parsed.get("summary"):
+                        await db.execute(sa_text("""
+                            UPDATE business_deals
+                            SET counterparty=COALESCE(:cp, counterparty),
+                                summary=COALESCE(:sm, summary)
+                            WHERE id=:id
+                        """), {"id": bd_id, "cp": parsed.get("counterparty"), "sm": parsed.get("summary")})
+                    continue
+                # Kur cevirisi
+                amt = float(parsed["amount_original"])
+                cur = parsed.get("currency") or "TRY"
+                amt_try = amt
+                if cur != "TRY":
+                    try:
+                        from app.services.business_deal_processor import get_exchange_rate
+                        rate, _ = await get_exchange_rate(cur)
+                        if rate:
+                            amt_try = amt * rate
+                    except Exception:
+                        pass
+                await db.execute(sa_text("""
+                    UPDATE business_deals
+                    SET amount_original=:amt, currency=:cur, amount_try=:amt_try,
+                        counterparty=COALESCE(:cp, counterparty),
+                        summary=COALESCE(:sm, summary)
+                    WHERE id=:id
+                """), {
+                    "id": bd_id, "amt": amt, "cur": cur, "amt_try": amt_try,
+                    "cp": parsed.get("counterparty"), "sm": parsed.get("summary"),
+                })
+                fixed.append({"id": bd_id, "ticker": ticker, "amount": amt, "cur": cur, "cp": parsed.get("counterparty")})
+            except Exception as e:
+                skipped.append({"id": bd_id, "error": str(e)[:200]})
+        await db.commit()
+    return {"fixed_count": len(fixed), "skipped_count": len(skipped), "fixed": fixed[:30], "skipped": skipped[:30]}
+
+
 @app.post("/api/v1/admin/process-kap-disclosure")
 @limiter.limit("30/minute")
 async def admin_process_kap_disclosure(request: Request, payload: dict = Body(...)):
