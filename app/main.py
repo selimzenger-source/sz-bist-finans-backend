@@ -8854,6 +8854,77 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.post("/api/v1/admin/refresh-isyatirim-bilanco")
+@limiter.limit("2/minute")
+async def admin_refresh_isyatirim_bilanco(request: Request, payload: dict = Body(...)):
+    """Admin: IsYatirim'den fresh bilanco cekip eksik current_assets/non_current_assets/total_debt
+    olan ticker'lari toplu guncelle.
+
+    Body: {
+      "admin_password": "...",
+      "tickers": ["SASA","NTGAZ"]  # opsiyonel, yoksa eksik veri olan TUM ticker'lar
+      "limit": 50  # max ticker sayisi
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    from app.scrapers.isyatirim_scraper import fetch_bilanco
+    from app.services.bilanco_pipeline import _save_bilanco_to_db
+    import asyncio as _asyncio
+    import gc as _gc
+    tickers = payload.get("tickers")
+    limit = int(payload.get("limit") or 30)
+    fixed_tickers = []
+    skipped = []
+    async with async_session() as db:
+        if not tickers:
+            # Eksik veri olan distinct ticker'lari bul (current_assets/non_current_assets NULL/0)
+            res = await db.execute(sa_text("""
+                SELECT DISTINCT ticker FROM company_financials
+                WHERE (current_assets IS NULL OR current_assets = 0
+                       OR non_current_assets IS NULL OR non_current_assets = 0)
+                ORDER BY ticker
+                LIMIT :lim
+            """), {"lim": limit})
+            tickers = [row[0] for row in res.fetchall()]
+        else:
+            tickers = [t.upper().strip() for t in tickers if t][:limit]
+
+    # Her ticker icin IsYatirim'den fetch + save
+    for ticker in tickers:
+        try:
+            periods = await fetch_bilanco(ticker, years=3)
+            if not periods:
+                skipped.append({"ticker": ticker, "reason": "no_data"})
+                continue
+            ok = await _save_bilanco_to_db(ticker, periods)
+            if ok:
+                # ozet rapor
+                last = periods[0] if periods else {}
+                fixed_tickers.append({
+                    "ticker": ticker,
+                    "periods_saved": len(periods),
+                    "last_period": last.get("period"),
+                    "last_curr": last.get("current_assets"),
+                    "last_noncurr": last.get("non_current_assets"),
+                })
+            else:
+                skipped.append({"ticker": ticker, "reason": "save_failed"})
+            del periods
+            _gc.collect()
+            await _asyncio.sleep(2)  # IsYatirim rate limit
+        except Exception as e:
+            skipped.append({"ticker": ticker, "error": str(e)[:200]})
+    return {
+        "fixed_count": len(fixed_tickers),
+        "skipped_count": len(skipped),
+        "fixed": fixed_tickers[:50],
+        "skipped": skipped[:30],
+    }
+
+
 @app.post("/api/v1/admin/parse-bilanco-from-url")
 @limiter.limit("10/minute")
 async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(...)):
