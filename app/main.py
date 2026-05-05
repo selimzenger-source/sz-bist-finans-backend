@@ -12136,6 +12136,40 @@ async def admin_wipe_capital_increases(request: Request, payload: dict = Body(..
     return {"deleted": before, "remaining": after}
 
 
+@app.post("/api/v1/admin/backfill-share-tx-direction")
+@limiter.limit("3/minute")
+async def admin_backfill_share_tx_direction(request: Request, payload: dict = Body(...)):
+    """Mevcut share_transaction_details kayitlarinin tx_type'ini oran degisimine gore yeniden hesapla.
+
+    Mantik: pay_orani_change_pct (yoksa oy_hakki_change_pct) > 0 -> alis, < 0 -> satis.
+    Net nominal: hem alim hem satim varsa zaten parser'da abs(net) yaziliyor, mevcut nominal_lot dokunulmuyor.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    async with async_session() as db:
+        # COALESCE: pay_orani_change_pct yoksa oy_hakki_change_pct kullan
+        result_alis = await db.execute(sa_text("""
+            UPDATE share_transaction_details
+            SET transaction_type = 'alis'
+            WHERE COALESCE(pay_orani_change_pct, oy_hakki_change_pct) > 0
+              AND transaction_type != 'alis'
+            RETURNING id
+        """))
+        alis_updated = len(result_alis.fetchall())
+        result_satis = await db.execute(sa_text("""
+            UPDATE share_transaction_details
+            SET transaction_type = 'satis'
+            WHERE COALESCE(pay_orani_change_pct, oy_hakki_change_pct) < 0
+              AND transaction_type != 'satis'
+            RETURNING id
+        """))
+        satis_updated = len(result_satis.fetchall())
+        await db.commit()
+    return {"updated_to_alis": alis_updated, "updated_to_satis": satis_updated}
+
+
 @app.post("/api/v1/admin/delete-share-tx")
 @limiter.limit("20/minute")
 async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
