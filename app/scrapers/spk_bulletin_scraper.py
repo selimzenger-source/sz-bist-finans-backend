@@ -897,6 +897,27 @@ async def _check_spk_bulletins_inner():
                 except Exception as _push_err:
                     logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
 
+                # ────────────────────────────────────────────
+                # Capital Increase state machine — SPK onay/red yansit
+                # NON-BREAKING: hata olursa sessizce atla, IPO akisini etkileme
+                # ────────────────────────────────────────────
+                try:
+                    if full_bulletin_text:
+                        from app.services.spk_bulten_capital_increase import (
+                            extract_capital_decisions_from_bulletin,
+                            apply_decisions_to_db,
+                        )
+                        _decisions = await extract_capital_decisions_from_bulletin(full_bulletin_text)
+                        if _decisions:
+                            _applied = await apply_decisions_to_db(db, _decisions, bulten_no=bno_str_val)
+                            logger.info(
+                                "SPK Bulten cap_inc: %s — onay=%s red=%s skipped=%s",
+                                bno_str_val, _applied.get("approved"), _applied.get("rejected"),
+                                len(_applied.get("skipped") or []),
+                            )
+                except Exception as _ci_err:
+                    logger.warning("SPK Bulten cap_inc state machine hata: %s", _ci_err)
+
                 # Bulten numarasini HEMEN guncelle — tweet/analiz basarisiz olsa bile
                 # bir sonraki calistirmada ayni bulteni tekrar islemesin
                 if highest_no is None or is_newer(bno, highest_no):
