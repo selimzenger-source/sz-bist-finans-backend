@@ -42,10 +42,24 @@ class CapitalIncrease(Base):
 
     # ─── Yapilandirilmis veriler (KAP body'sinden AI ile parse) ───
     percentage: Mapped[float | None] = mapped_column(
-        Float, comment="Sermaye artis yuzdesi (orn: 990.99 → %990.99)"
+        Float, comment="(deprecated — yerine 4 ayri pct alani)"
     )
     amount_tl: Mapped[float | None] = mapped_column(
-        Float, comment="Sermaye artis tutari TL (orn: 545000000.0)"
+        Float, comment="(deprecated — yerine bolunme_sonrasi_sermaye_tl)"
+    )
+
+    # ─── 3 oran tipi (ayni ticker'da bir veya birkaci dolu olabilir) ───
+    bedelli_pct: Mapped[float | None] = mapped_column(
+        Float, comment="Bedelli oran %"
+    )
+    bedelsiz_pct: Mapped[float | None] = mapped_column(
+        Float, comment="Bedelsiz oran % (ic kaynak)"
+    )
+    tahsisli_pct: Mapped[float | None] = mapped_column(
+        Float, comment="Tahsisli oran %"
+    )
+    bolunme_sonrasi_sermaye_tl: Mapped[float | None] = mapped_column(
+        Float, comment="Bolunme sonrasi toplam sermaye (TL)"
     )
 
     # ─── State machine kilometre taslari ───

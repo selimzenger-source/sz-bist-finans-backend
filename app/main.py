@@ -8017,6 +8017,10 @@ async def list_capital_increases(
             "type": r.type,
             "percentage": r.percentage,
             "amount_tl": r.amount_tl,
+            "bedelli_pct": getattr(r, "bedelli_pct", None),
+            "bedelsiz_pct": getattr(r, "bedelsiz_pct", None),
+            "tahsisli_pct": getattr(r, "tahsisli_pct", None),
+            "bolunme_sonrasi_sermaye_tl": getattr(r, "bolunme_sonrasi_sermaye_tl", None),
             "ykk_date": r.ykk_date.isoformat() if r.ykk_date else None,
             "ykk_kap_url": r.ykk_kap_url,
             "spk_approval_date": r.spk_approval_date.isoformat() if r.spk_approval_date else None,
@@ -11967,6 +11971,91 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
       import traceback
       logger.error("cleanup-share-tx-duplicates failed: %s\n%s", e, traceback.format_exc())
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
+
+
+@app.post("/api/v1/admin/seed-capital-increases")
+@limiter.limit("3/minute")
+async def admin_seed_capital_increases(request: Request, payload: dict = Body(...)):
+    """Admin: capital_increases bulk seed.
+
+    Body: {
+      admin_password,
+      status: "ykk_alindi" | ...,
+      records: [
+        { ticker, company_name?, bolunme_sonrasi_sermaye_tl?, bedelli_pct?, bedelsiz_pct?, tahsisli_pct?, ykk_date?, spk_approval_date?, distribution_date? }
+      ]
+    }
+    Type field, dolu olan oran'a gore otomatik atanir (mixed kayitta primary tip).
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    records = payload.get("records") or []
+    status_in = payload.get("status") or "ykk_alindi"
+    if status_in not in ("ykk_alindi", "spk_onayli", "tarih_belli", "dagitiliyor", "tamamlandi", "reddedildi"):
+        raise HTTPException(status_code=400, detail="status gecersiz")
+    if not isinstance(records, list) or not records:
+        raise HTTPException(status_code=400, detail="records bos")
+
+    inserted = 0
+    skipped = 0
+    async with async_session() as db:
+        for r in records:
+            ticker = (r.get("ticker") or "").upper().strip()
+            if not ticker or len(ticker) > 10:
+                skipped += 1
+                continue
+            bedelli = r.get("bedelli_pct")
+            bedelsiz = r.get("bedelsiz_pct")
+            tahsisli = r.get("tahsisli_pct")
+            # Primary type — en buyuk oran hangisindeyse o
+            type_options = [(bedelli or 0, "bedelli"), (bedelsiz or 0, "bedelsiz"), (tahsisli or 0, "tahsisli")]
+            type_options.sort(key=lambda x: -x[0])
+            primary_type = type_options[0][1] if type_options[0][0] > 0 else "bedelsiz"
+            try:
+                await db.execute(sa_text("""
+                    INSERT INTO capital_increases (
+                        ticker, company_name, type, status,
+                        bedelli_pct, bedelsiz_pct, tahsisli_pct,
+                        bolunme_sonrasi_sermaye_tl,
+                        ykk_date, spk_approval_date, distribution_date,
+                        created_at, updated_at
+                    ) VALUES (
+                        :ticker, :company_name, :type, :status,
+                        :bedelli, :bedelsiz, :tahsisli,
+                        :sermaye,
+                        :ykk_date, :spk_date, :dist_date,
+                        NOW(), NOW()
+                    )
+                    ON CONFLICT (ticker, type, ykk_date) DO UPDATE SET
+                        bedelli_pct=EXCLUDED.bedelli_pct,
+                        bedelsiz_pct=EXCLUDED.bedelsiz_pct,
+                        tahsisli_pct=EXCLUDED.tahsisli_pct,
+                        bolunme_sonrasi_sermaye_tl=EXCLUDED.bolunme_sonrasi_sermaye_tl,
+                        spk_approval_date=COALESCE(EXCLUDED.spk_approval_date, capital_increases.spk_approval_date),
+                        distribution_date=COALESCE(EXCLUDED.distribution_date, capital_increases.distribution_date),
+                        company_name=COALESCE(EXCLUDED.company_name, capital_increases.company_name),
+                        status=EXCLUDED.status,
+                        updated_at=NOW()
+                """), {
+                    "ticker": ticker,
+                    "company_name": r.get("company_name"),
+                    "type": primary_type,
+                    "status": status_in,
+                    "bedelli": bedelli,
+                    "bedelsiz": bedelsiz,
+                    "tahsisli": tahsisli,
+                    "sermaye": r.get("bolunme_sonrasi_sermaye_tl"),
+                    "ykk_date": r.get("ykk_date"),
+                    "spk_date": r.get("spk_approval_date"),
+                    "dist_date": r.get("distribution_date"),
+                })
+                inserted += 1
+            except Exception:
+                skipped += 1
+        await db.commit()
+    return {"inserted": inserted, "skipped": skipped}
 
 
 @app.post("/api/v1/admin/wipe-capital-increases")
