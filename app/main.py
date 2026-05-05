@@ -8854,6 +8854,43 @@ async def remove_from_watchlist(
     return {"success": True, "ticker": ticker}
 
 
+@app.get("/api/v1/admin/test-pdf-fetch")
+async def admin_test_pdf_fetch(url: str):
+    """Debug: KAP PDF fetch test."""
+    import httpx, io
+    try:
+        import pdfplumber
+    except Exception as e:
+        return {"error": "pdfplumber import: " + str(e)}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0",
+        "Accept": "application/pdf,*/*",
+        "Accept-Language": "tr-TR,tr;q=0.9",
+        "Referer": "https://www.kap.org.tr/tr/Bildirim/1600871",
+    }
+    out: dict = {"url": url}
+    try:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=20.0) as client:
+            # Warmup
+            try:
+                w = await client.get("https://www.kap.org.tr/tr/Bildirim/1600871")
+                out["warmup_status"] = w.status_code
+            except Exception as we:
+                out["warmup_error"] = str(we)[:200]
+            r = await client.get(url)
+            out["status"] = r.status_code
+            out["len"] = len(r.content)
+            out["ctype"] = r.headers.get("content-type")
+            if r.status_code == 200 and "pdf" in (r.headers.get("content-type","").lower()):
+                with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+                    out["pages"] = len(pdf.pages)
+                    out["text_p1"] = (pdf.pages[0].extract_text() or "")[:500]
+        return out
+    except Exception as e:
+        import traceback
+        return {"error": str(e)[:300], "trace": traceback.format_exc()[:1000]}
+
+
 @app.get("/api/v1/admin/raw-cf/{ticker}")
 async def admin_raw_cf(ticker: str):
     """Debug: raw SQL ile company_financials sorgula."""
