@@ -9637,6 +9637,50 @@ async def admin_trigger_viop_notification(request: Request, payload: dict, db: A
     return {"status": "ok", "sent": sent, "session_type": session_type}
 
 
+@app.post("/api/v1/admin/kap-force-reanalyze")
+@limiter.limit("10/minute")
+async def admin_kap_force_reanalyze(request: Request, payload: dict = Body(...)):
+    """Admin: spesifik kap_url(s) icin AI ozeti zorla yeniden uret.
+
+    Body: { "admin_password": "...", "kap_urls": ["...", ...] | "kap_url": "..." }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import select
+    from app.database import async_session
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.kap_all_analyzer import analyze_disclosure
+    urls = payload.get("kap_urls") or ([payload.get("kap_url")] if payload.get("kap_url") else [])
+    urls = [u for u in urls if u]
+    if not urls:
+        return {"error": "kap_url(s) gerekli"}
+    results = []
+    async with async_session() as db:
+        for url in urls[:30]:
+            stmt = select(KapAllDisclosure).where(KapAllDisclosure.kap_url == url).limit(1)
+            row = (await db.execute(stmt)).scalar_one_or_none()
+            if not row:
+                results.append({"url": url, "status": "not_found"})
+                continue
+            try:
+                ai = await analyze_disclosure(
+                    company_code=row.company_code or "",
+                    title=row.title or "",
+                    body=row.body_text or row.title or "",
+                )
+                if ai:
+                    row.ai_summary = ai.get("summary")
+                    row.ai_sentiment = ai.get("sentiment")
+                    row.ai_impact_score = ai.get("impact_score")
+                    results.append({"url": url, "ticker": row.company_code, "summary": (ai.get("summary") or "")[:120]})
+                else:
+                    results.append({"url": url, "status": "ai_failed"})
+            except Exception as e:
+                results.append({"url": url, "error": str(e)[:200]})
+        await db.commit()
+    return {"results": results}
+
+
 @app.post("/api/v1/admin/kap-reanalyze")
 @limiter.limit("3/minute")
 async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
