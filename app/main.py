@@ -11973,6 +11973,37 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
+@app.post("/api/v1/admin/migrate-capital-increases-schema")
+@limiter.limit("3/minute")
+async def admin_migrate_capital_increases(request: Request, payload: dict = Body(...)):
+    """Admin: capital_increases tablosuna yeni 4 column ekle (idempotent)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    stmts = [
+        "ALTER TABLE capital_increases ADD COLUMN IF NOT EXISTS bedelli_pct DOUBLE PRECISION",
+        "ALTER TABLE capital_increases ADD COLUMN IF NOT EXISTS bedelsiz_pct DOUBLE PRECISION",
+        "ALTER TABLE capital_increases ADD COLUMN IF NOT EXISTS tahsisli_pct DOUBLE PRECISION",
+        "ALTER TABLE capital_increases ADD COLUMN IF NOT EXISTS bolunme_sonrasi_sermaye_tl DOUBLE PRECISION",
+        # ykk_date NULL olabilsin (unique constraint icin sorun olmasin diye)
+        "ALTER TABLE capital_increases ALTER COLUMN ykk_date DROP NOT NULL",
+        # Eski unique constraint problem olabilir — ticker tek anahtar
+        "ALTER TABLE capital_increases DROP CONSTRAINT IF EXISTS uq_cap_inc_ticker_type_ykk",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_cap_inc_ticker_status ON capital_increases (ticker, status) WHERE status IN ('ykk_alindi','spk_onayli','tarih_belli','dagitiliyor')",
+    ]
+    results = []
+    async with async_session() as db:
+        for s in stmts:
+            try:
+                await db.execute(sa_text(s))
+                results.append({"sql": s[:60], "ok": True})
+            except Exception as e:
+                results.append({"sql": s[:60], "ok": False, "err": str(e)[:200]})
+        await db.commit()
+    return {"applied": results}
+
+
 @app.post("/api/v1/admin/seed-capital-increases")
 @limiter.limit("3/minute")
 async def admin_seed_capital_increases(request: Request, payload: dict = Body(...)):
@@ -12028,16 +12059,7 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
                         :ykk_date, :spk_date, :dist_date,
                         NOW(), NOW()
                     )
-                    ON CONFLICT (ticker, type, ykk_date) DO UPDATE SET
-                        bedelli_pct=EXCLUDED.bedelli_pct,
-                        bedelsiz_pct=EXCLUDED.bedelsiz_pct,
-                        tahsisli_pct=EXCLUDED.tahsisli_pct,
-                        bolunme_sonrasi_sermaye_tl=EXCLUDED.bolunme_sonrasi_sermaye_tl,
-                        spk_approval_date=COALESCE(EXCLUDED.spk_approval_date, capital_increases.spk_approval_date),
-                        distribution_date=COALESCE(EXCLUDED.distribution_date, capital_increases.distribution_date),
-                        company_name=COALESCE(EXCLUDED.company_name, capital_increases.company_name),
-                        status=EXCLUDED.status,
-                        updated_at=NOW()
+                    ON CONFLICT DO NOTHING
                 """), {
                     "ticker": ticker,
                     "company_name": r.get("company_name"),
@@ -12052,8 +12074,11 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
                     "dist_date": r.get("distribution_date"),
                 })
                 inserted += 1
-            except Exception:
+            except Exception as e:
                 skipped += 1
+                if skipped <= 3:
+                    import logging as _lg
+                    _lg.getLogger(__name__).warning("seed_cap_inc skip %s: %s", ticker, str(e)[:200])
         await db.commit()
     return {"inserted": inserted, "skipped": skipped}
 
