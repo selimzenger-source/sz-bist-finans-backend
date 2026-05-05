@@ -9507,14 +9507,22 @@ async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...
             result["steps"].append(f"KAP body fetch hatasi: {e}")
 
     async with _async_session() as db:
-        # 2. DB'de var mi
+        # 2. DB'de var mi — UNIQUE constraint kap_url uzerinde, oncelikle url ile ara
         existing_q = await db.execute(
             select(KapAllDisclosure).where(
-                KapAllDisclosure.company_code == ticker,
-                KapAllDisclosure.title == title,
+                KapAllDisclosure.kap_url == kap_url,
             ).limit(1)
         )
         disclosure = existing_q.scalar_one_or_none()
+        if not disclosure:
+            # URL bulunamadi — fallback: ayni ticker+title (eski kayitlar icin)
+            existing_q2 = await db.execute(
+                select(KapAllDisclosure).where(
+                    KapAllDisclosure.company_code == ticker,
+                    KapAllDisclosure.title == title,
+                ).limit(1)
+            )
+            disclosure = existing_q2.scalar_one_or_none()
 
         # is_bilanco / category — title'a göre otomatik
         title_lower = title.lower()
