@@ -760,11 +760,17 @@ Hisse: {company_code}
 
 GOREV: Bu KAP bildirimini yatirimci bakis acisiyla analiz et. (Detayli rubrik system prompt'unda.)
 
+ONEMLI — TICKER ODAKLI ANALIZ:
+- Bu bildirim BIRDEN FAZLA hisse icerebilir (orn: "[TRILC, YUNSA]"). SADECE {company_code} ile ilgili kismi ozetle.
+- Diger hisselere ait bilgileri (ornek: baska bir hissenin bedelsiz orani, baska hissenin temettusu)
+  KESINLIKLE ozete dahil ETME.
+- Eger bildirim hem temettu hem bedelsiz icerirse: {company_code} hangisine ait ise SADECE onu yaz.
+
 CIKTI ALANLARI:
 1. sentiment: "Olumlu" | "Olumsuz" | "Nötr"
 2. impact_score: 1.0-10.0 arasi 0.1 hassasiyetle (sysem prompt'undaki rubrik)
 3. category: "finansal" | "strateji" | "bilgi"
-4. summary: 3-5 cumle Turkce ozet (tweet-ready). Ne oldugunu, sirket icin ne anlama geldigini,
+4. summary: 3-5 cumle Turkce ozet (tweet-ready). SADECE {company_code} hakkinda. Ne oldugunu, sirket icin ne anlama geldigini,
    yatirimci icin neden onemli oldugunu acikla. Onemli rakamlari (tutar, %, oran) dahil et.
 5. hashtags: 2-3 adet (# isareti olmadan, ticker'i tekrar verme — sektor + konu)
 
