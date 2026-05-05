@@ -505,8 +505,8 @@ async def upsert_pay_alim_satim_from_kap(
         if nb:
             nominal_lot = nb
 
-    # Sira: 1) Ortagi/kurucu spesifik patterns, 2) generic body, 3) header slug, 4) Bilinmiyor
-    party_name = None
+    # Sira: 0) PDF parse'tan party (en yuksek oncelik), 1) Ortagi pattern, 2) generic, 3) header, 4) Bilinmiyor
+    party_name = parsed.get("party_name")  # PDF'ten gelmis olabilir
     import re as _re
     # 1) Ortagi/kurucu/araciliyla — KAP body'nin standart kalibi
     body_clean = body.replace("\xa0", " ")
@@ -540,8 +540,13 @@ async def upsert_pay_alim_satim_from_kap(
     if not party_name:
         party_name = "Bilinmiyor"
 
-    # Body'den fiyat aralığı
-    price_low, price_high = extract_price_range(body)
+    # Body'den / PDF'ten fiyat aralığı (PDF onceligi)
+    price_low = parsed.get("price_low")
+    price_high = parsed.get("price_high")
+    if price_low is None or price_high is None:
+        pl, ph = extract_price_range(body)
+        price_low = price_low or pl
+        price_high = price_high or ph
 
     # Tx type body fallback
     if not (alim or satim):
