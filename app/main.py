@@ -9485,7 +9485,21 @@ async def admin_process_bistech_vbts(request: Request, payload: dict = Body(...)
         if not body:
             return {"status": "error", "msg": "body bos"}
 
-        title = "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu"
+        from app.services.kap_category_processors import is_bistech_vbts, _TICKER_DOT_E_RE, _CS_PROMPT, _call_gemini
+        title = payload.get("title") or "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu"
+        debug = {
+            "title": title,
+            "body_len": len(body),
+            "is_vbts": is_bistech_vbts(title, body),
+            "tickers_in_body": sorted(set(_TICKER_DOT_E_RE.findall(body))),
+        }
+        if debug["is_vbts"] and debug["tickers_in_body"]:
+            ai_raw = await _call_gemini(_CS_PROMPT.format(
+                ticker=",".join(debug["tickers_in_body"]),
+                title=title, body=body[:3000],
+            ))
+            debug["ai_parsed"] = ai_raw
+
         async with _async_session() as db:
             results = await process_cautious_bistech_multi(
                 db, disclosure_id=0, title=title, body=body,
@@ -9498,6 +9512,7 @@ async def admin_process_bistech_vbts(request: Request, payload: dict = Body(...)
             "kap_url": kap_url,
             "processed_tickers": [r.ticker for r in results],
             "count": len(results),
+            "debug": debug,
         }
     except Exception as e:
         import traceback
