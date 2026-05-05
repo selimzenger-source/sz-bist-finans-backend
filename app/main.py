@@ -8871,7 +8871,6 @@ async def admin_refresh_isyatirim_bilanco(request: Request, payload: dict = Body
     from sqlalchemy import text as sa_text
     from app.database import async_session
     from app.scrapers.isyatirim_scraper import fetch_bilanco
-    from app.services.bilanco_pipeline import _save_bilanco_to_db
     import asyncio as _asyncio
     import gc as _gc
     tickers = payload.get("tickers")
@@ -8880,7 +8879,6 @@ async def admin_refresh_isyatirim_bilanco(request: Request, payload: dict = Body
     skipped = []
     async with async_session() as db:
         if not tickers:
-            # Eksik veri olan distinct ticker'lari bul (current_assets/non_current_assets NULL/0)
             res = await db.execute(sa_text("""
                 SELECT DISTINCT ticker FROM company_financials
                 WHERE (current_assets IS NULL OR current_assets = 0
@@ -8892,29 +8890,93 @@ async def admin_refresh_isyatirim_bilanco(request: Request, payload: dict = Body
         else:
             tickers = [t.upper().strip() for t in tickers if t][:limit]
 
-    # Her ticker icin IsYatirim'den fetch + save
+    # Her ticker icin IsYatirim'den fetch + DIRECT SQL UPDATE
+    UPDATE_SQL = sa_text("""
+        UPDATE company_financials
+        SET current_assets = COALESCE(:ca, current_assets),
+            non_current_assets = COALESCE(:nca, non_current_assets),
+            total_debt = COALESCE(:td, total_debt),
+            net_debt = COALESCE(:nd, net_debt),
+            cash_and_equivalents = COALESCE(:cash, cash_and_equivalents),
+            gross_profit = COALESCE(:gp, gross_profit),
+            operating_profit = COALESCE(:op, operating_profit),
+            current_ratio = COALESCE(:cr, current_ratio),
+            debt_to_equity = COALESCE(:de, debt_to_equity),
+            source = 'isyatirim',
+            updated_at = NOW()
+        WHERE ticker = :tk AND period = :pd
+    """)
+    INSERT_SQL = sa_text("""
+        INSERT INTO company_financials(ticker, period, period_end_date, revenue, gross_profit,
+            operating_profit, net_income, ebitda, total_assets, total_equity, total_debt,
+            net_debt, cash_and_equivalents, current_assets, non_current_assets,
+            current_ratio, gross_margin_pct, net_margin_pct, roe_pct, debt_to_equity,
+            source, scraped_at, updated_at)
+        VALUES(:tk, :pd, :ped, :rev, :gp, :op, :ni, :eb, :ta, :te, :td,
+               :nd, :cash, :ca, :nca, :cr, :gm, :nm, :roe, :de,
+               'isyatirim', NOW(), NOW())
+        ON CONFLICT (ticker, period) DO NOTHING
+    """)
     for ticker in tickers:
         try:
             periods = await fetch_bilanco(ticker, years=3)
             if not periods:
                 skipped.append({"ticker": ticker, "reason": "no_data"})
                 continue
-            ok = await _save_bilanco_to_db(ticker, periods)
-            if ok:
-                # ozet rapor
-                last = periods[0] if periods else {}
-                fixed_tickers.append({
-                    "ticker": ticker,
-                    "periods_saved": len(periods),
-                    "last_period": last.get("period"),
-                    "last_curr": last.get("current_assets"),
-                    "last_noncurr": last.get("non_current_assets"),
-                })
-            else:
-                skipped.append({"ticker": ticker, "reason": "save_failed"})
+            updated = 0
+            sample_curr = None
+            sample_period = None
+            async with async_session() as db2:
+                for p in periods:
+                    # Once UPDATE dene
+                    res = await db2.execute(UPDATE_SQL, {
+                        "tk": ticker, "pd": p["period"],
+                        "ca": p.get("current_assets"),
+                        "nca": p.get("non_current_assets"),
+                        "td": p.get("total_debt"),
+                        "nd": p.get("net_debt"),
+                        "cash": p.get("cash_and_equivalents"),
+                        "gp": p.get("gross_profit"),
+                        "op": p.get("operating_profit"),
+                        "cr": p.get("current_ratio"),
+                        "de": p.get("debt_to_equity"),
+                    })
+                    if res.rowcount == 0:
+                        # Yoksa INSERT
+                        try:
+                            from datetime import datetime as _dt2
+                            ped = p.get("period_end_date")
+                            ped_obj = _dt2.strptime(ped, "%Y-%m-%d") if ped else None
+                            await db2.execute(INSERT_SQL, {
+                                "tk": ticker, "pd": p["period"], "ped": ped_obj,
+                                "rev": p.get("revenue"), "gp": p.get("gross_profit"),
+                                "op": p.get("operating_profit"), "ni": p.get("net_income"),
+                                "eb": p.get("ebitda"), "ta": p.get("total_assets"),
+                                "te": p.get("total_equity"), "td": p.get("total_debt"),
+                                "nd": p.get("net_debt"), "cash": p.get("cash_and_equivalents"),
+                                "ca": p.get("current_assets"), "nca": p.get("non_current_assets"),
+                                "cr": p.get("current_ratio"), "gm": p.get("gross_margin_pct"),
+                                "nm": p.get("net_margin_pct"), "roe": p.get("roe_pct"),
+                                "de": p.get("debt_to_equity"),
+                            })
+                        except Exception:
+                            pass
+                    else:
+                        updated += 1
+                    if p.get("current_assets") and not sample_curr:
+                        sample_curr = p.get("current_assets")
+                        sample_period = p.get("period")
+                await db2.commit()
+            fixed_tickers.append({
+                "ticker": ticker,
+                "periods_fetched": len(periods),
+                "updated_rows": updated,
+                "sample_period": sample_period,
+                "sample_curr": sample_curr,
+            })
             del periods
             _gc.collect()
-            await _asyncio.sleep(2)  # IsYatirim rate limit
+            await _asyncio.sleep(2)
         except Exception as e:
             skipped.append({"ticker": ticker, "error": str(e)[:200]})
     return {
