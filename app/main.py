@@ -5190,6 +5190,73 @@ async def search_mentions(
     return result
 
 
+@app.post("/api/v1/admin/save-market-close-fast")
+@limiter.limit("3/minute")
+async def admin_save_market_close_fast(request: Request, payload: dict = Body(...)):
+    """Tavan/taban hisselerini AI olmadan hizla DB'ye kaydeder (reason boş kalir).
+    Sonra AI analizi ayri job ile uretilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from app.services.market_close_analyzer import scrape_uzmanpara
+    from app.models.daily_stock_market_stat import DailyStockMarketStat
+    from app.database import async_session
+    from datetime import datetime as _dt7, timezone as _tz7, date as _date7, timedelta as _td7
+    from sqlalchemy import text as sa_text
+    from decimal import Decimal as _Dec
+    import zoneinfo
+    tz_tr = zoneinfo.ZoneInfo("Europe/Istanbul")
+    today = _dt7.now(tz_tr).date()
+
+    ceilings = await scrape_uzmanpara(is_ceiling=True)
+    floors = await scrape_uzmanpara(is_ceiling=False)
+    if not ceilings and not floors:
+        return {"status": "error", "msg": "scrape returned empty"}
+
+    saved = 0
+    async with async_session() as db:
+        # bugünün kayitlarini sil (force gibi)
+        await db.execute(sa_text('DELETE FROM daily_stock_market_stats WHERE "date" = :today'), {"today": today})
+        await db.commit()
+
+        # consec hesabi (basitleştirilmiş)
+        all_stocks = [(s, True) for s in ceilings] + [(s, False) for s in floors]
+        seen = set()
+        for stock, is_c in all_stocks:
+            try:
+                ticker = stock["ticker"]
+                if ticker in seen: continue
+                seen.add(ticker)
+                # past
+                past = (await db.execute(sa_text("""
+                    SELECT is_ceiling, is_floor, consecutive_ceiling_count, consecutive_floor_count, "date"
+                    FROM daily_stock_market_stats WHERE ticker=:t ORDER BY "date" DESC LIMIT 30
+                """), {"t": ticker})).fetchall()
+                consec = 1
+                if past and ((is_c and past[0][0]) or (not is_c and past[0][1])):
+                    gap = (today - past[0][4]).days
+                    if gap == 1 or (gap <= 3 and today.weekday() == 0) or (gap == 2 and today.weekday() in (0, 1)):
+                        consec = (past[0][2] if is_c else past[0][3]) + 1
+                monthly = sum(1 for r in past if (r[0] if is_c else r[1]) and (today - r[4]).days <= 30) + 1
+
+                db.add(DailyStockMarketStat(
+                    ticker=ticker, date=today,
+                    close_price=_Dec(str(stock["price"])),
+                    percent_change=_Dec(str(stock["change"])),
+                    is_ceiling=is_c, is_floor=not is_c,
+                    consecutive_ceiling_count=consec if is_c else 0,
+                    monthly_ceiling_count=monthly if is_c else 0,
+                    consecutive_floor_count=consec if not is_c else 0,
+                    monthly_floor_count=monthly if not is_c else 0,
+                    reason=""
+                ))
+                saved += 1
+            except Exception as e:
+                continue
+        await db.commit()
+    return {"saved": saved, "today": today.isoformat()}
+
+
 @app.post("/api/v1/admin/trigger-market-close-tweet")
 @limiter.limit("3/minute")
 async def trigger_market_close_tweet(
