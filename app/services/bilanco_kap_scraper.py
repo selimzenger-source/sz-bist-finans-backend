@@ -173,17 +173,30 @@ def parse_kap_finansal_rapor(body: str) -> dict:
 
     out["period"] = _detect_period(body)
 
+    # Sunum Para Birimi carpani — "1.000 TL" / "1.000.000 TL" / "TL"
+    # FROTO, BRISA gibi sirketler degerlerini binlik olarak sunar.
+    multiplier = 1
+    pb = re.search(r"Sunum\s+Para\s+Birimi\s*\|\s*([0-9.,]+)?\s*TL", body, re.IGNORECASE)
+    if pb and pb.group(1):
+        raw = pb.group(1).replace(".", "").replace(",", "").strip()
+        try:
+            n = int(raw)
+            if n in (1000, 1000000):
+                multiplier = n
+        except ValueError:
+            pass
+
     # XBRL etiketlerini tek tek çek
     for tag, field in TAG_TO_FIELD.items():
         v = _extract_value_after_tag(body, tag)
         if v is None:
             continue
+        v_scaled = v * multiplier
         if field == "net_income_parent":
-            # Eger ana net_income yoksa parent kullan
             if out.get("net_income") is None:
-                out["net_income"] = v
+                out["net_income"] = v_scaled
         else:
-            out[field] = v
+            out[field] = v_scaled
 
     # net_debt hesabi
     if out["total_debt"] is not None and out["cash_and_equivalents"] is not None:
