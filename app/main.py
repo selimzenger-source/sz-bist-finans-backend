@@ -9658,9 +9658,11 @@ async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(..
       async with async_session() as db:
         # Son 30 gun, ai_summary olmayan veya kuskulu kayitlari kontrol et
         rows_q = await db.execute(sa_text("""
-            SELECT id, ticker, kap_url, status, gross_amount_per_share
+            SELECT id, ticker,
+                   COALESCE(ykk_kap_url, general_assembly_kap_url, payment_kap_url) AS kap_url,
+                   status, gross_amount_per_share
             FROM dividend_calendar
-            WHERE kap_url IS NOT NULL
+            WHERE COALESCE(ykk_kap_url, general_assembly_kap_url, payment_kap_url) IS NOT NULL
               AND status NOT IN ('tamamlandi', 'odeniyor')
               AND created_at > NOW() - INTERVAL '30 days'
               AND COALESCE(gross_amount_per_share, 0) = 0
