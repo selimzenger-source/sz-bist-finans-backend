@@ -9637,6 +9637,53 @@ async def admin_trigger_viop_notification(request: Request, payload: dict, db: A
     return {"status": "ok", "sent": sent, "session_type": session_type}
 
 
+@app.post("/api/v1/admin/delete-orphan-dividends")
+@limiter.limit("5/minute")
+async def admin_delete_orphan_dividends(request: Request, payload: dict = Body(...)):
+    """Admin: dividend_calendar'da kap_url'siz, gross'siz hayalet kayitlari sil.
+
+    Kriter: tum kap_url'lar NULL VE gross_amount_per_share NULL/0 VE status='ykk_alindi'
+    Yani: title match olmus ama KAP body cekilemediginden dogrulanmamis.
+
+    Body: { admin_password, tickers: ["SMRVA","TRILC",...] (opsiyonel — yoksa hepsi) }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    tickers = payload.get("tickers")
+    try:
+      async with async_session() as db:
+        if tickers:
+            res = await db.execute(sa_text("""
+                DELETE FROM dividend_calendar
+                WHERE ticker = ANY(:tks)
+                  AND ykk_kap_url IS NULL
+                  AND general_assembly_kap_url IS NULL
+                  AND payment_kap_url IS NULL
+                  AND COALESCE(gross_amount_per_share, 0) = 0
+                  AND status IN ('ykk_alindi', 'tarih_belli')
+                RETURNING id, ticker
+            """), {"tks": tickers})
+        else:
+            res = await db.execute(sa_text("""
+                DELETE FROM dividend_calendar
+                WHERE ykk_kap_url IS NULL
+                  AND general_assembly_kap_url IS NULL
+                  AND payment_kap_url IS NULL
+                  AND COALESCE(gross_amount_per_share, 0) = 0
+                  AND status IN ('ykk_alindi', 'tarih_belli')
+                  AND created_at > NOW() - INTERVAL '30 days'
+                RETURNING id, ticker
+            """))
+        deleted = res.fetchall()
+        await db.commit()
+      return {"deleted_count": len(deleted), "deleted": [{"id": r[0], "ticker": r[1]} for r in deleted[:50]]}
+    except Exception as e:
+      import traceback
+      return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
+
+
 @app.post("/api/v1/admin/cleanup-fake-dividends")
 @limiter.limit("5/minute")
 async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(...)):
