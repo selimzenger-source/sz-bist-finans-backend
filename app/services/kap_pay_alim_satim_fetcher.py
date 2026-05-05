@@ -96,11 +96,9 @@ def parse_kap_html(html: str) -> Optional[dict]:
     m = re.search(r"İlgili\s+Şirketler[^\[]{0,30}\[([A-Z]{2,6})", html, re.DOTALL)
     if m:
         ticker = m.group(1).strip()
-    if not ticker:
-        # Fallback: ilk kose parantezli ticker
-        m = re.search(r"\[([A-Z]{2,6})(?:\s*,|\])", html)
-        if m:
-            ticker = m.group(1).strip()
+    # Fallback KALDIRILDI — body'de rastgele [DIV], [TR] gibi metinleri yakalayip
+    # yanlis ticker olusturuyordu. KAP'in resmi "İlgili Şirketler" alanini bulamazsa
+    # ticker None doner, upsert company_code parametresine fallback yapar.
 
     # KAP tablo yapisi (10 sutun):
     # [0] Tarih  [1] Alim Nominal  [2] Satim Nominal  [3] Net Nominal
@@ -541,6 +539,18 @@ async def upsert_pay_alim_satim_from_kap(
         cand = extract_party_name(body_clean)
         if cand and len(cand) < 80 and not _re.match(r"^(TL|adet|payın|oranı)", cand, _re.IGNORECASE):
             party_name = cand
+    # Junk filter — aciklama metni / aciklama parcasi gibi yakalanmislari at
+    if party_name:
+        junk_markers = [
+            "toplam nominal tutarlı",
+            "tutarlı alış işlemi",
+            "tutarlı satış işlemi",
+            "alış işlemi",
+            "satış işlemi",
+        ]
+        if any(m in party_name.lower() for m in junk_markers):
+            party_name = None
+
     # 4) Son care fallback — NOT NULL constraint için
     if not party_name:
         party_name = "Bilinmiyor"
