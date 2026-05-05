@@ -11952,6 +11952,27 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
+@app.post("/api/v1/admin/wipe-capital-increases")
+@limiter.limit("3/minute")
+async def admin_wipe_capital_increases(request: Request, payload: dict = Body(...)):
+    """Admin: capital_increases tablosundaki TUM kayitlari sil (yeniden tasarim icin).
+
+    Body: { "admin_password": "...", "confirm": "WIPE_ALL" }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    if payload.get("confirm") != "WIPE_ALL":
+        raise HTTPException(status_code=400, detail="confirm='WIPE_ALL' gerekli")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    async with async_session() as db:
+        before = (await db.execute(sa_text("SELECT COUNT(*) FROM capital_increases"))).scalar() or 0
+        await db.execute(sa_text("DELETE FROM capital_increases"))
+        await db.commit()
+        after = (await db.execute(sa_text("SELECT COUNT(*) FROM capital_increases"))).scalar() or 0
+    return {"deleted": before, "remaining": after}
+
+
 @app.post("/api/v1/admin/delete-share-tx")
 @limiter.limit("20/minute")
 async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
