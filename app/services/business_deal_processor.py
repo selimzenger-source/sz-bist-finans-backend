@@ -85,20 +85,42 @@ KURALLAR:
 """
 
 
-_AMOUNT_RE = re.compile(
-    r"""(?:İhale\s*bedeli|sözleşme\s*bedeli|sözleşme\s*tutarı|toplam\s*bedel|sözleşme\s*değeri|işin\s*bedeli|alım\s*bedeli|satım\s*bedeli|tutarı|bedeli)
-        [\s:]*
-        (?:KDV\s*hariç|KDV\s*dahil|net|brüt)?[\s:]*
-        ([\d]{1,3}(?:[.\s]\d{3})*(?:,\d+)?|[\d]+(?:,\d+)?)
-        \s*
-        (TL|TRY|USD|EUR|GBP|\$|€|£|TÜRK\s*LİRASI|Türk\s*Lirası|Amerikan\s*Doları|Avro|Euro)
-    """,
-    re.VERBOSE | re.IGNORECASE,
+_CURRENCY_GROUP = (
+    r"(TL|TRY|USD|EUR|GBP|\$|€|£|"
+    r"ABD\s*Dolar[ıi]?|Amerikan\s*Dolar[ıi]?|"
+    r"T[üu]rk\s*Liras[ıi]|Lira|"
+    r"Avro|Euro|Sterlin|Pound)"
 )
 
-# Geniş fallback: "12.100.000 TL" gibi serbest amount-currency
+_AMOUNT_RE = re.compile(
+    r"(?:İhale\s*bedeli|sözleşme\s*bedeli|sözleşme\s*tutarı|toplam\s*bedel|sözleşme\s*değeri|işin\s*bedeli|alım\s*bedeli|satım\s*bedeli|tutarı|bedeli)"
+    r"[\s:]*"
+    r"(?:KDV\s*hariç|KDV\s*dahil|net|brüt)?[\s:]*"
+    r"([\d]{1,3}(?:[.\s]\d{3})*(?:,\d+)?|[\d]+(?:,\d+)?)"
+    r"\s*"
+    + _CURRENCY_GROUP,
+    re.IGNORECASE,
+)
+
+# Geniş fallback: "12.100.000 TL" / "76.650 ABD Doları" / "5,5 milyon Euro"
 _AMOUNT_FALLBACK_RE = re.compile(
-    r"([\d]{1,3}(?:[.\s]\d{3})+(?:,\d+)?|[\d]+(?:[.,]\d{3})+(?:,\d+)?)\s*(TL|TRY|USD|EUR|GBP|\$|€|£)",
+    r"([\d]{1,3}(?:[.\s]\d{3})+(?:,\d+)?|[\d]+(?:,\d+)?)\s*"
+    + _CURRENCY_GROUP,
+    re.IGNORECASE,
+)
+
+# Action-coupled pattern: "X TL/USD/Doları satış/sözleşme/ihracat/anlaşma"
+_AMOUNT_ACTION_RE = re.compile(
+    r"([\d]{1,3}(?:[.\s]\d{3})*(?:,\d+)?|[\d]+(?:[.,]\d+)?)\s*"
+    + _CURRENCY_GROUP +
+    r"\s*(?:tutar|değer|bedel|sat[ıi][şs]|al[ıi][mn]|ihrac|s[oö]zle[şs]me|anla[şs]ma|i[şs]lem|ihale|gelir)",
+    re.IGNORECASE,
+)
+
+# Çarpan kelimeleri ("milyon", "milyar")
+_MULTIPLIER_RE = re.compile(
+    r"([\d]+(?:[.,]\d+)?)\s*(milyon|milyar|trilyon|bin)\s*"
+    + _CURRENCY_GROUP,
     re.IGNORECASE,
 )
 
@@ -153,25 +175,73 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
     if not body:
         return out
 
-    # 1) Yapılandırılmış pattern: "ihale bedeli ... 12.100.000 TL"
-    m = _AMOUNT_RE.search(body)
-    if not m:
-        # 2) Fallback: herhangi büyük sayı + para birimi (binlik ayırıcılı)
-        m = _AMOUNT_FALLBACK_RE.search(body)
-
+    # 1) Çarpanlı pattern: "5,5 milyon Euro"
+    amount = None
+    currency = None
+    m = _MULTIPLIER_RE.search(body)
     if m:
-        amount = _parse_tr_number(m.group(1))
-        currency = _normalize_currency(m.group(2))
-        if amount and amount >= 1000:  # 1000 TL altı şüpheli
-            out["amount_original"] = amount
-            out["currency"] = currency
+        base = _parse_tr_number(m.group(1))
+        mult_word = m.group(2).lower()
+        mult = {"bin": 1_000, "milyon": 1_000_000, "milyar": 1_000_000_000, "trilyon": 1_000_000_000_000}.get(mult_word, 1)
+        if base:
+            amount = base * mult
+            currency = _normalize_currency(m.group(3))
 
-    # Karşı taraf (Müşterinin Adı / Tedarikçinin Adı)
-    cp = re.search(r"(?:Müşterinin|Tedarikçinin)[^:]*?:\s*([^\n\r]{5,200}?)(?:\n|Varsa|İş İlişkisinin|$)", body, re.IGNORECASE)
+    # 2) Yapılandırılmış: "ihale bedeli ... 12.100.000 TL"
+    if amount is None:
+        m = _AMOUNT_RE.search(body)
+        if m:
+            a = _parse_tr_number(m.group(1))
+            if a:
+                amount, currency = a, _normalize_currency(m.group(2))
+
+    # 3) Action-coupled: "76.650 ABD Doları satışı/ihracatı"
+    if amount is None:
+        m = _AMOUNT_ACTION_RE.search(body)
+        if m:
+            a = _parse_tr_number(m.group(1))
+            if a:
+                amount, currency = a, _normalize_currency(m.group(2))
+
+    # 4) En geniş fallback: "X TL/Doları" cümle içinde
+    if amount is None:
+        m = _AMOUNT_FALLBACK_RE.search(body)
+        if m:
+            a = _parse_tr_number(m.group(1))
+            if a:
+                amount, currency = a, _normalize_currency(m.group(2))
+
+    if amount and amount >= 1000:  # 1000 birim altı şüpheli
+        out["amount_original"] = amount
+        out["currency"] = currency
+
+    # Karşı taraf
+    # 1) Form template: "Müşterinin Adı: X"
+    cp_clean = None
+    cp = re.search(r"(?:Müşterinin|Tedarikçinin|Karşı\s*Taraf|Alıcının|Satıcının|İlgili\s*Tarafın)[^:]*?:\s*([^\n\r]{5,200}?)(?:\n|Varsa|İş İlişkisinin|$)", body, re.IGNORECASE)
     if cp:
         cp_clean = cp.group(1).strip().rstrip(",.")
-        if 5 < len(cp_clean) < 250:
-            out["counterparty"] = cp_clean
+    # 2) Body'den: "Şirketimiz ile X arasında" / "X ile yapılan/imzalanan"
+    if not cp_clean or len(cp_clean) < 4:
+        m = re.search(r"[Şş]irketimiz\s+ile\s+([A-ZÇĞİÖŞÜ][^\s,]{2,80}?(?:\s+[A-ZÇĞİÖŞÜ][^\s,]{2,40}){0,5})\s+aras[ıi]nda", body)
+        if m:
+            cp_clean = m.group(1).strip()
+    if not cp_clean:
+        m = re.search(r"([A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ\s]{2,40})\s+(?:ile|firmasi|firması|şirketi|sirketi)\s+(?:imzalan|yapılan|yapilan|anla[şs]ma)", body)
+        if m:
+            cp_clean = m.group(1).strip()
+    # 3) Ülke ihracat: "JAPONYA ülkesine yapacağı"
+    if not cp_clean:
+        m = re.search(r'"?\s*([A-ZÇĞİÖŞÜ]{3,40})\s*"?\s*[üu]lkesine', body)
+        if m:
+            cp_clean = m.group(1).strip()
+    # 4) Generic büyük harfli ifade: "ile X imzalandı/yapıldı"
+    if not cp_clean:
+        m = re.search(r"ile\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{2,80}?)\s+(?:aras[ıi]nda|firmas[ıi]|şirketi|sirketi|ile)", body)
+        if m:
+            cp_clean = m.group(1).strip()
+    if cp_clean and 3 < len(cp_clean) < 250:
+        out["counterparty"] = cp_clean
 
     # Özet — ilk anlamlı paragraf
     first_para = body.strip().split("\n")[0][:300]
