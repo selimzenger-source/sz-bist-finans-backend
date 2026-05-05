@@ -256,15 +256,15 @@ async def ai_parse_business_deal(ticker: str, title: str, body: str) -> dict[str
 
     Önce regex (deterministik). AI sadece eksik kalan alanlar için fallback.
     """
-    # ÖNCELİK 1: Regex
+    # ÖNCELİK 1: Regex (deterministik, ~%95 standart kalipi yakalar)
     out = regex_extract_business_deal(body or "")
-    # Eğer amount + currency varsa AI'a hiç gerek yok
-    if out.get("amount_original") and out.get("currency"):
-        logger.info("BusinessDeal regex parse OK: %s %s", out["amount_original"], out["currency"])
-        # Devam etme — AI'a gitmeye gerek yok (counterparty/summary regex'ten geldi)
+    # Tum alanlar dolu ise AI'a gerek yok
+    if out.get("amount_original") and out.get("currency") and out.get("counterparty") and out.get("summary"):
+        logger.info("BusinessDeal regex tam parse: %s %s cp=%s",
+                    out["amount_original"], out["currency"], (out.get("counterparty") or "")[:30])
         return out
 
-    # ÖNCELİK 2: AI fallback (sadece amount yoksa)
+    # ÖNCELİK 2: AI fallback — eksik alanlari tamamlar (regex ne bulduysa korunur)
     gemini_key = _get_gemini_key()
     if not gemini_key or not body:
         return out
@@ -288,22 +288,26 @@ async def ai_parse_business_deal(ticker: str, title: str, body: str) -> dict[str
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 parsed = _parse_ai_json(content.strip()) if content else None
                 if parsed:
-                    if isinstance(parsed.get("amount_original"), (int, float)):
+                    # AI sonucu sadece regex bulamadigi alanlara yaz (regex'i ezmez)
+                    if not out.get("amount_original") and isinstance(parsed.get("amount_original"), (int, float)):
                         out["amount_original"] = float(parsed["amount_original"])
-                    cur = parsed.get("currency")
-                    if isinstance(cur, str) and cur.upper() in ("TRY", "USD", "EUR", "GBP"):
-                        out["currency"] = cur.upper()
-                    if isinstance(parsed.get("deal_date"), str):
+                    if not out.get("currency"):
+                        cur = parsed.get("currency")
+                        if isinstance(cur, str) and cur.upper() in ("TRY", "USD", "EUR", "GBP"):
+                            out["currency"] = cur.upper()
+                    if not out.get("deal_date") and isinstance(parsed.get("deal_date"), str):
                         try:
                             out["deal_date"] = date.fromisoformat(parsed["deal_date"])
                         except ValueError:
                             pass
-                    cp = parsed.get("counterparty")
-                    if isinstance(cp, str):
-                        out["counterparty"] = cp[:500]
-                    s = parsed.get("summary")
-                    if isinstance(s, str):
-                        out["summary"] = s[:300]
+                    if not out.get("counterparty"):
+                        cp = parsed.get("counterparty")
+                        if isinstance(cp, str):
+                            out["counterparty"] = cp[:500]
+                    if not out.get("summary"):
+                        s = parsed.get("summary")
+                        if isinstance(s, str):
+                            out["summary"] = s[:300]
     except Exception as e:
         logger.warning("BusinessDeal AI hata: %s", e)
     return out
