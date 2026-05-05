@@ -11553,6 +11553,7 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
+    from app.database import async_session
     try:
       async with async_session() as db:
         # Bad kayit: '?' / 'Bilinmiyor' / NULL party_name VEYA nominal_lot=0/NULL
@@ -11611,6 +11612,7 @@ async def admin_delete_share_tx(request: Request, payload: dict = Body(...)):
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import text as sa_text
+    from app.database import async_session
     tx_id = int(payload.get("id") or 0)
     if not tx_id:
         return {"error": "id required"}
