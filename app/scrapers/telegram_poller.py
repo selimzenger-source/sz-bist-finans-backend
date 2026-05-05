@@ -358,8 +358,9 @@ async def _route_to_calendars(
     Toptan/Tip/Pay zaten kap_all_disclosures.category alaninda — ayri tablo gerekmez.
     Tedbirli ayri kaynaktan beslenir.
     """
-    from app.services.capital_increase_processor import (
-        is_capital_increase, process_kap_disclosure as cap_process,
+    from app.services.capital_increase_kap_parser import detect_stage as _ci_detect_stage
+    from app.services.capital_increase_kap_processor import (
+        process_kap_for_capital_increase as cap_process_new,
     )
     from app.services.dividend_calendar_processor import (
         is_dividend, process_kap_disclosure as div_process,
@@ -376,13 +377,15 @@ async def _route_to_calendars(
         is_cautious, process_cautious,
     )
 
-    if is_capital_increase(title):
+    # Capital increase — yeni 3-pct schema processor (state machine)
+    if _ci_detect_stage(title or "", body or ""):
         try:
-            await cap_process(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
-                kap_url=kap_url, published_at=published_at,
+            res = await cap_process_new(
+                session, ticker=ticker or "", kap_url=kap_url or "",
+                title=title or "", body=body or "",
             )
+            if res:
+                logger.info("Router→cap_inc %s: %s", ticker, res)
         except Exception as e:
             logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
 
