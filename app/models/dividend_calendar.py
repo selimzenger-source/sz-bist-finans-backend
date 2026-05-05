@@ -71,24 +71,10 @@ class DividendCalendar(Base):
 
     # 3. Odeme tarihi (dagitim baslangici)
     payment_date: Mapped[date | None] = mapped_column(
-        Date, comment="Kesinleşen Hak Kullanim/Odeme tarihi"
+        Date, comment="Hak kullanim/odeme tarihi"
     )
     payment_kap_disclosure_id: Mapped[int | None] = mapped_column(BigInteger)
     payment_kap_url: Mapped[str | None] = mapped_column(Text)
-
-    # ─── Detay alanlari (KAP body'sinden) ───
-    payment_type: Mapped[str | None] = mapped_column(
-        String(20), comment="nakit | pay | karma | yok"
-    )
-    payment_schedule: Mapped[str | None] = mapped_column(
-        String(20), comment="pesin | taksit"
-    )
-    installment_count: Mapped[int | None] = mapped_column(
-        BigInteger, comment="Taksit sayisi (peşinse 1)"
-    )
-    proposed_payment_date: Mapped[date | None] = mapped_column(
-        Date, comment="Teklif Edilen Hak Kullanim Tarihi"
-    )
 
     # 4. Reddedildi (terminal)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
