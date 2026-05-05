@@ -9461,6 +9461,49 @@ async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(
     return {"processed": len(results), "results": results}
 
 
+@app.post("/api/v1/admin/process-bistech-vbts")
+@limiter.limit("20/minute")
+async def admin_process_bistech_vbts(request: Request, payload: dict = Body(...)):
+    """Admin: KAP URL'sinden BISTECH VBTS bildirimi parse + cautious_stocks update.
+
+    Body: { "admin_password": "...", "kap_url": "https://www.kap.org.tr/tr/Bildirim/1601348" }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    kap_url = (payload.get("kap_url") or "").strip()
+    if not kap_url:
+        raise HTTPException(status_code=400, detail="kap_url gerekli")
+
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.kap_category_processors import process_cautious_bistech_multi
+    from app.database import async_session as _async_session
+    from datetime import datetime as _dt, timezone as _tz
+
+    try:
+        disc = await fetch_kap_disclosure(kap_url)
+        body = disc.get("full_text", "") if disc else ""
+        if not body:
+            return {"status": "error", "msg": "body bos"}
+
+        title = "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu"
+        async with _async_session() as db:
+            results = await process_cautious_bistech_multi(
+                db, disclosure_id=0, title=title, body=body,
+                kap_url=kap_url, published_at=_dt.now(_tz.utc),
+            )
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "kap_url": kap_url,
+            "processed_tickers": [r.ticker for r in results],
+            "count": len(results),
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "msg": str(e)[:300], "trace": traceback.format_exc()[-400:]}
+
+
 @app.post("/api/v1/admin/inject-kap-disclosure")
 @limiter.limit("10/minute")
 async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...)):

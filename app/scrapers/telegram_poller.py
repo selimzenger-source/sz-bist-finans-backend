@@ -485,6 +485,23 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→cautious hata (%s): %s", ticker, e)
 
+    # BISTECH VBTS multi-ticker — body'den tum ticker'lari cikart
+    try:
+        from app.services.kap_category_processors import is_bistech_vbts, process_cautious_bistech_multi
+        body_for_vbts = body or ""
+        if (not body_for_vbts or len(body_for_vbts) < 200) and kap_url and is_bistech_vbts(title, body_for_vbts):
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            disc = await fetch_kap_disclosure(kap_url)
+            if disc and disc.get("full_text"):
+                body_for_vbts = disc["full_text"]
+        if is_bistech_vbts(title, body_for_vbts):
+            await process_cautious_bistech_multi(
+                session, disclosure_id=disclosure_id, title=title,
+                body=body_for_vbts, kap_url=kap_url, published_at=published_at,
+            )
+    except Exception as e:
+        logger.warning("Router→BISTECH VBTS hata: %s", e)
+
     # ════════════════════════════════════════════════════════════════
     # MKK/BIST DUYURULARI — title generic, body'ye bakmak gerek
     # 1. Temettü ödeme duyurusu (BIST sistemine düştü) → DividendCalendar 'tamamlandi'

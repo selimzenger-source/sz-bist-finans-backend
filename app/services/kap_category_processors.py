@@ -452,3 +452,107 @@ async def process_cautious(
     await db.flush()
     logger.info("Cautious: yeni (%s, tags=%s)", ticker, valid_tags)
     return new_row
+
+
+# ─── BISTECH Multi-Ticker (VBTS) ─────────────────────────────────────────────
+# KAP'taki BISTECH Pay Piyasasi Alim Satim Sistemi Duyurulari company_code=DKB
+# olarak gelir, body'de "BIGEN.E ve ICUGS.E paylarinda ... brut takas..." gibi
+# birden fazla ticker bahsedilir. process_cautious tek ticker calistigi icin
+# bunlar yakalanmazdi. Bu wrapper body'den tum ticker'lari cikartip her biri
+# icin merge eder.
+
+_TICKER_DOT_E_RE = re.compile(r'\b([A-Z]{3,6})\.E\b')
+
+
+def is_bistech_vbts(title: str, body: Optional[str]) -> bool:
+    t = lower_tr(title or "")
+    b = lower_tr(body or "")[:2000]
+    if "bistech" not in t:
+        return False
+    return ("volatilite bazl" in b or "volatilite bazl" in t or
+            "vbts" in b or "vbts" in t or
+            "brüt takas" in b or "brut takas" in b or
+            "tedbir" in t)
+
+
+async def process_cautious_bistech_multi(
+    db: AsyncSession, *, disclosure_id: int, title: str, body: Optional[str],
+    kap_url: Optional[str], published_at: Optional[datetime],
+) -> list[CautiousStock]:
+    """BISTECH VBTS bildiriminden body'deki tum ticker'lari cikart, her biri icin
+    cautious_stocks kaydini merge et. Tek AI cagrisiyla ortak tag/tarih cikarilir.
+    """
+    if not body or not is_bistech_vbts(title, body):
+        return []
+
+    tickers = sorted(set(_TICKER_DOT_E_RE.findall(body)))
+    if not tickers:
+        return []
+
+    parsed = await _call_gemini(_CS_PROMPT.format(
+        ticker=",".join(tickers), title=title or "", body=(body or "")[:3000]
+    )) or {}
+
+    raw_tags = parsed.get("tags") or []
+    if not isinstance(raw_tags, list):
+        raw_tags = []
+    _VALID = {"KRD", "ACS", "BRT", "EMR", "PEM", "VEY", "TEK", "EPT", "IEY"}
+    valid_tags = [t.upper().replace("Ç", "C") for t in raw_tags
+                  if isinstance(t, str) and t.upper().replace("Ç", "C") in _VALID]
+
+    start_date = None
+    end_date = None
+    if isinstance(parsed.get("start_date"), str):
+        try:
+            start_date = date.fromisoformat(parsed["start_date"])
+        except ValueError:
+            pass
+    if isinstance(parsed.get("end_date"), str):
+        try:
+            end_date = date.fromisoformat(parsed["end_date"])
+        except ValueError:
+            pass
+
+    if not valid_tags and not start_date and not end_date:
+        logger.debug("BISTECH VBTS skip: AI bilgi cikartamadi (tickers=%s)", tickers)
+        return []
+
+    today = date.today()
+    results: list[CautiousStock] = []
+
+    for tk in tickers:
+        stmt = select(CautiousStock).where(
+            CautiousStock.ticker == tk,
+            CautiousStock.is_active == True,
+        ).order_by(CautiousStock.id.desc()).limit(1)
+        existing = (await db.execute(stmt)).scalar_one_or_none()
+
+        if existing:
+            cur_tags = set((existing.tags or "").split(",")) - {""}
+            new_set = cur_tags | set(valid_tags)
+            existing.tags = ",".join(sorted(new_set)) if new_set else None
+            if start_date and not existing.start_date:
+                existing.start_date = start_date
+            if end_date:
+                existing.end_date = end_date
+                existing.is_active = end_date >= today
+            if kap_url and not existing.kap_url:
+                existing.kap_url = kap_url
+            results.append(existing)
+            logger.info("BISTECH VBTS merge: %s tags=%s end=%s", tk, sorted(new_set), end_date)
+        else:
+            new_row = CautiousStock(
+                ticker=tk,
+                start_date=start_date,
+                end_date=end_date,
+                tags=",".join(valid_tags) if valid_tags else None,
+                is_active=bool(end_date and end_date >= today),
+                kap_url=kap_url,
+                source="kap_ai_parse",
+            )
+            db.add(new_row)
+            await db.flush()
+            results.append(new_row)
+            logger.info("BISTECH VBTS yeni: %s tags=%s", tk, valid_tags)
+
+    return results
