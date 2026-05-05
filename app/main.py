@@ -9637,6 +9637,67 @@ async def admin_trigger_viop_notification(request: Request, payload: dict, db: A
     return {"status": "ok", "sent": sent, "session_type": session_type}
 
 
+@app.post("/api/v1/admin/cleanup-fake-dividends")
+@limiter.limit("5/minute")
+async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(...)):
+    """Admin: dividend_calendar tablosunda bedelsiz/sermaye artırımı KAP'larından
+    yanlislikla olusmus kayitlari sil.
+
+    Kriter: kap_url body'sinde 'bedelsiz sermaye artirim' veya 'kaydilesmis pay'
+    geciyorsa ve 'pay basina brut temettu' GECMIYORSA → temettu degil.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import select, text as sa_text
+    from app.database import async_session
+    from app.models.dividend_calendar import DividendCalendar
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.utils.tr_text import lower_tr
+    deleted = []
+    skipped = []
+    async with async_session() as db:
+        # Son 30 gun, ai_summary olmayan veya kuskulu kayitlari kontrol et
+        rows_q = await db.execute(sa_text("""
+            SELECT id, ticker, kap_url, status, gross_amount_per_share
+            FROM dividend_calendar
+            WHERE kap_url IS NOT NULL
+              AND status NOT IN ('tamamlandi', 'odeniyor')
+              AND created_at > NOW() - INTERVAL '30 days'
+              AND COALESCE(gross_amount_per_share, 0) = 0
+            ORDER BY id DESC LIMIT 200
+        """))
+        rows = rows_q.fetchall()
+        for row in rows:
+            div_id, ticker, kap_url, status, gross = row[0], row[1], row[2], row[3], row[4]
+            try:
+                disc = await fetch_kap_disclosure(kap_url)
+                body = (disc or {}).get("full_text") or ""
+                if not body:
+                    skipped.append({"id": div_id, "reason": "no_body"})
+                    continue
+                b = lower_tr(body)
+                is_capital = any(s in b for s in [
+                    "bedelsiz sermaye artirim", "bedelsiz sermaye artırım",
+                    "kaydilesmis pay senetlerinin artirim", "kaydileşmiş pay senetlerinin artırım",
+                    "bonus issue",
+                ])
+                is_div = any(s in b for s in [
+                    "pay basina brut temettu", "pay başına brüt temettü",
+                    "gross dividend payment per share",
+                    "kar payi dagit", "kar payı dağıt", "kâr payı dağıt",
+                    "temettu dagit", "temettü dağıt",
+                ])
+                if is_capital and not is_div:
+                    await db.execute(sa_text("DELETE FROM dividend_calendar WHERE id=:id"), {"id": div_id})
+                    deleted.append({"id": div_id, "ticker": ticker, "kap": kap_url})
+                else:
+                    skipped.append({"id": div_id, "ticker": ticker, "is_div": is_div, "is_capital": is_capital})
+            except Exception as e:
+                skipped.append({"id": div_id, "error": str(e)[:200]})
+        await db.commit()
+    return {"deleted_count": len(deleted), "deleted": deleted[:30], "skipped_count": len(skipped)}
+
+
 @app.post("/api/v1/admin/kap-force-reanalyze")
 @limiter.limit("10/minute")
 async def admin_kap_force_reanalyze(request: Request, payload: dict = Body(...)):

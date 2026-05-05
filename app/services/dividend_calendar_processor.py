@@ -81,22 +81,40 @@ def is_dividend(title: str, body: str = "") -> bool:
         return False
     t = lower_tr(title)
 
+    # Title "Merkezi Kayıt Kuruluşu" / "Hak Kullanım İşlemleri" → büyük olasılıkla bedelsiz
+    # Bunlar temettü değil eğer body bedelsiz sermaye artırımı diyorsa
+    title_generic_kkk = any(s in t for s in [
+        "merkezi kayıt kuruluşu", "merkezi kayit kurulusu",
+        "hak kullanım işlemleri", "hak kullanim islemleri",
+    ])
+
     # Body sermaye artırımı sinyali veriyorsa temettü değil
     if body:
         b = lower_tr(body)
         capital_signals = [
             "bedelsiz pay alma orani", "bedelsiz pay alma oranı",
+            "bedelsiz sermaye artırım", "bedelsiz sermaye artirim",
+            "bedelsiz sermaye artir", "bedelsiz sermaye artırışı",
+            "bonus issue", "bonus share",
             "rüçhan hakkı kullan", "ruchan hakki kullan",
             "sermaye azaltım oranı", "sermaye azaltim orani",
             "sermaye artırımı karşılığı", "sermaye artirimi karsiligi",
+            "kayitlilesmis pay senetlerinin artirim", "kaydileşmiş pay senetlerinin artırım",
+            "alacak kaydedilmiştir", "alacak kaydedilmistir",
         ]
         # Body'de "Pay Başına Brüt Temettü" yoksa AMA bedelsiz sinyali varsa → temettü değil
         is_capital_payload = any(s in b for s in capital_signals)
         is_dividend_payload = any(s in b for s in [
             "pay başına brüt temettü", "pay basina brut temettu",
-            "kar payı", "kar payi", "kâr payı", "temettü", "temettu",
+            "gross dividend payment per share",
+            "kar payı dağıt", "kar payi dagit", "kâr payı dağıt",
+            "temettü dağıt", "temettu dagit",
+            "temettü ödem", "temettu odem",
         ])
         if is_capital_payload and not is_dividend_payload:
+            return False
+        # Generic title (Merkezi Kayıt) + body'de net temettü ifadesi yoksa → temettü değil
+        if title_generic_kkk and not is_dividend_payload:
             return False
 
     return any(p in t for p in _DIVIDEND_TITLE_PATTERNS)
