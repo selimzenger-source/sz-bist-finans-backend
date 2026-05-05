@@ -9461,6 +9461,58 @@ async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(
     return {"processed": len(results), "results": results}
 
 
+@app.post("/api/v1/admin/parse-bilanco-from-url")
+@limiter.limit("20/minute")
+async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli bir KAP URL'sinden DOGRUDAN bilanco parse + DB kayit.
+
+    DB'deki kap_all_disclosures listesini bypass eder — ozellikle is_bilanco=False
+    olarak girmis veya hic girmemis KAP'lardan veri kurtarir.
+
+    Body: { "admin_password": "...", "items": [{"ticker":"MAKTK","kap_url":"https://www.kap.org.tr/tr/Bildirim/1601437"}, ...] }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items list olmali")
+
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.bilanco_kap_scraper import parse_kap_finansal_rapor
+    from app.services.ai_bilanco_analyzer import save_parsed_bilanco
+
+    results: list[dict] = []
+    for it in items:
+        ticker = (it.get("ticker") or "").strip().upper()
+        kap_url = it.get("kap_url") or ""
+        if not ticker or not kap_url:
+            results.append({"ticker": ticker, "kap_url": kap_url, "status": "skip", "msg": "ticker veya kap_url eksik"})
+            continue
+        try:
+            disc = await fetch_kap_disclosure(kap_url)
+            if not disc or not disc.get("full_text"):
+                results.append({"ticker": ticker, "status": "error", "msg": "body bos"})
+                continue
+            parsed = parse_kap_finansal_rapor(disc["full_text"])
+            if not parsed or not parsed.get("period"):
+                results.append({"ticker": ticker, "status": "error", "msg": "period tespit edilemedi"})
+                continue
+            ok = await save_parsed_bilanco(ticker, parsed)
+            results.append({
+                "ticker": ticker,
+                "period": parsed.get("period"),
+                "revenue": parsed.get("revenue"),
+                "net_income": parsed.get("net_income"),
+                "total_assets": parsed.get("total_assets"),
+                "saved": bool(ok),
+                "status": "ok",
+            })
+        except Exception as e:
+            results.append({"ticker": ticker, "status": "error", "msg": str(e)[:200]})
+
+    return {"processed": len(results), "results": results}
+
+
 @app.post("/api/v1/admin/inject-kap-disclosure")
 @limiter.limit("10/minute")
 async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...)):
