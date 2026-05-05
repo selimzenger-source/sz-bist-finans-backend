@@ -167,36 +167,42 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
         except Exception as kap_err:
             logger.warning("KAP aninda parse hatasi %s: %s", ticker, kap_err)
 
-        # 1. IsYatirim'den bilanco verisi cek (1-2 gun gecikme olabilir)
-        from app.scrapers.isyatirim_scraper import on_bilanco_bildirimi
-        bilanco_data = await on_bilanco_bildirimi(ticker)
-
-        if not bilanco_data or not bilanco_data.get("periods"):
-            if kap_parsed:
-                # IsYatirim'de henuz yok ama KAP parse'dan rakamlar var
-                logger.info("Bilanco pipeline: %s — IsYatirim bos, KAP parse kullaniliyor", ticker)
-                bilanco_data = {"periods": [kap_parsed], "ticker": ticker}
-            else:
-                logger.warning("Bilanco pipeline: %s icin veri cekilemedi", ticker)
-                return
-        else:
-            # IsYatirim verisi geldi AMA KAP'ta yeni donem (orn 2026-Q1) varsa onu garantile
-            # IsYatirim 1-2 gun gecikmeli — yeni donemi mutlaka KAP'tan al
-            if kap_parsed and kap_parsed.get("period"):
-                kap_period = kap_parsed["period"]
-                isy_periods = {p.get("period") for p in bilanco_data["periods"]}
-                if kap_period not in isy_periods:
-                    logger.info("Bilanco pipeline: %s — KAP'tan yeni donem %s eklendi (IsYatirim'de yok)",
-                                ticker, kap_period)
-                    bilanco_data["periods"] = [kap_parsed] + bilanco_data["periods"]
-
-        # 2. DB'ye kaydet (IsYatirim verisi gelirse KAP parse uzerine yazar)
-        saved = await _save_bilanco_to_db(ticker, bilanco_data["periods"])
-        if not saved:
-            logger.warning("Bilanco pipeline: %s DB kaydi basarisiz", ticker)
+        # 1. SADECE KAP body parse — IsYatirim KAPATILDI (sadece DB seed icindi)
+        # KAP'tan Cari Donem tarihinden quarter cikar, o donemi DB'ye yaz.
+        if not kap_parsed:
+            logger.warning("Bilanco pipeline: %s — KAP parse fail, atlanacak", ticker)
             return
 
-        # 3. AI analiz
+        # save_parsed_bilanco() yukarda zaten cagriildi (line 118), o yuzden DB'de var.
+        # AI analiz icin DB'den son 8 cevreklik veriyi okuyup karsılastır.
+        from app.models.company_financial import CompanyFinancial
+        from sqlalchemy import select as _sel_cf, desc as _desc_cf
+        async with async_session() as db:
+            recent_q = (await db.execute(
+                _sel_cf(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
+                .order_by(_desc_cf(CompanyFinancial.period)).limit(8)
+            )).scalars().all()
+        bilanco_data = {"ticker": ticker, "periods": [
+            {
+                "period": p.period,
+                "period_end_date": p.period_end_date.isoformat() if p.period_end_date else None,
+                "revenue": float(p.revenue) if p.revenue else None,
+                "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+                "operating_profit": float(p.operating_profit) if p.operating_profit else None,
+                "net_income": float(p.net_income) if p.net_income else None,
+                "ebitda": float(p.ebitda) if p.ebitda else None,
+                "total_assets": float(p.total_assets) if p.total_assets else None,
+                "current_assets": float(p.current_assets) if p.current_assets else None,
+                "non_current_assets": float(p.non_current_assets) if p.non_current_assets else None,
+                "total_equity": float(p.total_equity) if p.total_equity else None,
+                "total_debt": float(p.total_debt) if p.total_debt else None,
+                "net_debt": float(p.net_debt) if p.net_debt else None,
+                "cash_and_equivalents": float(p.cash_and_equivalents) if p.cash_and_equivalents else None,
+            }
+            for p in recent_q
+        ]}
+
+        # 2. AI analiz — DB'deki son 8 ceyrek karsilastirilarak
         ai_result = await _run_ai_analysis(ticker, bilanco_data["periods"])
 
         # 4. Tweet at (opsiyonel — AI sonucu varsa)
