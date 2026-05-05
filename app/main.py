@@ -9650,12 +9650,12 @@ async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(..
         raise HTTPException(status_code=403, detail="Yetkisiz")
     from sqlalchemy import select, text as sa_text
     from app.database import async_session
-    from app.models.dividend_calendar import DividendCalendar
     from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
     from app.utils.tr_text import lower_tr
     deleted = []
     skipped = []
-    async with async_session() as db:
+    try:
+      async with async_session() as db:
         # Son 30 gun, ai_summary olmayan veya kuskulu kayitlari kontrol et
         rows_q = await db.execute(sa_text("""
             SELECT id, ticker, kap_url, status, gross_amount_per_share
@@ -9695,7 +9695,10 @@ async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(..
             except Exception as e:
                 skipped.append({"id": div_id, "error": str(e)[:200]})
         await db.commit()
-    return {"deleted_count": len(deleted), "deleted": deleted[:30], "skipped_count": len(skipped)}
+      return {"deleted_count": len(deleted), "deleted": deleted[:30], "skipped_count": len(skipped)}
+    except Exception as e:
+      import traceback
+      return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
 @app.post("/api/v1/admin/kap-force-reanalyze")
