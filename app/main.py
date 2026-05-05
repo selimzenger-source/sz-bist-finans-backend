@@ -12178,8 +12178,12 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
                 fetch_kap_pay_alim_satim, upsert_pay_alim_satim_from_kap,
             )
             from datetime import datetime as _dt2, timezone as _tz2
-            pay_parsed = await fetch_kap_pay_alim_satim(kap_url)
-            result["processors"]["pay_alim_satim"] = pay_parsed or {"parsed": None}
+            # Title check — sadece "Pay Alım Satım Bildirimi" KAP'larina pay_alim_satim uygula
+            # CCOLA gibi bilanco KAP'larin yanlislikla buraya dusmesini engelle
+            title_lo = (disclosure.get("title") or "").lower() if disclosure else ""
+            is_pay_alim_satim = "pay alım satım" in title_lo or "pay alim satim" in title_lo or "pay alım bildirim" in title_lo or "alım satım bildirim" in title_lo
+            pay_parsed = await fetch_kap_pay_alim_satim(kap_url) if is_pay_alim_satim else None
+            result["processors"]["pay_alim_satim"] = pay_parsed or {"skipped": "title_not_pay_alim_satim", "title": title_lo[:80]}
             # Ticker: fetcher'dan veya payload hint'inden
             tx_ticker = (pay_parsed.get("ticker") if pay_parsed else None) or ticker_hint
             if pay_parsed and tx_ticker:
