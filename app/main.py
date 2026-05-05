@@ -9504,7 +9504,17 @@ async def admin_inject_kap_disclosure(request: Request, payload: dict = Body(...
         # 3. AI analiz (henuz yapilmadiysa)
         if not disclosure.ai_analyzed_at:
             try:
-                await analyze_disclosure(db, disclosure)
+                ai_result = await analyze_disclosure(
+                    company_code=disclosure.company_code,
+                    title=disclosure.title,
+                    body=disclosure.body or "",
+                    is_bilanco=bool(disclosure.is_bilanco),
+                )
+                if ai_result:
+                    disclosure.ai_sentiment = ai_result.get("sentiment")
+                    disclosure.ai_impact_score = ai_result.get("impact_score")
+                    disclosure.ai_summary = ai_result.get("summary")
+                    disclosure.ai_analyzed_at = _dt.now(_tz.utc)
                 result["steps"].append(
                     f"AI analiz: sentiment={disclosure.ai_sentiment}, score={disclosure.ai_impact_score}"
                 )
