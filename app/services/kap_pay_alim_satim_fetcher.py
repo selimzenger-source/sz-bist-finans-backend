@@ -505,14 +505,27 @@ async def upsert_pay_alim_satim_from_kap(
         if nb:
             nominal_lot = nb
 
-    # Sira: 0) PDF parse'tan party (en yuksek oncelik), 1) Ortagi pattern, 2) generic, 3) header, 4) Bilinmiyor
+    # Sira: 0) PDF party, 1) HTML header slug (KAP "Bildirimi Yapan"), 2) Ortagi pattern, 3) generic, 4) Bilinmiyor
     party_name = parsed.get("party_name")  # PDF'ten gelmis olabilir
     import re as _re
-    # 1) Ortagi/kurucu/araciliyla — KAP body'nin standart kalibi
+    # 1) Header slug — KAP'in resmi "Bildirimi Yapan" alani (PDF yoksa en guvenilir kaynak)
+    if not party_name:
+        hdr = parsed.get("party_name_header")
+        if hdr and ticker:
+            hdr_collapsed = _re.sub(r"[^A-ZÇĞİÖŞÜ]", "", hdr.upper())
+            # Ticker'in kendi sirketi degilse header'i kullan
+            if ticker not in hdr_collapsed[:len(ticker)+3]:
+                party_name = hdr
+        elif hdr:
+            party_name = hdr
+    # 2) Ortagi/kurucu/araciliyla — KAP body'nin standart kalibi
     body_clean = body.replace("\xa0", " ")
     for pat in [
+        # "Pardus Portföy Yönetimi AŞ.nin kurucusu olduğu" -> Pardus Portföy Yönetimi
+        r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{4,80}?)\s*(?:A\.\s*Ş\.?|AŞ\.?)['’]?\s*(?:ni[nm]|in)\s+kurucusu",
+        # "Ortağı X A.Ş.'den gelen yazı" -> X
         r"Ortağı\s+([A-ZÇĞİÖŞÜ][^'’\.]{4,120}?(?:A\.\s*Ş\.?|AŞ|Holding|Ltd\.?))['’]?(?:den|dan)\s+gelen",
-        r"kurucusu\s+olduğu(?:muz)?\s+([A-ZÇĞİÖŞÜ][^.]{5,120}?(?:A\.\s*Ş\.?|AŞ|Holding|Fon))",
+        # "X kurucu" generic
         r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{4,80}?\s+(?:A\.\s*Ş\.?|AŞ\.?|Holding))['’]?(?:nin|nın|in|ın)\s+kurucu",
     ]:
         m = _re.search(pat, body_clean, _re.IGNORECASE)
@@ -521,21 +534,11 @@ async def upsert_pay_alim_satim_from_kap(
             if "A.Ş" not in party_name and "AŞ" not in party_name and "Holding" not in party_name:
                 party_name += " A.Ş."
             break
-    # 2) Generic body pattern (eski extract_party_name) — sadece kısa match'ler
+    # 3) Generic body pattern (eski extract_party_name) — sadece kısa match'ler
     if not party_name:
         cand = extract_party_name(body_clean)
         if cand and len(cand) < 80 and not _re.match(r"^(TL|adet|payın|oranı)", cand, _re.IGNORECASE):
             party_name = cand
-    # 3) Header slug — ama ticker'in kendi ismine denk geliyorsa skip et
-    if not party_name:
-        hdr = parsed.get("party_name_header")
-        if hdr and ticker:
-            # Header company adı + ticker — ticker harfleri header'da varsa muhtemelen kendi şirketi
-            hdr_collapsed = _re.sub(r"[^A-ZÇĞİÖŞÜ]", "", hdr.upper())
-            if ticker not in hdr_collapsed[:len(ticker)+3]:
-                party_name = hdr
-        elif hdr:
-            party_name = hdr
     # 4) Son care fallback — NOT NULL constraint için
     if not party_name:
         party_name = "Bilinmiyor"
