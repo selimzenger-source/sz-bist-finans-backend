@@ -79,6 +79,7 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                 kap_news_list = list(kap_result.scalars().all())
 
             from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            import gc
             best_parsed = None
             for kap_news in kap_news_list:
                 body_full = kap_news.body or ""
@@ -87,6 +88,8 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                         disclosure = await fetch_kap_disclosure(kap_news.kap_url)
                         if disclosure and disclosure.get("full_text"):
                             body_full = disclosure["full_text"]
+                        # MEMORY: disclosure dict (text_blocks, tables, vs) artik gereksiz
+                        del disclosure
                     except Exception as fe:
                         logger.debug("KAP body fetch hata %s: %s", ticker, fe)
                         continue
@@ -95,14 +98,23 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                     continue
 
                 parsed = await parse_bilanco_from_kap(ticker, body_full)
+                # Body parse bittikten sonra hemen serbest birak (200KB)
+                del body_full
                 # Sadece XBRL'i çıkaran (revenue/total_assets dolu) KAP kabul
                 if parsed and (parsed.get("total_assets") or parsed.get("revenue")):
                     best_parsed = parsed
                     logger.info("📊 KAP XBRL bulundu: %s — %s (%s)", ticker, kap_news.title[:30], kap_news.kap_url)
+                    gc.collect()
                     break
+                # Eslesmediyse parse'i da bosalt
+                if parsed:
+                    del parsed
 
             if best_parsed:
                 kap_parsed = best_parsed
+                # kap_news_list (10 obje) artik gereksiz — save oncesi bosalt
+                del kap_news_list
+                gc.collect()
                 await save_parsed_bilanco(ticker, kap_parsed)
                 logger.info("📊 KAP aninda parse OK: %s — Ciro: %s, Varlik: %s",
                             ticker, kap_parsed.get("revenue"), kap_parsed.get("total_assets"))
