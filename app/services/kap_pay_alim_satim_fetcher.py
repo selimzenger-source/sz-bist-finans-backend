@@ -428,6 +428,9 @@ async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncCli
                         pdf_url = p; break
                 if not pdf_url and pdf_links:
                     pdf_url = pdf_links[0]
+                # KAP /tr/ prefix gerektiriyor — yoksa 404 doner
+                if pdf_url and "/tr/api/" not in pdf_url:
+                    pdf_url = pdf_url.replace("kap.org.tr/api/", "kap.org.tr/tr/api/")
                 if pdf_url:
                     pdf_text = await _fetch_pdf_text(pdf_url, client, kap_url=url)
                     if pdf_text:
