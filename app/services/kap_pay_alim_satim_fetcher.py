@@ -483,21 +483,23 @@ async def upsert_pay_alim_satim_from_kap(
     if not ticker:
         return False
 
-    # Transaction type (alim/satim nominal'a gore)
+    # Transaction type + net nominal (her ikisi de varsa NET = alim - satim)
     alim = parsed.get("alim_nominal") or 0
     satim = parsed.get("satim_nominal") or 0
-    if alim > 0 and satim == 0:
+    net = alim - satim
+    if alim > 0 and satim > 0:
+        # Hem alim hem satim var → net miktar gosterilir
+        tx_type = "alis" if net >= 0 else "satis"
+        nominal_lot = int(abs(net))
+    elif alim > 0 and satim == 0:
         tx_type = "alis"
+        nominal_lot = int(alim)
     elif satim > 0 and alim == 0:
         tx_type = "satis"
-    elif alim > satim:
-        tx_type = "alis"
-    elif satim > alim:
-        tx_type = "satis"
+        nominal_lot = int(satim)
     else:
         tx_type = "alis"  # default
-
-    nominal_lot = int(parsed.get("alim_nominal") or parsed.get("satim_nominal") or 0)
+        nominal_lot = 0
     body = parsed.get("body_text") or ""
     # Tablo yoksa body'den nominal cek
     if not nominal_lot:
@@ -566,6 +568,12 @@ async def upsert_pay_alim_satim_from_kap(
     beg_oy = parsed.get("beginning_oy_hakki_pct")
     pay_change = (end_pay - beg_pay) if (end_pay is not None and beg_pay is not None) else None
     oy_change = (end_oy - beg_oy) if (end_oy is not None and beg_oy is not None) else None
+
+    # CRITICAL: tx_type override — oran degisimi yonu en guvenilir sinyal
+    # +pay_change/oy_change → ortak hisse aldi (alis), -change → satis
+    _change_signal = pay_change if pay_change is not None else oy_change
+    if _change_signal is not None and abs(_change_signal) > 1e-6:
+        tx_type = "alis" if _change_signal > 0 else "satis"
 
     tx_date = parsed.get("transaction_date") or (published_at.date() if published_at else None)
     if not tx_date:
