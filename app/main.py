@@ -10233,7 +10233,34 @@ async def admin_trigger_viop_notification(request: Request, payload: dict, db: A
     from app.services.notification import NotificationService
     notif_svc = NotificationService(db)
     sent = await notif_svc.notify_viop_session(session_type, summary, price=price, change_pct=change_pct, night_diff=night_diff)
-    return {"status": "ok", "sent": sent, "session_type": session_type}
+
+    # Opsiyonel: tweet_text gelirse VIOP sayfasinda gozuksun diye PendingTweet'e
+    # 'sent' kaydi olustur. Tweet ban suresince app feed'i bos kalmasin diye.
+    tweet_text = payload.get("tweet_text")
+    pending_tweet_id = None
+    if tweet_text and isinstance(tweet_text, str) and ("VİOP" in tweet_text or "VIOP" in tweet_text.upper()):
+        try:
+            from app.models.pending_tweet import PendingTweet
+            from datetime import datetime as _dt_now
+            pt = PendingTweet(
+                text=tweet_text,
+                source=f"viop_local_{session_type}",
+                status="sent",
+                sent_at=_dt_now.utcnow(),
+            )
+            db.add(pt)
+            await db.commit()
+            await db.refresh(pt)
+            pending_tweet_id = pt.id
+        except Exception as _pt_err:
+            import logging
+            logging.getLogger(__name__).warning("VIOP pending_tweet kaydi hatasi: %s", _pt_err)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+
+    return {"status": "ok", "sent": sent, "session_type": session_type, "pending_tweet_id": pending_tweet_id}
 
 
 @app.post("/api/v1/admin/delete-orphan-dividends")
