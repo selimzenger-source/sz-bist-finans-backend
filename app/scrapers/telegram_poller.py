@@ -567,11 +567,32 @@ async def _route_to_calendars(
         "sorumluluk beyanı", "mali tablo", "ara dönem finansal"
     ])
     if is_bilanco_kap:
+        # ANINDA direkt parse — kap_url'den XBRL cek, period+rakamlar dogru kaydet.
+        # Queue/kap_all_disclosures'a is_bilanco=True flag bagimliligi yok.
+        if kap_url:
+            try:
+                from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                from app.services.bilanco_kap_scraper import parse_kap_finansal_rapor
+                from app.services.ai_bilanco_analyzer import save_parsed_bilanco
+                disc = await fetch_kap_disclosure(kap_url)
+                body_xbrl = disc.get("full_text", "") if disc else ""
+                if body_xbrl:
+                    parsed = parse_kap_finansal_rapor(body_xbrl)
+                    if parsed and parsed.get("period") and (
+                        parsed.get("total_assets") or parsed.get("revenue")
+                    ):
+                        await save_parsed_bilanco(ticker, parsed)
+                        logger.info("Router→bilanco DIREKT save: %s %s rev=%s ta=%s",
+                                    ticker, parsed.get("period"),
+                                    parsed.get("revenue"), parsed.get("total_assets"))
+            except Exception as e:
+                logger.warning("Router→bilanco direkt parse hata (%s): %s", ticker, e)
+        # Yedek: queue worker da calissin (full pipeline tweet/notification icin)
         try:
             from app.services.bilanco_pipeline import enqueue_bilanco
             await enqueue_bilanco(ticker, title or "")
         except Exception as e:
-            logger.warning("Router→bilanco hata (%s): %s", ticker, e)
+            logger.warning("Router→bilanco queue hata (%s): %s", ticker, e)
 
 
 # -------------------------------------------------------------------
