@@ -7941,6 +7941,7 @@ async def list_kap_all_disclosures(
 @app.get("/api/v1/capital-increases")
 async def list_capital_increases(
     type: Optional[str] = Query(None, description="bedelsiz | bedelli | tahsisli (yoksa hepsi)"),
+    status: Optional[str] = Query(None, description="ykk_alindi | spk_onayli | tarih_belli | dagitiliyor | tamamlandi | reddedildi (yoksa hepsi)"),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
@@ -7958,6 +7959,8 @@ async def list_capital_increases(
     query = select(CapitalIncrease)
     if type and type in ("bedelsiz", "bedelli", "tahsisli"):
         query = query.where(CapitalIncrease.type == type)
+    if status and status in ("ykk_alindi", "spk_onayli", "tarih_belli", "dagitiliyor", "tamamlandi", "reddedildi"):
+        query = query.where(CapitalIncrease.status == status)
 
     # Status sira anahtari
     status_order = {
