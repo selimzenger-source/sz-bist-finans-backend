@@ -9116,6 +9116,49 @@ async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(..
         }
 
 
+@app.post("/api/v1/admin/inject-kap-bilanco")
+@limiter.limit("10/minute")
+async def admin_inject_kap_bilanco(request: Request, payload: dict = Body(...)):
+    """Eksik kap_all_disclosures bilanço kayitlarini ekle.
+    Body: { admin_password, items: [{ticker, kap_url, title, published_at?}] }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items list bos")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    from datetime import datetime as _dt5, timezone as _tz5
+    inserted = 0
+    skipped = 0
+    async with async_session() as db:
+        for it in items:
+            ticker = (it.get("ticker") or "").upper().strip()
+            kap_url = (it.get("kap_url") or "").strip()
+            title = (it.get("title") or "Finansal Durum Tablosu (Bilanço)").strip()
+            pub = it.get("published_at") or _dt5.now(_tz5.utc).isoformat()
+            if not ticker or not kap_url:
+                skipped += 1
+                continue
+            try:
+                # Idempotent — kap_url unique olmali
+                check = await db.execute(sa_text("SELECT id FROM kap_all_disclosures WHERE kap_url=:k LIMIT 1"), {"k": kap_url})
+                if check.scalar():
+                    skipped += 1
+                    continue
+                await db.execute(sa_text("""
+                    INSERT INTO kap_all_disclosures
+                      (ticker, company_code, title, kap_url, published_at, is_bilanco, category, source, sentiment, ai_score)
+                    VALUES (:t,:t,:ti,:k, CAST(:pub AS TIMESTAMPTZ), TRUE, 'Bilanço/Finansal Rapor', 'admin_inject', 'Nötr', 5.0)
+                """), {"t": ticker, "ti": title, "k": kap_url, "pub": pub})
+                inserted += 1
+            except Exception:
+                skipped += 1
+        await db.commit()
+    return {"inserted": inserted, "skipped": skipped}
+
+
 @app.post("/api/v1/admin/sync-is-bilanco-flag")
 @limiter.limit("3/minute")
 async def admin_sync_is_bilanco_flag(request: Request, payload: dict = Body(...)):
