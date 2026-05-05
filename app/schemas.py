@@ -690,6 +690,8 @@ class CompanyFinancialOut(BaseModel):
     net_income: Optional[Decimal] = None
     ebitda: Optional[Decimal] = None
     total_assets: Optional[Decimal] = None
+    current_assets: Optional[Decimal] = None
+    non_current_assets: Optional[Decimal] = None
     total_equity: Optional[Decimal] = None
     total_debt: Optional[Decimal] = None
     net_debt: Optional[Decimal] = None
@@ -699,7 +701,9 @@ class CompanyFinancialOut(BaseModel):
     net_margin_pct: Optional[Decimal] = None
     roe_pct: Optional[Decimal] = None
     debt_to_equity: Optional[Decimal] = None
+    source: Optional[str] = None
     scraped_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
