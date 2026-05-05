@@ -11973,6 +11973,28 @@ async def admin_cleanup_share_tx_duplicates(request: Request, payload: dict = Bo
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
+@app.post("/api/v1/admin/delete-capital-increases-by-tickers")
+@limiter.limit("3/minute")
+async def admin_delete_cap_inc_by_tickers(request: Request, payload: dict = Body(...)):
+    """Admin: belirli ticker'larin capital_increases kayitlarini sil (advance icin)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    tickers = payload.get("tickers") or []
+    if not isinstance(tickers, list) or not tickers:
+        raise HTTPException(status_code=400, detail="tickers list bos")
+    tickers_up = [str(t).upper().strip() for t in tickers if t]
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    async with async_session() as db:
+        result = await db.execute(
+            sa_text("DELETE FROM capital_increases WHERE ticker = ANY(:tks) RETURNING id"),
+            {"tks": tickers_up},
+        )
+        deleted = len(result.fetchall())
+        await db.commit()
+    return {"deleted": deleted, "tickers": tickers_up}
+
+
 @app.post("/api/v1/admin/migrate-capital-increases-schema")
 @limiter.limit("3/minute")
 async def admin_migrate_capital_increases(request: Request, payload: dict = Body(...)):
