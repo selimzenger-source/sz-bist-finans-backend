@@ -27,15 +27,26 @@ TAG_TO_FIELD: dict[str, str] = {
     "ifrs-full_Assets|": "total_assets",
     "ifrs-full_CurrentAssets|": "current_assets",
     "ifrs-full_NoncurrentAssets|": "non_current_assets",
-    "ifrs-full_Equity|": "total_equity",
+    "ifrs-full_Equity|": "_total_equity_consolidated",  # NCI dahil — Fintables ana ortaklik kullanir
+    "ifrs-full_EquityAttributableToOwnersOfParent|": "total_equity",  # Ana Ortaklığa Ait — TERCIH
     "ifrs-full_Liabilities|": "total_debt",
     "ifrs-full_CashAndCashEquivalents|": "cash_and_equivalents",
+    # Net borc icin finansal borç bilesenleri (Fintables formulu):
+    #   Net Borç = CurrentBorrowings + CurrentPortionOfNoncurrentBorrowings + LongtermBorrowings - Cash
+    "kap-fr_CurrentBorowings|": "_current_borrowings",  # KAP'taki tag'de typo: tek "r"
+    "kap-fr_CurrentBorrowings|": "_current_borrowings",  # ikili olasilik
+    "kap-fr_CurrentPortionOfNoncurrentBorrowings|": "_current_portion_lt_borrowings",
+    "ifrs-full_LongtermBorrowings|": "_longterm_borrowings",
+    "ifrs-full_NoncurrentLoansReceived|": "_longterm_borrowings",  # bazi sirketler
     # Gelir Tablosu
     "ifrs-full_Revenue|": "revenue",
     "ifrs-full_GrossProfit|": "gross_profit",
     "ifrs-full_ProfitLossFromOperatingActivities|": "operating_profit",
-    "ifrs-full_ProfitLoss|": "net_income",
-    "ifrs-full_ProfitLossAttributableToOwnersOfParent|": "net_income_parent",
+    "ifrs-full_ProfitLoss|": "_net_income_consolidated",  # NCI dahil
+    "ifrs-full_ProfitLossAttributableToOwnersOfParent|": "net_income",  # Ana Ortaklik — TERCIH
+    # Amortisman (FAVOK = operating_profit + amortisman)
+    "ifrs-full_AdjustmentsForDepreciationAndAmortisationExpense|": "_depreciation_amortization",
+    "ifrs-full_DepreciationAndAmortisationExpense|": "_depreciation_amortization",
 }
 
 # Sayi formati — Turkce 1.234.567,89
@@ -187,24 +198,50 @@ def parse_kap_finansal_rapor(body: str) -> dict:
             pass
 
     # XBRL etiketlerini tek tek çek
+    # Onceliklendirme: tercih edilen alan (parent equity, parent net income) bulunmazsa
+    # _consolidated fallback'i kullanilir.
+    aux: dict = {}
     for tag, field in TAG_TO_FIELD.items():
         v = _extract_value_after_tag(body, tag)
         if v is None:
             continue
         v_scaled = v * multiplier
-        if field == "net_income_parent":
-            if out.get("net_income") is None:
-                out["net_income"] = v_scaled
+        if field.startswith("_"):
+            # Yardimci alanlar (NCI dahil consolidated, borclanmalar, amortisman)
+            aux[field] = v_scaled
         else:
-            out[field] = v_scaled
+            # Tercih edilen alan — sadece henuz dolu degilse yaz (parent over consolidated)
+            if out.get(field) is None:
+                out[field] = v_scaled
 
-    # net_debt hesabi
-    if out["total_debt"] is not None and out["cash_and_equivalents"] is not None:
+    # Parent equity yoksa consolidated'i kullan
+    if out["total_equity"] is None and aux.get("_total_equity_consolidated") is not None:
+        out["total_equity"] = aux["_total_equity_consolidated"]
+    # Parent net income yoksa consolidated kullan
+    if out["net_income"] is None and aux.get("_net_income_consolidated") is not None:
+        out["net_income"] = aux["_net_income_consolidated"]
+
+    # Net Borç = Finansal Borçlar - Nakit (Fintables formulu)
+    fin_debt = sum(
+        v for v in (
+            aux.get("_current_borrowings"),
+            aux.get("_current_portion_lt_borrowings"),
+            aux.get("_longterm_borrowings"),
+        ) if v is not None
+    )
+    if fin_debt > 0 and out["cash_and_equivalents"] is not None:
+        out["net_debt"] = fin_debt - out["cash_and_equivalents"]
+    elif out["total_debt"] is not None and out["cash_and_equivalents"] is not None:
+        # Fallback: finansal borc tagi yoksa toplam yukumluluk - nakit
         out["net_debt"] = out["total_debt"] - out["cash_and_equivalents"]
 
-    # ebitda fallback: operating_profit
-    if out["ebitda"] is None and out["operating_profit"] is not None:
-        out["ebitda"] = out["operating_profit"]
+    # FAVOK = Operating Profit + Amortisman (eger amortisman varsa)
+    dep = aux.get("_depreciation_amortization")
+    if out["operating_profit"] is not None:
+        if dep is not None:
+            out["ebitda"] = out["operating_profit"] + abs(dep)  # amortisman pozitif eklenir
+        else:
+            out["ebitda"] = out["operating_profit"]
 
     # Confidence — kac alan dolduruldu?
     filled = sum(1 for k in ("revenue", "net_income", "total_assets", "total_equity") if out.get(k) is not None)
