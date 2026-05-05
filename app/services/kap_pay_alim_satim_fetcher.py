@@ -267,6 +267,117 @@ def extract_party_name(body: str) -> Optional[str]:
     return None
 
 
+async def _fetch_pdf_text(pdf_url: str, client: httpx.AsyncClient, kap_url: Optional[str] = None) -> Optional[str]:
+    """KAP PDF'i indirip pdfplumber ile text extract et.
+
+    KAP Referer + cookie warmup gerektiriyor — yoksa 404.
+    """
+    try:
+        # Referer header KAP sayfasini gostermeli — yoksa KAP 404 doner
+        pdf_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/pdf,*/*",
+            "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+        }
+        if kap_url:
+            pdf_headers["Referer"] = kap_url
+            # Cookie warmup — KAP sayfasini ziyaret et (cookie alir)
+            try:
+                await client.get(kap_url, headers={"User-Agent": pdf_headers["User-Agent"]}, timeout=15.0)
+            except Exception:
+                pass
+        resp = await client.get(pdf_url, headers=pdf_headers, timeout=20.0)
+        if resp.status_code != 200 or not resp.content:
+            return None
+        if "pdf" not in (resp.headers.get("content-type") or "").lower():
+            return None
+        import io
+        import pdfplumber
+        text_parts: list[str] = []
+        with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
+            for page in pdf.pages[:5]:  # max 5 sayfa
+                t = page.extract_text() or ""
+                if t:
+                    text_parts.append(t)
+        return "\n".join(text_parts)
+    except Exception as e:
+        logger.warning("PDF parse hata (%s): %s", pdf_url, e)
+        return None
+
+
+def parse_pdf_pay_alim_satim(text: str) -> Optional[dict]:
+    """KAP PDF text'inden Pay Alım Satım structured data cikar.
+
+    PDF formatI (örnek GEN İLAÇ 1600871):
+        Bildirime Konu Borsa Şirketi : GEN İLAÇ VE SAĞLIK ÜRÜNLERİ SANAYİ VE TİCARET A.Ş.
+        Ad Soyad / Ticaret Ünvanı : ŞÜKRÜ TÜRKMEN
+        Açıklama: 04.05.2026 ... 8,7272 TL ortalama fiyat ile 290.978 TL toplam nominal alış işlemi
+        Tablo: 04/05/2026 290.978 0 290.978 50.957.677 51.248.655 1,13 0,65 1,14 0,66
+    """
+    if not text:
+        return None
+    out: dict = {}
+
+    # Ticker (köşe parantezli) — body'den
+    m = re.search(r"\[([A-Z]{2,6})(?:\s*,|\])", text)
+    if m:
+        out["ticker"] = m.group(1).strip()
+
+    # Bildirimi yapan kişi (party)
+    party = None
+    m = re.search(r"Ad\s+Soyad\s*/\s*Ticaret\s+[ÜU]nvan[ıi]\s*:?\s*([^\n\r]{3,150}?)\s*(?:T[üu]zel|G[öo]rev|$)", text, re.IGNORECASE)
+    if m:
+        party = m.group(1).strip().rstrip(".,;:")
+
+    # Bildirime Konu Borsa Şirketi (ticker firma adı)
+    company = None
+    m = re.search(r"Bildirime\s+Konu\s+Borsa\s+[ŞS]irketi\s*:?\s*([^\n\r]{3,200}?)\s*(?:A\.\s*[ŞS]\.|A[ŞS]\.|A\.[ŞS])", text, re.IGNORECASE)
+    if m:
+        company = (m.group(1).strip() + " A.Ş.").strip()
+
+    # Body içinde party (Ad Soyad fail olursa)
+    if not party:
+        m = re.search(r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.]{4,80}?)\s+taraf[ıi]ndan\s+Kurulu[şs]umuza", text)
+        if m:
+            party = m.group(1).strip()
+    out["party_name"] = party
+    out["company_name"] = company
+    out["body_text"] = text[:2000]
+
+    # Fiyat (Ortalama fiyat / aralık)
+    out["price_low"], out["price_high"] = extract_price_range(text)
+    # Body'de "8,7272 TL ortalama fiyat" gibi tek fiyat
+    if not out["price_low"]:
+        m = re.search(r"(\d{1,4}[,]\d{1,4})\s*TL\s+ortalama\s+fiyat", text, re.IGNORECASE)
+        if m:
+            v = _parse_tr_decimal(m.group(1))
+            if v:
+                out["price_low"] = out["price_high"] = v
+
+    # Tablo: PDF text'te bir satirda 10 sayi (tarih + 9)
+    # 04/05/2026 290.978 0 290.978 50.957.677 51.248.655 1,13 0,65 1,14 0,66
+    # Tek satir veya cok satir olabilir
+    table_pat = re.compile(
+        r"(\d{2}[/.]\d{2}[/.]\d{4})\s+"
+        r"([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+"
+        r"([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+"
+        r"(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)"
+    )
+    m = table_pat.search(text)
+    if m:
+        out["transaction_date"] = _parse_kap_date(m.group(1))
+        out["alim_nominal"] = _parse_tr_decimal(m.group(2))
+        out["satim_nominal"] = _parse_tr_decimal(m.group(3))
+        out["net_nominal"] = _parse_tr_decimal(m.group(4))
+        out["beginning_nominal"] = _parse_tr_decimal(m.group(5))
+        out["end_nominal"] = _parse_tr_decimal(m.group(6))
+        out["beginning_pay_oran_pct"] = _parse_tr_decimal(m.group(7))
+        out["beginning_oy_hakki_pct"] = _parse_tr_decimal(m.group(8))
+        out["end_pay_oran_pct"] = _parse_tr_decimal(m.group(9))
+        out["end_oy_hakki_pct"] = _parse_tr_decimal(m.group(10))
+    return out
+
+
 async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
     """KAP URL'sinden Pay Alım Satım structured data fetch eder.
 
@@ -300,6 +411,35 @@ async def fetch_kap_pay_alim_satim(kap_url: str, client: Optional[httpx.AsyncCli
             result = {"body_text": _extract_body_text(decoded_html or html), "_no_table": True}
         # Header'dan party (slug bazli) — body fail olursa kullanilacak
         result["party_name_header"] = extract_party_from_html_header(decoded_html or html)
+
+        # PDF FALLBACK: HTML'de tablo yoksa veya alim/satim nominal eksikse PDF'e bak
+        no_table = result.get("_no_table", False)
+        no_alim = (result.get("alim_nominal") in (None, 0)) and (result.get("satim_nominal") in (None, 0))
+        if no_table or no_alim:
+            try:
+                # KAP PDF URL'lerini bul (extractor body'sinde mevcut)
+                from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                disc_full = await fetch_kap_disclosure(url)
+                pdf_links = (disc_full or {}).get("pdf_links") or []
+                # /api/file/download/ formatini tercih et (gercek PDF)
+                pdf_url = None
+                for p in pdf_links:
+                    if "/api/file/download/" in p:
+                        pdf_url = p; break
+                if not pdf_url and pdf_links:
+                    pdf_url = pdf_links[0]
+                if pdf_url:
+                    pdf_text = await _fetch_pdf_text(pdf_url, client, kap_url=url)
+                    if pdf_text:
+                        pdf_parsed = parse_pdf_pay_alim_satim(pdf_text)
+                        if pdf_parsed:
+                            # Boş alanlari PDF'ten doldur
+                            for k, v in pdf_parsed.items():
+                                if v is not None and (result.get(k) in (None, 0)):
+                                    result[k] = v
+                            logger.info("PDF parse ile pay_alim_satim alanlari dolduruldu: %s", url)
+            except Exception as pe:
+                logger.debug("PDF fallback hata: %s", pe)
         return result
     except Exception as e:
         logger.warning("KAP fetch hata (%s): %s", url, e)
@@ -418,6 +558,16 @@ async def upsert_pay_alim_satim_from_kap(
 
     tx_date = parsed.get("transaction_date") or (published_at.date() if published_at else None)
     if not tx_date:
+        return False
+
+    # GUARD: party "Bilinmiyor" + nominal=0 + oy/pay None ise = hicbir gercek veri yok
+    # PDF parse fail olmus demektir, placeholder kayit yapma
+    has_real_data = bool(
+        nominal_lot or end_pay or end_oy or
+        (party_name and party_name != "Bilinmiyor")
+    )
+    if not has_real_data:
+        logger.info("Pay alim satim: %s icin gercek veri yok (PDF parse fail?), kayit atlandi", ticker)
         return False
 
     # UPSERT — once kap_url'a gore ara (ayni KAP iki kez insert olmasin)
