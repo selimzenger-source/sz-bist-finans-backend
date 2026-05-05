@@ -11965,12 +11965,18 @@ async def admin_process_kap_disclosure(request: Request, payload: dict = Body(..
         except Exception as e:
             result["processors"]["mkk_realization"] = {"error": str(e)}
 
-        # 2d. bilanço — XBRL scrape
+        # 2d. bilanço — XBRL scrape + DB save
         try:
-            from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap
+            from app.services.ai_bilanco_analyzer import parse_bilanco_from_kap, save_parsed_bilanco
             if ticker_hint:
                 bil_parsed = await parse_bilanco_from_kap(ticker_hint, body)
                 result["processors"]["bilanco"] = bil_parsed or {"parsed": None}
+                if bil_parsed and (bil_parsed.get("revenue") or bil_parsed.get("total_assets")):
+                    try:
+                        await save_parsed_bilanco(ticker_hint, bil_parsed)
+                        result["processors"]["bilanco"]["db_saved"] = True
+                    except Exception as save_err:
+                        result["processors"]["bilanco"]["save_error"] = str(save_err)[:200]
             else:
                 result["processors"]["bilanco"] = {"skipped": "no_ticker_hint"}
         except Exception as e:
