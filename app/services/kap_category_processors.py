@@ -465,9 +465,12 @@ _TICKER_DOT_E_RE = re.compile(r'\b([A-Z]{3,6})\.E\b')
 
 
 def is_bistech_vbts(title: str, body: Optional[str]) -> bool:
-    t = lower_tr(title or "")
-    b = lower_tr(body or "")[:2000]
-    if "bistech" not in t:
+    # NOT: lower_tr 'I' → 'ı' (dotless) cevirir, "bistech" match olmaz.
+    # Bu yuzden ascii lower (.lower()) kullanilir.
+    t = (title or "").lower()
+    b = (body or "")[:3000].lower()
+    has_bistech = "bistech" in t or "bıstech" in t  # iki olasilik
+    if not has_bistech:
         return False
     return ("volatilite bazl" in b or "volatilite bazl" in t or
             "vbts" in b or "vbts" in t or
