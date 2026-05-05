@@ -5190,11 +5190,58 @@ async def search_mentions(
     return result
 
 
+@app.post("/api/v1/admin/backfill-market-close-ai")
+@limiter.limit("3/minute")
+async def admin_backfill_market_close_ai(request: Request, payload: dict = Body(...)):
+    """Bugün DB'de reason='' olan tavan/taban kayitlarini AI ile doldur.
+    Her ticker için ayrı UPDATE+commit — restart durumunda kalan tickers'tan devam eder.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from app.services.market_close_analyzer import _analyze_reason_with_ai
+    from app.models.daily_stock_market_stat import DailyStockMarketStat
+    from app.database import async_session
+    from sqlalchemy import select as _sel9
+    from datetime import datetime as _dt9
+    import zoneinfo, asyncio as _asy
+    tz_tr = zoneinfo.ZoneInfo("Europe/Istanbul")
+    today = _dt9.now(tz_tr).date()
+
+    async with async_session() as db:
+        rows = (await db.execute(
+            _sel9(DailyStockMarketStat).where(
+                DailyStockMarketStat.date == today,
+                (DailyStockMarketStat.reason == "") | (DailyStockMarketStat.reason.is_(None))
+            )
+        )).scalars().all()
+
+    filled = 0
+    for r in rows:
+        try:
+            reason = await _analyze_reason_with_ai(
+                ticker=r.ticker, is_ceiling=bool(r.is_ceiling),
+                price=float(r.close_price), pct=float(r.percent_change),
+                consec=r.consecutive_ceiling_count if r.is_ceiling else r.consecutive_floor_count,
+                monthly=r.monthly_ceiling_count if r.is_ceiling else r.monthly_floor_count,
+            )
+            if reason:
+                async with async_session() as db2:
+                    obj = (await db2.execute(_sel9(DailyStockMarketStat).where(DailyStockMarketStat.id == r.id))).scalar_one_or_none()
+                    if obj:
+                        obj.reason = reason[:100]
+                        await db2.commit()
+                filled += 1
+        except Exception:
+            pass
+        await _asy.sleep(2)  # Hafif rate limit
+    return {"filled": filled, "total": len(rows)}
+
+
 @app.post("/api/v1/admin/save-market-close-fast")
 @limiter.limit("3/minute")
 async def admin_save_market_close_fast(request: Request, payload: dict = Body(...)):
-    """Tavan/taban hisselerini AI olmadan hizla DB'ye kaydeder (reason boş kalir).
-    Sonra AI analizi ayri job ile uretilir.
+    """Tavan/taban hisselerini hizla DB'ye kaydeder + AI analizini arka planda baslatir.
+    Her ticker'in AI reason'i ayri commit'lendigi icin restart'lar kaybetmez.
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz")

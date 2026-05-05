@@ -1023,38 +1023,14 @@ async def _save_market_close_data(session, today, ceilings, floors):
     )
     await session.commit()
 
-    logger.info(f"Faz1 OK: {len(prepared)} hisse. AI sıralı analiz başlıyor...")
+    logger.info(f"Faz1 OK: {len(prepared)} hisse. ONCE DB'ye kaydet (reason boş), sonra AI doldur.")
 
-    # ── FAZ 2: AI analiz — sıralı + her hisse arasında delay (rate limit + bellek koruması) ──
-    # Anthropic limiti: 30K token/dakika. Her prompt ~5-8K token → 3-4 hisse/dakika güvenli.
-    # Bellek: her iterasyonda gc.collect() + 10 sn bekle, Tavily+Claude response'lari temizlensin
-    import gc
-    reasons = []
-    for i, s in enumerate(prepared):
-        try:
-            reason = await _analyze_reason_with_ai(
-                ticker=s["ticker"], is_ceiling=s["is_ceiling"],
-                price=float(s["price"]), pct=float(s["pct"]),
-                consec=s["consec"], monthly=s["monthly"])
-            reasons.append(reason)
-        except Exception as e:
-            logger.error(f"AI {s['ticker']}: {e}")
-            reasons.append("")
-        # Bellek temizliği: Tavily + Claude/OpenAI/Gemini response'lari serbest biraksin
-        gc.collect()
-        # Rate limit + bellek rahatlama: her hisseden sonra 10 sn bekle (dakikada 6 hisse)
-        if i < len(prepared) - 1:
-            await asyncio.sleep(10)
-    ai_ok = sum(1 for r in reasons if r)
-    logger.info(f"Faz2 OK: {ai_ok}/{len(prepared)} AI başarılı.")
-
-    # ── FAZ 3: DB'ye kaydet (hızlı) ──
+    # ── FAZ 2: DB'ye HEMEN kaydet (reason boş) — restart kaybi olmasin ──
     saved = 0
-    for s, reason in zip(prepared, reasons):
+    saved_objs: list[DailyStockMarketStat] = []
+    for s in prepared:
         try:
-            lbl = "TAVAN" if s["is_ceiling"] else "TABAN"
-            logger.info(f"[{lbl}] {s['ticker']}: {'✅' if reason else '❌'} | {reason[:50] if reason else 'boş'}")
-            session.add(DailyStockMarketStat(
+            obj = DailyStockMarketStat(
                 ticker=s["ticker"], date=today,
                 close_price=s["price"], percent_change=s["pct"],
                 is_ceiling=s["is_ceiling"], is_floor=not s["is_ceiling"],
@@ -1062,14 +1038,38 @@ async def _save_market_close_data(session, today, ceilings, floors):
                 monthly_ceiling_count=s["monthly"] if s["is_ceiling"] else 0,
                 consecutive_floor_count=s["consec"] if not s["is_ceiling"] else 0,
                 monthly_floor_count=s["monthly"] if not s["is_ceiling"] else 0,
-                reason=(reason or "")[:100]
-            ))
+                reason=""
+            )
+            session.add(obj)
+            saved_objs.append(obj)
             saved += 1
         except Exception as e:
-            logger.error(f"[KAYIT] {s['ticker']}: {e}")
-
+            logger.error(f"[KAYIT-FAZ2] {s['ticker']}: {e}")
     await session.commit()
-    logger.info(f"Faz3 OK: {saved}/{len(prepared)} kayıt, AI: {ai_ok} başarılı.")
+    logger.info(f"Faz2 OK: {saved} hisse DB'ye kaydedildi (reason boş).")
+
+    # ── FAZ 3: AI analiz — her ticker icin AYRI UPDATE+commit ──
+    # Restart olursa kalan tickerlardan devam edebilir (boş reason'liler).
+    import gc
+    ai_ok = 0
+    for i, (s, obj) in enumerate(zip(prepared, saved_objs)):
+        try:
+            reason = await _analyze_reason_with_ai(
+                ticker=s["ticker"], is_ceiling=s["is_ceiling"],
+                price=float(s["price"]), pct=float(s["pct"]),
+                consec=s["consec"], monthly=s["monthly"])
+            if reason:
+                obj.reason = reason[:100]
+                await session.commit()  # Per-ticker atomic commit
+                ai_ok += 1
+                lbl = "TAVAN" if s["is_ceiling"] else "TABAN"
+                logger.info(f"[{lbl}] {s['ticker']}: ✅ AI updated | {reason[:50]}")
+        except Exception as e:
+            logger.error(f"AI {s['ticker']}: {e}")
+        gc.collect()
+        if i < len(prepared) - 1:
+            await asyncio.sleep(10)
+    logger.info(f"Faz3 OK: {ai_ok}/{saved} AI reason dolduruldu.")
 
 
 async def scrape_and_analyze_market_close(force: bool = False, analyze_only: bool = False):
