@@ -12136,6 +12136,49 @@ async def admin_wipe_capital_increases(request: Request, payload: dict = Body(..
     return {"deleted": before, "remaining": after}
 
 
+@app.post("/api/v1/admin/reparse-share-tx")
+@limiter.limit("10/minute")
+async def admin_reparse_share_tx(request: Request, payload: dict = Body(...)):
+    """Mevcut share_transaction_details kaydini yeniden parse et (party_name fix vb.).
+
+    Body: { admin_password, id }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    tx_id = int(payload.get("id") or 0)
+    if not tx_id:
+        return {"error": "id required"}
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    from app.services.kap_pay_alim_satim_fetcher import fetch_kap_pay_alim_satim
+    async with async_session() as db:
+        row = (await db.execute(sa_text("SELECT ticker, kap_url FROM share_transaction_details WHERE id=:id"), {"id": tx_id})).first()
+        if not row:
+            return {"error": "not found"}
+        ticker, kap_url = row
+        if not kap_url:
+            return {"error": "kap_url yok"}
+        parsed = await fetch_kap_pay_alim_satim(kap_url)
+        if not parsed:
+            return {"error": "KAP fetch fail"}
+        # Header slug'tan party_name al
+        new_party = None
+        hdr = parsed.get("party_name_header")
+        if hdr:
+            import re as _re
+            hdr_collapsed = _re.sub(r"[^A-ZÇĞİÖŞÜ]", "", hdr.upper())
+            if ticker not in hdr_collapsed[:len(ticker)+3]:
+                new_party = hdr
+        # Yoksa body parse fallback'lerinden
+        if not new_party:
+            new_party = parsed.get("party_name")
+        if not new_party:
+            return {"error": "party_name bulunamadi", "header": hdr}
+        await db.execute(sa_text("UPDATE share_transaction_details SET party_name=:pn WHERE id=:id"), {"pn": new_party, "id": tx_id})
+        await db.commit()
+    return {"id": tx_id, "ticker": ticker, "new_party_name": new_party}
+
+
 @app.post("/api/v1/admin/backfill-share-tx-direction")
 @limiter.limit("3/minute")
 async def admin_backfill_share_tx_direction(request: Request, payload: dict = Body(...)):
