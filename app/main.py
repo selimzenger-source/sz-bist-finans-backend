@@ -9116,6 +9116,38 @@ async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(..
         }
 
 
+@app.post("/api/v1/admin/sync-is-bilanco-flag")
+@limiter.limit("3/minute")
+async def admin_sync_is_bilanco_flag(request: Request, payload: dict = Body(...)):
+    """kap_all_disclosures'taki bilanço title'li kayitlara is_bilanco=True set et.
+
+    Frontend `/bilanco` listesi bu flag'i okuyor. Eski kayitlarda flag eksik kalmis olabilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from sqlalchemy import text as sa_text
+    from app.database import async_session
+    async with async_session() as db:
+        result = await db.execute(sa_text("""
+            UPDATE kap_all_disclosures
+            SET is_bilanco = TRUE
+            WHERE is_bilanco = FALSE
+              AND (
+                LOWER(title) LIKE '%finansal durum tablosu%'
+                OR LOWER(title) LIKE '%finansal rapor%'
+                OR LOWER(title) LIKE '%bilanço%'
+                OR LOWER(title) LIKE '%bilanco%'
+                OR LOWER(title) LIKE '%finansal tablo%'
+                OR LOWER(title) LIKE '%kar veya zarar%'
+                OR LOWER(title) LIKE '%sorumluluk beyan%'
+              )
+            RETURNING id
+        """))
+        updated = len(result.fetchall())
+        await db.commit()
+    return {"updated": updated}
+
+
 @app.post("/api/v1/admin/batch-bilanco-recent-kap")
 @limiter.limit("3/minute")
 async def admin_batch_bilanco_recent_kap(request: Request, payload: dict = Body(...)):
