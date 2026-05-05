@@ -216,11 +216,25 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
         out["currency"] = currency
 
     # Karşı taraf
-    # 1) Form template: "Müşterinin Adı: X"
+    # 1) KAP form template: "Müşterinin/Tedarikçinin Adı Soyadı/Ticaret Ünvanı  X"
+    #    Value satir sonunda VEYA bir sonraki satirda olabilir (cok satirli tablo)
     cp_clean = None
-    cp = re.search(r"(?:Müşterinin|Tedarikçinin|Karşı\s*Taraf|Alıcının|Satıcının|İlgili\s*Tarafın)[^:]*?:\s*([^\n\r]{5,200}?)(?:\n|Varsa|İş İlişkisinin|$)", body, re.IGNORECASE)
+    cp = re.search(
+        r"(?:Müşterinin|Tedarikçinin|Karşı\s*Taraf|Alıcının|Satıcının|İlgili\s*Tarafın)[^\n:]*?(?:Ünvan[ıi]|Adı|Taraf)[^\n:]*?[:\s]+([^\n\r]{3,200}?)(?:\n|Varsa|İş İlişkisinin|Bağlantılı|$)",
+        body, re.IGNORECASE,
+    )
     if cp:
-        cp_clean = cp.group(1).strip().rstrip(",.")
+        cp_clean = cp.group(1).strip().rstrip(",.").strip()
+    # 1b) "Yurtdışı Müşteri" ise gercek ulke "Hangi Ülke" alanindan (varsa)
+    if cp_clean and re.search(r"yurtd[ıi]ş[ıi]\s*(?:müşteri|tedarikçi)", cp_clean, re.IGNORECASE):
+        country_m = re.search(
+            r"(?:Yurtd[ıi]ş[ıi].*?Hangi\s*Ülke|Hangi\s*Ülke|Ülke(?:si)?)[^\n:]*?[:\s]+([A-ZÇĞİÖŞÜA-Za-zÇĞİÖŞÜçğıöşü][^\n\r]{2,60})",
+            body, re.IGNORECASE,
+        )
+        if country_m:
+            country = country_m.group(1).strip().rstrip(",.")
+            if country and country.lower() not in ("evet", "hayır", "hayir", "-", "yok"):
+                cp_clean = country
     # 2) Body'den: "Şirketimiz ile X arasında" / "X ile yapılan/imzalanan"
     if not cp_clean or len(cp_clean) < 4:
         m = re.search(r"[Şş]irketimiz\s+ile\s+([A-ZÇĞİÖŞÜ][^\s,]{2,80}?(?:\s+[A-ZÇĞİÖŞÜ][^\s,]{2,40}){0,5})\s+aras[ıi]nda", body)
@@ -240,6 +254,14 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
         m = re.search(r"ile\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{2,80}?)\s+(?:aras[ıi]nda|firmas[ıi]|şirketi|sirketi|ile)", body)
         if m:
             cp_clean = m.group(1).strip()
+    # 5) Özet kalıbı: "TICKER, X A.Ş./Ltd ile ..." (CWENE summary gibi)
+    if not cp_clean:
+        m = re.search(
+            r"(?:^|[,\.]\s)([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{3,80}?(?:A\.\s*Ş\.?|AŞ\.?|Ltd\.?|Holding|Şti\.?))\s+ile\b",
+            body,
+        )
+        if m:
+            cp_clean = m.group(1).strip().rstrip(",.")
     if cp_clean and 3 < len(cp_clean) < 250:
         out["counterparty"] = cp_clean
 
