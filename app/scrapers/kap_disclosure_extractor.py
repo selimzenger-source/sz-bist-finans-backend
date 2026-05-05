@@ -211,7 +211,7 @@ async def fetch_kap_disclosure(
             "text_blocks": text_blocks,
             "tables": tables,
             "pdf_links": pdf_links,
-            "full_text": full_text[:200000],  # Bilanço için tam: balance sheet + income statement
+            "full_text": full_text[:400000],  # Bilanço için tam: balance sheet + income + cash flow (amortisman cash flow'da)
             "html_length": len(html),
         }
     finally:

@@ -492,32 +492,40 @@ async def process_cautious_bistech_multi(
     if not tickers:
         return []
 
-    parsed = await _call_gemini(_CS_PROMPT.format(
-        ticker=",".join(tickers), title=title or "", body=(body or "")[:3000]
-    )) or {}
+    # Regex ile body'den tag/tarih cikar (AI'ya gerek yok — VBTS bildirimleri
+    # yapisi sabit: "brut takas", "aciga satis", "kredili islem" gibi anahtar
+    # kelimeler + "DD/MM/YYYY ... DD/MM/YYYY" tarih araligi)
+    valid_tags: list[str] = []
+    body_lo = body.lower()
+    if "brüt takas" in body_lo or "brut takas" in body_lo or "gross settlement" in body_lo:
+        valid_tags.append("BRT")
+    if "açığa satış" in body_lo or "aciga satis" in body_lo or "short selling" in body_lo:
+        valid_tags.append("ACS")
+    if "kredili işlem" in body_lo or "kredili islem" in body_lo or "margn trading" in body_lo or "margin trading" in body_lo:
+        valid_tags.append("KRD")
+    if "tek fiyat" in body_lo:
+        valid_tags.append("TEK")
+    if "emir paketi" in body_lo:
+        valid_tags.append("EPT")
+    if "internet emir" in body_lo:
+        valid_tags.append("IEY")
 
-    raw_tags = parsed.get("tags") or []
-    if not isinstance(raw_tags, list):
-        raw_tags = []
-    _VALID = {"KRD", "ACS", "BRT", "EMR", "PEM", "VEY", "TEK", "EPT", "IEY"}
-    valid_tags = [t.upper().replace("Ç", "C") for t in raw_tags
-                  if isinstance(t, str) and t.upper().replace("Ç", "C") in _VALID]
-
+    # Tarih araligi: ilk iki "DD/MM/YYYY tarihli ... DD/MM/YYYY tarihli" eslesmesi
     start_date = None
     end_date = None
-    if isinstance(parsed.get("start_date"), str):
+    date_re = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
+    matches = date_re.findall(body)
+    if len(matches) >= 2:
         try:
-            start_date = date.fromisoformat(parsed["start_date"])
-        except ValueError:
-            pass
-    if isinstance(parsed.get("end_date"), str):
-        try:
-            end_date = date.fromisoformat(parsed["end_date"])
-        except ValueError:
+            d1, m1, y1 = map(int, matches[0])
+            d2, m2, y2 = map(int, matches[1])
+            start_date = date(y1, m1, d1)
+            end_date = date(y2, m2, d2)
+        except (ValueError, TypeError):
             pass
 
     if not valid_tags and not start_date and not end_date:
-        logger.debug("BISTECH VBTS skip: AI bilgi cikartamadi (tickers=%s)", tickers)
+        logger.debug("BISTECH VBTS skip: regex bilgi cikartamadi (tickers=%s)", tickers)
         return []
 
     today = date.today()
