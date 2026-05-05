@@ -333,7 +333,14 @@ async def process_kap_disclosure(
 
     Temettu degilse None doner.
     """
-    if not is_dividend(title):
+    # is_dividend body'ye de bakıyor — bedelsiz/sermaye artırımı durumunda False döner
+    if not is_dividend(title, body or ""):
+        return None
+
+    # Body bos veya cok kisa ise (KAP fetch fail) — orphan kayit oluşturma
+    # Çünkü gross/period bilgisi olmadan kayıt yararlı değil
+    if not body or len(body) < 50:
+        logger.info("Dividend skip — body bos/cok kisa (orphan oluşmasin): %s", ticker)
         return None
 
     # Title yetersizse body'ye bak (dağıtmama coğunlukla body'de gizli)
