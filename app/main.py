@@ -12056,7 +12056,7 @@ async def admin_seed_capital_increases(request: Request, payload: dict = Body(..
                         :ticker, :company_name, :type, :status,
                         :bedelli, :bedelsiz, :tahsisli,
                         :sermaye,
-                        :ykk_date, :spk_date, :dist_date,
+                        CAST(:ykk_date AS DATE), CAST(:spk_date AS DATE), CAST(:dist_date AS DATE),
                         NOW(), NOW()
                     )
                     ON CONFLICT DO NOTHING
