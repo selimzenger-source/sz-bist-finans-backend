@@ -9230,6 +9230,52 @@ async def admin_parse_bilanco_from_url(request: Request, payload: dict = Body(..
         }
 
 
+@app.post("/api/v1/admin/backfill-kap-ai")
+@limiter.limit("3/minute")
+async def admin_backfill_kap_ai(request: Request, payload: dict = Body(...)):
+    """ai_analyzed_at IS NULL olan recent KAP'lara AI analizi uygula.
+    Body: { admin_password, hours (default=4), limit (default=30) }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from datetime import timedelta as _td3, timezone as _tz3, datetime as _dt3
+    from sqlalchemy import select as _sel3, desc as _desc3
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.kap_all_analyzer import analyze_disclosure
+    from app.database import async_session as _as3
+    hours = int(payload.get("hours") or 4)
+    limit = int(payload.get("limit") or 30)
+    cutoff = _dt3.now(_tz3.utc) - _td3(hours=hours)
+    updated = 0
+    skipped = 0
+    async with _as3() as db:
+        rows = (await db.execute(
+            _sel3(KapAllDisclosure)
+            .where(KapAllDisclosure.published_at >= cutoff)
+            .where(KapAllDisclosure.ai_analyzed_at.is_(None))
+            .order_by(_desc3(KapAllDisclosure.published_at))
+            .limit(limit)
+        )).scalars().all()
+        for r in rows:
+            try:
+                ai = await analyze_disclosure(
+                    company_code=r.company_code or "",
+                    title=r.title or "",
+                    body=r.body or "",
+                    is_bilanco=bool(r.is_bilanco),
+                )
+                if ai:
+                    r.ai_sentiment = ai.get("sentiment")
+                    r.ai_impact_score = ai.get("impact_score")
+                    r.ai_summary = ai.get("summary")
+                    r.ai_analyzed_at = _dt3.now(_tz3.utc)
+                    updated += 1
+            except Exception:
+                skipped += 1
+        await db.commit()
+    return {"updated": updated, "skipped": skipped, "total": len(rows)}
+
+
 @app.post("/api/v1/admin/inject-kap-bilanco")
 @limiter.limit("10/minute")
 async def admin_inject_kap_bilanco(request: Request, payload: dict = Body(...)):
