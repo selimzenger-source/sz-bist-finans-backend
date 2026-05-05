@@ -9144,9 +9144,11 @@ async def admin_batch_bilanco_recent_kap(request: Request, payload: dict = Body(
     skipped = 0
     errors: list[str] = []
     seen = set()
+    import gc as _gc
+    max_batch = int(payload.get("max_batch") or 5)  # OOM koruma — 5 ticker batch
 
     async with _as2() as db:
-        q = _sel2(KapAllDisclosure).where(KapAllDisclosure.published_at >= cutoff).order_by(_desc2(KapAllDisclosure.published_at)).limit(500)
+        q = _sel2(KapAllDisclosure).where(KapAllDisclosure.published_at >= cutoff).order_by(_desc2(KapAllDisclosure.published_at)).limit(200)
         rows = (await db.execute(q)).scalars().all()
 
     for r in rows:
@@ -9167,19 +9169,25 @@ async def admin_batch_bilanco_recent_kap(request: Request, payload: dict = Body(
         try:
             disc = await fetch_kap_disclosure(r.kap_url)
             body = disc.get("full_text", "") if disc else ""
+            if disc:
+                del disc
             if not body:
                 skipped += 1
                 continue
             parsed = await parse_bilanco_from_kap(ticker, body)
+            del body  # 200K serbest birak
+            _gc.collect()
             if not parsed or not parsed.get("period"):
                 skipped += 1
                 continue
             await save_parsed_bilanco(ticker, parsed)
+            del parsed
+            _gc.collect()
             saved += 1
         except Exception as e:
             errors.append(f"{ticker}: {str(e)[:120]}")
             skipped += 1
-        if processed >= 30:
+        if processed >= max_batch:
             break
 
     return {"processed": processed, "saved": saved, "skipped": skipped, "errors": errors[:5]}
