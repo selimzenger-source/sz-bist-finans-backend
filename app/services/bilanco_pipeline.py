@@ -80,7 +80,11 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
 
             from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
             import gc
-            best_parsed = None
+            # Birden fazla KAP body'sini MERGE et — bilanco bildirimi 3 ayri parcaya bolunmus
+            # olabilir (Bilanco / Kar-Zarar / Nakit Akis). Hepsini gez, ayni period icin
+            # NULL olmayan alanlari biriktir.
+            merged: dict | None = None
+            tried_titles: list[str] = []
             for kap_news in kap_news_list:
                 body_full = kap_news.body or ""
                 if (not body_full or len(body_full) < 500) and kap_news.kap_url:
@@ -88,7 +92,6 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                         disclosure = await fetch_kap_disclosure(kap_news.kap_url)
                         if disclosure and disclosure.get("full_text"):
                             body_full = disclosure["full_text"]
-                        # MEMORY: disclosure dict (text_blocks, tables, vs) artik gereksiz
                         del disclosure
                     except Exception as fe:
                         logger.debug("KAP body fetch hata %s: %s", ticker, fe)
@@ -98,17 +101,40 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                     continue
 
                 parsed = await parse_bilanco_from_kap(ticker, body_full)
-                # Body parse bittikten sonra hemen serbest birak (200KB)
                 del body_full
-                # Sadece XBRL'i çıkaran (revenue/total_assets dolu) KAP kabul
-                if parsed and (parsed.get("total_assets") or parsed.get("revenue")):
-                    best_parsed = parsed
-                    logger.info("📊 KAP XBRL bulundu: %s — %s (%s)", ticker, kap_news.title[:30], kap_news.kap_url)
-                    gc.collect()
-                    break
-                # Eslesmediyse parse'i da bosalt
-                if parsed:
+                if not parsed:
+                    continue
+                if not (parsed.get("total_assets") or parsed.get("revenue") or
+                        parsed.get("net_income") or parsed.get("total_equity")):
                     del parsed
+                    continue
+
+                tried_titles.append(kap_news.title[:40])
+                if merged is None:
+                    merged = dict(parsed)
+                else:
+                    # Sadece ayni period verilerini birlestir (farkli ceyrekleri karistirma)
+                    if parsed.get("period") and merged.get("period") and parsed["period"] != merged["period"]:
+                        del parsed
+                        continue
+                    for k, v in parsed.items():
+                        if v is None:
+                            continue
+                        if merged.get(k) is None:
+                            merged[k] = v
+                del parsed
+
+                # Tum kritik alanlar dolduysa erken cik
+                if merged and all(merged.get(k) is not None for k in (
+                    "revenue", "net_income", "total_assets", "total_equity"
+                )):
+                    break
+
+            best_parsed = merged
+            if best_parsed:
+                logger.info("📊 KAP XBRL merged: %s — %d KAP'tan birlesti (%s)",
+                            ticker, len(tried_titles), ", ".join(tried_titles))
+                gc.collect()
 
             if best_parsed:
                 kap_parsed = best_parsed

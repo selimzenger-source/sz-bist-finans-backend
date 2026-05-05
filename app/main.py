@@ -11194,16 +11194,14 @@ async def list_latest_bilancos(
         .limit(limit * 5)  # ticker dedupe için fazladan çek
     )
     all_items = list(kap_result.scalars().all())
-    # (Ticker + day) bazli dedupe — aynı hisse aynı gün birden fazla KAP atarsa
-    # yalnizca en yenisi kalir. (Farkli donemler/günler ayri satir.)
-    seen_keys = set()
+    # Ticker bazli dedupe — ayni hisseden bir kac KAP gelse bile (initial + duzeltme +
+    # yeniden yayin) yalnizca EN YENI 1 satir gosterilir.
+    seen_tickers = set()
     kap_items: list[KapAllDisclosure] = []
     for k in all_items:
-        day_str = k.published_at.date().isoformat() if k.published_at else ""
-        key = (k.company_code, day_str)
-        if key in seen_keys:
+        if not k.company_code or k.company_code in seen_tickers:
             continue
-        seen_keys.add(key)
+        seen_tickers.add(k.company_code)
         kap_items.append(k)
     # Offset + limit uygula
     kap_items = kap_items[offset:offset + limit]
