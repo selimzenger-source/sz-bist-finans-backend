@@ -44,6 +44,12 @@ _poll_lock = asyncio.Lock()  # Eszamanli getUpdates cagrilarini engelle
 _consecutive_errors = 0  # Ust uste hata sayaci — spam onleme
 _last_heartbeat: float = 0.0  # Periyodik status log zamani
 
+# Push bildirim debounce — ayni ticker icin 2 dk icinde 2. positif KAP gelirse
+# push gonderilmez ve kap_all_disclosures'a yazilmaz (kullanici spam yememesi icin).
+# Format: { "TICKER": unix_timestamp_son_push }
+_last_kap_push_per_ticker: dict[str, float] = {}
+_KAP_PUSH_COOLDOWN_SEC = 120  # 2 dakika
+
 
 async def fetch_telegram_updates(bot_token: str, offset: int | None = None) -> list[dict]:
     """Telegram getUpdates API'sini cagir.
@@ -855,11 +861,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             except Exception:
                 kap_source = "telegram"  # Default — guvenli yol
 
+            # ── DEBOUNCE: ayni ticker icin 2 dk icinde 2. pozitif KAP gelirse skip ──
+            # Push spam ve KAP feed'inde duplicate olmamasi icin. BIST 50 ve BIST Tum
+            # icin de gecerli (channel ayrimi yok, ticker bazli).
+            import time as _time_mod
+            _now_ts = _time_mod.time()
+            _is_positive_dup = False
+            if ticker and ai_score is not None and ai_score >= 6 and message_type in ("seans_ici_pozitif", "borsa_kapali"):
+                _last_push = _last_kap_push_per_ticker.get(ticker.upper())
+                if _last_push and (_now_ts - _last_push) < _KAP_PUSH_COOLDOWN_SEC:
+                    _is_positive_dup = True
+                    logger.info(
+                        "KAP push debounce: %s — son push %.0fs once, %ds cooldown — atlandi",
+                        ticker, _now_ts - _last_push, _KAP_PUSH_COOLDOWN_SEC,
+                    )
+
             if (
                 ticker
                 and ai_score is not None
                 and message_type in ("seans_ici_pozitif", "borsa_kapali")
                 and is_telegram_active(kap_source)
+                and not _is_positive_dup
             ):
                 try:
                     from app.models.kap_all_disclosure import KapAllDisclosure
@@ -1043,6 +1065,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Push bildirim — sadece should_notify True ise
             if not should_notify:
                 pass  # Yukarida loglandi
+            elif _is_positive_dup:
+                logger.info(
+                    "Push debounce: %s — 2dk icinde tekrar pozitif KAP, push atilmadi",
+                    ticker,
+                )
             else:
                 try:
                     from app.services.notification import NotificationService
@@ -1055,6 +1082,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         news_type = "seans_disi_acilis"
                     else:
                         news_type = "seans_disi"
+                    # Cooldown timestamp'ini kaydet (sadece pozitif seans_ici/disi icin)
+                    if ticker and message_type in ("seans_ici_pozitif", "borsa_kapali"):
+                        _last_kap_push_per_ticker[ticker.upper()] = _now_ts
                     await notif.notify_kap_news(
                         ticker=ticker or "",
                         price=None,
