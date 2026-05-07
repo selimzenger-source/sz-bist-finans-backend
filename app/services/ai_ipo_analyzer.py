@@ -78,15 +78,51 @@ PUANLAMA SISTEMI (v3 — AGIRLIKLI COK BOYUTLU SKOR)
 overall_score hesabini asagidaki 7 kategoride yap. Her kategorinin MAX puani ve agirligi bellidir.
 Toplam 100 puan uzerinden hesapla, sonra 10'a bol (10 uzerinden puan).
 
-KATEGORI 1: FIYATLAMA & DEGERLEME (max 25 puan)
+★★★ DENGE PRENSIBI (ÇOK ÖNEMLİ) ★★★
+Hicbir IPO mukemmel veya korkunc degildir. Her sirket bir bilesiktir:
+guclu yonleri + zayif yonleri olur. Aksi takdirde halka arz onayini SPK
+zaten vermezdi.
+
+PUAN TABANI: Her kategori icin minimum %30 taban uygulanir
+(boylelikle 0 puan tek bir hatadan dolayi verilmez):
+  - Fiyatlama (max 25): MIN 7 puan
+  - Finansal Saglik (max 20): MIN 6 puan
+  - Buyume (max 15): MIN 4 puan
+  - Arz Yapisi (max 15): MIN 4 puan
+  - Sektor (max 10): MIN 3 puan
+  - Yonetim (max 10): MIN 3 puan
+  - Risk Bonus (max 5): MIN 1 puan
+
+EKSIK VERI YAKLASIMI:
+  Bilgiyi bulamadıysan SIFIR verme — sektör ortalamasını varsay ve
+  TABAN PUANI uygula. "Veri yetersiz" notu ile birlikte taban puanı ver.
+  Örnek: Yönetim kurulu yapısı izahnamede yoksa → 5/10 (orta) ver,
+  "veri yetersizliği nedeniyle ortalama varsayıldı" yaz.
+
+ZORUNLU OLUMLU TESPIT:
+  Her kategoride EN AZ BIR olumlu nokta listele. Hiçbir kategoride
+  "tamamen olumsuz" değerlendirme yapma. SPK onayı bunun garantisidir.
+
+KATEGORI 1: FIYATLAMA & DEGERLEME (max 25 puan, MIN 7)
   Halka arz fiyati makul mu? Sektör emsal kıyaslaması nasıl?
-  DIKKAT ET:
-  - Iskonto orani: %20+ iskonto → 18-25p, %10-20 → 12-17p, %0-10 → 6-11p, prim (iskontosuz) → 0-5p
-  - Halka aciklik orani: %20-35 ideal → yuksek puan, <%10 veya >%50 → dusuk puan
-  - Piyasa degeri / hasilat carpani makul mu?
-  - Arz buyuklugu sektore gore uygun mu?
-  - Sektordeki halka acik benzer sirketlerle Fiyat/Kazanc orani kiyaslamasi (bilgi varsa)
-  KIRMIZI BAYRAK: Sektorun cok ustunde F/K → agir puan kirimi
+  DEĞERLENDIRME ADIMLARI:
+  1. Halka arz piyasa değerini hesapla: ihraç sonrası toplam pay × halka arz fiyatı
+  2. Fiyat/Kazanç oranı (yıllık kar varsa) — sektör ortalamasıyla kıyasla
+  3. Piyasa Değeri / Defter Değeri oranı — varlık yoğun sektörlerde kritik
+  4. ★ NET NAKIT + MADDI DURAN VARLIK kıyaslaması ★ (varlık yoğun şirketler için)
+     Eğer (Net Nakit + Maddi Duran Varlık Defter Değeri) > 2× Piyasa Değeri:
+       → 18-25 puan ver, "bilanço-değer açısından iskontolu fiyatlama" yorumu yap
+     Eğer ekspertiz değeri var ve defter değerinin ÜZERİNDE:
+       → Ek pozitif sinyal, +2-3 puan ekle
+  5. Halka aciklik orani: %20-35 ideal → yüksek puan, %10-20 → orta, <%10 veya >%50 → düşük
+
+  PUAN ARALIĞI:
+  - %20+ iskonto VEYA varlık-iskonto sinyali → 18-25
+  - %10-20 iskonto → 12-17
+  - %0-10 (makul fiyatlama) → 8-11
+  - Prim (iskontosuz) → 7 (taban)
+
+  KIRMIZI BAYRAK: Sektör F/K'sının 3 katından fazla → -5 ek penaltı
 
 KATEGORI 2: FINANSAL SAGLIK (max 20 puan)
   Sirketin mali yapisi ne kadar saglam?
@@ -133,24 +169,37 @@ KATEGORI 5: SEKTOR KONUMU & REKABET (max 10 puan)
   - Sektorun regulasyon riskleri
   - Sektore giris bariyerleri: yuksek bariyer → mevcut oyuncular icin avantaj
 
-KATEGORI 6: YONETIM & KURUMSAL YAPI (max 10 puan)
-  Yonetim kalitesi ve kurumsal yonetim yapisi
-  DIKKAT ET:
-  - Lock-up suresi: 360+ gun → 8-10p (yonetim guveninin gostergesi), 180-360 → 5-7p, <180 → 2-4p, yok → 0-1p
-  - Konsorsiyum lideri itibar: buyuk araci kurum → guven sinyali
-  - Fiyat istikrari mekanizmasi: varsa → ek puan
-  - Katilim endeksine uygunluk: uygunsa → ek puan (faizsiz finans yatirimcisina erisilebilirlik)
-  KIRMIZI BAYRAK: Lock-up yok veya cok kisa (<90 gun) → iceriden hizli cikis riski
+KATEGORI 6: YONETIM & KURUMSAL YAPI (max 10 puan, MIN 3)
+  Yönetim kalitesi ve kurumsal yönetim yapısı
+  DİKKAT ET:
+  - Satış yasağı süresi (satmama taahhüdü): 360+ gün → 8-10p, 180-360 → 5-7p, <180 → 3-4p
+    ★ Belirtilmemişse veya OCR'da bulunamadıysa → 5p (taban) ver,
+      "süre net belirtilmemiş, KAP'taki nihai izahname kontrol edilmeli" notu yaz
+  - Konsorsiyum lideri itibarı: büyük aracı kurum → güven sinyali
+  - Fiyat istikrarı mekanizması varsa → ek puan
+  - Katılım endeksine uygunluk varsa → ek puan
+  - Yönetim kurulu yapısı, bağımsız üyeler, kurucu deneyimi
+  - Bağımsız denetim raporları kalitesi
+  ★ Şirket SPK'dan halka arz onayı ALMIŞ — yani temel yönetim standartları sağlanmış,
+    sıfır puan vermek hatalıdır. Min 3 puan taban.
+  KIRMIZI BAYRAK: Sadece izahnamede AÇIK olarak satış yasağı süresi "yoktur" yazıyorsa
+  veya bilgi-saklama, denetim-uyumsuzluk gibi resmi sicil sorunları varsa.
 
-KATEGORI 7: RISK DEGERLENDIRMESI (max 5 puan — BONUS)
-  Risklerin yonetilebilirlik duzeyi
-  DIKKAT ET:
-  - Makroekonomik riskler (enflasyon, kur, faiz ortami)
-  - Regulasyon riskleri (sektor bazinda)
-  - Operasyonel riskler (tek lokasyon, tek musteri vs.)
-  - Likidite riski: dusuk halka aciklik → islem hacmi sorunu olabilir
-  - 0 puan: riskler agir ve yonetilmesi zor
-  - 5 puan: riskler sinirli ve yonetilebilir
+KATEGORI 7: RISK DEGERLENDIRMESI (max 5 puan — BONUS, MIN 1)
+  Risklerin yönetilebilirlik düzeyi
+  DİKKAT ET:
+  - Makroekonomik riskler (enflasyon, kur, faiz ortamı) — Türkiye'de hep var, normal
+  - Regülasyon riskleri (sektör bazında)
+  - Operasyonel riskler (tek lokasyon, tek müşteri, deprem bölgesi vs.)
+  - Likidite riski: düşük halka açıklık → işlem hacmi sorunu
+  - Hammadde tedarik riski
+
+  PUAN ARALIĞI:
+  - 5: Riskler çok sınırlı, çeşitlendirilmiş, kontrol edilebilir
+  - 3-4: Standart sektör riskleri var, ama yönetilebilir
+  - 2: Birden fazla ciddi risk faktörü var (deprem + tek lokasyon + döviz vs.)
+  - 1 (taban): Sektör-spesifik aşırı riskler birikmiş — ama 0 vermek hatalı,
+    şirket faaliyetine devam ediyor demektir.
 
 TOPLAM: Kategori puanlarinin toplami / 10 = overall_score (1.0 - 10.0 arasi)
 
@@ -1170,18 +1219,26 @@ async def generate_and_save_ipo_report(ipo_id: int, force: bool = False) -> bool
             )
 
             # Kullanicilara push bildirim — AI rapor hazir
-            try:
-                from app.services.notification import NotificationService
-                notif_service = NotificationService(session)
-                notif_count = await notif_service.notify_ai_report_ready(
-                    ipo, report["overall_score"]
-                )
+            # ÖNEMLİ: force=True ise (yeniden üretim) bildirim ATILMAZ.
+            # Bildirim sadece İLK üretimde atılır; tekrar tekrar bildirim spam olur.
+            if force:
                 logger.info(
-                    "AI rapor bildirimi gonderildi: %s — %d kullanici",
-                    ipo.ticker or ipo.company_name, notif_count,
+                    "AI rapor force regenerate — push bildirim ATLANDI: %s",
+                    ipo.ticker or ipo.company_name,
                 )
-            except Exception as notif_err:
-                logger.warning("AI rapor push bildirim hatasi: %s", notif_err)
+            else:
+                try:
+                    from app.services.notification import NotificationService
+                    notif_service = NotificationService(session)
+                    notif_count = await notif_service.notify_ai_report_ready(
+                        ipo, report["overall_score"]
+                    )
+                    logger.info(
+                        "AI rapor bildirimi gonderildi: %s — %d kullanici",
+                        ipo.ticker or ipo.company_name, notif_count,
+                    )
+                except Exception as notif_err:
+                    logger.warning("AI rapor push bildirim hatasi: %s", notif_err)
 
             # Admin Telegram bildirimi
             try:

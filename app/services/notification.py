@@ -1036,19 +1036,25 @@ class NotificationService:
         - Seans Disi Pozitif Haber Yakalandi
         - Seans Disi Haber Yakalanan Hisse Acilisi (GAP bilgisi ile)
         """
-        # AI puani varsa basliga ekle
+        # AI puani SADECE ucretli abonelere gosterilir (premium ozellik).
+        # Ucretsiz BIST50 kullanicilarina puansiz baslik gonderilir.
         score_tag = ""
         if ai_score is not None:
             score_tag = f" (AI: {ai_score:.1f}/10)"
 
         if news_type == "seans_ici":
-            title = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}{score_tag}"
+            title_paid = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}{score_tag}"
+            title_free = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}"
         elif news_type == "seans_disi_acilis":
-            # Gap yuzdesini title'a ekle — kullanici bildirimde hemen gorsun
             gap_str = f" ({gap_pct})" if gap_pct else ""
-            title = f"📊 {ticker} Açılış{gap_str}{score_tag}"
+            title_paid = f"📊 {ticker} Açılış{gap_str}{score_tag}"
+            title_free = f"📊 {ticker} Açılış{gap_str}"
         else:
-            title = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
+            title_paid = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
+            title_free = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}"
+
+        # Geriye donuk uyumluluk: tek title degiskeni (paid versiyon — admin loglari icin)
+        title = title_paid
 
         # Virgulden onceki ilk kelimeyi al (cok kelimeli keyword'leri kirp)
         clean_kw = matched_keyword.split(",")[0].strip() if matched_keyword else matched_keyword
@@ -1092,11 +1098,14 @@ class NotificationService:
         ticker_upper = ticker.upper()
 
         # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
-        sent += await self._send_paid_kap_news(title, body, data, ticker_upper)
+        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper)
 
         # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
+        # Ucretsiz kullanicilara AI puani GOSTERILMEZ — premium ozellik
         if ticker_upper in BIST50_TICKERS:
-            sent += await self._send_bist50_free(title, body, data, ticker_upper)
+            # Free kullanicinin data'sinda da ai_score olmasin
+            data_free = {k: v for k, v in data.items() if k != "ai_score"}
+            sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper)
 
             # Tweet: poller'da zaten tweet_bist30_news cagriliyor, burada TEKRAR atma (dedup)
 
