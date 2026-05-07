@@ -3407,6 +3407,40 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
     }
 
 
+@app.post("/api/v1/admin/notify-new-ipo")
+@limiter.limit("10/minute")
+async def admin_notify_new_ipo(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Belirli bir IPO için "Yeni Halka Arz" push bildirimini manuel tetikle.
+
+    Body: {"admin_password": "...", "ipo_id": 47}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    if not ipo_id:
+        return {"status": "error", "message": "ipo_id gerekli"}
+
+    from app.models.ipo import IPO
+    from app.services.notification import NotificationService
+
+    result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
+    ipo = result.scalar_one_or_none()
+    if not ipo:
+        return {"status": "error", "message": f"IPO {ipo_id} bulunamadi"}
+
+    notif_service = NotificationService(db)
+    sent = await notif_service.notify_new_ipo(ipo)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "ipo_id": ipo.id,
+        "company": ipo.company_name,
+        "sent_count": sent,
+    }
+
+
 @app.post("/api/v1/admin/reset-spk-flags")
 @limiter.limit("10/minute")
 async def admin_reset_spk_flags(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):

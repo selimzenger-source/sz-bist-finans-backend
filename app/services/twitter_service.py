@@ -322,6 +322,55 @@ def _is_duplicate_tweet(text: str) -> bool:
     return False
 
 
+def _save_pending_tweet_sync(
+    text: str,
+    image_path: str | None = None,
+    source: str = "unknown",
+    status: str = "sent",
+    twitter_tweet_id: str | None = None,
+) -> int | None:
+    """PendingTweet tablosuna kayit ekler. Tweet basarili olsa da olmasa da
+    icerik DB'ye yazilsin diye kullanilir (orn: SPK bulten analizi sayfasi).
+
+    Returns: yeni kaydin id'si veya None.
+    """
+    try:
+        from app.config import get_settings
+        from app.models.pending_tweet import PendingTweet
+        from datetime import datetime, timezone
+
+        settings = get_settings()
+        db_url = str(settings.DATABASE_URL)
+        sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://").replace("postgres://", "postgresql://")
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        engine = create_engine(sync_url, pool_pre_ping=True)
+        new_id = None
+        with Session(engine) as db:
+            now_utc = datetime.now(timezone.utc)
+            tweet = PendingTweet(
+                text=text,
+                image_path=image_path,
+                twitter_tweet_id=twitter_tweet_id,
+                source=source,
+                status=status,
+                sent_at=now_utc if status == "sent" else None,
+                reviewed_at=now_utc if status == "sent" else None,
+            )
+            db.add(tweet)
+            db.commit()
+            db.refresh(tweet)
+            new_id = tweet.id
+            logger.info("[PRE-SAVE] PendingTweet eklendi id=%s status=%s source=%s", new_id, status, source)
+        engine.dispose()
+        return new_id
+    except Exception as e:
+        logger.error("[PRE-SAVE] PendingTweet eklenemedi: %s", e)
+        return None
+
+
 def _mark_tweet_sent(text: str, image_path: str | None = None, source: str = "unknown",
                      twitter_tweet_id: str | None = None):
     """Basarili tweet'i cache'e + pending_tweets tablosuna kaydet.
@@ -675,7 +724,7 @@ def _safe_reply_tweet(reply_text: str, in_reply_to_tweet_id: str) -> bool:
         return False
 
 
-def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) -> bool:
+def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False, skip_mark_sent: bool = False) -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
     Basarisiz olursa Telegram'a bildirim gonderir.
 
@@ -736,7 +785,12 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False) ->
         if response.status_code in (200, 201):
             tweet_id = response.json().get("data", {}).get("id", "?")
             logger.info(f"Tweet basarili (id={tweet_id}): {text[:60]}...")
-            _mark_tweet_sent(text, source=source, twitter_tweet_id=str(tweet_id))
+            if not skip_mark_sent:
+                _mark_tweet_sent(text, source=source, twitter_tweet_id=str(tweet_id))
+            else:
+                import time as _time
+                text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+                _tweet_sent_cache[text_hash] = _time.time()
             _record_tweet_sent()
 
             # Facebook'a da ayni metni at (Twitter'i etkilemez)
@@ -2226,7 +2280,7 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         return False
 
 
-def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", force_send: bool = False) -> bool:
+def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", force_send: bool = False, skip_mark_sent: bool = False) -> bool:
     """Gorsel + metin tweeti atar.
 
     TWITTER_AUTO_SEND=False iken tweet kuyruğa eklenir (admin onay bekler).
@@ -2389,8 +2443,14 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
             except Exception as _media_err:
                 logger.warning(f"Twitter media URL alinamadi: {_media_err}")
 
-            _mark_tweet_sent(text, image_path=_media_url or image_path, source=source,
-                             twitter_tweet_id=str(tweet_id))
+            if not skip_mark_sent:
+                _mark_tweet_sent(text, image_path=_media_url or image_path, source=source,
+                                 twitter_tweet_id=str(tweet_id))
+            else:
+                # Pre-saved DB kaydi var — sadece cache'e ekle, duplicate satir yaratma
+                import time as _time
+                text_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+                _tweet_sent_cache[text_hash] = _time.time()
             _record_tweet_sent()
             global _last_tweet_id
             _last_tweet_id = tweet_id
@@ -3144,21 +3204,30 @@ def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
 
 
 def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | str:
-    """SPK bulten analiz tweetini atar.
+    """SPK bulten analiz tweetini atar VE analizi DB'ye kaydeder.
+
+    ÖNEMLİ: Twitter'a tweet atmak başarısız olsa bile (kill switch, rate limit,
+    network hatası vb.), AI analiz metni + Cloudinary görseli MUTLAKA
+    PendingTweet tablosuna status="sent" olarak kaydedilir. Bu sayede SPK
+    Bülten Analizleri sayfası (uygulama + web) tweet durumundan bağımsız çalışır.
 
     Zengin bülten (3+ madde): Dinamik görsel üret + kısa tweet metni
     Sade bülten (1-2 madde): Sadece metin tweet (görsel yok)
+
+    Returns:
+        str (ai_text): AI analiz başarılıysa — tweet atılmış olsun olmasın
+        False: AI metni üretilemediyse
     """
     try:
         if not bulletin_text or len(bulletin_text) < 50:
-            logger.warning("SPK bulten analiz: Bulten icerigi cok kisa (%d char), tweet atilmadi",
+            logger.warning("SPK bulten analiz: Bulten icerigi cok kisa (%d char), atlandi",
                            len(bulletin_text) if bulletin_text else 0)
             return False
 
         # 1. AI analiz üret
         ai_text = _generate_bulletin_analysis_sync(bulletin_text, bulletin_no)
         if not ai_text:
-            logger.warning("SPK bulten analiz: AI metin uretilemedi, tweet atilmadi")
+            logger.warning("SPK bulten analiz: AI metin uretilemedi, atlandi")
             return False
 
         # 2. Tarih
@@ -3168,33 +3237,30 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
         _now = _dt.now()
         _tarih_str = f"{_now.day} {_AYLAR_TR[_now.month - 1]} {_now.year}"
 
-        # 3. İçerik zenginliği kontrolü — section sayısına bak
-        # Emoji başlıkları say (🚀, 💰, ⚖️ gibi) + bullet point'ler
-        import re as _re
+        # 3. İçerik zenginliği kontrolü
         _section_emojis = ["🚀", "💰", "💵", "📊", "📈", "⚖️", "🏛", "🔔", "📋", "🏢", "🔍", "⚠️", "🎯"]
         _section_count = sum(1 for em in _section_emojis if em in ai_text)
         _bullet_count = ai_text.count("\n•") + ai_text.count("\n-") + ai_text.count("\n#")
         _richness = max(_section_count, _bullet_count)
 
-        if _richness >= 3:
-            # ── ZENGİN BÜLTEN: Görsel üret + kısa tweet ──
-            logger.info("SPK bulten analiz: zengin icerik (%d madde) — gorsel + kisa tweet", _bullet_count)
+        report_image = None
+        cloud_url = None
+        text = None
 
+        if _richness >= 3:
+            logger.info("SPK bulten analiz: zengin icerik (%d madde) — gorsel + kisa tweet", _bullet_count)
             from app.services.chart_image_generator import generate_spk_bulletin_image
             report_image = generate_spk_bulletin_image(ai_text, bulletin_no)
 
             if report_image:
-                # Görseli Cloudinary'ye yükle — uygulama ve web için kalıcı URL
                 cloud_url = _upload_image_to_cloudinary(report_image, folder="spk_bulletins")
 
-                # Tweet metni — tam AI analiz metni (görsel de eklenir)
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                     f"{ai_text}\n\n"
                     f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                     f"#SPK #BultenAnaliz #BIST100 #borsa"
                 )
-                # 4000 karakter Twitter limiti
                 if len(text) > 3950:
                     max_ai = 3950 - len(text) + len(ai_text) - 10
                     ai_trimmed = ai_text[:max_ai] + "..."
@@ -3204,48 +3270,81 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                         f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                         f"#SPK #BultenAnaliz #BIST100 #borsa"
                     )
-                success = _safe_tweet_with_media(text, report_image, source="tweet_spk_bulletin_analysis")
-
-                # DB'deki image_path'i Cloudinary URL ile güncelle
-                if success and cloud_url:
-                    _update_tweet_image_path(text, cloud_url)
-
-                # Temp dosyayı temizle
-                try:
-                    os.remove(report_image)
-                except OSError:
-                    pass
-                return ai_text if success else False
             else:
-                logger.warning("SPK bulten gorsel uretilemedi — metin ile devam")
-                # Görsel üretilemezse metin olarak at (aşağıya düş)
+                logger.warning("SPK bulten gorsel uretilemedi — sade metinle devam")
 
-        # ── SADE BÜLTEN (veya görsel hatası): Tam metin tweet ──
-        logger.info("SPK bulten analiz: sade icerik (%d madde) — sadece metin tweet", _bullet_count)
-        text = (
-            f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
-            f"{ai_text}\n\n"
-            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
-            f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
-        )
-
-        # 4000 karakter Twitter limiti
-        if len(text) > 3950:
-            max_ai = 3950 - len(text) + len(ai_text) - 10
-            ai_text = ai_text[:max_ai] + "..."
+        if text is None:
+            # Sade bülten (veya görsel hatası): tam metin
+            logger.info("SPK bulten analiz: sade icerik (%d madde) — sadece metin", _bullet_count)
             text = (
                 f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                 f"{ai_text}\n\n"
                 f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
                 f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
             )
+            if len(text) > 3950:
+                max_ai = 3950 - len(text) + len(ai_text) - 10
+                ai_trimmed = ai_text[:max_ai] + "..."
+                text = (
+                    f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
+                    f"{ai_trimmed}\n\n"
+                    f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz.\n"
+                    f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
+                )
 
-        if _safe_tweet(text, source="tweet_spk_bulletin_analysis"):
-            return ai_text
-        return False
+        # ────────────────────────────────────────────────────────
+        # KRITIK: TWEET ATMAYI DENEMEDEN ÖNCE DB'YE KAYDET
+        # Tweet basarisiz olsa bile (kill switch, rate limit) analiz
+        # SPK Bulten Analizleri sayfasinda gorunsun.
+        # ────────────────────────────────────────────────────────
+        pre_saved_id = _save_pending_tweet_sync(
+            text=text,
+            image_path=cloud_url,  # Cloudinary URL — kill switch durumunda tek bilgi kaynagi
+            source="tweet_spk_bulletin_analysis",
+            status="sent",
+        )
+        if pre_saved_id:
+            logger.info("SPK bulten analiz DB'ye kaydedildi (id=%s) — tweet bagimsiz denenecek", pre_saved_id)
+
+        # ────────────────────────────────────────────────────────
+        # Tweet denemesi (best-effort) — basarisiz olsa da DB kaydi duruyor
+        # skip_mark_sent=True: _mark_tweet_sent cagrilmaz (duplicate onleme)
+        # ────────────────────────────────────────────────────────
+        tweet_success = False
+        try:
+            if report_image:
+                tweet_success = _safe_tweet_with_media(
+                    text, report_image,
+                    source="tweet_spk_bulletin_analysis",
+                    skip_mark_sent=bool(pre_saved_id),
+                )
+            else:
+                tweet_success = _safe_tweet(
+                    text,
+                    source="tweet_spk_bulletin_analysis",
+                    skip_mark_sent=bool(pre_saved_id),
+                )
+        except Exception as _tw_err:
+            logger.warning("SPK bulten tweet hatasi (DB zaten kaydedildi): %s", _tw_err)
+            tweet_success = False
+
+        # Temp dosyayi temizle
+        if report_image:
+            try:
+                os.remove(report_image)
+            except OSError:
+                pass
+
+        logger.info(
+            "SPK bulten analiz tamamlandi: bulten=%s, db_kayit=%s, tweet=%s",
+            bulletin_no, "OK" if pre_saved_id else "HATA", "basarili" if tweet_success else "atlandi/basarisiz",
+        )
+
+        # AI text MUTLAKA donulur — caller (scraper) summary cikarmak icin kullanir
+        return ai_text
 
     except Exception as e:
-        logger.error("tweet_spk_bulletin_analysis hatasi: %s", e)
+        logger.error("tweet_spk_bulletin_analysis hatasi: %s", e, exc_info=True)
         return False
 
 
