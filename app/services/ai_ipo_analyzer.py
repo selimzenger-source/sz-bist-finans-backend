@@ -155,17 +155,51 @@ KATEGORI 7: RISK DEGERLENDIRMESI (max 5 puan — BONUS)
 TOPLAM: Kategori puanlarinin toplami / 10 = overall_score (1.0 - 10.0 arasi)
 
 KIRMIZI BAYRAK PENALTILERI (toplam puandan dusulur):
-  - %100 ortak satisi → -10 puan
-  - Negatif hasilat buyumesi → -5 puan
-  - Satış yasağı süresi (satmama taahhüdü) yok veya <90 gun → -5 puan
-  - Fon kullaniminin %80'den fazlasi borc odemesi → -5 puan
-  - Sektör ortalamasinin 3 katindan fazla Fiyat/Kazanc orani → -5 puan
-  - Halka aciklik <%8 → -3 puan
-  - %100 ortak satisi + satış yasağı süresi yok BIRLIKTE → ek -5 puan (cift kirmizi bayrak)
+  ★ ÖNEMLI: PENALTI VERMEK ICIN KESIN KANIT GEREKIR ★
+  Sadece "izahnamede gormedim" yetmez. Penaltı vermek için izahnamede
+  AÇIK olarak "yoktur / belirtilmemiştir / uygulanmayacaktır" yazmalı.
+  Eksik OCR / belge sınırlamaları sebebiyle göremediğin bilgiler için
+  PENALTI VERME — bunun yerine "veri yetersizliği nedeniyle bu maddeye
+  puan verilemedi, ek araştırma önerilir" notu yaz.
 
-ÖNEMLI TERMINOLOJI (her zaman TÜRKÇE kullan, asla "lock-up" yazma):
-  - "lock-up" yerine "satış yasağı süresi" veya "satmama taahhüdü"
+  - %100 ortak satisi → -10 puan (sadece NET olarak ortak satış oranı %100 ise)
+  - Negatif hasilat buyumesi → -5 puan (KESIN rakamlarla doğrulanmışsa)
+  - Satış yasağı süresi (satmama taahhüdü) <90 gun olduğu BELGELENMIŞSE → -5 puan
+    (sadece "izahnamede görmedim" → penaltı YOK; "yoktur" yazıyorsa → penaltı VAR)
+  - Fon kullaniminin %80'den fazlasi borc odemesi → -5 puan (kesin oran ile)
+  - Sektör ortalamasinin 3 katindan fazla Fiyat/Kazanc orani → -5 puan (kıyaslamalı)
+  - Halka aciklik <%8 → -3 puan
+  - %100 ortak satisi + satış yasağı süresi yok BIRLIKTE → ek -5 puan
+
+ÖNEMLI TERMINOLOJI (her zaman TÜRKÇE kullan):
+  - "lock-up" YASAK → "satış yasağı süresi" veya "satmama taahhüdü"
+  - "secondary offering" YASAK → "ortak satışı"
+  - "primary offering" YASAK → "sermaye artırımı"
+  - "book building" YASAK → "talep toplama"
   - Tüm finansal terimler Türkçe yazılmalı
+
+★★★ EKSIK VERI KURALI (ÇOK ÖNEMLI) ★★★
+PDF taranmış (OCR ile okunmuş) izahnamelerde her sayfa örneklenmemiş olabilir.
+Bilgi YOKLUĞU ile bilgi BULUNAMAMASI farklıdır:
+  ✗ KÖTÜ: "Lock-up süresi belirtilmemiş" (oysa OCR'da o sayfa yoktu)
+  ✓ İYİ: "Mevcut OCR örneklerinde satış yasağı süresine dair bilgiye
+    rastlanmadı; final izahnamede yer alıyor olabilir, yatırımcı
+    KAP'taki nihai izahnameyi kontrol etmeli."
+
+★★★ DEĞER ANALİZİ KURALI ★★★
+Şirketin değerlemesi için 4 metriği ZORUNLU karşılaştır:
+  1. Halka arz piyasa değeri = İhraç sonrası toplam pay × halka arz fiyatı
+  2. Net nakit pozisyonu (nakit - finansal borç)
+  3. Maddi duran varlık defter değeri
+  4. Maddi duran varlık ekspertiz değeri (varsa)
+
+Eğer şirketin Net Nakit + Maddi Duran Varlık Defter Değeri,
+toplam piyasa değerinin 2 KATINDAN FAZLA ise:
+  → "Defter değeri açısından önemli iskonto" sinyali
+  → fiyatlama_degerleme puanı 18+ olmalı (25 üzerinden)
+  → "şirket bilanço-değer açısından ucuz fiyatlanmış" yorumu yap
+
+Bu özellikle sermaye yoğun (demir-çelik, çimento, gayrimenkul) sektörler için kritik.
 
 MINIMUM PUAN: 1.0 (puanlar 1.0'in altina dusmez)
 MAXIMUM PUAN: 10.0 (puanlar 10.0'i gecmez)
