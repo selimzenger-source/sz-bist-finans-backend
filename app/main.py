@@ -3407,6 +3407,49 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
     }
 
 
+@app.post("/api/v1/admin/replace-ai-report-text")
+@limiter.limit("10/minute")
+async def admin_replace_ai_report_text(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: IPO ai_report metninde string replace yap.
+
+    Body: {"admin_password": "...", "ipo_id": 47, "find": "lock-up", "replace": "satış yasağı süresi"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ipo_id = payload.get("ipo_id")
+    find = payload.get("find", "")
+    replace = payload.get("replace", "")
+    if not ipo_id or not find:
+        return {"status": "error", "message": "ipo_id ve find gerekli"}
+
+    from app.models.ipo import IPO
+    result = await db.execute(select(IPO).where(IPO.id == int(ipo_id)))
+    ipo = result.scalar_one_or_none()
+    if not ipo or not ipo.ai_report:
+        return {"status": "error", "message": "IPO veya ai_report bulunamadi"}
+
+    import re
+    # Case-insensitive replace, hem string hem JSON
+    if isinstance(ipo.ai_report, str):
+        old = ipo.ai_report
+        # Case-insensitive replace
+        pattern = re.compile(re.escape(find), re.IGNORECASE)
+        new = pattern.sub(replace, old)
+        count = old.count(find) + old.count(find.lower()) + old.count(find.upper()) + old.count(find.title())
+        ipo.ai_report = new
+        await db.commit()
+        return {
+            "status": "ok",
+            "ipo_id": ipo.id,
+            "company": ipo.company_name,
+            "replaced_count": len(re.findall(pattern, old)),
+            "old_length": len(old),
+            "new_length": len(new),
+        }
+    return {"status": "error", "message": "ai_report formati beklenmedik"}
+
+
 @app.post("/api/v1/admin/notify-new-ipo")
 @limiter.limit("10/minute")
 async def admin_notify_new_ipo(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):

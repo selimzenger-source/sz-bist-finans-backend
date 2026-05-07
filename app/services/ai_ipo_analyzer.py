@@ -157,11 +157,15 @@ TOPLAM: Kategori puanlarinin toplami / 10 = overall_score (1.0 - 10.0 arasi)
 KIRMIZI BAYRAK PENALTILERI (toplam puandan dusulur):
   - %100 ortak satisi → -10 puan
   - Negatif hasilat buyumesi → -5 puan
-  - Lock-up yok veya <90 gun → -5 puan
+  - Satış yasağı süresi (satmama taahhüdü) yok veya <90 gun → -5 puan
   - Fon kullaniminin %80'den fazlasi borc odemesi → -5 puan
   - Sektör ortalamasinin 3 katindan fazla Fiyat/Kazanc orani → -5 puan
   - Halka aciklik <%8 → -3 puan
-  - %100 ortak satisi + lock-up yok BIRLIKTE → ek -5 puan (cift kirmizi bayrak)
+  - %100 ortak satisi + satış yasağı süresi yok BIRLIKTE → ek -5 puan (cift kirmizi bayrak)
+
+ÖNEMLI TERMINOLOJI (her zaman TÜRKÇE kullan, asla "lock-up" yazma):
+  - "lock-up" yerine "satış yasağı süresi" veya "satmama taahhüdü"
+  - Tüm finansal terimler Türkçe yazılmalı
 
 MINIMUM PUAN: 1.0 (puanlar 1.0'in altina dusmez)
 MAXIMUM PUAN: 10.0 (puanlar 10.0'i gecmez)
@@ -203,7 +207,7 @@ ANAHTAR KELIMELER & KAVRAMLAR (bunlari analizde MUTLAKA degerlendir):
   Fiyatlama: iskonto orani, piyasa degeri, arz buyuklugu, halka aciklik orani, fiyat/kazanc orani, piyasa degeri/defter degeri, dusuk fiyatlama olgusu
   Finansal: hasilat buyumesi, brut kar marji, faaliyet kari, net kar/zarar, ozkaynak karliligi, borc/ozkaynak orani, nakit akisi, isletme sermayesi
   Arz Yapisi: esit dagitim, oransal dagitim, sermaye artirimi, ortak satisi, bireysel tahsisat, talep toplama, borsada satis
-  Risk: lock-up suresi, fiyat istikrari, kur riski, faiz riski, regulasyon riski, hasilat konsantrasyonu, tek musteri bagimliligi
+  Risk: satış yasağı süresi (satmama taahhüdü), fiyat istikrari, kur riski, faiz riski, regulasyon riski, hasilat konsantrasyonu, tek musteri bagimliligi
   Sektor: buyume orani, pazar payi, rekabet avantaji, giris bariyeri, olceklenebilirlik, dijitallesme, Turkiye pazar buyuklugu
   Yonetim: konsorsiyum lideri, kurumsal yonetim, bagimsiz denetim, ortaklik yapisi
 
@@ -404,7 +408,7 @@ HALLUSINASYON KORUMASI (MUTLAK — v3 GUCLENDIRILMIS)
 - Sektordeki rakip sirketlerin F/K, PD/DD gibi degerlerini UYDURMA. Bilmiyorsan "sektordeki benzer sirketlerin degerlemesiyle kiyaslandiginda" gibi genel ifade kullan.
 - Spesifik rakam verdiysen kaynagi sana verilmis veriler olmali. Haber, rapor, arastirma sonucu UYDURMA.
 - Izahname analiz verileri sunulmussa bunlari YORUMLA — ama tekrar etme, derinlestir.
-- SPK mevzuati geregi tum izahnamelerde finansal tablolar, lock-up sureleri, ortaklik yapisi ZORUNLU bulunur. Bunlar "eksik" olamaz — erisemiyorsan o konuyu ATLA.
+- SPK mevzuati geregi tum izahnamelerde finansal tablolar, satış yasağı süreleri (satmama taahhüdü), ortaklik yapisi ZORUNLU bulunur. Bunlar "eksik" olamaz — erisemiyorsan o konuyu ATLA.
 - Gercekte var olmayan trendleri, istatistikleri, arastirma sonuclarini UYDURMA.
 
 =====================================================
@@ -718,13 +722,13 @@ def _build_ipo_context(
     lines.append("--- EK BILGILER & YONETIM ---")
 
     if ipo.lock_up_period_days:
-        lines.append(f"Lock-up Suresi: {ipo.lock_up_period_days} gun")
+        lines.append(f"Satış Yasağı Süresi (Satmama Taahhüdü): {ipo.lock_up_period_days} gun")
         if ipo.lock_up_period_days >= 360:
-            lines.append("  → Uzun lock-up: yonetimin sirkete guveni yuksek sinyali")
+            lines.append("  → Uzun satış yasağı: yonetimin sirkete guveni yuksek sinyali")
         elif ipo.lock_up_period_days < 90:
-            lines.append("  → UYARI: Kisa lock-up — iceriden hizli cikis riski")
+            lines.append("  → UYARI: Kisa satış yasağı süresi — iceriden hizli cikis riski")
     else:
-        lines.append("Lock-up Suresi: BELIRTILMEMIS — bu bir risk sinyali olabilir")
+        lines.append("Satış Yasağı Süresi: BELIRTILMEMIS — bu bir risk sinyali olabilir")
 
     if ipo.price_stability_days:
         lines.append(f"Fiyat Istikrari: {ipo.price_stability_days} gun (fiyat destegi mekanizmasi)")
