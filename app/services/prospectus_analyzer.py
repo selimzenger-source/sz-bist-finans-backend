@@ -632,8 +632,9 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
         _settings = get_settings()
         api_key = _settings.ABACUS_API_KEY
         gemini_key_ocr = _settings.GEMINI_API_KEY
-        if not api_key and not gemini_key_ocr:
-            logger.warning("Vision OCR: API key yok (ne Abacus ne Gemini)")
+        anthropic_key_ocr = getattr(_settings, "ANTHROPIC_API_KEY", None) or None
+        if not api_key and not gemini_key_ocr and not anthropic_key_ocr:
+            logger.warning("Vision OCR: API key yok (Abacus/Gemini/Anthropic hicbiri)")
             return []
 
         doc = fitz.open(pdf_path)
@@ -776,6 +777,60 @@ def _extract_pages_vision_sync(pdf_path: str) -> list:
                             "Vision OCR Gemini HTTP %d: %s",
                             resp.status_code, resp.text[:200],
                         )
+
+                # Gemini de başarısızsa Anthropic Claude Vision dene (son fallback)
+                if not ocr_success and anthropic_key_ocr:
+                    # Anthropic Messages API formatı OpenAI'dan farklı:
+                    # image_url yerine source.base64
+                    anth_content = [{
+                        "type": "text",
+                        "text": content[0]["text"],
+                    }]
+                    for _, b64 in batch:
+                        anth_content.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": b64,
+                            },
+                        })
+                    try:
+                        with _httpx.Client(timeout=90) as hcl:
+                            resp = hcl.post(
+                                _ANTHROPIC_URL,
+                                headers={
+                                    "x-api-key": anthropic_key_ocr,
+                                    "anthropic-version": "2023-06-01",
+                                    "Content-Type": "application/json",
+                                },
+                                json={
+                                    "model": "claude-sonnet-4-5-20250929",
+                                    "max_tokens": 4000,
+                                    "temperature": 0,
+                                    "messages": [{"role": "user", "content": anth_content}],
+                                },
+                            )
+                        if resp.status_code == 200:
+                            _anth_data = resp.json()
+                            _content_blocks = _anth_data.get("content", [])
+                            extracted = "".join(
+                                blk.get("text", "") for blk in _content_blocks
+                                if blk.get("type") == "text"
+                            )
+                            if extracted:
+                                ocr_success = True
+                                logger.info(
+                                    "Vision OCR Anthropic basarili s.%d-%d: %d karakter",
+                                    batch_start + 1, end_page, len(extracted),
+                                )
+                        else:
+                            logger.warning(
+                                "Vision OCR Anthropic HTTP %d: %s",
+                                resp.status_code, resp.text[:200],
+                            )
+                    except Exception as _anth_err:
+                        logger.warning("Vision OCR Anthropic hatasi: %s", _anth_err)
 
                 if ocr_success and extracted:
                     all_texts.append((batch_start, extracted))
