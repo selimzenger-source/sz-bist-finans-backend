@@ -8500,15 +8500,30 @@ async def list_share_type_conversions(
     ticker: Optional[str] = Query(None),
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
+    quality_only: bool = Query(True, description="True ise eksik kayitlar gizlenir"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Borsada İşlem Gören Tipe Dönüşüm — public list."""
+    """Borsada İşlem Gören Tipe Dönüşüm — public list.
+
+    quality_only=True (default): investor_name'i NULL/bos/'?' olan veya
+    converted_lot null olan kayıtları gizler. Mobilde "—" görünmesin.
+    """
     from app.models.share_type_conversion import ShareTypeConversion
     from datetime import timedelta as _td
+    from sqlalchemy import and_ as _and_
     cutoff = date.today() - _td(days=days)
     query = select(ShareTypeConversion).where(ShareTypeConversion.transaction_date >= cutoff)
     if ticker:
         query = query.where(ShareTypeConversion.ticker == ticker.upper())
+    if quality_only:
+        query = query.where(
+            _and_(
+                ShareTypeConversion.investor_name.isnot(None),
+                ShareTypeConversion.investor_name != "",
+                ShareTypeConversion.investor_name != "?",
+                ShareTypeConversion.converted_lot.isnot(None),
+            )
+        )
     query = query.order_by(desc(ShareTypeConversion.transaction_date), desc(ShareTypeConversion.id)).limit(limit)
     rows = (await db.execute(query)).scalars().all()
     return [{
