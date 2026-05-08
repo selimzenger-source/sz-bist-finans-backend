@@ -681,6 +681,23 @@ async def init_db():
         except Exception:
             pass
 
+        # v52 migration: cok-sembollu KAP bildirimleri icin composite unique
+        # Eski: uq_kap_url SADECE kap_url uzerinde unique. Cok hisseli bildirimde
+        # (orn: VBTS DAGI+DMRGD ayni URL) ikinci ticker insert'i UniqueViolation
+        # ile patliyor. Yeni: (kap_url, company_code) composite unique.
+        try:
+            await conn.execute(text(
+                "DROP INDEX IF EXISTS uq_kap_url"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_url_ticker "
+                "ON kap_all_disclosures(kap_url, company_code) "
+                "WHERE kap_url IS NOT NULL"
+            ))
+            logger.info("v52: uq_kap_url_ticker composite unique index olusturuldu")
+        except Exception as _v52_err:
+            logger.warning("v52 migration hatasi: %s", _v52_err)
+
         # v49 migration: ipo_poll_votes tablosu (2 fazli anket: hype + ceiling prediction)
         try:
             await conn.execute(text("""
