@@ -3407,6 +3407,95 @@ async def admin_spk_bulletin_status(request: Request, payload: dict, db: AsyncSe
     }
 
 
+@app.post("/api/v1/admin/check-kap-indexes")
+@limiter.limit("10/minute")
+async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: kap_all_disclosures index'lerini listeler (composite migration kontrolu)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from sqlalchemy import text as _sa_text
+    result = await db.execute(_sa_text(
+        "SELECT indexname, indexdef FROM pg_indexes "
+        "WHERE tablename = 'kap_all_disclosures'"
+    ))
+    indexes = [{"name": r[0], "definition": r[1]} for r in result.fetchall()]
+    return {"indexes": indexes}
+
+
+@app.post("/api/v1/admin/backfill-multi-symbol-disclosure")
+@limiter.limit("10/minute")
+async def admin_backfill_multi_symbol(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Tek bir kap_url icin eksik ticker'lari geri-doldur.
+
+    Body: {"admin_password": "...", "kap_url": "https://...", "missing_tickers": ["DMRGD"]}
+    Mevcut bir kayit (orn: DAGI) kopyalanir, missing_tickers'taki her bir ticker icin
+    yeni satir olusturulur.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url", "")
+    missing = payload.get("missing_tickers", [])
+    if not kap_url or not missing:
+        return {"status": "error", "message": "kap_url ve missing_tickers gerekli"}
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+
+    # Mevcut kaydi bul (kopyalanacak template)
+    result = await db.execute(
+        select(KapAllDisclosure).where(KapAllDisclosure.kap_url == kap_url).limit(1)
+    )
+    template = result.scalar_one_or_none()
+    if not template:
+        return {"status": "error", "message": f"kap_url icin mevcut kayit yok: {kap_url}"}
+
+    inserted = []
+    skipped = []
+    for ticker in missing:
+        # Zaten var mi?
+        check = await db.execute(
+            select(KapAllDisclosure.id).where(
+                KapAllDisclosure.kap_url == kap_url,
+                KapAllDisclosure.company_code == ticker,
+            ).limit(1)
+        )
+        if check.scalar_one_or_none():
+            skipped.append(ticker)
+            continue
+
+        new_disc = KapAllDisclosure(
+            company_code=ticker,
+            title=template.title,
+            body=template.body,
+            category=template.category,
+            is_bilanco=template.is_bilanco,
+            kap_url=kap_url,
+            source=template.source,
+            published_at=template.published_at,
+            ai_sentiment=template.ai_sentiment,
+            ai_impact_score=template.ai_impact_score,
+            ai_summary=template.ai_summary,
+            ai_analyzed_at=template.ai_analyzed_at,
+        )
+        db.add(new_disc)
+        inserted.append(ticker)
+
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "message": f"Commit hatasi (constraint olabilir): {str(e)[:300]}"}
+
+    return {
+        "status": "ok",
+        "kap_url": kap_url,
+        "template_id": template.id,
+        "inserted": inserted,
+        "skipped_already_exists": skipped,
+    }
+
+
 @app.post("/api/v1/admin/replace-ai-report-text")
 @limiter.limit("10/minute")
 async def admin_replace_ai_report_text(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
