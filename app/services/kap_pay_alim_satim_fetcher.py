@@ -239,29 +239,85 @@ def extract_party_from_html_header(html: str) -> Optional[str]:
             name += " A.Ş."
         if 5 <= len(name) <= 200:
             return name
+
+    # FALLBACK 1: "Bildirimi Yapan" headeri sonrasındaki plain text — gerçek kişi yatırımcılar için
+    # KAP HTML'inde slug yoksa (örn: ŞÜKRÜ TÜRKMEN gibi bireysel yatırımcılar) düz metin olur
+    m = re.search(
+        r"Bildirimi\s*Yapan(?:\s*</[^>]+>)*\s*(?:<[^>]+>\s*)*"
+        r"([A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜa-zçğıöşü\s\.\-&]{3,150}?)"
+        r"\s*(?:</|<br|<div|<p|İlgili|Bildirimi\s*[Kk]onu|Açıklama)",
+        html, re.DOTALL,
+    )
+    if m:
+        name = re.sub(r"\s+", " ", m.group(1)).strip().rstrip(".,;:")
+        # Tag artıkları temizle
+        name = re.sub(r"<[^>]+>", "", name).strip()
+        # Çok kısa veya çok uzun değilse kabul
+        if 5 <= len(name) <= 200 and not name.lower().startswith("http"):
+            return name
+
+    # FALLBACK 2: "Ad Soyad / Ticaret Ünvanı : X" PDF'te değil HTML metninde de olabiliyor
+    m = re.search(
+        r"Ad\s+Soyad\s*/\s*Ticaret\s+[ÜU]nvan[ıi]\s*:?\s*"
+        r"([A-ZÇĞİÖŞÜ][^\n<]{3,150}?)"
+        r"\s*(?:T[üu]zel|G[öo]rev|<|$)",
+        html, re.IGNORECASE,
+    )
+    if m:
+        name = m.group(1).strip().rstrip(".,;:")
+        name = re.sub(r"<[^>]+>", "", name).strip()
+        if 5 <= len(name) <= 200:
+            return name
+
     return None
 
 
 def extract_party_name(body: str) -> Optional[str]:
     """Body metninden party adını çıkar (basit regex).
 
+    Hem A.Ş. (kurumsal) hem gerçek kişi yatırımcı (Şükrü Türkmen, Ebubekir Balıkçı vb.)
+    için pattern içerir.
+
     Ornek: "Pardus Portföy Yönetimi AŞ.'nin kurucusu olduğu yatırım fonlarının..."
     -> "Pardus Portföy Yönetimi AŞ"
+
+    Ornek: "Ebubekir Balıkçı tarafından 100 - 104 TL fiyat aralığından satılmış..."
+    -> "Ebubekir Balıkçı"
     """
     if not body:
         return None
-    # "X A.Ş.'nin" / "X A.Ş.nin" pattern
-    patterns = [
+    # Önce A.Ş. (kurumsal) pattern
+    patterns_corp = [
         r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\.\s\-&]{5,80}?)\s*(?:A\.\s*Ş\.|AŞ\.|A\.Ş)\.?'?\s*[ni]?n[ıi]?n",
         r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\.\s\-&]{5,80}?)\s+kurucu",
     ]
-    for pat in patterns:
+    for pat in patterns_corp:
         m = re.search(pat, body)
         if m:
             name = m.group(1).strip()
             if "A.Ş" not in name and "AŞ" not in name:
                 name += " A.Ş."
             return name[:200]
+
+    # Gerçek kişi pattern: "Ad Soyad tarafından" veya "Ad Soyad'a/'in ait/sahip"
+    # Türkçe Ad Soyad tipik olarak 2-4 kelime, her kelime büyük harfle başlar
+    patterns_person = [
+        # "Şükrü Türkmen tarafından"
+        r"\b([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+){1,3})\s+taraf[ıi]ndan",
+        # "Şükrü Türkmen'in / Ebubekir Balıkçı'nın"
+        r"\b([A-ZÇĞİÖŞÜ][a-zçğıöşü]+(?:\s+[A-ZÇĞİÖŞÜ][a-zçğıöşü]+){1,3})\s*['']?(?:n[ıi]n|in|nin)\b",
+        # PDF: "Ad Soyad / Ticaret Ünvanı: ŞÜKRÜ TÜRKMEN"
+        r"Ad\s+Soyad\s*/\s*Ticaret\s+[ÜU]nvan[ıi]\s*:?\s*([A-ZÇĞİÖŞÜ\s]{5,80}?)(?:\n|T[üu]zel|G[öo]rev)",
+    ]
+    for pat in patterns_person:
+        m = re.search(pat, body)
+        if m:
+            name = m.group(1).strip().rstrip(".,;:")
+            # Çok kısa veya tek kelime ise atla
+            if len(name) >= 5 and len(name.split()) >= 2:
+                # Yanlış pozitif önle: "Bildirimi Yapan" gibi şablon kelimeler değilse
+                if not re.search(r"\b(Bildirimi|Borsa|Şirket|Pay|Ortaklık|İşlem)\b", name, re.IGNORECASE):
+                    return name[:200]
     return None
 
 

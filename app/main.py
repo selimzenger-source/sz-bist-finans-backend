@@ -8911,6 +8911,132 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/reparse-incomplete-share-transactions")
+@limiter.limit("3/minute")
+async def admin_reparse_incomplete_share_transactions(request: Request, payload: dict = Body(...)):
+    """Admin: Eksik (party_name yok veya tum oran/fiyat null) kayitlari KAP'tan
+    yeniden fetch edip parse ederek günceller. SİLMEZ.
+
+    Body: {"admin_password": "...", "limit": 50}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from app.services.kap_pay_alim_satim_fetcher import fetch_kap_pay_alim_satim
+    from sqlalchemy import or_ as _or_, and_ as _and_
+
+    limit = int(payload.get("limit", 50))
+    bad_filter = _or_(
+        ShareTransactionDetail.party_name.is_(None),
+        ShareTransactionDetail.party_name == "",
+        ShareTransactionDetail.party_name == "?",
+        _and_(
+            ShareTransactionDetail.oy_hakki_pct.is_(None),
+            ShareTransactionDetail.pay_orani_pct.is_(None),
+            ShareTransactionDetail.price_low.is_(None),
+            ShareTransactionDetail.nominal_lot.is_(None),
+        ),
+    )
+
+    fixed = []
+    failed = []
+
+    async for db in get_db():
+        result = await db.execute(
+            select(ShareTransactionDetail)
+            .where(bad_filter)
+            .order_by(desc(ShareTransactionDetail.id))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+
+        for row in rows:
+            if not row.kap_url:
+                failed.append({"id": row.id, "ticker": row.ticker, "reason": "kap_url yok"})
+                continue
+            try:
+                parsed = await fetch_kap_pay_alim_satim(row.kap_url)
+                if not parsed:
+                    failed.append({"id": row.id, "ticker": row.ticker, "reason": "parse failed"})
+                    continue
+
+                changed = False
+
+                # party_name güncelle
+                new_party = (
+                    parsed.get("party_name")
+                    or parsed.get("party_name_header")
+                )
+                if not new_party:
+                    body = parsed.get("body_text") or ""
+                    from app.services.kap_pay_alim_satim_fetcher import extract_party_name as _epn
+                    new_party = _epn(body)
+                if new_party and new_party != row.party_name:
+                    row.party_name = new_party
+                    changed = True
+
+                # Sayisal alanlar
+                for src_key, db_attr in [
+                    ("end_pay_oran_pct", "pay_orani_pct"),
+                    ("end_oy_hakki_pct", "oy_hakki_pct"),
+                ]:
+                    v = parsed.get(src_key)
+                    if v is not None and getattr(row, db_attr) is None:
+                        setattr(row, db_attr, v)
+                        changed = True
+
+                # Pay/oy değişimi
+                if parsed.get("end_pay_oran_pct") is not None and parsed.get("beginning_pay_oran_pct") is not None:
+                    diff = parsed["end_pay_oran_pct"] - parsed["beginning_pay_oran_pct"]
+                    if row.pay_orani_change_pct is None:
+                        row.pay_orani_change_pct = diff
+                        changed = True
+                if parsed.get("end_oy_hakki_pct") is not None and parsed.get("beginning_oy_hakki_pct") is not None:
+                    diff = parsed["end_oy_hakki_pct"] - parsed["beginning_oy_hakki_pct"]
+                    if row.oy_hakki_change_pct is None:
+                        row.oy_hakki_change_pct = diff
+                        changed = True
+
+                # Fiyat
+                if parsed.get("price_low") is not None and row.price_low is None:
+                    row.price_low = parsed["price_low"]
+                    changed = True
+                if parsed.get("price_high") is not None and row.price_high is None:
+                    row.price_high = parsed["price_high"]
+                    changed = True
+
+                # Nominal lot
+                alim = parsed.get("alim_nominal") or 0
+                satim = parsed.get("satim_nominal") or 0
+                lot = int(abs(alim - satim) if alim and satim else (alim or satim or 0))
+                if lot and row.nominal_lot is None:
+                    row.nominal_lot = lot
+                    changed = True
+
+                if changed:
+                    fixed.append({
+                        "id": row.id,
+                        "ticker": row.ticker,
+                        "party_name": row.party_name,
+                    })
+
+            except Exception as e:
+                failed.append({"id": row.id, "ticker": row.ticker, "reason": str(e)[:200]})
+
+        if fixed:
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "scanned": len(rows),
+            "fixed_count": len(fixed),
+            "failed_count": len(failed),
+            "fixed": fixed[:20],
+            "failed": failed[:20],
+        }
+
+
 @app.post("/api/v1/admin/cleanup-incomplete-share-transactions")
 @limiter.limit("3/minute")
 async def admin_cleanup_incomplete_share_transactions(request: Request, payload: dict = Body(...)):
