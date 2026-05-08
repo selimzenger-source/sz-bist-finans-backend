@@ -13,6 +13,12 @@ KAP'ta bilanco bildirimi geldiginde (is_bilanco=TRUE) otomatik tetiklenen akis:
 Ayrica:
 - Haftalik batch job: Tum 700+ hisse icin bilanco guncelleme
 - Gunluk: Temettu verisi guncelleme
+
+★★★ BILANCO PIPELINE GEÇİCİ KAPALI ★★★
+Mobil uygulamada Bilanço tab'ı şu an gizli (yasal hazırlık dönemi).
+KAP bildirimi geldiğinde pipeline tetiklenmesin, AI analizi üretilmesin,
+DB'ye boş yazma yapılmasın diye BILANCO_PIPELINE_ENABLED=False.
+İleride aktif etmek için bu flag'i True yap.
 """
 
 import asyncio
@@ -20,6 +26,10 @@ import logging
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
+
+# ★ Bilanço pipeline geçici olarak DEVRE DIŞI (mobil tab gizli olduğu için).
+#   True yapılırsa KAP bilanço bildirimleri AI analizi + tweet üretmeye devam eder.
+BILANCO_PIPELINE_ENABLED = False
 
 # Bilanco sezonu yogunluk kontrolu
 _bilanco_queue: asyncio.Queue | None = None
@@ -48,6 +58,13 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
         ticker: Hisse kodu
         kap_title: KAP bildirim basligi (tweet icin)
     """
+    if not BILANCO_PIPELINE_ENABLED:
+        logger.info(
+            "📊 Bilanco pipeline ATLANDI (kapatildi): %s — %s — flag BILANCO_PIPELINE_ENABLED=False",
+            ticker, kap_title,
+        )
+        return
+
     logger.info("📊 Bilanco pipeline baslatildi: %s — %s", ticker, kap_title)
 
     try:
@@ -252,6 +269,9 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
 
 async def enqueue_bilanco(ticker: str, kap_title: str = ""):
     """Bilanco islemini queue'ya ekler. Queue worker isleyecek."""
+    if not BILANCO_PIPELINE_ENABLED:
+        logger.debug("Bilanco enqueue atlandi (pipeline kapali): %s", ticker)
+        return
     await _ensure_queue()
     await _bilanco_queue.put((ticker, kap_title))
     logger.info("Bilanco queue'ya eklendi: %s (queue size: %d)", ticker, _bilanco_queue.qsize())
@@ -263,6 +283,9 @@ async def start_bilanco_queue_worker():
     Scheduler baslangicinda bir kez cagrilir.
     Bilanco sezonu (Mart-Nisan) yogunlugu icin tasarlanmistir.
     """
+    if not BILANCO_PIPELINE_ENABLED:
+        logger.info("Bilanco queue worker BASLATILMADI — flag kapali")
+        return
     global _queue_worker_running
     if _queue_worker_running:
         return
@@ -319,6 +342,9 @@ async def weekly_bilanco_update():
     Pazar gecesi calistirilmasi onerilir.
     Tahmini sure: ~3-4 saat (700+ hisse x 11 yil x 1.5sn) — ilk calisma uzun, sonrakiler sadece yeni donem
     """
+    if not BILANCO_PIPELINE_ENABLED:
+        logger.info("📊 Haftalik bilanco batch ATLANDI — flag kapali")
+        return
     logger.info("📊 Haftalik bilanco batch baslatildi")
     start_time = datetime.now(timezone.utc)
 
