@@ -316,7 +316,12 @@ def extract_party_name(body: str) -> Optional[str]:
             # Çok kısa veya tek kelime ise atla
             if len(name) >= 5 and len(name.split()) >= 2:
                 # Yanlış pozitif önle: "Bildirimi Yapan" gibi şablon kelimeler değilse
-                if not re.search(r"\b(Bildirimi|Borsa|Şirket|Pay|Ortaklık|İşlem)\b", name, re.IGNORECASE):
+                blacklist = (
+                    r"\b(Bildirimi|Borsa|Şirket|Pay|Ortaklık|İşlem|Sayılı|Kişisel|"
+                    r"Veriler|Veri|Kanun|Yasal|Madde|Fıkra|Hüküm|Uyarınca|Saygılarımızla|"
+                    r"Açıklama|Yukarıda|Aşağıda|Sermaye|Hisse|Tarihinde|İlgili|Konu|Mevzuat)\b"
+                )
+                if not re.search(blacklist, name, re.IGNORECASE):
                     return name[:200]
     return None
 
