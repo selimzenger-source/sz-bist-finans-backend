@@ -8423,11 +8423,21 @@ async def list_share_transactions(
     transaction_type: Optional[str] = Query(None, description="alici | satici"),
     days: int = Query(30, ge=1, le=365, description="Son kac gun"),
     limit: int = Query(50, ge=1, le=200),
+    quality_only: bool = Query(True, description="True ise eksik (party_name veya oran yok) kayitlar gizlenir"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pay alim satim — yapilandirilmis kayitlar (kim ne zaman ne kadar aldı/sattı)."""
+    """Pay alim satim — yapilandirilmis kayitlar (kim ne zaman ne kadar aldı/sattı).
+
+    quality_only=True (default): Sadece **eksiksiz** kayıtları dondurur:
+      - party_name NULL/bos/'?' DEGIL
+      - oy_hakki_pct VEYA pay_orani_pct VEYA price_low en az BIRI dolu
+    Bu sayede uygulamada "?" ve "—" olan dağınık kartlar görünmez.
+
+    quality_only=False: TUM kayitlari doner (admin debugging icin).
+    """
     from app.models.share_transaction_detail import ShareTransactionDetail
     from datetime import timedelta as _td
+    from sqlalchemy import and_ as _and_, or_ as _or_
 
     cutoff = date.today() - _td(days=days)
     query = select(ShareTransactionDetail).where(
@@ -8437,6 +8447,25 @@ async def list_share_transactions(
         query = query.where(ShareTransactionDetail.ticker == ticker.upper())
     if transaction_type in ("alici", "satici"):
         query = query.where(ShareTransactionDetail.transaction_type == transaction_type)
+
+    if quality_only:
+        # Party adi ZORUNLU
+        query = query.where(
+            _and_(
+                ShareTransactionDetail.party_name.isnot(None),
+                ShareTransactionDetail.party_name != "",
+                ShareTransactionDetail.party_name != "?",
+            )
+        )
+        # En az bir sayisal veri olmali (oy hakki / pay orani / fiyat)
+        query = query.where(
+            _or_(
+                ShareTransactionDetail.oy_hakki_pct.isnot(None),
+                ShareTransactionDetail.pay_orani_pct.isnot(None),
+                ShareTransactionDetail.price_low.isnot(None),
+                ShareTransactionDetail.nominal_lot.isnot(None),
+            )
+        )
 
     query = query.order_by(desc(ShareTransactionDetail.transaction_date), desc(ShareTransactionDetail.id))
     query = query.limit(limit)
@@ -8880,6 +8909,74 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "ok", **stats, "days": days, "targets": targets}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/cleanup-incomplete-share-transactions")
+@limiter.limit("3/minute")
+async def admin_cleanup_incomplete_share_transactions(request: Request, payload: dict = Body(...)):
+    """Admin: Eksik (party_name yok veya tum oran/fiyat null) kayitlari sil.
+
+    Body: {"admin_password": "...", "dry_run": true}
+    dry_run=true ise sadece sayar, silmez.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from sqlalchemy import or_ as _or_, and_ as _and_, delete as _sa_delete
+
+    dry_run = bool(payload.get("dry_run", False))
+
+    # Eksik kayit kriteri:
+    #  1) party_name NULL/bos/'?' VEYA
+    #  2) tum sayisal alanlar null (oy_hakki_pct, pay_orani_pct, price_low, nominal_lot)
+    bad_filter = _or_(
+        ShareTransactionDetail.party_name.is_(None),
+        ShareTransactionDetail.party_name == "",
+        ShareTransactionDetail.party_name == "?",
+        _and_(
+            ShareTransactionDetail.oy_hakki_pct.is_(None),
+            ShareTransactionDetail.pay_orani_pct.is_(None),
+            ShareTransactionDetail.price_low.is_(None),
+            ShareTransactionDetail.nominal_lot.is_(None),
+        ),
+    )
+
+    # Once say
+    count_q = select(ShareTransactionDetail).where(bad_filter)
+    async for db in get_db():
+        count_result = await db.execute(count_q)
+        bad_rows = count_result.scalars().all()
+        bad_count = len(bad_rows)
+
+        sample = [
+            {
+                "id": r.id,
+                "ticker": r.ticker,
+                "party_name": r.party_name,
+                "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
+            }
+            for r in bad_rows[:10]
+        ]
+
+        if dry_run:
+            return {
+                "status": "ok",
+                "dry_run": True,
+                "would_delete": bad_count,
+                "sample": sample,
+            }
+
+        # Sil
+        del_stmt = _sa_delete(ShareTransactionDetail).where(bad_filter)
+        await db.execute(del_stmt)
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "deleted": bad_count,
+            "sample": sample,
+        }
 
 
 @app.post("/api/v1/admin/reclassify-share-transactions")
