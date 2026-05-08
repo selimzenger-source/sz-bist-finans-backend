@@ -8911,6 +8911,102 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/reparse-incomplete-type-conversions")
+@limiter.limit("3/minute")
+async def admin_reparse_incomplete_type_conversions(request: Request, payload: dict = Body(...)):
+    """Admin: Eksik (investor_name='?' veya converted_lot null) tipe dönüşüm
+    kayıtlarını KAP'tan yeniden fetch edip parse ederek günceller. SİLMEZ.
+
+    Body: {"admin_password": "...", "limit": 100}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.share_type_conversion import ShareTypeConversion
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.kap_category_processors import _parse_tc_table
+    from sqlalchemy import or_ as _or_
+
+    limit = int(payload.get("limit", 100))
+    bad_filter = _or_(
+        ShareTypeConversion.investor_name.is_(None),
+        ShareTypeConversion.investor_name == "",
+        ShareTypeConversion.investor_name == "?",
+        ShareTypeConversion.converted_lot.is_(None),
+    )
+
+    fixed = []
+    failed = []
+
+    async for db in get_db():
+        result = await db.execute(
+            select(ShareTypeConversion)
+            .where(bad_filter)
+            .order_by(desc(ShareTypeConversion.id))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+
+        # Aynı kap_url için bir kez fetch yap (cache)
+        url_cache: dict = {}
+
+        for row in rows:
+            if not row.kap_url:
+                failed.append({"id": row.id, "ticker": row.ticker, "reason": "kap_url yok"})
+                continue
+            try:
+                if row.kap_url not in url_cache:
+                    disc = await fetch_kap_disclosure(row.kap_url)
+                    body = (disc or {}).get("full_text") or ""
+                    url_cache[row.kap_url] = _parse_tc_table(body)
+                table_rows = url_cache[row.kap_url]
+
+                # Bu satıra ait ticker'ı tablo satırlarında ara
+                match = None
+                for d in table_rows:
+                    if d.get("ticker", "").upper() == (row.ticker or "").upper():
+                        match = d
+                        break
+
+                if not match:
+                    failed.append({"id": row.id, "ticker": row.ticker, "reason": "tabloda eşleşme yok"})
+                    continue
+
+                changed = False
+                if (not row.investor_name or row.investor_name in ("", "?")) and match.get("investor_name"):
+                    row.investor_name = match["investor_name"][:255]
+                    changed = True
+                if row.converted_lot is None and match.get("nominal_tl"):
+                    row.converted_lot = int(match["nominal_tl"])
+                    changed = True
+                if (not row.company_name) and match.get("company_name"):
+                    row.company_name = match["company_name"][:255]
+                    changed = True
+
+                if changed:
+                    fixed.append({
+                        "id": row.id,
+                        "ticker": row.ticker,
+                        "investor_name": row.investor_name,
+                        "converted_lot": row.converted_lot,
+                    })
+
+            except Exception as e:
+                failed.append({"id": row.id, "ticker": row.ticker, "reason": str(e)[:200]})
+
+        if fixed:
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "scanned": len(rows),
+            "fixed_count": len(fixed),
+            "failed_count": len(failed),
+            "fixed": fixed[:20],
+            "failed": failed[:20],
+        }
+
+
 @app.post("/api/v1/admin/reparse-incomplete-share-transactions")
 @limiter.limit("3/minute")
 async def admin_reparse_incomplete_share_transactions(request: Request, payload: dict = Body(...)):
