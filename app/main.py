@@ -8943,6 +8943,111 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/backfill-payment-announcements")
+@limiter.limit("3/minute")
+async def admin_backfill_payment_announcements(request: Request, payload: dict = Body(...)):
+    """Admin: Geçmiş 'BISTECH Pay Piyasası' / 'Hak Kullanımı' KAP duyurularını tarayıp
+    içlerindeki temettü ödemelerini DividendCalendar'a uygula.
+
+    DB'deki kap_all_disclosures tablosundan TITLE eşleşen kayıtları al,
+    her birinin body'sini parse_dividend_payment_announcement ile tara,
+    process_dividend_payment_announcement ile DividendCalendar status'larını güncelle.
+
+    Body: {"admin_password": "...", "days": 90, "limit": 200}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.dividend_calendar_processor import (
+        parse_dividend_payment_announcement,
+        process_dividend_payment_announcement,
+    )
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from datetime import timedelta as _td
+    from sqlalchemy import or_ as _or_
+
+    days = int(payload.get("days", 90))
+    limit = int(payload.get("limit", 200))
+    cutoff = datetime.now(timezone.utc) - _td(days=days)
+
+    title_filter = _or_(
+        KapAllDisclosure.title.ilike("%BISTECH Pay Piyasas%"),
+        KapAllDisclosure.title.ilike("%bistech pay piyasas%"),
+        KapAllDisclosure.title.ilike("%Hak Kullan%"),
+        KapAllDisclosure.title.ilike("%hak kullan%"),
+        KapAllDisclosure.title.ilike("%Borsa İstanbul A.%"),
+    )
+
+    summary = {
+        "scanned": 0,
+        "with_pattern": 0,
+        "tickers_processed": [],
+        "by_url": [],
+    }
+
+    async for db in get_db():
+        result = await db.execute(
+            select(KapAllDisclosure)
+            .where(title_filter)
+            .where(KapAllDisclosure.published_at >= cutoff)
+            .order_by(desc(KapAllDisclosure.published_at))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+        summary["scanned"] = len(rows)
+
+        for row in rows:
+            try:
+                body = row.body or ""
+                # Body kısa ise KAP'tan tekrar çek
+                if len(body) < 200 and row.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(row.kap_url)
+                        if disc and disc.get("full_text"):
+                            body = disc["full_text"]
+                    except Exception:
+                        pass
+                if not body:
+                    continue
+
+                parsed = parse_dividend_payment_announcement(body)
+                if not parsed:
+                    continue
+
+                summary["with_pattern"] += 1
+                tickers = [p["ticker"] for p in parsed]
+                summary["tickers_processed"].extend(tickers)
+
+                # Process et
+                _r = await process_dividend_payment_announcement(
+                    db,
+                    body=body,
+                    kap_url=row.kap_url,
+                    disclosure_id=row.id,
+                    published_at=row.published_at,
+                )
+                if len(summary["by_url"]) < 30:
+                    summary["by_url"].append({
+                        "kap_url": row.kap_url,
+                        "title": (row.title or "")[:80],
+                        "tickers": tickers,
+                        "processed": _r,
+                    })
+            except Exception as e:
+                logger.warning("Backfill payment announcement hata (id=%s): %s", row.id, e)
+
+        await db.commit()
+
+        # Tekil ticker listesi
+        unique_tickers = sorted(set(summary["tickers_processed"]))
+        summary["unique_ticker_count"] = len(unique_tickers)
+        summary["unique_tickers"] = unique_tickers[:50]
+        summary.pop("tickers_processed", None)
+
+        return {"status": "ok", **summary}
+
+
 @app.post("/api/v1/admin/reprocess-payment-announcement")
 @limiter.limit("3/minute")
 async def admin_reprocess_payment_announcement(request: Request, payload: dict = Body(...)):
