@@ -8958,7 +8958,7 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
-    from app.models.coupon import Coupon
+    from app.models.user import Coupon
     import secrets as _secrets
     import string as _string
 
