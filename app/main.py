@@ -9010,6 +9010,111 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/list-bilanco-by-period")
+@limiter.limit("10/minute")
+async def admin_list_bilanco_by_period(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli period kayıtlarını listele.
+
+    Body: {"admin_password": "...", "period": "2025-Q4"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.company_financial import CompanyFinancial
+    period = payload.get("period", "")
+
+    async for db in get_db():
+        result = await db.execute(
+            select(CompanyFinancial)
+            .where(CompanyFinancial.period == period)
+            .order_by(desc(CompanyFinancial.id))
+            .limit(200)
+        )
+        rows = result.scalars().all()
+        return {
+            "period": period,
+            "count": len(rows),
+            "tickers": [r.ticker for r in rows],
+            "sample": [
+                {"id": r.id, "ticker": r.ticker, "revenue": float(r.revenue) if r.revenue else None}
+                for r in rows[:30]
+            ],
+        }
+
+
+@app.post("/api/v1/admin/reparse-bilanco-period-by-period")
+@limiter.limit("3/minute")
+async def admin_reparse_by_period(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli period'lu (örn 2025-Q4) tüm kayıtları reparse et.
+
+    Body: {"admin_password": "...", "period": "2025-Q4", "limit": 200}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.company_financial import CompanyFinancial
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.bilanco_kap_scraper import _detect_period
+
+    period = payload.get("period", "")
+    limit = int(payload.get("limit", 200))
+
+    fixed = []
+    skipped = []
+
+    async for db in get_db():
+        result = await db.execute(
+            select(CompanyFinancial)
+            .where(CompanyFinancial.period == period)
+            .order_by(desc(CompanyFinancial.id))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+
+        for row in rows:
+            try:
+                kap_q = await db.execute(
+                    select(KapAllDisclosure)
+                    .where(KapAllDisclosure.company_code == row.ticker)
+                    .where(KapAllDisclosure.is_bilanco == True)
+                    .order_by(desc(KapAllDisclosure.published_at))
+                    .limit(8)
+                )
+                kap_rows = kap_q.scalars().all()
+                detected = set()
+                for kap in kap_rows:
+                    if not kap.body or len(kap.body) < 200:
+                        continue
+                    p = _detect_period(kap.body)
+                    if p:
+                        detected.add(p)
+                if not detected:
+                    skipped.append({"ticker": row.ticker, "reason": "period yok"})
+                    continue
+                latest = sorted(detected, reverse=True)[0]
+                if latest != row.period:
+                    fixed.append({
+                        "ticker": row.ticker,
+                        "old": row.period,
+                        "new": latest,
+                    })
+                    row.period = latest
+            except Exception as e:
+                skipped.append({"ticker": row.ticker, "reason": str(e)[:80]})
+
+        if fixed:
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "scanned": len(rows),
+            "fixed_count": len(fixed),
+            "fixed": fixed[:30],
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
+        }
+
+
 @app.post("/api/v1/admin/reparse-bilanco-period")
 @limiter.limit("3/minute")
 async def admin_reparse_bilanco_period(request: Request, payload: dict = Body(...)):
