@@ -72,25 +72,32 @@ _PATTERN_YKK = [
 
 
 def is_fund_ticker(ticker: str) -> bool:
-    """Yatırım fonu / ETF / GYO ticker'ı mı?
+    """Yatırım fonu / ETF ticker'ı mı?
 
-    Fon kodu kalıpları:
-    - 6+ karakter ve sonu F/FX/FN/FY ile biter (ZTM25F, AKBNF, BIST30FX gibi)
-    - Sadece harf+rakam, hisse senedi 4-5 harf değil
-    - YAY, YAS, YBE gibi yatırım fonu ön ekleri
+    BIST hisse senedi kuralları:
+    - 4-5 karakter, başında 1-2 sayı OLABİLİR (A1CAP, A1YEN gerçek hisse)
+    - Sayı içerse bile 5 karaktere kadar = hisse
+
+    Fon kuralları:
+    - 6+ karakter (THY30FX gibi)
+    - 6+ karakter ve içinde sayı (ZTM25F gibi) — kesin fon
+    - F/FX/FN/FY ile biten 6+ karakterli ticker'lar
     """
     if not ticker:
         return False
     t = ticker.upper().strip()
-    # Hisse senedi: 4-5 harf, sadece A-Z (THYAO, GARAN, ASELS)
-    # Fon: 6+ karakter veya sayı içerir
-    if len(t) < 4 or len(t) > 7:
+    # Çok kısa veya çok uzun → fon
+    if len(t) < 4 or len(t) > 8:
         return True
-    # Sayı içeriyorsa fon (ZTM25F, BIST30F)
+    # 5 karaktere kadar olan ticker'lar genelde hisse (A1CAP, THYAO, BANVT)
+    if len(t) <= 5:
+        return False
+    # 6-8 karakter:
+    # - Sayı içerirse fon (ZTM25F, AKBN30F)
     if any(c.isdigit() for c in t):
         return True
-    # F/FX/FN/FY ile bitiyorsa ve 5+ karakterse fon
-    if len(t) >= 5 and (t.endswith("FX") or t.endswith("FN") or t.endswith("FY")):
+    # - F/FX/FN/FY ile biterse fon (BISTHFX, AKETFFN)
+    if t.endswith("FX") or t.endswith("FN") or t.endswith("FY") or t.endswith("F"):
         return True
     return False
 
