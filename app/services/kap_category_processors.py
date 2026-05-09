@@ -342,6 +342,13 @@ _CS_TITLE_PATTERNS = [
     "tedbir uygulan", "önlem uygulan", "onlem uygulan",
     "emir iptali", "piyasa emri", "tek fiyat",
     "tedbirli", "borsa istanbul tedbir",
+    # YENI — VBTS başlıkları (kullanıcı bildirimi: KAP 1601348 ve sonrası)
+    "volatilite bazlı tedbir", "volatilite bazli tedbir",
+    "vbts kapsamında", "vbts kapsaminda",
+    "pay piyasasında volatilite", "pay piyasasinda volatilite",
+    " vbts ", "(vbts)",
+    # Genel "tedbir" kelimesi başlıkta geçiyorsa yakala (devre kesici hariç tutulur)
+    "tedbir sistemi",
 ]
 
 

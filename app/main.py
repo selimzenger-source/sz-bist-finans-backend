@@ -9009,6 +9009,104 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/backfill-cautious-stocks")
+@limiter.limit("3/minute")
+async def admin_backfill_cautious_stocks(request: Request, payload: dict = Body(...)):
+    """Admin: Geçmiş VBTS / Tedbirli hisse KAP bildirimlerini tarayıp
+    cautious_stocks tablosuna işle.
+
+    Body: {"admin_password": "...", "days": 30, "limit": 100}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.cautious_stock import CautiousStock
+    from app.services.kap_category_processors import is_cautious, process_cautious
+    from datetime import timedelta as _td
+    from sqlalchemy import or_ as _or_
+
+    days = int(payload.get("days", 30))
+    limit = int(payload.get("limit", 100))
+    cutoff = datetime.now(timezone.utc) - _td(days=days)
+
+    title_filter = _or_(
+        KapAllDisclosure.title.ilike("%volatilite%"),
+        KapAllDisclosure.title.ilike("%vbts%"),
+        KapAllDisclosure.title.ilike("%tedbir%"),
+        KapAllDisclosure.title.ilike("%bistech pay piyasas%"),
+        KapAllDisclosure.title.ilike("%brüt takas%"),
+        KapAllDisclosure.title.ilike("%brut takas%"),
+        KapAllDisclosure.title.ilike("%açığa satış%"),
+        KapAllDisclosure.title.ilike("%aciga satis%"),
+        KapAllDisclosure.title.ilike("%kredili işlem%"),
+    )
+
+    summary = {
+        "scanned": 0,
+        "processed": 0,
+        "added": [],
+        "skipped_existing": 0,
+        "not_cautious": 0,
+    }
+
+    async for db in get_db():
+        result = await db.execute(
+            select(KapAllDisclosure)
+            .where(title_filter)
+            .where(KapAllDisclosure.published_at >= cutoff)
+            .order_by(desc(KapAllDisclosure.published_at))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+        summary["scanned"] = len(rows)
+
+        for row in rows:
+            try:
+                # Devre kesici atla
+                if "devre kesici" in (row.title or "").lower():
+                    continue
+
+                if not is_cautious(row.title or ""):
+                    summary["not_cautious"] += 1
+                    continue
+
+                # Zaten işlenmiş mi?
+                exists = await db.execute(
+                    select(CautiousStock)
+                    .where(CautiousStock.kap_url == row.kap_url)
+                    .where(CautiousStock.ticker == row.company_code)
+                    .limit(1)
+                )
+                if exists.scalar_one_or_none():
+                    summary["skipped_existing"] += 1
+                    continue
+
+                processed = await process_cautious(
+                    db,
+                    disclosure_id=row.id,
+                    ticker=row.company_code,
+                    company_name=row.company_code,  # company_name yoksa ticker
+                    title=row.title,
+                    body=row.body,
+                    kap_url=row.kap_url,
+                    published_at=row.published_at,
+                )
+                if processed:
+                    summary["processed"] += 1
+                    if len(summary["added"]) < 30:
+                        summary["added"].append({
+                            "ticker": processed.ticker,
+                            "tags": processed.tags or [],
+                            "kap_url": row.kap_url,
+                        })
+            except Exception as e:
+                logger.warning("Cautious backfill hata (id=%s): %s", row.id, e)
+
+        await db.commit()
+        return {"status": "ok", **summary}
+
+
 @app.post("/api/v1/admin/seed-ipo-poll-votes")
 @limiter.limit("3/minute")
 async def admin_seed_ipo_poll_votes(request: Request, payload: dict = Body(...)):
