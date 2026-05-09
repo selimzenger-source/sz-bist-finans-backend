@@ -8943,6 +8943,51 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/seed-ipo-poll-votes")
+@limiter.limit("3/minute")
+async def admin_seed_ipo_poll_votes(request: Request, payload: dict = Body(...)):
+    """Admin: Bir IPO için sahte oy ekle (test/demo için).
+
+    Body: {
+      "admin_password": "...",
+      "ipo_id": 47,
+      "participate": 11,
+      "skip": 3,
+      "phase": "hype"
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.ipo_poll_vote import IPOPollVote
+    import uuid as _uuid
+
+    ipo_id = int(payload.get("ipo_id", 0))
+    participate = int(payload.get("participate", 0))
+    skip = int(payload.get("skip", 0))
+    phase = payload.get("phase", "hype")
+
+    if ipo_id <= 0:
+        return {"status": "error", "message": "ipo_id gerekli"}
+
+    async for db in get_db():
+        added = {"participate": 0, "skip": 0}
+        for choice, count in [("participate", participate), ("skip", skip)]:
+            for _ in range(count):
+                fake_device = f"seed-{_uuid.uuid4().hex[:24]}"
+                vote = IPOPollVote(
+                    ipo_id=ipo_id,
+                    phase=phase,
+                    choice=choice,
+                    device_id=fake_device,
+                    ip_address=None,
+                )
+                db.add(vote)
+                added[choice] += 1
+        await db.commit()
+        return {"status": "ok", "ipo_id": ipo_id, "added": added}
+
+
 @app.post("/api/v1/admin/backfill-payment-announcements")
 @limiter.limit("3/minute")
 async def admin_backfill_payment_announcements(request: Request, payload: dict = Body(...)):
