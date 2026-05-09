@@ -8943,6 +8943,58 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/reprocess-payment-announcement")
+@limiter.limit("3/minute")
+async def admin_reprocess_payment_announcement(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli bir KAP URL'sindeki temettü ödeme duyurusunu yeniden işle.
+
+    Body: {"admin_password": "...", "kap_url": "https://www.kap.org.tr/tr/Bildirim/1597336"}
+    Body fetch edilir → parse_dividend_payment_announcement → DividendCalendar
+    'odeniyor'/'tamamlandi' güncellenir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url", "")
+    if not kap_url:
+        return {"status": "error", "message": "kap_url gerekli"}
+
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.dividend_calendar_processor import (
+        parse_dividend_payment_announcement,
+        process_dividend_payment_announcement,
+    )
+
+    disc = await fetch_kap_disclosure(kap_url)
+    if not disc:
+        return {"status": "error", "message": "KAP fetch fail"}
+
+    body = disc.get("full_text") or disc.get("body") or ""
+    if not body:
+        return {"status": "error", "message": "body bos"}
+
+    parsed = parse_dividend_payment_announcement(body)
+
+    async for db in get_db():
+        result = await process_dividend_payment_announcement(
+            db,
+            body=body,
+            kap_url=kap_url,
+            disclosure_id=None,
+            published_at=datetime.now(timezone.utc),
+        )
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "kap_url": kap_url,
+            "body_length": len(body),
+            "parsed_count": len(parsed),
+            "parsed_sample": parsed[:20],
+            "process_result": result,
+        }
+
+
 @app.post("/api/v1/admin/cleanup-fund-dividends")
 @limiter.limit("3/minute")
 async def admin_cleanup_fund_dividends(request: Request, payload: dict = Body(...)):

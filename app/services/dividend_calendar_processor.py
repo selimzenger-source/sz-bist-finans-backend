@@ -703,9 +703,29 @@ _PAYMENT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Alternatif kalip 1: ".E" suffix yok — Borsa Istanbul "Hak Kullanimi" duyurularinda
+# "TICKER Pay Basina Brut Temettu: X,XX TL"
+_PAYMENT_RE_NO_SUFFIX = re.compile(
+    r"\b([A-Z]{2,6})\s+(?:Pay\s+Başına\s+Brüt\s+Temettü|Pay\s+Basina\s+Brut\s+Temettu)\s*:?\s*"
+    r"([0-9]+(?:[.,][0-9]+)?)\s*(?:TL|₺)",
+    re.IGNORECASE,
+)
+
+# Alternatif kalip 2: Tablo "TICKER ... X,XX TL" satir bazli
+# "KLKIM        0,47 TL    %1,62"
+_PAYMENT_RE_TABLE = re.compile(
+    r"^\s*([A-Z]{3,6})\s+[\d.]*[,]?\d*\s*(?:TL|₺|TRY)\s+",
+    re.MULTILINE,
+)
+
 
 def parse_dividend_payment_announcement(body: str) -> list[dict[str, Any]]:
     """KAP/MKK pay piyasası duyurusundan ödenen temettüleri çıkar.
+
+    Birden fazla format destekler:
+    1. "TICKER.E Pay Başına Brüt Temettü: X,XX TL" (BISTECH duyurusu)
+    2. "TICKER Pay Başına Brüt Temettü: X,XX TL" (Borsa İstanbul Hak Kullanımı)
+    3. Tablo satır bazlı (yedek)
 
     Returns:
         [{"ticker": "ALARK", "gross_amount_per_share": 3.185}, ...]
@@ -714,6 +734,8 @@ def parse_dividend_payment_announcement(body: str) -> list[dict[str, Any]]:
         return []
     seen: set[str] = set()
     results: list[dict[str, Any]] = []
+
+    # Birincil: .E suffixli
     for m in _PAYMENT_RE.finditer(body):
         ticker = m.group(1).upper()
         if ticker in seen:
@@ -725,14 +747,49 @@ def parse_dividend_payment_announcement(body: str) -> list[dict[str, Any]]:
         except ValueError:
             continue
         results.append({"ticker": ticker, "gross_amount_per_share": amount})
+
+    # Ikincil: .E olmadan (Borsa Istanbul Hak Kullanimi duyurusu)
+    for m in _PAYMENT_RE_NO_SUFFIX.finditer(body):
+        ticker = m.group(1).upper()
+        if ticker in seen:
+            continue
+        # Cok kisa veya endeks ticker'lari ele
+        if len(ticker) < 3 or ticker in ("BIST", "TL", "USD", "EUR"):
+            continue
+        seen.add(ticker)
+        raw_amt = m.group(2).replace(".", "").replace(",", ".")
+        try:
+            amount = float(raw_amt)
+        except ValueError:
+            continue
+        results.append({"ticker": ticker, "gross_amount_per_share": amount})
+
     return results
 
 
 def is_dividend_payment_announcement(title: str, body: str) -> bool:
-    """Title + body üzerinden temettü ödeme duyurusu mu?"""
+    """Title + body üzerinden temettü ödeme duyurusu mu?
+
+    Title kontrolü de eklendi: "Borsa İstanbul A.Ş. ... Hak Kullanımı" tipi
+    bildirimler temettü ödeme duyurusu olabilir.
+    """
     if not body:
         return False
-    has_pattern = bool(_PAYMENT_RE.search(body))
+    # Title sinyalleri
+    if title:
+        t = lower_tr(title)
+        title_signals = [
+            "bistech pay piyasasi", "bistech pay piyasası",
+            "borsa istanbul a.ş.", "borsa istanbul a.s.",
+            "hak kullanım işlemleri", "hak kullanim islemleri",
+            "temettü ödeme", "temettu odeme",
+            "nakit temettü hak kullan", "nakit temettu hak kullan",
+        ]
+        has_title = any(s in t for s in title_signals)
+        if has_title and (_PAYMENT_RE.search(body) or _PAYMENT_RE_NO_SUFFIX.search(body)):
+            return True
+    # Title olmasa bile body'de pattern varsa
+    has_pattern = bool(_PAYMENT_RE.search(body) or _PAYMENT_RE_NO_SUFFIX.search(body))
     return has_pattern
 
 
