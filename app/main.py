@@ -8457,13 +8457,12 @@ async def list_share_transactions(
                 ShareTransactionDetail.party_name != "?",
             )
         )
-        # En az bir sayisal veri olmali (oy hakki / pay orani / fiyat)
+        # OY HAKKI veya PAY ORANI DOLU OLMALI (price_low tek başına yetmez —
+        # kart "OY HAKKI: —, PAY ORANI: —" göstermesin diye)
         query = query.where(
             _or_(
                 ShareTransactionDetail.oy_hakki_pct.isnot(None),
                 ShareTransactionDetail.pay_orani_pct.isnot(None),
-                ShareTransactionDetail.price_low.isnot(None),
-                ShareTransactionDetail.nominal_lot.isnot(None),
             )
         )
 
@@ -8627,17 +8626,35 @@ async def list_business_deals(
     period: str = Query("week", description="week|month|quarter"),
     ticker: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
+    quality_only: bool = Query(True, description="True ise counterparty veya amount yok kayıtlar gizlenir"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Yeni İş Anlaşmaları — KAP'tan AI parse + TRY çevrim."""
+    """Yeni İş Anlaşmaları — KAP'tan AI parse + TRY çevrim.
+
+    quality_only=True (default): counterparty NULL/bos VE amount_try NULL
+    olan kayıtlar gizlenir. Yani en az birinden anlamlı veri olmalı.
+    Mobilde '— —' gosteren bos kartlar gorunmez.
+    """
     from app.models.business_deal import BusinessDeal
     from datetime import timedelta as _td
+    from sqlalchemy import or_ as _or_, and_ as _and_
     days_map = {"week": 7, "month": 30, "quarter": 90}
     days = days_map.get(period, 7)
     cutoff = date.today() - _td(days=days)
     query = select(BusinessDeal).where(BusinessDeal.deal_date >= cutoff)
     if ticker:
         query = query.where(BusinessDeal.ticker == ticker.upper())
+    if quality_only:
+        # En az birinden bilgi olmalı: counterparty (karşı taraf) VEYA amount_try (tutar)
+        query = query.where(
+            _or_(
+                _and_(
+                    BusinessDeal.counterparty.isnot(None),
+                    BusinessDeal.counterparty != "",
+                ),
+                BusinessDeal.amount_try.isnot(None),
+            )
+        )
     query = query.order_by(desc(BusinessDeal.amount_try), desc(BusinessDeal.deal_date)).limit(limit)
     rows = (await db.execute(query)).scalars().all()
     return [{
