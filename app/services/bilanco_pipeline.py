@@ -27,9 +27,9 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# ★ Bilanço pipeline geçici olarak DEVRE DIŞI (mobil tab gizli olduğu için).
-#   True yapılırsa KAP bilanço bildirimleri AI analizi + tweet üretmeye devam eder.
-BILANCO_PIPELINE_ENABLED = False
+# Bilanço pipeline — KAP'tan gelen Q1 2026 vb. raporlar parse edilsin diye AÇIK.
+# Tab mobilde gizli ama backend veri toplama devam eder (sirket-karti vb. için).
+BILANCO_PIPELINE_ENABLED = True
 
 # Bilanco sezonu yogunluk kontrolu
 _bilanco_queue: asyncio.Queue | None = None
