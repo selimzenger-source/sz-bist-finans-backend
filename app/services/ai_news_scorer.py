@@ -31,6 +31,7 @@ Hata Toleransi:
 import json
 import logging
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -1024,6 +1025,26 @@ NOTLAR:
         if score is not None and content:
             score = _validate_score_against_content(score, content, ticker)
 
+        # ─── TEKRAR EDEN BILDIRIM DAMPER ───
+        # Ayni ticker icin son 7 gunde benzer konuda yuksek skor verilmisse,
+        # bu yeni bildirim takip-bildirimdir (orn: YKK -> SPK basvuru -> SPK onay
+        # zinciri). Skor 5.5'e cekilir, push/tweet spam'i onlenir.
+        if score is not None and score >= 6.0 and content:
+            try:
+                is_followup, prior_topic = await _check_followup_notification(ticker, content)
+                if is_followup:
+                    original_score = score
+                    score = min(score, 5.5)
+                    logger.info(
+                        "AI News Scorer [TAKIP-DAMPER] %s: score %s -> %s (konu: %s, son 7 günde benzer pozitif var)",
+                        ticker, original_score, score, prior_topic,
+                    )
+                    # Summary'ye not ekle
+                    if summary:
+                        summary = f"[Takip bildirimi - {prior_topic}] {summary}"
+            except Exception as _follow_err:
+                logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
+
         logger.info(
             "AI News Scorer [%s]: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
             provider_used, ticker, score,
@@ -1064,6 +1085,69 @@ _STRONG_POSITIVE_PATTERNS = [
     (r"(?:net\s*)?k[aâ]r[ıi]?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})\s*art", 9.0),  # %100+ kar artisi
     (r"rekor\s*(?:k[aâ]r|gelir|has[ıi]lat)", 8.0),
 ]
+
+
+_FOLLOWUP_TOPICS = {
+    "bedelsiz": ["bedelsiz", "iç kaynak", "ic kaynak", "sermaye artırımı bedelsiz"],
+    "bedelli": ["bedelli sermaye", "rüçhan hakkı", "ruchan hakki"],
+    "temettü": ["kar payı", "kar payi", "kâr payı", "temettü", "temettu", "pay başına brüt"],
+    "spk_onay": ["spk onay", "sermaye piyasası kurulu onay", "spk kabul"],
+    "spk_başvuru": ["spk başvuru", "spk basvuru", "kurul'a başvuru"],
+    "halka_arz": ["halka arz", "halka acilma", "halka açılma", "ihraç belgesi"],
+    "sözleşme": ["sözleşme imzaland", "sozlesme imzaland", "anlaşma imzaland", "ihale kazan", "ihale alın"],
+    "satın_alma": ["satın al", "satin al", "iktisap", "devralın", "devralin"],
+    "yeni_iş": ["yeni iş ilişkisi", "yeni is iliskisi", "yeni müşteri", "yeni musteri"],
+    "kapasite": ["kapasite artır", "kapasite artir", "yeni tesis", "yatırım planı"],
+}
+
+
+async def _check_followup_notification(ticker: str, content: str) -> tuple[bool, str | None]:
+    """Son 7 günde aynı ticker için aynı konuda yüksek skor verilmiş bir
+    bildirim varsa True döner — bu yeni bildirim takip-bildirimdir.
+
+    Returns: (is_followup, topic_name)
+    """
+    if not ticker or not content:
+        return (False, None)
+
+    # Yeni bildirim hangi konuya ait?
+    content_lower = content.lower()
+    new_topics = []
+    for topic, keywords in _FOLLOWUP_TOPICS.items():
+        if any(kw in content_lower for kw in keywords):
+            new_topics.append(topic)
+    if not new_topics:
+        return (False, None)
+
+    try:
+        from app.database import async_session
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from sqlalchemy import select, desc
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        async with async_session() as db:
+            result = await db.execute(
+                select(KapAllDisclosure)
+                .where(KapAllDisclosure.company_code == ticker.upper())
+                .where(KapAllDisclosure.published_at >= cutoff)
+                .where(KapAllDisclosure.ai_impact_score >= 6.0)
+                .order_by(desc(KapAllDisclosure.published_at))
+                .limit(20)
+            )
+            recent = result.scalars().all()
+
+            for prior in recent:
+                prior_text = ((prior.title or "") + " " + (prior.body or "") + " " + (prior.ai_summary or "")).lower()
+                # Aynı konu eşleşmesi var mı?
+                for topic in new_topics:
+                    keywords = _FOLLOWUP_TOPICS[topic]
+                    if any(kw in prior_text for kw in keywords):
+                        return (True, topic)
+    except Exception as e:
+        logger.debug("Followup DB sorgu hata (%s): %s", ticker, e)
+
+    return (False, None)
 
 
 def _validate_score_against_content(score: float, content: str, ticker: str) -> float:
