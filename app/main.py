@@ -9010,6 +9010,93 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/reparse-bilanco-period")
+@limiter.limit("3/minute")
+async def admin_reparse_bilanco_period(request: Request, payload: dict = Body(...)):
+    """Admin: company_financials'taki yanlış period'lu kayıtları KAP body'sinden
+    yeniden tespit edip düzeltir.
+
+    Body: {"admin_password": "...", "ticker": "YUNSA", "limit": 50}
+    ticker verilmezse son N kayıt.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.company_financial import CompanyFinancial
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.bilanco_kap_scraper import _detect_period
+    from sqlalchemy import or_ as _or_
+
+    ticker = payload.get("ticker")
+    limit = int(payload.get("limit", 50))
+
+    fixed = []
+    skipped = []
+
+    async for db in get_db():
+        # Son finans kayıtlarını al
+        query = select(CompanyFinancial).order_by(desc(CompanyFinancial.id))
+        if ticker:
+            query = query.where(CompanyFinancial.ticker == ticker.upper())
+        query = query.limit(limit)
+        result = await db.execute(query)
+        rows = result.scalars().all()
+
+        for row in rows:
+            try:
+                # Bu ticker için bu period'a denk gelen KAP bildirimini bul
+                kap_q = await db.execute(
+                    select(KapAllDisclosure)
+                    .where(KapAllDisclosure.company_code == row.ticker)
+                    .where(KapAllDisclosure.is_bilanco == True)
+                    .order_by(desc(KapAllDisclosure.published_at))
+                    .limit(5)
+                )
+                kap_rows = kap_q.scalars().all()
+                if not kap_rows:
+                    skipped.append({"ticker": row.ticker, "period": row.period, "reason": "KAP yok"})
+                    continue
+
+                # Her bir KAP body'sinde period tespit et, en güncel olanı al
+                detected_periods = set()
+                for kap in kap_rows:
+                    body = kap.body or ""
+                    if len(body) < 200:
+                        continue
+                    p = _detect_period(body)
+                    if p:
+                        detected_periods.add(p)
+
+                if not detected_periods:
+                    skipped.append({"ticker": row.ticker, "period": row.period, "reason": "period bulunamadi"})
+                    continue
+
+                # En yeni period'u seç
+                latest = sorted(detected_periods, reverse=True)[0]
+                if latest != row.period:
+                    old_period = row.period
+                    row.period = latest
+                    fixed.append({
+                        "ticker": row.ticker,
+                        "old_period": old_period,
+                        "new_period": latest,
+                    })
+            except Exception as e:
+                skipped.append({"ticker": row.ticker, "period": row.period, "reason": str(e)[:100]})
+
+        if fixed:
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "scanned": len(rows),
+            "fixed_count": len(fixed),
+            "fixed": fixed[:30],
+            "skipped_count": len(skipped),
+            "skipped": skipped[:10],
+        }
+
+
 @app.post("/api/v1/admin/backfill-cautious-stocks")
 @limiter.limit("3/minute")
 async def admin_backfill_cautious_stocks(request: Request, payload: dict = Body(...)):

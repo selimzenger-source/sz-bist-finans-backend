@@ -81,24 +81,37 @@ def _parse_number(s: str) -> Optional[float]:
 
 
 def _detect_period(body: str) -> Optional[str]:
-    """Body'de 'Cari Dönem 01.01.2026 - 31.03.2026' kalibindan donem cikar."""
-    # Once "Cari Donem" sonrasi tarih ara
-    pat = re.compile(r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2})\.(\d{2})\.(\d{4})", re.IGNORECASE)
-    m = pat.search(body)
-    end_month = end_year = None
-    if m:
-        end_month = int(m.group(5))
-        end_year = int(m.group(6))
-    else:
-        # Bilanço sadece tek tarih: "Cari Dönem 31.03.2026"
-        pat2 = re.compile(r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})", re.IGNORECASE)
-        m2 = pat2.search(body)
-        if m2:
-            end_month = int(m2.group(2))
-            end_year = int(m2.group(3))
+    """Body'de 'Cari Dönem 01.01.2026 - 31.03.2026' kalibindan donem cikar.
 
-    if not end_month or not end_year:
+    KAP bildirimlerinde Bilanço ve Gelir Tablosu için ayrı 'Cari Dönem'
+    blokları olabilir. EN YENİ tarihi seç (Q4 2025 + Q1 2026 birlikte
+    olabilir, doğru olan Q1 2026'dır).
+    """
+    # TÜM "Cari Dönem" eşleşmelerini topla
+    candidates: list[tuple[int, int]] = []  # (year, month)
+
+    # Pattern 1: "Cari Dönem 01.01.2026 - 31.03.2026" (gelir tablosu)
+    pat = re.compile(
+        r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2})\.(\d{2})\.(\d{4})",
+        re.IGNORECASE,
+    )
+    for m in pat.finditer(body):
+        candidates.append((int(m.group(6)), int(m.group(5))))
+
+    # Pattern 2: "Cari Dönem 31.03.2026" (bilanço — tek tarih)
+    pat2 = re.compile(
+        r"Cari\s+D[öo]nem(?!\s+\d{2}\.\d{2}\.\d{4}\s*-)\s+(\d{2})\.(\d{2})\.(\d{4})",
+        re.IGNORECASE,
+    )
+    for m in pat2.finditer(body):
+        candidates.append((int(m.group(3)), int(m.group(2))))
+
+    if not candidates:
         return None
+
+    # En yeni tarihi seç (yıl sonra ay)
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    end_year, end_month = candidates[0]
 
     q = {3: "Q1", 6: "Q2", 9: "Q3", 12: "Q4"}.get(end_month)
     if not q:
