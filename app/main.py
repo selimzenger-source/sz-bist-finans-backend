@@ -9025,7 +9025,6 @@ async def admin_reparse_bilanco_period(request: Request, payload: dict = Body(..
     from app.models.company_financial import CompanyFinancial
     from app.models.kap_all_disclosure import KapAllDisclosure
     from app.services.bilanco_kap_scraper import _detect_period
-    from sqlalchemy import or_ as _or_
 
     ticker = payload.get("ticker")
     limit = int(payload.get("limit", 50))
