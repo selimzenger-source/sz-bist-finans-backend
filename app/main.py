@@ -8959,7 +8959,12 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
     from app.models.coupon import Coupon
-    from app.admin.routes import _generate_coupon_code
+    import secrets as _secrets
+    import string as _string
+
+    def _gen_code() -> str:
+        chars = _string.ascii_uppercase + _string.digits
+        return "SZ" + "".join(_secrets.choice(chars) for _ in range(6))
 
     amount = float(payload.get("amount", 1000))
     max_uses = int(payload.get("max_uses", 1))
@@ -8976,7 +8981,7 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         # Unique kod
         code = None
         for _ in range(10):
-            cand = _generate_coupon_code()
+            cand = _gen_code()
             existing = await db.execute(select(Coupon).where(Coupon.code == cand))
             if not existing.scalar_one_or_none():
                 code = cand
