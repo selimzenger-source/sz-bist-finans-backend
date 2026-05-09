@@ -8943,6 +8943,67 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/create-coupon")
+@limiter.limit("10/minute")
+async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
+    """Admin: JSON ile kupon kodu üret.
+
+    Body: {
+      "admin_password": "...",
+      "amount": 1000,        // puan
+      "max_uses": 1,         // kullanım limiti
+      "expires_days": 7      // bugünden N gün sonra biter (null = süresiz)
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.coupon import Coupon
+    from app.admin.routes import _generate_coupon_code
+
+    amount = float(payload.get("amount", 1000))
+    max_uses = int(payload.get("max_uses", 1))
+    expires_days = payload.get("expires_days", 7)
+
+    expire_dt = None
+    if expires_days is not None:
+        from datetime import timedelta as _td
+        expire_dt = (datetime.now(timezone.utc) + _td(days=int(expires_days))).replace(
+            hour=23, minute=59, second=59
+        )
+
+    async for db in get_db():
+        # Unique kod
+        code = None
+        for _ in range(10):
+            cand = _generate_coupon_code()
+            existing = await db.execute(select(Coupon).where(Coupon.code == cand))
+            if not existing.scalar_one_or_none():
+                code = cand
+                break
+        if not code:
+            return {"status": "error", "message": "kod uretilemedi"}
+
+        coupon = Coupon(
+            code=code,
+            amount=amount,
+            max_uses=max_uses,
+            uses_count=0,
+            expires_at=expire_dt,
+            is_active=True,
+        )
+        db.add(coupon)
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "code": code,
+            "amount": amount,
+            "max_uses": max_uses,
+            "expires_at": expire_dt.isoformat() if expire_dt else None,
+        }
+
+
 @app.post("/api/v1/admin/seed-ipo-poll-votes")
 @limiter.limit("3/minute")
 async def admin_seed_ipo_poll_votes(request: Request, payload: dict = Body(...)):
