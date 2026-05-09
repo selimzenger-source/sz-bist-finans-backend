@@ -71,13 +71,42 @@ _PATTERN_YKK = [
 ]
 
 
-def is_dividend(title: str, body: str = "") -> bool:
+def is_fund_ticker(ticker: str) -> bool:
+    """Yatırım fonu / ETF / GYO ticker'ı mı?
+
+    Fon kodu kalıpları:
+    - 6+ karakter ve sonu F/FX/FN/FY ile biter (ZTM25F, AKBNF, BIST30FX gibi)
+    - Sadece harf+rakam, hisse senedi 4-5 harf değil
+    - YAY, YAS, YBE gibi yatırım fonu ön ekleri
+    """
+    if not ticker:
+        return False
+    t = ticker.upper().strip()
+    # Hisse senedi: 4-5 harf, sadece A-Z (THYAO, GARAN, ASELS)
+    # Fon: 6+ karakter veya sayı içerir
+    if len(t) < 4 or len(t) > 7:
+        return True
+    # Sayı içeriyorsa fon (ZTM25F, BIST30F)
+    if any(c.isdigit() for c in t):
+        return True
+    # F/FX/FN/FY ile bitiyorsa ve 5+ karakterse fon
+    if len(t) >= 5 and (t.endswith("FX") or t.endswith("FN") or t.endswith("FY")):
+        return True
+    return False
+
+
+def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     """Title temettu ile ilgili mi?
 
     "Hak Kullanımı" generic — hem temettü hem bedelsiz sermaye artırımı için kullanılıyor.
     Bu durumda body'ye bakıp ayırt et.
+
+    Yatırım fonu / ETF / GYO bildirimleri filtre dışı (gerçek temettü değil).
     """
     if not title:
+        return False
+    # ★ Fon ticker'ı ise temettü olarak işleme — kullanıcının ZTM25F vakası
+    if ticker and is_fund_ticker(ticker):
         return False
     t = lower_tr(title)
 
@@ -374,8 +403,8 @@ async def process_kap_disclosure(
 
     Temettu degilse None doner.
     """
-    # is_dividend body'ye de bakıyor — bedelsiz/sermaye artırımı durumunda False döner
-    if not is_dividend(title, body or ""):
+    # is_dividend body'ye + ticker'a da bakıyor — bedelsiz/sermaye artırımı/fon durumunda False döner
+    if not is_dividend(title, body or "", ticker):
         return None
 
     # Body bos veya cok kisa ise (KAP fetch fail) — orphan kayit oluşturma

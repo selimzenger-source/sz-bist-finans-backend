@@ -8943,6 +8943,62 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/cleanup-fund-dividends")
+@limiter.limit("3/minute")
+async def admin_cleanup_fund_dividends(request: Request, payload: dict = Body(...)):
+    """Admin: dividend_calendar tablosundan fon/ETF/GYO ticker'ları sil.
+
+    Pattern: 6+ karakter, sayı içerir, F/FX/FN/FY ile biter.
+    Örnek: ZTM25F, BIST30F, AKBNF gibi yatırım fonları.
+
+    Body: {"admin_password": "...", "dry_run": false}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.dividend_calendar import DividendCalendar
+    from app.services.dividend_calendar_processor import is_fund_ticker
+    from sqlalchemy import delete as _sa_delete
+
+    dry_run = bool(payload.get("dry_run", False))
+
+    async for db in get_db():
+        result = await db.execute(select(DividendCalendar))
+        rows = result.scalars().all()
+        bad_ids = []
+        sample = []
+        for r in rows:
+            if is_fund_ticker(r.ticker or ""):
+                bad_ids.append(r.id)
+                if len(sample) < 30:
+                    sample.append({
+                        "id": r.id,
+                        "ticker": r.ticker,
+                        "company_name": r.company_name,
+                        "status": r.status,
+                    })
+
+        if dry_run:
+            return {
+                "status": "ok",
+                "dry_run": True,
+                "would_delete": len(bad_ids),
+                "sample": sample,
+            }
+
+        if bad_ids:
+            await db.execute(
+                _sa_delete(DividendCalendar).where(DividendCalendar.id.in_(bad_ids))
+            )
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "deleted": len(bad_ids),
+            "sample": sample,
+        }
+
+
 @app.post("/api/v1/admin/reclassify-dividend-calendar")
 @limiter.limit("3/minute")
 async def admin_reclassify_dividend_calendar(request: Request, payload: dict = Body(...)):
