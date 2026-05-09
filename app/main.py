@@ -8943,6 +8943,84 @@ async def admin_backfill_calendars(request: Request, payload: dict = Body(...)):
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/reclassify-dividend-calendar")
+@limiter.limit("3/minute")
+async def admin_reclassify_dividend_calendar(request: Request, payload: dict = Body(...)):
+    """Admin: dividend_calendar kayıtlarını yeniden classify et.
+
+    Mevcut KAP body'sini kullanarak (yeniden fetch yok) status'u günceller:
+    - Eğer body'de dağıtmama ifadesi varsa ve status 'reddedildi' DEĞİLse → 'reddedildi'
+    - Sayısal alanları NULL'a sıfırla (yanlış AI parse'tan kalanlar)
+
+    Body: {"admin_password": "...", "limit": 200}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.dividend_calendar import DividendCalendar
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.dividend_calendar_processor import classify_event_with_body
+
+    limit = int(payload.get("limit", 200))
+    fixed = []
+
+    async for db in get_db():
+        # Status reddedildi DEĞİL ama YKK kap_url'i olan kayıtlar
+        result = await db.execute(
+            select(DividendCalendar)
+            .where(DividendCalendar.status != "reddedildi")
+            .where(DividendCalendar.ykk_kap_disclosure_id.isnot(None))
+            .order_by(desc(DividendCalendar.created_at))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+
+        for row in rows:
+            try:
+                # YKK disclosure body'sini al
+                disc_id = row.ykk_kap_disclosure_id
+                if not disc_id:
+                    continue
+                d_result = await db.execute(
+                    select(KapAllDisclosure).where(KapAllDisclosure.id == disc_id).limit(1)
+                )
+                disc = d_result.scalar_one_or_none()
+                if not disc or not disc.body:
+                    continue
+
+                event = classify_event_with_body(disc.title or "", disc.body or "")
+                if event == "rejection":
+                    # Yanlış sınıflandırılmış → düzelt
+                    row.status = "reddedildi"
+                    row.rejected_at = datetime.now(timezone.utc)
+                    row.rejection_kap_disclosure_id = disc_id
+                    row.rejection_kap_url = row.ykk_kap_url
+                    # Yanlış AI değerlerini temizle
+                    row.gross_amount_per_share = None
+                    row.net_amount_per_share = None
+                    row.gross_yield_pct = None
+                    row.net_yield_pct = None
+                    row.total_amount_tl = None
+                    fixed.append({
+                        "id": row.id,
+                        "ticker": row.ticker,
+                        "old_status": "ykk_alindi (yanlış)",
+                        "new_status": "reddedildi",
+                    })
+            except Exception as e:
+                logger.warning("dividend reclassify hata (%s): %s", row.ticker, e)
+
+        if fixed:
+            await db.commit()
+
+        return {
+            "status": "ok",
+            "scanned": len(rows),
+            "fixed_count": len(fixed),
+            "fixed": fixed[:30],
+        }
+
+
 @app.post("/api/v1/admin/reparse-incomplete-type-conversions")
 @limiter.limit("3/minute")
 async def admin_reparse_incomplete_type_conversions(request: Request, payload: dict = Body(...)):

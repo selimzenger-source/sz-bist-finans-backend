@@ -177,6 +177,26 @@ def classify_event_with_body(title: str, body: str) -> str:
             "kâr payı dağıtılmamasına", "kar payi dagitilmamasina",
             "sıfır temettü", "sifir temettu",
             "temettü dağıtmama", "temettu dagitmama",
+            # YENI v2 — daha kapsamli (BANVIT vakasi ve benzerleri)
+            "dağıtım yapılmaması", "dagitim yapilmamasi",
+            "dağıtılmamasına oybirliği", "dagitilmamasina oybirligi",
+            "dağıtılmaması yönünde", "dagitilmamasi yonunde",
+            "dağıtılmasına yer olmadığına", "dagitilmasina yer olmadigina",
+            "dağıtım yapılmayacak", "dagitim yapilmayacak",
+            "dağıtılmasına gerek olmadığı", "dagitilmasina gerek olmadigi",
+            "kar payı ödenmeyecek", "kar payi odenmeyecek",
+            "temettü ödenmeyecek", "temettu odenmeyecek",
+            "kar dağıtmama yönünde", "kar dagitmama yonunde",
+            "dağıtım gerçekleştirilmemesine", "dagitim gerceklestirilmemesine",
+            "dağıtım gerçekleştirmeme", "dagitim gerceklestirmeme",
+            "kar dağıtım planlanmamış", "kar dagitim planlanmamis",
+            "kar payı dağıtım planlanmamış", "kar payi dagitim planlanmamis",
+            "kar dağıtımı yapılmamasına", "kar dagitimi yapilmamasina",
+            "kâr dağıtımı yapılmamasına", "kar dagitimi yapilmamasina",
+            "kar dağıtmamasına", "kar dagitmamasina",
+            "dağıtmamasına karar", "dagitmamasina karar",
+            "dağıtılmamasının uygun", "dagitilmamasinin uygun",
+            "kar payı dağıtmamasına", "kar payi dagitmamasina",
         ]
         if any(p in b for p in rejection_phrases):
             return "rejection"
@@ -228,6 +248,18 @@ KURALLAR:
 - Yuzde verim: temettu/hisse_fiyat * 100.
 - Tarihler bildirimde gecen tarihler.
 - Bilinmeyenler null.
+
+★ KRITIK: DAGITMAMA KARARI TESPITI ★
+Eger bildirim "kar payi DAGITILMAMASI", "DAGITILMAMASINA karar verilmistir",
+"DAGITIM YAPILMAYACAK", "kar payi ODENMEYECEK", "DAGITMAMA karari" vb. ifadeler
+iceriyorsa → bu bir DAGITMAMA (red) bildirimidir.
+Bu durumda TUM sayisal alanlar NULL olmalidir:
+  gross_amount_per_share = null
+  net_amount_per_share = null
+  gross_yield_pct = null
+  net_yield_pct = null
+  total_amount_tl = null
+Cunku dagitim yapilmiyor — herhangi bir sayisal deger yanlis bilgi verir.
 """
 
 
@@ -357,7 +389,23 @@ async def process_kap_disclosure(
     if event_type == "unknown":
         event_type = "ykk"
 
-    parsed = await ai_parse_dividend(ticker, title, body or "")
+    # ★ REJECTION ise AI'a parse ettirme — sayisal alan ZATEN OLMAMALI
+    #   AI body'de "X TL temettu odenmeyecek" cumlesinden X'i gross_amount olarak
+    #   yakalayabilir, bu yanlis. Rejection icin tum sayisal alanlar NULL kalsin.
+    if event_type == "rejection":
+        parsed = {
+            "period": None,
+            "gross_amount_per_share": None,
+            "net_amount_per_share": None,
+            "gross_yield_pct": None,
+            "net_yield_pct": None,
+            "total_amount_tl": None,
+            "ykk_date": None,
+            "general_assembly_date": None,
+            "payment_date": None,
+        }
+    else:
+        parsed = await ai_parse_dividend(ticker, title, body or "")
 
     period = parsed.get("period")
     ykk_dt = parsed.get("ykk_date") or (published_at.date() if published_at and event_type == "ykk" else None)
