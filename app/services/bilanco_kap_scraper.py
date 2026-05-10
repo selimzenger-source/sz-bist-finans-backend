@@ -86,21 +86,28 @@ def _detect_period(body: str) -> Optional[str]:
     KAP bildirimlerinde Bilanço ve Gelir Tablosu için ayrı 'Cari Dönem'
     blokları olabilir. EN YENİ tarihi seç (Q4 2025 + Q1 2026 birlikte
     olabilir, doğru olan Q1 2026'dır).
+
+    KAP HTML/RSC formatında 'Cari Dönem<br/>31.03.2026' veya 'Cari Dönem
+    </span><span>31.03.2026' gibi araya HTML tag girebilir. Regex
+    whitespace + HTML tag toleranslı.
     """
-    # TÜM "Cari Dönem" eşleşmelerini topla
+    # Whitespace VEYA HTML tag (br, span, div, vb.) toleranslı separator
+    # SEP_OPT = opsiyonel separator (tag YA da boşluk olabilir)
+    SEP_OPT = r"(?:\s*<[^>]*>\s*|\s+|&nbsp;)+"
+
     candidates: list[tuple[int, int]] = []  # (year, month)
 
-    # Pattern 1: "Cari Dönem 01.01.2026 - 31.03.2026" (gelir tablosu)
+    # Pattern 1: "Cari Dönem 01.01.2026 - 31.03.2026" (gelir tablosu — aralık)
     pat = re.compile(
-        r"Cari\s+D[öo]nem\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2})\.(\d{2})\.(\d{4})",
+        rf"Cari{SEP_OPT}D[öo]nem{SEP_OPT}(\d{{2}})\.(\d{{2}})\.(\d{{4}})\s*-\s*(\d{{2}})\.(\d{{2}})\.(\d{{4}})",
         re.IGNORECASE,
     )
     for m in pat.finditer(body):
         candidates.append((int(m.group(6)), int(m.group(5))))
 
-    # Pattern 2: "Cari Dönem 31.03.2026" (bilanço — tek tarih)
+    # Pattern 2: "Cari Dönem 31.03.2026" / "Cari Dönem<br/>31.03.2026" (bilanço — tek tarih)
     pat2 = re.compile(
-        r"Cari\s+D[öo]nem(?!\s+\d{2}\.\d{2}\.\d{4}\s*-)\s+(\d{2})\.(\d{2})\.(\d{4})",
+        rf"Cari{SEP_OPT}D[öo]nem{SEP_OPT}(\d{{2}})\.(\d{{2}})\.(\d{{4}})(?!\s*-\s*\d)",
         re.IGNORECASE,
     )
     for m in pat2.finditer(body):
