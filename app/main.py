@@ -9010,6 +9010,41 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/cleanup-generic-issuer-dividends")
+@limiter.limit("3/minute")
+async def admin_cleanup_generic_issuer_dividends(request: Request, payload: dict = Body(...)):
+    """Admin: dividend_calendar tablosundan generic issuer (ISE/BIST/MKK/BORSA/KAP)
+    ticker'lı kayıtları sil. Bunlar bulk duyurudan yanlışlıkla oluşmuş.
+
+    Body: {"admin_password": "...", "dry_run": false}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.dividend_calendar import DividendCalendar
+    from sqlalchemy import delete as _sa_delete
+
+    GENERIC = ["ISE", "BIST", "BORSA", "MKK", "KAP", "BORSA İSTANBUL", "BORSA ISTANBUL"]
+    dry_run = bool(payload.get("dry_run", False))
+
+    async for db in get_db():
+        result = await db.execute(
+            select(DividendCalendar).where(DividendCalendar.ticker.in_(GENERIC))
+        )
+        rows = result.scalars().all()
+        sample = [{"id": r.id, "ticker": r.ticker, "status": r.status} for r in rows[:30]]
+
+        if dry_run:
+            return {"status": "ok", "dry_run": True, "would_delete": len(rows), "sample": sample}
+
+        if rows:
+            await db.execute(
+                _sa_delete(DividendCalendar).where(DividendCalendar.ticker.in_(GENERIC))
+            )
+            await db.commit()
+        return {"status": "ok", "deleted": len(rows), "sample": sample}
+
+
 @app.post("/api/v1/admin/list-bilanco-by-period")
 @limiter.limit("10/minute")
 async def admin_list_bilanco_by_period(request: Request, payload: dict = Body(...)):

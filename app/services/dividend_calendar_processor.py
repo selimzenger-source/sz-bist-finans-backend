@@ -410,6 +410,36 @@ async def process_kap_disclosure(
 
     Temettu degilse None doner.
     """
+    # ★ BULK ÖDEME DUYURUSU REDIRECTION ★
+    # "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu" / "Borsa İstanbul A.Ş."
+    # tipi bildirimler MULTI-SYMBOL bulk duyurular. Bunlar tek bir "issuer" (ISE/BIST)
+    # için ayrı kayıt oluşturmamalı — body içindeki HER ticker'ın DividendCalendar
+    # kaydı 'ödendi' olarak güncellenmeli.
+    GENERIC_ISSUERS = {"ISE", "BIST", "BORSA", "MKK", "KAP"}
+    is_bulk_announcement = (
+        ticker.upper() in GENERIC_ISSUERS
+        or "bistech pay piyasas" in (title or "").lower()
+        or "borsa istanbul a.ş." in (title or "").lower()
+        or "borsa istanbul a.s." in (title or "").lower()
+    )
+    if is_bulk_announcement and body and is_dividend_payment_announcement(title or "", body):
+        logger.info(
+            "Dividend BULK ödeme duyurusu tespit edildi (issuer=%s) — multi-ticker process'e yönlendiriliyor",
+            ticker,
+        )
+        try:
+            await process_dividend_payment_announcement(
+                db,
+                body=body,
+                kap_url=kap_url,
+                disclosure_id=disclosure_id,
+                published_at=published_at,
+            )
+        except Exception as _e:
+            logger.warning("Bulk ödeme duyurusu process hatası: %s", _e)
+        # Issuer (ISE/BIST) için DividendCalendar kaydı AÇMA — sadece ticker'lar güncellendi
+        return None
+
     # is_dividend body'ye + ticker'a da bakıyor — bedelsiz/sermaye artırımı/fon durumunda False döner
     if not is_dividend(title, body or "", ticker):
         return None
