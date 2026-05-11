@@ -28,12 +28,39 @@ _TITLE_PATTERNS = [
     "önemli paydaş", "onemli paydas",
 ]
 
+# Body içinde aranacak pay alım satım sinyalleri
+# Multi-symbol bulk duyurularda title generic olabilir ("Kamuyu Aydınlatma")
+# ama body'de Pay Alım Satım kalıbı geçer.
+_BODY_PATTERNS = [
+    "pay alım satım bildirimi", "pay alim satim bildirimi",
+    "alım nominal", "satım nominal", "alim nominal", "satim nominal",
+    "günü içinde",  # KAP standart pay alım satım açıklama kalıbı
+    "fiyat aralığından", "fiyat aralıgindan",
+    "pay başına ortalama fiyat", "pay basina ortalama fiyat",
+    "oy hakkı oranı", "oy hakki orani",
+    "pay oranı", "pay orani",
+]
 
-def is_share_transaction(title: str) -> bool:
-    if not title:
-        return False
-    t = lower_tr(title)
-    return any(p in t for p in _TITLE_PATTERNS)
+
+def is_share_transaction(title: str, body: str = "") -> bool:
+    """Pay Alım Satım Bildirimi mi?
+
+    Title'da kalıp varsa direkt True. Title generic ise ("Kamuyu Aydınlatma
+    Platformu Duyurusu") body'de pay alım satım kalıbı arar — multi-symbol
+    bulk duyurular için.
+    """
+    if title:
+        t = lower_tr(title)
+        if any(p in t for p in _TITLE_PATTERNS):
+            return True
+    # Title yetersiz — body'de ara
+    if body:
+        b = lower_tr(body)
+        # En az 2 farklı body sinyali olmalı (yanlış pozitif önle)
+        matches = sum(1 for p in _BODY_PATTERNS if p in b)
+        if matches >= 2:
+            return True
+    return False
 
 
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"

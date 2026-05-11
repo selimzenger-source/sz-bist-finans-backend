@@ -437,7 +437,15 @@ async def _route_to_calendars(
     except Exception as e:
         logger.warning("Router→buyback hata (%s): %s", ticker, e)
 
-    if is_share_transaction(title):
+    if is_share_transaction(title, body or ""):
+        # Multi-symbol bulk duyurularda ardışık fetch KAP rate limit'e takılır.
+        # Her fetch öncesi 1.5sn bekle (KAP standart rate limit toleransı).
+        try:
+            import asyncio as _asyncio
+            await _asyncio.sleep(1.5)
+        except Exception:
+            pass
+
         # ÖNCE: KAP URL'den structured table fetch (deterministik, daha güvenilir)
         kap_fetch_ok = False
         kap_fetch_error: str | None = None
