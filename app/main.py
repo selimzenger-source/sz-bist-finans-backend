@@ -9010,6 +9010,82 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/backfill-share-transactions")
+@limiter.limit("3/minute")
+async def admin_backfill_share_transactions(request: Request, payload: dict = Body(...)):
+    """Admin: Son N saatteki 'Pay Alım Satım' KAP bildirimlerini tarayıp
+    share_transaction_details tablosuna eksik olanları işle.
+
+    Body: {"admin_password": "...", "hours": 48, "limit": 100}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from app.services.kap_pay_alim_satim_fetcher import upsert_pay_alim_satim_from_kap
+    from app.services.share_transaction_kap_processor import is_share_transaction
+    from datetime import timedelta as _td
+
+    hours = int(payload.get("hours", 48))
+    limit = int(payload.get("limit", 100))
+    cutoff = datetime.now(timezone.utc) - _td(hours=hours)
+
+    summary = {"scanned": 0, "matched": 0, "processed": 0, "skipped_existing": 0, "errors": [], "newly_added": []}
+
+    async for db in get_db():
+        result = await db.execute(
+            select(KapAllDisclosure)
+            .where(KapAllDisclosure.title.ilike("%Pay Alım Satım%"))
+            .where(KapAllDisclosure.published_at >= cutoff)
+            .order_by(desc(KapAllDisclosure.published_at))
+            .limit(limit)
+        )
+        rows = result.scalars().all()
+        summary["scanned"] = len(rows)
+
+        for row in rows:
+            if not is_share_transaction(row.title or ""):
+                continue
+            summary["matched"] += 1
+
+            try:
+                # Zaten var mı?
+                existing = await db.execute(
+                    select(ShareTransactionDetail)
+                    .where(ShareTransactionDetail.kap_url == row.kap_url)
+                    .where(ShareTransactionDetail.ticker == row.company_code)
+                    .limit(1)
+                )
+                if existing.scalar_one_or_none():
+                    summary["skipped_existing"] += 1
+                    continue
+
+                ok = await upsert_pay_alim_satim_from_kap(
+                    db,
+                    kap_url=row.kap_url,
+                    company_code=row.company_code,
+                    title=row.title or "",
+                    published_at=row.published_at,
+                    disclosure_id=row.id,
+                )
+                if ok:
+                    summary["processed"] += 1
+                    if len(summary["newly_added"]) < 30:
+                        summary["newly_added"].append({
+                            "ticker": row.company_code,
+                            "kap_url": row.kap_url,
+                            "published_at": row.published_at.isoformat() if row.published_at else None,
+                        })
+                else:
+                    summary["errors"].append({"ticker": row.company_code, "reason": "upsert returned False"})
+            except Exception as e:
+                summary["errors"].append({"ticker": row.company_code, "reason": str(e)[:200]})
+
+        await db.commit()
+        return {"status": "ok", **summary}
+
+
 @app.post("/api/v1/admin/cleanup-generic-issuer-dividends")
 @limiter.limit("3/minute")
 async def admin_cleanup_generic_issuer_dividends(request: Request, payload: dict = Body(...)):
