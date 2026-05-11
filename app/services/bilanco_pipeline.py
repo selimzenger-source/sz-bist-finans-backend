@@ -100,8 +100,12 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
             # Birden fazla KAP body'sini MERGE et — bilanco bildirimi 3 ayri parcaya bolunmus
             # olabilir (Bilanco / Kar-Zarar / Nakit Akis). Hepsini gez, ayni period icin
             # NULL olmayan alanlari biriktir.
-            merged: dict | None = None
-            tried_titles: list[str] = []
+            #
+            # KRITIK FIX: Onceki sistem published_at desc sirayla ilk gelen parsed'i
+            # MASTER yapiyordu — ama Q4 duzeltme bildirimi Q1'den sonra gelmis ise
+            # baz Q4 oluyor, Q1 atiliyordu (period mismatch). Cozum: ONCE TUM body'leri
+            # parse et, sonra **en yeni period'a** sahip olanlari merge et.
+            parsed_list: list[tuple[str, dict, str]] = []  # (period, parsed, title)
             for kap_news in kap_news_list:
                 body_full = kap_news.body or ""
                 if (not body_full or len(body_full) < 500) and kap_news.kap_url:
@@ -126,26 +130,34 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
                     del parsed
                     continue
 
-                tried_titles.append(kap_news.title[:40])
-                if merged is None:
-                    merged = dict(parsed)
-                else:
-                    # Sadece ayni period verilerini birlestir (farkli ceyrekleri karistirma)
-                    if parsed.get("period") and merged.get("period") and parsed["period"] != merged["period"]:
-                        del parsed
-                        continue
-                    for k, v in parsed.items():
-                        if v is None:
-                            continue
-                        if merged.get(k) is None:
-                            merged[k] = v
-                del parsed
+                period = parsed.get("period") or ""
+                parsed_list.append((period, parsed, kap_news.title[:40]))
 
-                # Tum kritik alanlar dolduysa erken cik
-                if merged and all(merged.get(k) is not None for k in (
-                    "revenue", "net_income", "total_assets", "total_equity"
-                )):
-                    break
+            # En yeni period'a sahip parsed'leri filtrele (ornek: tum 2026-Q1'ler)
+            merged: dict | None = None
+            tried_titles: list[str] = []
+            if parsed_list:
+                # Period string'i lexicographic siralanir: "2026-Q1" > "2025-Q4"
+                parsed_list.sort(key=lambda x: x[0], reverse=True)
+                target_period = parsed_list[0][0]
+                logger.info("📊 KAP merge: %s — target period = %s (toplam %d KAP)",
+                            ticker, target_period, len(parsed_list))
+                for period, parsed, title in parsed_list:
+                    if period != target_period:
+                        continue  # eski period bildirimi (Q4 duzeltme vs.) atla
+                    tried_titles.append(title)
+                    if merged is None:
+                        merged = dict(parsed)
+                    else:
+                        for k, v in parsed.items():
+                            if v is None:
+                                continue
+                            if merged.get(k) is None:
+                                merged[k] = v
+                    if all(merged.get(k) is not None for k in (
+                        "revenue", "net_income", "total_assets", "total_equity"
+                    )):
+                        break
 
             best_parsed = merged
             if best_parsed:
@@ -342,95 +354,20 @@ async def weekly_bilanco_update():
     Pazar gecesi calistirilmasi onerilir.
     Tahmini sure: ~3-4 saat (700+ hisse x 11 yil x 1.5sn) — ilk calisma uzun, sonrakiler sadece yeni donem
     """
-    if not BILANCO_PIPELINE_ENABLED:
-        logger.info("📊 Haftalik bilanco batch ATLANDI — flag kapali")
-        return
-    logger.info("📊 Haftalik bilanco batch baslatildi")
-    start_time = datetime.now(timezone.utc)
-
-    try:
-        from app.scrapers.isyatirim_scraper import fetch_all_bist_tickers, fetch_bilanco
-
-        tickers = await fetch_all_bist_tickers()
-        if not tickers:
-            logger.error("Haftalik bilanco: Ticker listesi alinamadi")
-            return
-
-        logger.info("Haftalik bilanco: %d hisse islenecek", len(tickers))
-
-        success = 0
-        fail = 0
-
-        async with __import__("httpx").AsyncClient(
-            timeout=30,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0",
-                "Accept": "application/json, text/plain, */*",
-                "Referer": "https://www.isyatirim.com.tr/tr-tr/analiz/hisse/Sayfalar/default.aspx",
-            },
-        ) as client:
-            for i, ticker in enumerate(tickers):
-                try:
-                    periods = await fetch_bilanco(ticker, years=11, client=client)
-                    if periods:
-                        await _save_bilanco_to_db(ticker, periods)
-                        success += 1
-                    else:
-                        fail += 1
-                except Exception as e:
-                    logger.warning("Haftalik bilanco %s hatasi: %s", ticker, e)
-                    fail += 1
-
-                if (i + 1) % 50 == 0:
-                    elapsed = (datetime.now(timezone.utc) - start_time).seconds
-                    logger.info(
-                        "Haftalik bilanco: %d/%d tamamlandi (%d basarili, %d basarisiz) — %d sn",
-                        i + 1, len(tickers), success, fail, elapsed,
-                    )
-
-        elapsed = (datetime.now(timezone.utc) - start_time).seconds
-        logger.info(
-            "✅ Haftalik bilanco batch tamamlandi: %d/%d basarili — %d sn",
-            success, len(tickers), elapsed,
-        )
-
-    except Exception as e:
-        logger.exception("Haftalik bilanco batch hatasi: %s", e)
+    # DEVRE DISI — Haftalik IsYatirim bilanco batch'i kaldirildi (BIST lisans).
+    # Bilanco verisi artik SADECE iki kaynaktan gelir:
+    #   1) KAP bildirim aninda parse (bilanco_kap_scraper + ai_bilanco_analyzer)
+    #   2) DB'de mevcut company_financials gecmisi
+    logger.info("📊 Haftalik bilanco batch DEVRE DISI (BIST lisans) — atlandi")
+    return
 
 
 async def daily_temettu_update():
+    """DEVRE DISI — Gunluk IsYatirim temettu batch'i kaldirildi (BIST lisans).
+    Temettu verisi sadece KAP bildirimlerinden ve mevcut dividend_history'den gelir.
     """
-    Gunluk batch: Tum BIST hisseleri icin temettu verisi gunceller.
-    Tahmini sure: ~17 dakika (700 hisse x 1.5sn)
-    """
-    logger.info("💰 Gunluk temettu batch baslatildi")
-
-    try:
-        from app.scrapers.isyatirim_scraper import fetch_all_bist_tickers, fetch_temettu_gecmisi
-
-        tickers = await fetch_all_bist_tickers()
-        success = 0
-
-        async with __import__("httpx").AsyncClient(
-            timeout=30, headers={"User-Agent": "Mozilla/5.0 Chrome/131.0.0.0"}
-        ) as client:
-            for i, ticker in enumerate(tickers):
-                try:
-                    data = await fetch_temettu_gecmisi(ticker, client=client)
-                    if data:
-                        await _save_temettu_to_db(ticker, data)
-                        success += 1
-                except Exception:
-                    pass
-                await asyncio.sleep(1.5)
-
-                if (i + 1) % 100 == 0:
-                    logger.info("Gunluk temettu: %d/%d", i + 1, len(tickers))
-
-        logger.info("✅ Gunluk temettu batch: %d/%d basarili", success, len(tickers))
-
-    except Exception as e:
-        logger.exception("Gunluk temettu batch hatasi: %s", e)
+    logger.info("💰 Gunluk temettu batch DEVRE DISI (BIST lisans) — atlandi")
+    return
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

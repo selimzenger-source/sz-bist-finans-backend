@@ -1911,13 +1911,14 @@ def _extract_short_summary(report_text: str, report_type: str = "morning") -> st
 
 
 async def send_morning_report_tweet():
-    """Sabah acilis raporu tweeti gonderir (08:15 TR).
-
-    Toplanan veri kaynaklari (10 kaynak):
-    1-7) _collect_all_data — market, IPO, KAP, Telegram, RSS, takvim, IPO-events
-    8)   get_high_impact_kap_disclosures — ai_impact_score>=8 onemli KAP haberleri
-    9-10) fetch_tavily_morning_news — Tavily ile web arastirmasi (2 sorgu)
+    """DEVRE DISI — BIST 100 endeksi snapshot'i lisans kapsaminda.
+    Sabah piyasa raporu tweet'i kapatildi.
     """
+    logger.info("Sabah piyasa raporu DEVRE DISI (BIST lisans) — atlandi")
+    return
+
+
+async def send_morning_report_tweet_legacy_disabled():
     import asyncio
 
     logger.info("Sabah acilis raporu hazirlaniyor — 10 kaynak toplanıyor...")
@@ -1992,11 +1993,14 @@ async def send_morning_report_tweet():
 
 
 async def send_evening_report_tweet():
-    """Aksam kapanis raporu tweeti gonderir (20:45 TR).
-
-    Rapor olusturulduktan sonra cache'e kaydedilir — sabah raporu
-    bunu okuyarak 'dun kapanis → bugun beklenti' bagini kurar.
+    """DEVRE DISI — BIST 100 kapanis verisi lisans kapsaminda.
+    Aksam piyasa kapanis raporu tweet'i kapatildi.
     """
+    logger.info("Aksam piyasa raporu DEVRE DISI (BIST lisans) — atlandi")
+    return
+
+
+async def send_evening_report_tweet_legacy_disabled():
     logger.info("Aksam kapanis raporu hazirlaniyor — 7 kaynak toplanıyor...")
 
     (market_data, ipos, kap_news, telegram_news,

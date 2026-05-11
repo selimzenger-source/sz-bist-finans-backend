@@ -137,14 +137,18 @@ _NEXT_TAG_RE = re.compile(r"\n(?:ifrs-full_|kap-fr_)\w+\|", re.IGNORECASE)
 def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
     """XBRL etiketi gecen yerden sonra Cari Donem sayisini cikar.
 
-    KAP Finansal Rapor body formati:
+    KAP Finansal Rapor body formati (pipe-ayrali tablo satiri):
       tag|http://...role/totalLabel |  | TUR aciklama |  |  | TUR | EN |  |  |  | CARI | ONCEKI
 
-    Cari Donem = pipe-ayrali son 2 sayidan ILKI (sondan ikinci sayi).
-    Sayi formati: 353.794.589 (binlik ayraci) veya 353.794.589,50 (ondalik).
+    KRITIK BUG FIX (2026-05): Onceden `valid[-2]` (sondan 2.) seciliyordu —
+    Equity gibi cok satirli XBRL etiketlerinde (Ozkaynak Degisim Tablosu) chunk
+    icinde >2 sayi olunca yanlis kolon (Onceki Donem) secilebiliyordu.
 
-    XBRL URL'sindeki "2003" yil rakamlarini eslesmemek icin _BIG_NUM_RE kullanilir
-    (en az 4 hane veya binlik ayraci).
+    Dogru mantik: KAP tablo formatinda **Cari Donem her zaman BASTA**, Onceki
+    Donem sagda. Pipe-separated yapida:
+      `... | CARI | ONCEKI` => `valid[0]` = Cari, `valid[1]` = Onceki
+
+    Cok sayilik durumda (multi-row XBRL) yine baslangictaki ilk sayi Cari'dir.
     """
     idx = body.find(tag)
     if idx == -1:
@@ -168,12 +172,8 @@ def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
     if not valid:
         return None
 
-    # KAP formati: ... | Cari | Onceki
-    # Genellikle son 2 sayi cari/onceki donem. Cari = sondan 2.
-    if len(valid) >= 2:
-        return valid[-2]
-    # Tek sayi varsa onu kullan
-    return valid[-1]
+    # Cari Donem = ilk buyuk sayi (KAP standart pipe-separated kolon sirasi)
+    return valid[0]
 
 
 def parse_kap_finansal_rapor(body: str) -> dict:

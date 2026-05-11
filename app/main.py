@@ -9538,6 +9538,55 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         return {"status": "ok", **summary}
 
 
+@app.post("/api/v1/admin/test-bilanco-parse")
+@limiter.limit("10/minute")
+async def admin_test_bilanco_parse(request: Request, payload: dict = Body(...)):
+    """Admin DEBUG: bir KAP bildirim URL'sinin bilanco parse sonucunu doner.
+    DB'ye YAZMAZ — sadece raporlar.
+
+    Body: {"admin_password": "...", "kap_url": "https://www.kap.org.tr/tr/Bildirim/XXX"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url", "")
+    if not kap_url:
+        return {"status": "error", "message": "kap_url gerekli"}
+
+    import re as _re
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.bilanco_kap_scraper import _detect_period, parse_kap_finansal_rapor
+
+    try:
+        disc = await fetch_kap_disclosure(kap_url)
+    except Exception as e:
+        return {"status": "error", "message": f"KAP fetch fail: {e}"}
+
+    body = (disc or {}).get("full_text", "") if disc else ""
+    if not body:
+        return {"status": "error", "message": "body bos"}
+
+    # Tum "Cari Donem" ve "Onceki Donem" header eslesmeleri
+    cari_headers = _re.findall(r"Cari\s*D[öo]nem[^|]{0,200}", body)[:10]
+    onceki_headers = _re.findall(r"[ÖO]nceki\s*D[öo]nem[^|]{0,200}", body)[:10]
+
+    detected_period = _detect_period(body)
+    parsed = parse_kap_finansal_rapor(body)
+
+    return {
+        "status": "ok",
+        "kap_url": kap_url,
+        "body_length": len(body),
+        "tables_count": len((disc or {}).get("tables", [])),
+        "pdf_links": (disc or {}).get("pdf_links", []),
+        "detected_period": detected_period,
+        "cari_donem_headers": cari_headers,
+        "onceki_donem_headers": onceki_headers,
+        "parsed": parsed,
+        "body_excerpt": body[:800],
+    }
+
+
 @app.post("/api/v1/admin/audit-categories")
 @limiter.limit("2/minute")
 async def admin_audit_categories(request: Request, payload: dict = Body(...)):
