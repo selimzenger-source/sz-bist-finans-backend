@@ -9010,6 +9010,23 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/sync-halkarz-tedbirli")
+@limiter.limit("3/minute")
+async def admin_sync_halkarz_tedbirli(request: Request, payload: dict = Body(...)):
+    """Admin: halkarz.com/tedbirli-hisseler sayfasını scrape et + cautious_stocks'a ekle.
+
+    KAP/Telegram'a düşmeyen VBTS bildirimleri için alternatif kaynak.
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.scrapers.halkarz_tedbirli_scraper import sync_to_db
+    result = await sync_to_db()
+    return {"status": "ok", **result}
+
+
 @app.post("/api/v1/admin/backfill-share-transactions")
 @limiter.limit("3/minute")
 async def admin_backfill_share_transactions(request: Request, payload: dict = Body(...)):
