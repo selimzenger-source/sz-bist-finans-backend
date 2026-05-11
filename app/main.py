@@ -9538,6 +9538,193 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         return {"status": "ok", **summary}
 
 
+@app.post("/api/v1/admin/audit-categories")
+@limiter.limit("2/minute")
+async def admin_audit_categories(request: Request, payload: dict = Body(...)):
+    """Admin: Son N gunluk KAP bildirimleri uzerinde 8 kategori siniflandiricinin
+    is_X() sonuclarini calistir + persist edilen DB tablolariyla cross-check yap.
+
+    Her kategori icin:
+      - matched: classifier match sayisi
+      - persisted: hedef tablodaki kayit sayisi (cross-check ile)
+      - missing_persist: classifier eslemis ama tablo yazimi yok (silent fail)
+      - sample_titles: 5 ornek baslik
+
+    Cakisma tespiti:
+      - multi_match: birden fazla classifier match eden bildirimler (overlap)
+      - unclassified: hiçbir classifier match etmeyen bildirimler
+
+    Duplicate tespiti:
+      - tablo bazinda ayni kap_url icin 1'den fazla satir
+
+    Body: {"admin_password": "...", "days": 7}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    days = int(payload.get("days", 7))
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.dividend_calendar import DividendCalendar
+    from app.models.business_deal import BusinessDeal
+    from app.models.share_transaction_detail import ShareTransactionDetail
+    from app.models.share_type_conversion import ShareTypeConversion
+    from app.models.block_trade import BlockTrade
+    from app.models.cautious_stock import CautiousStock
+    from app.models.capital_increase import CapitalIncrease
+    from app.services.dividend_calendar_processor import is_dividend
+    from app.services.business_deal_processor import is_business_deal
+    from app.services.share_transaction_kap_processor import is_share_transaction
+    from app.services.kap_category_processors import is_block_trade, is_type_conversion, is_cautious
+    from app.services.buyback_processor import is_buyback
+    from app.services.capital_increase_kap_parser import detect_stage as ci_detect_stage
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+
+    async with async_session() as db:
+        q = (
+            select(KapAllDisclosure)
+            .where(KapAllDisclosure.published_at >= since)
+            .order_by(desc(KapAllDisclosure.published_at))
+        )
+        rows = list((await db.execute(q)).scalars().all())
+
+        # Her classifier icin sayac + ornek
+        cats: dict[str, dict] = {
+            "dividend": {"matched": 0, "samples": [], "kap_urls": set()},
+            "business_deal": {"matched": 0, "samples": [], "kap_urls": set()},
+            "share_transaction": {"matched": 0, "samples": [], "kap_urls": set()},
+            "block_trade": {"matched": 0, "samples": [], "kap_urls": set()},
+            "type_conversion": {"matched": 0, "samples": [], "kap_urls": set()},
+            "cautious": {"matched": 0, "samples": [], "kap_urls": set()},
+            "buyback": {"matched": 0, "samples": [], "kap_urls": set()},
+            "capital_increase": {"matched": 0, "samples": [], "kap_urls": set()},
+        }
+        multi_match: list[dict] = []
+        unclassified: list[dict] = []
+
+        for r in rows:
+            title = r.title or ""
+            body = r.body or ""
+            ticker = r.company_code or ""
+
+            matches: list[str] = []
+            try:
+                if is_dividend(title, body, ticker): matches.append("dividend")
+            except Exception: pass
+            try:
+                if is_business_deal(title): matches.append("business_deal")
+            except Exception: pass
+            try:
+                if is_share_transaction(title, body): matches.append("share_transaction")
+            except Exception: pass
+            try:
+                if is_block_trade(title, body): matches.append("block_trade")
+            except Exception: pass
+            try:
+                if is_type_conversion(title): matches.append("type_conversion")
+            except Exception: pass
+            try:
+                if is_cautious(title): matches.append("cautious")
+            except Exception: pass
+            try:
+                if is_buyback(title): matches.append("buyback")
+            except Exception: pass
+            try:
+                if ci_detect_stage(title, body): matches.append("capital_increase")
+            except Exception: pass
+
+            for m in matches:
+                cats[m]["matched"] += 1
+                if r.kap_url:
+                    cats[m]["kap_urls"].add(r.kap_url)
+                if len(cats[m]["samples"]) < 5:
+                    cats[m]["samples"].append({"ticker": ticker, "title": title[:120], "kap_url": r.kap_url})
+
+            if len(matches) > 1 and len(multi_match) < 30:
+                multi_match.append({
+                    "ticker": ticker, "title": title[:120], "kap_url": r.kap_url,
+                    "matched": matches,
+                })
+            if len(matches) == 0 and len(unclassified) < 30:
+                # Sadece anlamli olanlari logla (boilerplate "Kamuyu Aydinlatma" gibi degil)
+                if title and len(title) > 10:
+                    unclassified.append({
+                        "ticker": ticker, "title": title[:120], "kap_url": r.kap_url,
+                    })
+
+        # Cross-check: hedef tablolarda gercekten kayit var mi
+        async def count_table(model, kap_url_col_name: str | list[str], category_urls: set) -> dict:
+            if not category_urls:
+                return {"persisted": 0, "missing": 0, "duplicate_urls": 0}
+            cols = [kap_url_col_name] if isinstance(kap_url_col_name, str) else kap_url_col_name
+            persisted_urls = set()
+            duplicate_count = 0
+            for col in cols:
+                try:
+                    res = await db.execute(text(
+                        f"SELECT {col}, COUNT(*) FROM {model.__tablename__} "
+                        f"WHERE {col} = ANY(:urls) GROUP BY {col}"
+                    ), {"urls": list(category_urls)})
+                    for url, cnt in res.fetchall():
+                        if url:
+                            persisted_urls.add(url)
+                            if cnt > 1:
+                                duplicate_count += 1
+                except Exception:
+                    pass
+            return {
+                "persisted": len(persisted_urls),
+                "missing": len(category_urls) - len(persisted_urls),
+                "duplicate_urls": duplicate_count,
+            }
+
+        # Dividend — multiple kap_url columns
+        div_cross = await count_table(DividendCalendar, ["ykk_kap_url", "general_assembly_kap_url", "payment_kap_url", "rejection_kap_url"], cats["dividend"]["kap_urls"])
+        bd_cross = await count_table(BusinessDeal, "kap_url", cats["business_deal"]["kap_urls"])
+        sht_cross = await count_table(ShareTransactionDetail, "kap_url", cats["share_transaction"]["kap_urls"])
+        bt_cross = await count_table(BlockTrade, "kap_url", cats["block_trade"]["kap_urls"])
+        tc_cross = await count_table(ShareTypeConversion, "kap_url", cats["type_conversion"]["kap_urls"])
+        cs_cross = await count_table(CautiousStock, "kap_url", cats["cautious"]["kap_urls"])
+        ci_cross = await count_table(CapitalIncrease, "kap_url", cats["capital_increase"]["kap_urls"])
+
+        # Buyback → share_transaction_details tablosuna yazılır
+        bb_cross = await count_table(ShareTransactionDetail, "kap_url", cats["buyback"]["kap_urls"])
+
+    # Set'leri sayıya çevir + cross verilerini ekle
+    def _pack(name: str, cross: dict) -> dict:
+        c = cats[name]
+        success_rate = (cross["persisted"] / c["matched"] * 100) if c["matched"] > 0 else 100.0
+        return {
+            "matched_disclosures": c["matched"],
+            "persisted_rows": cross["persisted"],
+            "missing_persist": cross["missing"],
+            "duplicate_urls_in_target": cross["duplicate_urls"],
+            "success_rate_pct": round(success_rate, 1),
+            "samples": c["samples"],
+        }
+
+    return {
+        "status": "ok",
+        "scanned_days": days,
+        "total_disclosures": len(rows),
+        "categories": {
+            "dividend": _pack("dividend", div_cross),
+            "business_deal": _pack("business_deal", bd_cross),
+            "share_transaction": _pack("share_transaction", sht_cross),
+            "block_trade": _pack("block_trade", bt_cross),
+            "type_conversion": _pack("type_conversion", tc_cross),
+            "cautious": _pack("cautious", cs_cross),
+            "buyback": _pack("buyback", bb_cross),
+            "capital_increase": _pack("capital_increase", ci_cross),
+        },
+        "overlap_count": len(multi_match),
+        "overlap_samples": multi_match,
+        "unclassified_count": len(unclassified),
+        "unclassified_samples": unclassified,
+    }
+
+
 @app.post("/api/v1/admin/debug-disclosure")
 @limiter.limit("10/minute")
 async def admin_debug_disclosure(request: Request, payload: dict = Body(...)):

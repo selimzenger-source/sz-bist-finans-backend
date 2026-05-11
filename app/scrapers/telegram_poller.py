@@ -432,10 +432,14 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→business_deal hata (%s): %s", ticker, e)
 
-    # Pay Geri Alımı (buyback) — share_transaction'dan ÖNCE check
+    # Pay Geri Alımı (buyback) — share_transaction'dan ÖNCE check.
+    # Buyback ile share_transaction patterns'ı çakışıyor ("geri alın").
+    # is_buyback True ise share_transaction'a HİÇ gitmesin (duplicate önlenir).
+    is_bb = False
     try:
         from app.services.buyback_processor import is_buyback, process_buyback
         if is_buyback(title):
+            is_bb = True
             body_for_bb = body or ""
             if (not body_for_bb or len(body_for_bb) < 200) and kap_url:
                 try:
@@ -457,7 +461,7 @@ async def _route_to_calendars(
     # bazen başlıkta sadece "Pay Alım Satım Bildirimi" der ama body'de
     # "toptan alış satış" geçer. Bu durumda share_transaction'a değil
     # block_trade'e route etmek lazım.
-    is_bt = is_block_trade(title or "", body or "")
+    is_bt = is_block_trade(title or "", body or "") and not is_bb
     if is_bt:
         try:
             await process_block_trade(
@@ -468,8 +472,9 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→block_trade hata (%s): %s", ticker, e)
 
-    # share_transaction sadece block_trade DEĞİL ise çalışır — çakışmayı önle
-    if not is_bt and is_share_transaction(title, body or ""):
+    # share_transaction sadece block_trade VE buyback DEĞİL ise çalışır
+    # ("geri alın" share_transaction VE buyback pattern'ında ortak → çakışma)
+    if not is_bt and not is_bb and is_share_transaction(title, body or ""):
         # Multi-symbol bulk duyurularda ardışık fetch KAP rate limit'e takılır.
         # Her fetch öncesi 1.5sn bekle (KAP standart rate limit toleransı).
         try:

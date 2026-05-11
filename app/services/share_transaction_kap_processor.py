@@ -21,8 +21,10 @@ _TITLE_PATTERNS = [
     # KAP gerçek başlıkları (production DB analizinden)
     "pay alım satım bildirimi", "pay alim satim bildirimi",       # 41 kayit son 30 gun
     "pay alım satım", "pay alim satim",
-    "payların geri alın", "paylarn geri alin",                       # 13 kayit
-    "geri alın", "geri alim",
+    # NOT: "geri alın" / "payların geri alın" KALDIRILDI — bunlar `buyback_processor`
+    # tarafından işleniyor ve şirketin kendi paylarını geri alımı (farklı kategori).
+    # Önceki çakışma duplicate kayıt yaratıyordu (hem buybacks hem
+    # share_transaction_details tablosuna yazılıyordu).
     "pay alımı", "pay alimi",
     "pay satışı", "pay satisi",
     "önemli paydaş", "onemli paydas",
