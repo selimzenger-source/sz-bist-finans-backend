@@ -9538,6 +9538,81 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         return {"status": "ok", **summary}
 
 
+@app.post("/api/v1/admin/debug-disclosure")
+@limiter.limit("10/minute")
+async def admin_debug_disclosure(request: Request, payload: dict = Body(...)):
+    """Admin: Bir KAP URL'sinin title/body + her processor'un is_X() sonuclarini
+    doner — yanlis kategori siniflandirma debug'i icin.
+
+    Body: {"admin_password": "...", "kap_url": "https://www.kap.org.tr/tr/Bildirim/1602036"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url") or ""
+    if not kap_url:
+        return {"status": "error", "message": "kap_url gerekli"}
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.dividend_calendar_processor import is_dividend
+    from app.services.business_deal_processor import is_business_deal
+    from app.services.share_transaction_kap_processor import is_share_transaction
+    from app.services.kap_category_processors import (
+        is_block_trade, is_type_conversion, is_cautious,
+    )
+    from app.services.buyback_processor import is_buyback
+
+    async with async_session() as db:
+        # DB'deki kayit
+        q = select(KapAllDisclosure).where(KapAllDisclosure.kap_url == kap_url).limit(1)
+        row = (await db.execute(q)).scalar_one_or_none()
+        db_title = row.title if row else None
+        db_body = row.body if row else None
+        db_ticker = row.company_code if row else None
+
+        # Live KAP fetch
+        live_disc = None
+        try:
+            live_disc = await fetch_kap_disclosure(kap_url)
+        except Exception as e:
+            live_disc = {"error": str(e)}
+
+        live_title = (live_disc or {}).get("title") or db_title or ""
+        live_body = (live_disc or {}).get("full_text") or db_body or ""
+
+        # Her classifier'in sonucu (body-aware)
+        classifications = {
+            "is_dividend": is_dividend(live_title, live_body, db_ticker or ""),
+            "is_business_deal": is_business_deal(live_title),
+            "is_share_transaction": is_share_transaction(live_title, live_body),
+            "is_block_trade": is_block_trade(live_title, live_body),
+            "is_type_conversion": is_type_conversion(live_title),
+            "is_cautious": is_cautious(live_title),
+            "is_buyback": is_buyback(live_title),
+        }
+
+        return {
+            "status": "ok",
+            "kap_url": kap_url,
+            "db_record": {
+                "found": bool(row),
+                "id": row.id if row else None,
+                "ticker": db_ticker,
+                "title": db_title,
+                "body_length": len(db_body or ""),
+                "published_at": row.published_at.isoformat() if row and row.published_at else None,
+            },
+            "live_fetch": {
+                "title": live_title[:200],
+                "body_length": len(live_body),
+                "body_excerpt": live_body[:800],
+            },
+            "classifications": classifications,
+            "categorized_as": [k.replace("is_", "") for k, v in classifications.items() if v] or ["UNKNOWN"],
+        }
+
+
 @app.post("/api/v1/admin/backfill-dividend-bodies")
 @limiter.limit("2/minute")
 async def admin_backfill_dividend_bodies(request: Request, payload: dict = Body(...)):

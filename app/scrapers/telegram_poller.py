@@ -453,7 +453,23 @@ async def _route_to_calendars(
     except Exception as e:
         logger.warning("Router→buyback hata (%s): %s", ticker, e)
 
-    if is_share_transaction(title, body or ""):
+    # ÖNCE block_trade kontrol — toptan/borsa dışı pay devri bildirimleri
+    # bazen başlıkta sadece "Pay Alım Satım Bildirimi" der ama body'de
+    # "toptan alış satış" geçer. Bu durumda share_transaction'a değil
+    # block_trade'e route etmek lazım.
+    is_bt = is_block_trade(title or "", body or "")
+    if is_bt:
+        try:
+            await process_block_trade(
+                session, disclosure_id=disclosure_id, ticker=ticker,
+                company_name=company_name, title=title, body=body,
+                kap_url=kap_url, published_at=published_at,
+            )
+        except Exception as e:
+            logger.warning("Router→block_trade hata (%s): %s", ticker, e)
+
+    # share_transaction sadece block_trade DEĞİL ise çalışır — çakışmayı önle
+    if not is_bt and is_share_transaction(title, body or ""):
         # Multi-symbol bulk duyurularda ardışık fetch KAP rate limit'e takılır.
         # Her fetch öncesi 1.5sn bekle (KAP standart rate limit toleransı).
         try:
@@ -492,16 +508,6 @@ async def _route_to_calendars(
                 )
             except Exception as e:
                 logger.exception("Router→share_transaction AI fallback hata (%s): %s", ticker, e)
-
-    if is_block_trade(title):
-        try:
-            await process_block_trade(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
-                kap_url=kap_url, published_at=published_at,
-            )
-        except Exception as e:
-            logger.warning("Router→block_trade hata (%s): %s", ticker, e)
 
     if is_type_conversion(title):
         try:

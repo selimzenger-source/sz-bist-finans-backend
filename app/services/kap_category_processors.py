@@ -90,14 +90,46 @@ _BT_TITLE_PATTERNS = [
     "toptan satış", "toptan alış", "toptan alım",
     "toptan işlem", "toptan satim",
     "toptan alim satim",
+    # Borsa dışı pay devri — toptan işlem niteliği taşır
+    "borsa dışı pay devr", "borsa disi pay devr",
+    "borsa dışında pay devr", "borsa disinda pay devr",
+    "pay devri bildirimi", "pay devri bildirim",
+    "block trade",
+]
+
+# Body içinde toptan/block trade sinyalleri — title generic ise (Pay Alım Satım
+# Bildirimi gibi) body'de aranır. Multi-symbol bulk veya yanlış title durumunda
+# da yakalayabilir.
+_BT_BODY_PATTERNS = [
+    "toptan alış satış", "toptan alis satis",
+    "toptan alım satım", "toptan alim satim",
+    "toptan satış işlemi", "toptan satis islemi",
+    "toptan alış işlemi", "toptan alis islemi",
+    "toptan işlem", "toptan islem",
+    "borsa dışı pay devri", "borsa disi pay devri",
+    "borsada işlem görmeyen pay", "borsada islem gormeyen pay",
+    "borsa dışında gerçekleş", "borsa disinda gerceklesti",
+    "block trade",
 ]
 
 
-def is_block_trade(title: str) -> bool:
-    if not title:
-        return False
-    t = lower_tr(title)
-    return any(p in t for p in _BT_TITLE_PATTERNS)
+def is_block_trade(title: str, body: str = "") -> bool:
+    """Toptan alim satim mi?
+
+    Title'da kalip varsa direkt True. Title generic (örn. "Pay Alım Satım
+    Bildirimi") ise body'de toptan/borsa disi sinyali ara — bu durumda yanlis
+    siniflandirma onlenir.
+    """
+    if title:
+        t = lower_tr(title)
+        if any(p in t for p in _BT_TITLE_PATTERNS):
+            return True
+    if body:
+        b = lower_tr(body)
+        # En az 1 belirgin body kalibi yeterli (toptan kelimesi guclu sinyaldir)
+        if any(p in b for p in _BT_BODY_PATTERNS):
+            return True
+    return False
 
 
 _BT_PROMPT = """KAP toptan alim satim bildirimini analiz et. JSON dondur:
@@ -124,7 +156,7 @@ async def process_block_trade(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],
 ) -> Optional[BlockTrade]:
-    if not is_block_trade(title):
+    if not is_block_trade(title or "", body or ""):
         return None
     if disclosure_id:
         stmt = select(BlockTrade).where(BlockTrade.kap_url == kap_url).limit(1) if kap_url else select(BlockTrade).where(False)
