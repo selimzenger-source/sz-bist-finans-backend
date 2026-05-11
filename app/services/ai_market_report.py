@@ -156,10 +156,21 @@ _DURUM_MAP = {
 # ────────────────────────────────────────────
 
 async def fetch_market_snapshot() -> dict:
-    """Tum piyasa verilerini Yahoo Finance'den ceker."""
+    """Yahoo'dan piyasa verisi — BIST endeksleri lisans gerekligi nedeniyle ATLANDI.
+
+    Sadece foreign (USDTRY, EURTRY, GOLD, SP500, NASDAQ vb.) ceker.
+    BIST 100 / BIST 30 / BANK / XKAGT gibi tickerlar None doner.
+    """
+    # BIST endekslerinin sembollerini filtrele (Yahoo'da .IS uzantili veya XU/XB ile baslayan)
+    BIST_BLOCKED = {"BIST100", "BIST30", "XU100", "XU030", "XBANK", "XKAGT", "BANK"}
     result = {}
     async with httpx.AsyncClient(timeout=20.0, headers=_YAHOO_HEADERS, follow_redirects=True) as client:
         for name, ticker in _MARKET_TICKERS.items():
+            # BIST endeksi mi? (.IS uzantili veya isim BIST kaynakli)
+            if name.upper() in BIST_BLOCKED or ".IS" in str(ticker).upper() or str(ticker).upper().startswith(("XU", "XB")):
+                logger.debug("market_snapshot: BIST endeksi atlandi (lisans) — %s", name)
+                result[name] = None
+                continue
             try:
                 resp = await client.get(
                     f"{_YAHOO_CHART_URL}/{ticker}",

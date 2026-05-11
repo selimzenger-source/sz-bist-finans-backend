@@ -189,53 +189,13 @@ async def fetch_ticker_ratios(client: httpx.AsyncClient, ticker: str, slug: str)
 
 # ─── Batch ────────────────────────────────────────────────────────────────
 async def scrape_all_ratios(limit: int | None = None) -> dict:
-    """Tum BIST hisseleri icin oranlari cek ve DB'ye yaz.
+    """DEVRE DISI — Borsa Istanbul veri lisansi gerekliligi nedeniyle
+    Mynet'ten F/K, PD/DD, FD/FAVOK, Piyasa Degeri, Fiyat cekimi kapatildi.
 
-    ~700 hisse x 0.4sn = ~5 dk
+    Lisansli vendor entegre edilince geri acilacak.
     """
-    stats = {"total": 0, "ok": 0, "no_data": 0, "errors": 0}
-    today = date.today()
-
-    async with httpx.AsyncClient(http2=False, timeout=_TIMEOUT) as client:
-        slug_map = await fetch_slug_map(client)
-        if not slug_map:
-            logger.error("Mynet slug haritasi alinamadi")
-            return stats
-
-        items = list(slug_map.items())
-        if limit:
-            items = items[:limit]
-        stats["total"] = len(items)
-
-        async with async_session() as session:
-            for i, (ticker, slug) in enumerate(items, 1):
-                ratios = await fetch_ticker_ratios(client, ticker, slug)
-                if ratios is None:
-                    stats["errors"] += 1
-                else:
-                    has_any = any(v is not None for v in ratios.values())
-                    if has_any:
-                        try:
-                            await upsert_ratios(session, ticker, ratios, today)
-                            stats["ok"] += 1
-                        except Exception as e:
-                            logger.warning("upsert %s hatasi: %s", ticker, e)
-                            stats["errors"] += 1
-                    else:
-                        stats["no_data"] += 1
-
-                # 50 hissede bir commit + log
-                if i % 50 == 0:
-                    await session.commit()
-                    logger.info("mynet ratios: %d/%d (ok=%d, no_data=%d, err=%d)",
-                                i, len(items), stats["ok"], stats["no_data"], stats["errors"])
-
-                await asyncio.sleep(_RATE_LIMIT)
-
-            await session.commit()
-
-    logger.info("mynet ratios tamamlandi: %s", stats)
-    return stats
+    logger.info("mynet ratios DEVRE DISI (BIST lisansi sureci) — atlandi")
+    return {"total": 0, "ok": 0, "no_data": 0, "errors": 0, "disabled": True}
 
 
 if __name__ == "__main__":

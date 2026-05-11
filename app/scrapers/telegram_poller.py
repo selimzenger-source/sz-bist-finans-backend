@@ -396,11 +396,27 @@ async def _route_to_calendars(
             logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
 
     # is_dividend body-aware: 'Hak Kullanımı' generic - bedelsiz sermaye artırımıysa skip
-    if is_dividend(title, body or ""):
+    # Title tek başına is_dividend true diyorsa direkt kabul et — body re-fetch ile dolar
+    if is_dividend(title or "", body or ""):
         try:
+            # BUG FIX: Telegram'dan gelen body genelde kısa (title+snippet).
+            # Dividend state machine `< 50 karakter` ise skip ediyor → tüm
+            # dağıtım kararı / dağıtmama / ödeme bildirimleri kaçıyordu.
+            # Buyback router'ındaki gibi KAP'tan tam body çekiyoruz.
+            body_for_div = body or ""
+            if (not body_for_div or len(body_for_div) < 200) and kap_url:
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    disc = await fetch_kap_disclosure(kap_url)
+                    if disc and disc.get("full_text"):
+                        body_for_div = disc["full_text"]
+                        logger.info("Dividend body KAP re-fetch (%s): %d kar", ticker, len(body_for_div))
+                except Exception as _fe:
+                    logger.debug("Dividend body re-fetch hata (%s): %s", ticker, _fe)
+
             await div_process(
                 session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
+                company_name=company_name, title=title, body=body_for_div,
                 kap_url=kap_url, published_at=published_at,
             )
         except Exception as e:

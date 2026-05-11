@@ -686,104 +686,39 @@ _STOCK_PRICE_TTL = 5 * 60  # 5 dk
 
 
 async def _fetch_yahoo_v8(ticker: str) -> float | None:
-    import httpx
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.IS?interval=1d&range=1d"
-    try:
-        async with httpx.AsyncClient(timeout=8) as c:
-            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            return None
-        meta = r.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
-        p = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
-        if isinstance(p, (int, float)) and p > 0:
-            return float(p)
-    except Exception:
-        pass
+    """DEVRE DISI — Borsa Istanbul veri lisansi gerekliligi.
+    Lisansli vendor entegre edilince geri acilacak.
+    """
     return None
 
 
 async def _fetch_mynet(ticker: str) -> float | None:
-    """Mynet Finans HTML scrape — ucretsiz gecikmeli fiyat."""
-    import httpx, re
-    url = f"https://finans.mynet.com/borsa/hisseler/{ticker.lower()}-{ticker.lower()}/"
-    try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True) as c:
-            r = await c.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code != 200:
-            return None
-        # Son fiyat <span class="data-price"... veya tl formatinda
-        m = re.search(r'data-price[^>]*>\s*([0-9.,]+)\s*<', r.text)
-        if m:
-            val = m.group(1).replace('.', '').replace(',', '.')
-            try:
-                p = float(val)
-                if p > 0:
-                    return p
-            except ValueError:
-                pass
-    except Exception:
-        pass
+    """DEVRE DISI — Borsa Istanbul veri lisansi gerekliligi."""
     return None
 
 
 @app.get("/api/v1/public/stock-price/{ticker}")
 @limiter.limit("120/minute")
 async def get_stock_price(request: Request, ticker: str):
-    """BIST hisse anlik/gecikmeli fiyat.
+    """BIST hisse fiyat — Borsa Istanbul veri lisansi gerekliligi nedeniyle
+    Yahoo/Mynet uzerinden cekim DEVRE DISI. Lisansli vendor entegre edilince
+    geri acilacak.
 
-    Cache: 5 dk. Fallback zinciri: Yahoo v8 -> Mynet.
-    Frontend'in bu endpoint'i cagirmasi, veri saglayici degisse bile
-    app build gerekmesini onler.
+    Frontend bu endpoint'i hala cagirabilir; her zaman price=None doner.
     """
-    import time
     tk = ticker.upper().strip()
-    if not tk or not tk.isalnum():
-        return {"ticker": tk, "price": None, "source": "invalid", "cached": False}
-
-    now = time.time()
-    hit = _STOCK_PRICE_CACHE.get(tk)
-    if hit and now - hit["at"] < _STOCK_PRICE_TTL:
-        return {"ticker": tk, "price": hit["price"], "source": hit["source"], "cached": True}
-
-    for fn, name in [(_fetch_yahoo_v8, "yahoo_v8"), (_fetch_mynet, "mynet")]:
-        price = await fn(tk)
-        if price is not None:
-            _STOCK_PRICE_CACHE[tk] = {"price": price, "source": name, "at": now}
-            return {"ticker": tk, "price": price, "source": name, "cached": False}
-
-    return {"ticker": tk, "price": None, "source": "none", "cached": False}
+    return {"ticker": tk, "price": None, "source": "disabled_license", "cached": False}
 
 
 @app.get("/api/v1/public/stock-prices")
 @limiter.limit("60/minute")
 async def get_stock_prices(request: Request, tickers: str = Query(..., description="virgulle ayrilmis ticker listesi")):
-    """Toplu fiyat cekimi — frontend N hisseyi tek istekle alsin."""
-    import asyncio, time
+    """Toplu fiyat — lisans nedeniyle devre disi; her ticker icin None doner."""
     ticker_list = [t.upper().strip() for t in tickers.split(",") if t.strip() and t.strip().isalnum()][:50]
-    now = time.time()
-    results: dict[str, dict] = {}
-    missing: list[str] = []
-
-    for tk in ticker_list:
-        hit = _STOCK_PRICE_CACHE.get(tk)
-        if hit and now - hit["at"] < _STOCK_PRICE_TTL:
-            results[tk] = {"price": hit["price"], "source": hit["source"], "cached": True}
-        else:
-            missing.append(tk)
-
-    async def _fetch_one(tk: str):
-        for fn, name in [(_fetch_yahoo_v8, "yahoo_v8"), (_fetch_mynet, "mynet")]:
-            p = await fn(tk)
-            if p is not None:
-                _STOCK_PRICE_CACHE[tk] = {"price": p, "source": name, "at": time.time()}
-                return tk, {"price": p, "source": name, "cached": False}
-        return tk, {"price": None, "source": "none", "cached": False}
-
-    if missing:
-        fetched = await asyncio.gather(*[_fetch_one(t) for t in missing])
-        for tk, data in fetched:
-            results[tk] = data
-
+    results: dict[str, dict] = {
+        tk: {"price": None, "source": "disabled_license", "cached": False}
+        for tk in ticker_list
+    }
     return {"prices": results}
 
 
@@ -9010,6 +8945,32 @@ async def admin_create_coupon_json(request: Request, payload: dict = Body(...)):
         }
 
 
+@app.post("/api/v1/admin/wipe-daily-stock-prices")
+@limiter.limit("3/minute")
+async def admin_wipe_daily_stock_prices(request: Request, payload: dict = Body(...)):
+    """Admin: daily_stock_market_stats tablosundaki tum close_price ve
+    percent_change degerlerini sifirlar. BIST veri lisansi sureci icin.
+
+    Sonrasinda frontend sadece: ticker, seri, son 30G ve AI nedeni gosterir.
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    async with async_session() as db:
+        res = await db.execute(text(
+            "UPDATE daily_stock_market_stats "
+            "SET close_price = 0, percent_change = 0 "
+            "WHERE close_price <> 0 OR percent_change <> 0"
+        ))
+        await db.commit()
+        affected = res.rowcount if hasattr(res, "rowcount") else None
+        cnt_res = await db.execute(text("SELECT COUNT(*) FROM daily_stock_market_stats"))
+        total = cnt_res.scalar()
+    return {"status": "ok", "rows_updated": affected, "total_rows": total}
+
+
 @app.post("/api/v1/admin/sync-halkarz-tedbirli")
 @limiter.limit("3/minute")
 async def admin_sync_halkarz_tedbirli(request: Request, payload: dict = Body(...)):
@@ -9575,6 +9536,164 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         summary.pop("tickers_processed", None)
 
         return {"status": "ok", **summary}
+
+
+@app.post("/api/v1/admin/backfill-dividend-bodies")
+@limiter.limit("2/minute")
+async def admin_backfill_dividend_bodies(request: Request, payload: dict = Body(...)):
+    """Admin: Son N saatte gelen tum temettu KAP bildirimleri icin body kisaysa
+    KAP'tan re-fetch + dividend state machine'inden gecir.
+
+    Body: {"admin_password": "...", "hours": 72, "limit": 200}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    hours = int(payload.get("hours", 72))
+    limit = int(payload.get("limit", 200))
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.dividend_calendar_processor import (
+        is_dividend, process_kap_disclosure as div_process,
+    )
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    stats = {"scanned": 0, "matched_dividend": 0, "body_refetched": 0, "processed": 0, "errors": 0, "events": []}
+
+    async with async_session() as db:
+        q = (
+            select(KapAllDisclosure)
+            .where(KapAllDisclosure.published_at >= since)
+            .order_by(desc(KapAllDisclosure.published_at))
+            .limit(limit)
+        )
+        rows = list((await db.execute(q)).scalars().all())
+        stats["scanned"] = len(rows)
+
+        for d in rows:
+            title = d.title or ""
+            body = d.body or ""
+            if not is_dividend(title, body):
+                continue
+            stats["matched_dividend"] += 1
+
+            # Body kisa ise KAP'tan re-fetch
+            if (not body or len(body) < 200) and d.kap_url:
+                try:
+                    disc = await fetch_kap_disclosure(d.kap_url)
+                    if disc and disc.get("full_text"):
+                        body = disc["full_text"]
+                        d.body = body
+                        stats["body_refetched"] += 1
+                except Exception:
+                    pass
+
+            try:
+                res = await div_process(
+                    db,
+                    disclosure_id=d.id,
+                    ticker=d.company_code,
+                    company_name=None,
+                    title=title,
+                    body=body,
+                    kap_url=d.kap_url,
+                    published_at=d.published_at,
+                )
+                if res:
+                    stats["processed"] += 1
+                    if len(stats["events"]) < 30:
+                        stats["events"].append({
+                            "ticker": d.company_code,
+                            "title": title[:80],
+                            "event_type": res.event_type if hasattr(res, "event_type") else None,
+                            "status": res.status,
+                            "period": res.period,
+                        })
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning("Backfill dividend hata (%s): %s", d.company_code, e)
+
+        await db.commit()
+
+    return {"status": "ok", "hours": hours, **stats}
+
+
+@app.post("/api/v1/admin/reprocess-dividend-disclosure")
+@limiter.limit("5/minute")
+async def admin_reprocess_dividend_disclosure(request: Request, payload: dict = Body(...)):
+    """Admin: Bir KAP bildirimini (ticker veya kap_url) temettu state machine'inden
+    yeniden gecir. Body kisa gelmisse KAP'tan re-fetch eder.
+
+    Body: {"admin_password": "...", "ticker": "TEZOL"} VEYA {"kap_url": "..."}
+    Optional: {"title_contains": "kar payı dağıtım"} - en yeni eslesen kayit secilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.dividend_calendar_processor import process_kap_disclosure as div_process
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+
+    ticker = (payload.get("ticker") or "").upper().strip() or None
+    kap_url = payload.get("kap_url") or None
+    title_contains = (payload.get("title_contains") or "kar payı dağıtım").lower()
+
+    async with async_session() as db:
+        # Hedef bildirimi bul
+        q = select(KapAllDisclosure)
+        if kap_url:
+            q = q.where(KapAllDisclosure.kap_url == kap_url)
+        elif ticker:
+            q = q.where(KapAllDisclosure.company_code == ticker).order_by(desc(KapAllDisclosure.published_at)).limit(10)
+        else:
+            return {"status": "error", "message": "ticker veya kap_url gerekli"}
+
+        res = await db.execute(q)
+        rows = list(res.scalars().all())
+        # title filter (case-insensitive)
+        if ticker and title_contains:
+            rows = [r for r in rows if title_contains in (r.title or "").lower()]
+        if not rows:
+            return {"status": "error", "message": "Eslesen bildirim bulunamadi"}
+
+        disclosure = rows[0]
+        body = disclosure.body or ""
+        # Body kisa ise KAP'tan re-fetch
+        if (not body or len(body) < 200) and disclosure.kap_url:
+            try:
+                disc = await fetch_kap_disclosure(disclosure.kap_url)
+                if disc and disc.get("full_text"):
+                    body = disc["full_text"]
+                    disclosure.body = body
+                    await db.commit()
+            except Exception as e:
+                logger.warning("KAP fetch hata (%s): %s", disclosure.company_code, e)
+
+        result = await div_process(
+            db,
+            disclosure_id=disclosure.id,
+            ticker=disclosure.company_code,
+            company_name=None,
+            title=disclosure.title,
+            body=body,
+            kap_url=disclosure.kap_url,
+            published_at=disclosure.published_at,
+        )
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "ticker": disclosure.company_code,
+            "title": disclosure.title,
+            "kap_url": disclosure.kap_url,
+            "body_length": len(body),
+            "dividend_id": result.id if result else None,
+            "event_type": result.event_type if result else None,
+            "period": result.period if result else None,
+            "gross_amount_per_share": float(result.gross_amount_per_share) if result and result.gross_amount_per_share else None,
+            "payment_date": result.payment_date.isoformat() if result and result.payment_date else None,
+        }
 
 
 @app.post("/api/v1/admin/reprocess-payment-announcement")

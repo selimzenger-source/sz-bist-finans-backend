@@ -3702,32 +3702,12 @@ async def _process_kap_disclosures(disclosures: list, job_name: str = "KAP"):
 
 
 async def kap_uzmanpara_quick_job():
-    """Uzmanpara hizli tarama — her 50 saniyede bir.
+    """DEVRE DISI — KAP haberleri artik tamamen Telegram poller'dan geliyor.
 
-    Sadece Uzmanpara'yi tarar (en guncel kaynak).
-    Yeni bildirimler aninda DB'ye kaydedilir + AI analiz + push bildirim.
-
-    NOT: Telegram bot artik primary kaynak. Bu job sadece kap_primary_source
-    "uzmanpara" veya "both" oldugunda calisir. Default'ta (telegram) atlanir.
+    Uzmanpara/Mynet scrape'i kaldirildi. Scheduler bu job'i hala tetikliyor
+    olabilir; bos donus saglar.
     """
-    # Toggle kontrolu — admin panelden ayarlanir
-    try:
-        from app.services.kap_source_setting import get_kap_source, is_uzmanpara_active
-        source = await get_kap_source()
-        if not is_uzmanpara_active(source):
-            # Telegram primary modda — Uzmanpara devre disi
-            logger.debug("KAP source: %s — Uzmanpara quick job atlandi", source)
-            return
-    except Exception as e:
-        # Toggle okunamadi — guvenli yol: eski sistemi calistir (yedek mantigi)
-        logger.warning("KAP source toggle okunamadi (%s) — Uzmanpara calisiyor (yedek)", e)
-
-    try:
-        from app.scrapers.kap_all_scraper import scrape_uzmanpara_only
-        disclosures = await scrape_uzmanpara_only()
-        await _process_kap_disclosures(disclosures, "KAP-Uzmanpara")
-    except Exception as e:
-        logger.error("KAP Uzmanpara quick job hatasi: %s", e)
+    return
 
 
 async def _calendar_status_updater_job():

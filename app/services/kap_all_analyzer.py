@@ -570,23 +570,11 @@ def _extract_dividend_brut_tl(title: str, body: str) -> float | None:
 
 
 async def _get_recent_stock_price(ticker: str) -> float | None:
-    """Hisse anlik fiyatini cek (Yahoo + Mynet fallback).
+    """BIST veri lisansi gerekliligi nedeniyle Yahoo/Mynet fiyat cekimi devre disi.
 
-    Cache yok burada — sadece temettu analizi sirasinda cagrilir, nadiren.
-    Hata sessizce yutulur, None doner.
+    Temettu analizi tetiklendiginde fiyat None doner; verim yuzdesi
+    hesaplanmaz (dividend_context bos kalir, AI gerek kalmadan calisir).
     """
-    try:
-        # main.py'deki helper'lari yeniden import et — cevrim kalmasin
-        from app.main import _fetch_yahoo_v8, _fetch_mynet
-        for fn in (_fetch_yahoo_v8, _fetch_mynet):
-            try:
-                p = await fn(ticker)
-                if p is not None and p > 0:
-                    return float(p)
-            except Exception:
-                continue
-    except Exception as e:
-        logger.warning("KAP Analyzer: Fiyat cekimi basarisiz (%s) — %s", ticker, e)
     return None
 
 

@@ -49,44 +49,27 @@ _BIST_TTL = 12 * 3600
 
 
 async def _refresh_bist_symbols() -> set[str]:
-    """BigPara BIST Tum endeksinden tum hisse kodlarini ceker (sayfali)."""
-    global _BIST_SYMBOLS, _BIST_TS
+    """BIST sembol listesi — STATIK kaynak (app/data/ticker_names.json).
 
-    now = time.time()
-    if _BIST_SYMBOLS and (now - _BIST_TS < _BIST_TTL):
+    Onceden BigPara'dan scrape ediliyordu; BIST veri lisansi sureci nedeniyle
+    3. parti scrape kaldirildi. KAP zaten Telegram'dan geldigi icin BIST
+    whitelist sadece filtre amacli — statik liste yeterli.
+    """
+    global _BIST_SYMBOLS, _BIST_TS
+    if _BIST_SYMBOLS:
         return _BIST_SYMBOLS
 
-    symbols: set[str] = set()
-    page = 1
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=HEADERS) as client:
-        while page <= 20:
-            url = BIST_INDEX_BASE if page == 1 else f"{BIST_INDEX_BASE}{page}/"
-            try:
-                r = await client.get(url)
-                soup = BeautifulSoup(r.text, "lxml")
-                links = soup.find_all(
-                    "a", href=lambda h: h and "/borsa/hisse-fiyatlari/" in h and "-detay/" in h
-                )
-                codes = {
-                    a.get_text(strip=True)
-                    for a in links
-                    if re.match(r"^[A-Z][A-Z0-9]{1,9}$", a.get_text(strip=True))
-                }
-                if not codes:
-                    break
-                symbols.update(codes)
-                page += 1
-            except Exception as exc:
-                logger.warning("BIST sayfa %d hata: %s", page, exc)
-                break
-
-    if symbols:
-        _BIST_SYMBOLS = symbols
-        _BIST_TS = now
-        logger.info("BIST whitelist guncellendi: %d sembol", len(symbols))
-    else:
-        logger.warning("BIST whitelist bos geldi, eski liste korunuyor (%d)", len(_BIST_SYMBOLS))
-
+    try:
+        import json, os
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        path = os.path.join(base_dir, "data", "ticker_names.json")
+        with open(path, "r", encoding="utf-8") as f:
+            names = json.load(f)
+        _BIST_SYMBOLS = set(names.keys())
+        _BIST_TS = time.time()
+        logger.info("BIST whitelist (statik) yuklendi: %d sembol", len(_BIST_SYMBOLS))
+    except Exception as exc:
+        logger.warning("BIST statik liste yuklenemedi: %s", exc)
     return _BIST_SYMBOLS
 
 
@@ -95,20 +78,14 @@ async def _refresh_bist_symbols() -> set[str]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def _uzmanpara_fetch() -> list[dict[str, Any]]:
-    """Uzmanpara KAP haberleri listing sayfasindan bildirim listesi.
-
-    Sadece listing sayfasini tarar — detay sayfasi ACILMAZ.
-
-    HTML yapisi:
-      <li>
-        <a class="hisse" href="/kap-haberi/.../">TICKER</a>
-        <a href="/kap-haberi/.../">Baslik</a>
-        <span class="date">01.03.2026<br/>20:31:25</span>
-      </li>
-
-    Returns:
-        [{title, company_code, kap_url, published_at, source, category, is_bilanco}, ...]
+    """DEVRE DISI — KAP haberleri artik Telegram poller'dan geliyor.
+    Uzmanpara/Mynet scrape'i kaldirildi.
     """
+    return []
+
+
+async def _uzmanpara_fetch_legacy_disabled() -> list[dict[str, Any]]:
+    """[Eski kod — disable] Uzmanpara KAP haberleri listing sayfasindan."""
     global _uzmanpara_fail_count
 
     async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=HEADERS) as client:
@@ -218,7 +195,14 @@ _TR_MONTHS = {
 
 
 async def _mynet_fetch() -> list[dict[str, Any]]:
-    """Mynet Finans KAP haberleri listing — yedek kaynak.
+    """DEVRE DISI — KAP haberleri artik Telegram poller'dan geliyor.
+    Mynet Finans scrape'i kaldirildi.
+    """
+    return []
+
+
+async def _mynet_fetch_legacy_disabled() -> list[dict[str, Any]]:
+    """[Eski kod — disable] Mynet Finans KAP haberleri listing — yedek kaynak.
 
     HTML yapisi:
       <li>
@@ -337,6 +321,11 @@ def _parse_mynet_date(text: str) -> datetime | None:
 
 
 async def fetch_mynet_detail_content(detail_url: str) -> str:
+    """DEVRE DISI — Mynet detay icerigi cekimi kaldirildi (KAP Telegram'dan)."""
+    return ""
+
+
+async def fetch_mynet_detail_content_legacy_disabled(detail_url: str) -> str:
     """Mynet Finans detay sayfasindan bildirim icerigi cekmek (AI icin).
 
     Mynet detay sayfasinda KAP bildiriminin tam icerigi tablo formatinda var.
@@ -612,30 +601,9 @@ def _apply_bist_filter(data: list[dict[str, Any]], bist: set[str]) -> list[dict[
 # ═════════════════════════════════════════════════════════════════════════════
 
 async def scrape_uzmanpara_only() -> list[dict[str, Any]]:
-    """KAP haberlerini ceker — Uzmanpara (ana) + Mynet Finans (yedek).
+    """DEVRE DISI — KAP haberleri artik Telegram poller'dan geliyor.
 
-    Her ~50 saniyede bir cagirilir.
-    Uzmanpara 2 ard arda fail ederse Mynet Finans yedek kaynaga gecer.
-    BIST whitelist ile filtrelenir.
-
-    Returns:
-        list[dict]: Bildirim listesi
+    Uzmanpara + Mynet Finans yedek kaynak scrape'leri kaldirildi.
+    Scheduler hala bu fonksiyonu cagiriyor olabilir; bos liste donulur.
     """
-    bist = await _refresh_bist_symbols()
-
-    # Ana kaynak: Uzmanpara
-    data = await _uzmanpara_fetch()
-
-    # Yedek kaynak: Mynet Finans (2 ard arda hata sonrasi)
-    if not data and _uzmanpara_fail_count >= _FAILOVER_THRESHOLD:
-        logger.warning(
-            "Uzmanpara %d kez basarisiz — Mynet Finans yedek kaynaga geciliyor",
-            _uzmanpara_fail_count,
-        )
-        data = await _mynet_fetch()
-
-    if not data:
-        return []
-
-    data = _apply_bist_filter(data, bist)
-    return data[:30]
+    return []
