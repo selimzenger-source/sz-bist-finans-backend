@@ -13178,10 +13178,18 @@ async def get_temettu_akisi(
     for r in rows:
         did = _latest_disclosure_id(r)
         ai = ai_map.get(did or -1) or {"ai_summary": None, "ai_sentiment": None, "ai_impact_score": None}
+        # Gerçek KAP "Özet Bilgi" başlığı varsa onu kullan, yoksa generic label
+        actual_title = getattr(r, "source_title", None) or _title_for(r.status or "")
+        # payment_type yoksa amount'a göre tahmin et (geri uyumluluk)
+        pt = getattr(r, "payment_type", None)
+        if not pt and r.status != "reddedildi":
+            if r.gross_amount_per_share or r.net_amount_per_share:
+                pt = "cash"
         items.append({
             "ticker": r.ticker,
             "company_name": r.company_name,
-            "title": _title_for(r.status or ""),
+            "title": actual_title,
+            "category_label": _title_for(r.status or ""),  # frontend isterse kategori adı için
             "type": _type_for_status(r.status or ""),
             "status": r.status,
             "published_at": _latest_event_iso(r),
@@ -13192,6 +13200,8 @@ async def get_temettu_akisi(
             "gross_yield_pct": float(r.gross_yield_pct) if r.gross_yield_pct else None,
             "net_yield_pct": float(r.net_yield_pct) if r.net_yield_pct else None,
             "total_amount_tl": float(r.total_amount_tl) if r.total_amount_tl else None,
+            "payment_type": pt,
+            "stock_ratio_text": getattr(r, "stock_ratio_text", None),
             "payment_date": r.payment_date.isoformat() if r.payment_date else None,
             "ai_summary": ai["ai_summary"],
             "ai_sentiment": ai["ai_sentiment"],

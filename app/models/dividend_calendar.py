@@ -58,6 +58,21 @@ class DividendCalendar(Base):
         Float, comment="Toplam dagitilacak temettu tutari (TL)"
     )
 
+    # ─── Dağıtım Türü (v56) ───
+    # cash | stock | cash_and_stock | none (none = dağıtmama kararı veya henüz belirsiz)
+    payment_type: Mapped[str | None] = mapped_column(
+        String(20), comment="Dağıtım tipi: cash | stock | cash_and_stock | none"
+    )
+    # Bedelsiz pay oranı serbest metin — örn. \"1 lota 2 lot\" veya \"%200\"
+    stock_ratio_text: Mapped[str | None] = mapped_column(
+        String(80), comment="Bedelsiz pay dağıtım oranı (serbest metin)"
+    )
+    # Orijinal KAP \"Özet Bilgi\" başlığı (her zaman bizim generic label'imizden daha
+    # spesifik — örn. \"Kar Payı Dağıtımına İlişkin Genel Kurul Kararı\")
+    source_title: Mapped[str | None] = mapped_column(
+        String(255), comment="Orijinal KAP Özet Bilgi başlığı"
+    )
+
     # ─── State machine kilometre taslari ───
     # 1. YKK (Yonetim Kurulu Karari)
     ykk_date: Mapped[date | None] = mapped_column(Date)

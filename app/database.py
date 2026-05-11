@@ -895,6 +895,20 @@ async def init_db():
         except Exception:
             pass
 
+        # v56 migration: dividend_calendar — payment_type, stock_ratio_text, source_title
+        try:
+            await conn.execute(text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS payment_type VARCHAR(20)"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS stock_ratio_text VARCHAR(80)"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS source_title VARCHAR(255)"
+            ))
+        except Exception:
+            pass
+
         # Timeout'ları resetle — normal çalışma için
         try:
             await conn.execute(text("SET lock_timeout = '0'"))

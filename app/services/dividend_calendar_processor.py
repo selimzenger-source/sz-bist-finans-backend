@@ -275,7 +275,9 @@ Donen JSON sablonu (bilgi yoksa null):
   "total_amount_tl": <toplam dagitilacak TL>,
   "ykk_date": "YYYY-MM-DD",
   "general_assembly_date": "YYYY-MM-DD",
-  "payment_date": "YYYY-MM-DD"
+  "payment_date": "YYYY-MM-DD",
+  "payment_type": "cash" | "stock" | "cash_and_stock" | "none",
+  "stock_ratio_text": "1 lota 2 lot" veya "%200" gibi serbest metin (sadece pay dagitimi varsa)
 }}
 
 KURALLAR:
@@ -283,6 +285,13 @@ KURALLAR:
 - Brut/net rakamlar TL cinsinden hisse basi.
 - Yuzde verim: temettu/hisse_fiyat * 100.
 - Tarihler bildirimde gecen tarihler.
+- payment_type:
+    * "cash" = sadece nakit temettu (cogu sirket)
+    * "stock" = sadece bedelsiz pay/hisse (nakit yok)
+    * "cash_and_stock" = hem nakit hem bedelsiz pay
+    * "none" = dagitim yapilmayacak / red karari
+- stock_ratio_text: bedelsiz pay verilecekse oranini metin olarak yaz, ornegin
+  "1 lota 2 lot", "%200", "1.000.000 TL nominal 2.000.000 TL". Nakit ise null.
 - Bilinmeyenler null.
 
 ★ KRITIK: DAGITMAMA KARARI TESPITI ★
@@ -318,6 +327,8 @@ async def ai_parse_dividend(
         "ykk_date": None,
         "general_assembly_date": None,
         "payment_date": None,
+        "payment_type": None,
+        "stock_ratio_text": None,
     }
 
     gemini_key = _get_gemini_key()
@@ -367,6 +378,13 @@ async def ai_parse_dividend(
                                 out[k] = date.fromisoformat(d)
                             except ValueError:
                                 pass
+                    # payment_type & stock_ratio_text
+                    pt = parsed.get("payment_type")
+                    if isinstance(pt, str) and pt.lower() in ("cash", "stock", "cash_and_stock", "none"):
+                        out["payment_type"] = pt.lower()
+                    sr = parsed.get("stock_ratio_text")
+                    if isinstance(sr, str) and sr.strip():
+                        out["stock_ratio_text"] = sr.strip()[:80]
             else:
                 logger.warning("Dividend AI: HTTP %s — %s", resp.status_code, resp.text[:200])
     except Exception as e:
@@ -500,6 +518,9 @@ async def process_kap_disclosure(
                 gross_yield_pct=parsed.get("gross_yield_pct"),
                 net_yield_pct=parsed.get("net_yield_pct"),
                 total_amount_tl=parsed.get("total_amount_tl"),
+                payment_type=parsed.get("payment_type"),
+                stock_ratio_text=parsed.get("stock_ratio_text"),
+                source_title=(title or "")[:255],
                 ykk_date=ykk_dt,
                 ykk_kap_disclosure_id=disclosure_id,
                 ykk_kap_url=kap_url,
@@ -517,10 +538,13 @@ async def process_kap_disclosure(
             return new_row
         # Mevcudu zenginlestir
         for k in ("period", "gross_amount_per_share", "net_amount_per_share",
-                  "gross_yield_pct", "net_yield_pct", "total_amount_tl"):
+                  "gross_yield_pct", "net_yield_pct", "total_amount_tl",
+                  "payment_type", "stock_ratio_text"):
             v = parsed.get(k)
-            if v and not getattr(existing, k):
+            if v and not getattr(existing, k, None):
                 setattr(existing, k, v)
+        if title and not getattr(existing, "source_title", None):
+            existing.source_title = title[:255]
         if not existing.ykk_date and ykk_dt:
             existing.ykk_date = ykk_dt
             existing.ykk_kap_disclosure_id = disclosure_id
@@ -538,6 +562,7 @@ async def process_kap_disclosure(
             existing = DividendCalendar(
                 ticker=ticker, company_name=company_name, period=period,
                 status="ykk_alindi",
+                source_title=(title or "")[:255],
             )
             db.add(existing)
             await db.flush()
@@ -546,6 +571,16 @@ async def process_kap_disclosure(
         )
         existing.general_assembly_kap_disclosure_id = disclosure_id
         existing.general_assembly_kap_url = kap_url
+        # AI parse'tan gelen amounts + payment_type/stock_ratio_text — GA bildiriminde
+        # genelde tüm detaylar netleşir, bu yüzden mevcut alanları zenginleştir.
+        for k in ("gross_amount_per_share", "net_amount_per_share",
+                  "gross_yield_pct", "net_yield_pct", "total_amount_tl",
+                  "payment_type", "stock_ratio_text"):
+            v = parsed.get(k)
+            if v and not getattr(existing, k, None):
+                setattr(existing, k, v)
+        if title and not getattr(existing, "source_title", None):
+            existing.source_title = title[:255]
         if existing.status == "ykk_alindi":
             existing.status = "genel_kurul_onayli"
         # Eger ayni bildirimde odeme tarihi de varsa
@@ -561,6 +596,7 @@ async def process_kap_disclosure(
             existing = DividendCalendar(
                 ticker=ticker, company_name=company_name, period=period,
                 status="reddedildi",
+                source_title=(title or "")[:255],
             )
             db.add(existing)
             await db.flush()
@@ -568,6 +604,9 @@ async def process_kap_disclosure(
         existing.rejected_at = datetime.now(timezone.utc)
         existing.rejection_kap_disclosure_id = disclosure_id
         existing.rejection_kap_url = kap_url
+        existing.payment_type = "none"
+        if title and not getattr(existing, "source_title", None):
+            existing.source_title = title[:255]
         logger.info("Dividend: red (%s)", ticker)
         return existing
 
@@ -576,9 +615,17 @@ async def process_kap_disclosure(
             existing = DividendCalendar(
                 ticker=ticker, company_name=company_name, period=period,
                 status="ykk_alindi",
+                source_title=(title or "")[:255],
             )
             db.add(existing)
             await db.flush()
+        if title and not getattr(existing, "source_title", None):
+            existing.source_title = title[:255]
+        # Payment_type fallback — sadece nakit/pay ödeme bildirimleri için
+        if parsed.get("payment_type") and not getattr(existing, "payment_type", None):
+            existing.payment_type = parsed.get("payment_type")
+        if parsed.get("stock_ratio_text") and not getattr(existing, "stock_ratio_text", None):
+            existing.stock_ratio_text = parsed.get("stock_ratio_text")
         pay_dt = parsed.get("payment_date")
         if pay_dt:
             existing.payment_date = pay_dt
