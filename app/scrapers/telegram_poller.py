@@ -440,6 +440,7 @@ async def _route_to_calendars(
     if is_share_transaction(title):
         # ÖNCE: KAP URL'den structured table fetch (deterministik, daha güvenilir)
         kap_fetch_ok = False
+        kap_fetch_error: str | None = None
         if kap_url:
             try:
                 from app.services.kap_pay_alim_satim_fetcher import upsert_pay_alim_satim_from_kap
@@ -447,11 +448,18 @@ async def _route_to_calendars(
                     session, kap_url=kap_url, company_code=ticker,
                     title=title, published_at=published_at, disclosure_id=disclosure_id,
                 )
+                if not kap_fetch_ok:
+                    kap_fetch_error = "upsert_returned_false"
             except Exception as e:
+                kap_fetch_error = f"exception:{type(e).__name__}:{str(e)[:120]}"
                 logger.warning("Router→kap_pay_fetch hata (%s): %s", ticker, e)
 
-        # SADECE yeni fetcher fail olursa AI parser fallback (duplicate önlenir)
+        # KAP fetcher fail VEYA exception olursa AI parser fallback
         if not kap_fetch_ok:
+            logger.info(
+                "Pay alım satım AI fallback (%s): kap_fetch=%s",
+                ticker, kap_fetch_error or "unknown",
+            )
             try:
                 await shtx_process(
                     session, disclosure_id=disclosure_id, ticker=ticker,
@@ -459,7 +467,7 @@ async def _route_to_calendars(
                     kap_url=kap_url, published_at=published_at,
                 )
             except Exception as e:
-                logger.warning("Router→share_transaction hata (%s): %s", ticker, e)
+                logger.exception("Router→share_transaction AI fallback hata (%s): %s", ticker, e)
 
     if is_block_trade(title):
         try:
