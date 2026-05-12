@@ -9862,6 +9862,76 @@ async def admin_audit_categories(request: Request, payload: dict = Body(...)):
     }
 
 
+@app.post("/api/v1/admin/route-disclosure-to-type-conversion")
+@limiter.limit("5/minute")
+async def admin_route_to_type_conversion(request: Request, payload: dict = Body(...)):
+    """Admin: Bir KAP URL'sini ZORLA type_conversion pipeline'ina sok.
+
+    Body: {"admin_password":"...","kap_url":"https://www.kap.org.tr/tr/Bildirim/XXXX"}
+
+    Telegram poller yakalamamis Tipe Donusum bildirimlerini manuel isleme alir.
+    Body kisaysa KAP'tan re-fetch. _parse_tc_table tum satirlari cikartip
+    share_type_conversions tablosuna yazar (multi-ticker).
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url", "")
+    if not kap_url:
+        return {"status": "error", "message": "kap_url gerekli"}
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.kap_category_processors import process_type_conversion
+
+    async with async_session() as db:
+        row_q = select(KapAllDisclosure).where(KapAllDisclosure.kap_url == kap_url).limit(1)
+        row = (await db.execute(row_q)).scalar_one_or_none()
+        title = row.title if row else "Borsada İşlem Gören Tipe Dönüşüm Duyurusu"
+        body = row.body if row else ""
+        ticker = row.company_code if row else ""
+        disclosure_id = row.id if row else 0
+        published_at = row.published_at if row else datetime.now(timezone.utc)
+
+        # Body kisaysa KAP'tan
+        if (not body or len(body) < 500):
+            try:
+                disc = await fetch_kap_disclosure(kap_url)
+                if disc and disc.get("full_text"):
+                    body = disc["full_text"]
+                    if row and (not row.body or len(row.body) < 500):
+                        row.body = body
+            except Exception as e:
+                logger.warning("KAP fetch hata: %s", e)
+
+        try:
+            result = await process_type_conversion(
+                db,
+                disclosure_id=disclosure_id or 0,
+                ticker=ticker or "",
+                company_name=None,
+                title=title or "Borsada İşlem Gören Tipe Dönüşüm Duyurusu",
+                body=body or "",
+                kap_url=kap_url,
+                published_at=published_at,
+            )
+            await db.commit()
+        except Exception as e:
+            logger.exception("type_conversion process hata: %s", e)
+            return {"status": "error", "message": str(e), "body_length": len(body or "")}
+
+        inserted_count = len(result) if result else 0
+        return {
+            "status": "ok",
+            "inserted_rows": inserted_count,
+            "body_length": len(body or ""),
+            "rows_preview": [
+                {"ticker": r.ticker, "investor": r.investor_name, "nominal": r.converted_lot}
+                for r in (result or [])[:20]
+            ] if result else [],
+        }
+
+
 @app.post("/api/v1/admin/route-disclosure-to-block-trade")
 @limiter.limit("5/minute")
 async def admin_route_to_block_trade(request: Request, payload: dict = Body(...)):
