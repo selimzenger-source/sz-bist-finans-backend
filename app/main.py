@@ -9878,22 +9878,30 @@ async def admin_normalize_share_tx_types(request: Request, payload: dict = Body(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
+    from app.models.share_transaction_detail import ShareTransactionDetail
     async with async_session() as db:
-        r1 = await db.execute(text(
-            "UPDATE share_transaction_details SET transaction_type='alici' WHERE transaction_type='alis'"
-        ))
-        r2 = await db.execute(text(
-            "UPDATE share_transaction_details SET transaction_type='satici' WHERE transaction_type='satis'"
-        ))
+        r1 = await db.execute(
+            update(ShareTransactionDetail)
+            .where(ShareTransactionDetail.transaction_type == "alis")
+            .values(transaction_type="alici")
+        )
+        r2 = await db.execute(
+            update(ShareTransactionDetail)
+            .where(ShareTransactionDetail.transaction_type == "satis")
+            .values(transaction_type="satici")
+        )
         await db.commit()
-        cnt_r = await db.execute(text(
-            "SELECT transaction_type, COUNT(*) FROM share_transaction_details GROUP BY transaction_type"
-        ))
-        counts = {row[0]: row[1] for row in cnt_r.fetchall()}
+
+        # Sayım — counts
+        cnt_q = await db.execute(
+            select(ShareTransactionDetail.transaction_type, func.count(ShareTransactionDetail.id))
+            .group_by(ShareTransactionDetail.transaction_type)
+        )
+        counts = {row[0]: row[1] for row in cnt_q.fetchall()}
     return {
         "status": "ok",
-        "alis_to_alici": r1.rowcount,
-        "satis_to_satici": r2.rowcount,
+        "alis_to_alici_updated": r1.rowcount if r1 else None,
+        "satis_to_satici_updated": r2.rowcount if r2 else None,
         "current_counts": counts,
     }
 
