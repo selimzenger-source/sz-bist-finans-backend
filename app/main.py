@@ -10321,16 +10321,26 @@ async def admin_reprocess_dividend_disclosure(request: Request, payload: dict = 
 
         disclosure = rows[0]
         body = disclosure.body or ""
-        # Body kisa ise KAP'tan re-fetch
-        if (not body or len(body) < 200) and disclosure.kap_url:
+        # Body kisa ise KAP'tan re-fetch (2 katmanli fallback)
+        if (not body or len(body) < 500) and disclosure.kap_url:
             try:
                 disc = await fetch_kap_disclosure(disclosure.kap_url)
                 if disc and disc.get("full_text"):
                     body = disc["full_text"]
-                    disclosure.body = body
-                    await db.commit()
             except Exception as e:
-                logger.warning("KAP fetch hata (%s): %s", disclosure.company_code, e)
+                logger.warning("KAP disclosure fetch hata (%s): %s", disclosure.company_code, e)
+            # Hala kisaysa daha agresif HTML fetcher dene
+            if not body or len(body) < 500:
+                try:
+                    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+                    page_body = await fetch_kap_page_content(disclosure.kap_url)
+                    if page_body and len(page_body) > len(body or ""):
+                        body = page_body
+                except Exception as e:
+                    logger.warning("KAP page fetch hata (%s): %s", disclosure.company_code, e)
+            if body:
+                disclosure.body = body
+                await db.commit()
 
         result = await div_process(
             db,

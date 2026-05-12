@@ -153,7 +153,27 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
         if title_generic_kkk and not is_dividend_payload:
             return False
 
-    return any(p in t for p in _DIVIDEND_TITLE_PATTERNS)
+    if any(p in t for p in _DIVIDEND_TITLE_PATTERNS):
+        return True
+
+    # BISTECH bulk announcement — title "BISTECH Pay Piyasası Alım Satım Sistemi
+    # Duyurusu" generic, body'de "Pay Başına Brüt Temettü" geçiyorsa temettü
+    # bulk ödeme/karar duyurusudur (multi-ticker).
+    if "bistech" in t and body:
+        b = lower_tr(body)
+        bistech_dividend_signals = [
+            "pay başına brüt temettü", "pay basina brut temettu",
+            "pay başına net temettü", "pay basina net temettu",
+            "teorik fiyat", "teorik fiyati",
+            "kar payı dağıt", "kar payi dagit",
+            "temettü dağıt", "temettu dagit",
+            "temettü ödem", "temettu odem",
+            "brüt temettü", "brut temettu",
+        ]
+        if any(s in b for s in bistech_dividend_signals):
+            return True
+
+    return False
 
 
 def classify_event(title: str) -> str:
