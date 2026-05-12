@@ -106,10 +106,25 @@ _BT_BODY_PATTERNS = [
     "toptan satış işlemi", "toptan satis islemi",
     "toptan alış işlemi", "toptan alis islemi",
     "toptan işlem", "toptan islem",
+    "toptan satış", "toptan satis",
+    "toptan alış", "toptan alis",
+    "toptan alım", "toptan alim",
     "borsa dışı pay devri", "borsa disi pay devri",
     "borsada işlem görmeyen pay", "borsada islem gormeyen pay",
     "borsa dışında gerçekleş", "borsa disinda gerceklesti",
     "block trade",
+]
+
+# Kombo pattern'lar — birden fazlasi birlikte gecerse block_trade kabul edilir.
+# Tek başına "alıcılar:" share_transaction'da da olabilir; ancak "aracı kurum:" +
+# "alıcılar:" + "lot miktarı:" + "maliyet fiyatı:" toptan alım satım iskeleti.
+_BT_COMBO_PATTERNS = [
+    "alıcılar:", "alicilar:",
+    "satıcılar:", "saticilar:",
+    "aracı kurum:", "araci kurum:",
+    "lot miktarı:", "lot miktari:",
+    "maliyet fiyatı:", "maliyet fiyati:",
+    "lot miktari", "maliyet fiyati",
 ]
 
 
@@ -117,8 +132,10 @@ def is_block_trade(title: str, body: str = "") -> bool:
     """Toptan alim satim mi?
 
     Title'da kalip varsa direkt True. Title generic (örn. "Pay Alım Satım
-    Bildirimi") ise body'de toptan/borsa disi sinyali ara — bu durumda yanlis
-    siniflandirma onlenir.
+    Bildirimi") ise body'de:
+      a) "toptan alış satış" gibi tek başına güçlü sinyal varsa True
+      b) Combo pattern'lardan en az 3 tanesi varsa True (alıcılar/satıcılar
+         + aracı kurum + lot miktarı + maliyet fiyatı iskeleti)
     """
     if title:
         t = lower_tr(title)
@@ -126,8 +143,12 @@ def is_block_trade(title: str, body: str = "") -> bool:
             return True
     if body:
         b = lower_tr(body)
-        # En az 1 belirgin body kalibi yeterli (toptan kelimesi guclu sinyaldir)
+        # Güçlü tek sinyal
         if any(p in b for p in _BT_BODY_PATTERNS):
+            return True
+        # Combo: en az 3 farklı kalıp birlikte → toptan iskeleti
+        combo_hits = sum(1 for p in _BT_COMBO_PATTERNS if p in b)
+        if combo_hits >= 3:
             return True
     return False
 

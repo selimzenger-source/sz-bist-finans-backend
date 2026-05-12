@@ -9862,6 +9862,116 @@ async def admin_audit_categories(request: Request, payload: dict = Body(...)):
     }
 
 
+@app.post("/api/v1/admin/route-disclosure-to-block-trade")
+@limiter.limit("5/minute")
+async def admin_route_to_block_trade(request: Request, payload: dict = Body(...)):
+    """Admin: Bir KAP URL'sini ZORLA block_trade pipeline'ina sok.
+
+    Body: {"admin_password":"...","kap_url":"https://www.kap.org.tr/tr/Bildirim/XXXX"}
+
+    Klasifikatör yanlis dedi diye yakalanmamis toptan alim satim bildirimlerini
+    elle yonlendirmek icin. Body kisaysa KAP'tan re-fetch eder. process_block_trade
+    AI ile lot/fiyat/karsi taraf cikartip block_trades tablosuna yazar.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    kap_url = payload.get("kap_url", "")
+    if not kap_url:
+        return {"status": "error", "message": "kap_url gerekli"}
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.kap_category_processors import process_block_trade, is_block_trade
+
+    async with async_session() as db:
+        # DB'de var mi?
+        row_q = select(KapAllDisclosure).where(KapAllDisclosure.kap_url == kap_url).limit(1)
+        row = (await db.execute(row_q)).scalar_one_or_none()
+        title = row.title if row else "Pay Alim Satim Bildirimi (manual route)"
+        body = row.body if row else ""
+        ticker = row.company_code if row else ""
+        disclosure_id = row.id if row else 0
+        published_at = row.published_at if row else datetime.now(timezone.utc)
+
+        # Body kisaysa KAP'tan tam icerik
+        if (not body or len(body) < 500):
+            try:
+                disc = await fetch_kap_disclosure(kap_url)
+                if disc and disc.get("full_text"):
+                    body = disc["full_text"]
+                    if row and (not row.body or len(row.body) < 500):
+                        row.body = body
+                    if disc.get("title") and (not row or not row.title):
+                        title = disc["title"]
+            except Exception as e:
+                logger.warning("KAP fetch hata: %s", e)
+
+        # is_block_trade kontrolu (debug)
+        is_bt = is_block_trade(title, body)
+
+        # ZORLA process — title generic olsa bile body'de toptan varsa yakala
+        try:
+            from app.services.kap_category_processors import _call_gemini, _BT_PROMPT
+            # AI'ya gonder, doner parsed
+            parsed = await _call_gemini(_BT_PROMPT.format(
+                ticker=ticker or "?", title=title or "", body=(body or "")[:3500]
+            )) or {}
+        except Exception:
+            parsed = {}
+
+        # Direkt insert (process_block_trade is_block_trade() check'i atlamak icin manuel)
+        from app.models.block_trade import BlockTrade
+        from sqlalchemy import select as _sel
+        existing = (await db.execute(
+            _sel(BlockTrade).where(BlockTrade.kap_url == kap_url).limit(1)
+        )).scalar_one_or_none()
+        if existing:
+            await db.commit()
+            return {
+                "status": "exists",
+                "message": "BlockTrade kaydi zaten var",
+                "id": existing.id,
+                "ticker": existing.ticker,
+                "is_block_trade_classifier": is_bt,
+            }
+
+        tx_type = parsed.get("transaction_type") if parsed.get("transaction_type") in ("alis", "satis") else None
+        tx_date = None
+        if isinstance(parsed.get("transaction_date"), str):
+            try:
+                tx_date = date.fromisoformat(parsed["transaction_date"])
+            except ValueError:
+                pass
+
+        new = BlockTrade(
+            ticker=(ticker or parsed.get("ticker") or "?")[:10].upper(),
+            transaction_type=tx_type or "satis",
+            transaction_date=tx_date or (published_at.date() if published_at else date.today()),
+            broker=(parsed.get("broker") or "")[:200] or None,
+            counterparties=(parsed.get("counterparties") or "")[:500] or None,
+            lot_amount=int(parsed.get("lot_amount")) if parsed.get("lot_amount") else None,
+            cost_price=float(parsed.get("cost_price")) if parsed.get("cost_price") else None,
+            kap_url=kap_url,
+            disclosure_id=disclosure_id or None,
+        )
+        db.add(new)
+        await db.commit()
+        return {
+            "status": "ok",
+            "message": "BlockTrade kaydi olusturuldu",
+            "id": new.id,
+            "ticker": new.ticker,
+            "transaction_type": new.transaction_type,
+            "lot_amount": new.lot_amount,
+            "cost_price": new.cost_price,
+            "broker": new.broker,
+            "counterparties": new.counterparties,
+            "is_block_trade_classifier": is_bt,
+            "body_length": len(body or ""),
+        }
+
+
 @app.post("/api/v1/admin/debug-disclosure")
 @limiter.limit("10/minute")
 async def admin_debug_disclosure(request: Request, payload: dict = Body(...)):
