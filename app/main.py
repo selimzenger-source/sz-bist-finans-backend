@@ -9867,6 +9867,38 @@ async def admin_audit_categories(request: Request, payload: dict = Body(...)):
     }
 
 
+@app.post("/api/v1/admin/delete-bad-block-trade")
+@limiter.limit("5/minute")
+async def admin_delete_bad_block_trade(request: Request, payload: dict = Body(...)):
+    """Admin: ticker='?' veya tum alanlari null olan bad block_trade kayitlarini sil.
+    Body: {"admin_password":"..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.models.block_trade import BlockTrade
+        async with async_session() as db:
+            res = await db.execute(
+                delete(BlockTrade).where(
+                    or_(
+                        BlockTrade.ticker == "?",
+                        BlockTrade.ticker == "",
+                        and_(
+                            BlockTrade.lot_amount.is_(None),
+                            BlockTrade.cost_price.is_(None),
+                            BlockTrade.broker.is_(None),
+                            BlockTrade.counterparties.is_(None),
+                        ),
+                    )
+                )
+            )
+            await db.commit()
+            return {"status": "ok", "deleted_rows": res.rowcount}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "exception_type": type(e).__name__, "exception_message": str(e), "traceback": traceback.format_exc()[-1500:]}
+
+
 @app.post("/api/v1/admin/normalize-share-tx-types")
 @limiter.limit("3/minute")
 async def admin_normalize_share_tx_types(request: Request, payload: dict = Body(...)):
