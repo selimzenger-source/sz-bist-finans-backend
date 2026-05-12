@@ -86,12 +86,15 @@ async def _call_gemini(prompt: str) -> Optional[dict]:
 
 _BT_TITLE_PATTERNS = [
     # KAP gerçek başlıkları (production DB analizinden)
-    "toptan alış satış", "toptan alis satis",                  # 5+ kayit
+    # NOT: lower_tr 'I' → 'ı' (dotsuz) yaptığı için ASCII başlıklarda variant ekle.
+    "toptan alış satış", "toptan alis satis", "toptan alıs satıs",
     "toptan satış", "toptan alış", "toptan alım",
-    "toptan işlem", "toptan satim",
-    "toptan alim satim",
+    "toptan satıs", "toptan alıs", "toptan alım", "toptan alım",
+    "toptan işlem", "toptan ışlem",
+    "toptan satim", "toptan satım",
+    "toptan alim satim", "toptan alım satım", "toptan alım satim",
     # Borsa dışı pay devri — toptan işlem niteliği taşır
-    "borsa dışı pay devr", "borsa disi pay devr",
+    "borsa dışı pay devr", "borsa disi pay devr", "borsa dısı pay devr",
     "borsa dışında pay devr", "borsa disinda pay devr",
     "pay devri bildirimi", "pay devri bildirim",
     "block trade",
@@ -478,8 +481,12 @@ _CS_TITLE_PATTERNS = [
     # Devre kesici DAHİL DEĞİL (anlık trading halt, tedbir sayılmaz).
     "tedbir kararı", "tedbir karari",
     "spk tedbir", "sermaye piyasası kurulu tedbir",
-    "bistech pay piyasası",                                        # BIST tedbir uygulamalarını duyurur
+    # NOT: lower_tr() ASCII 'I' harfini dotsuz 'ı'ya çevirdiği için "BISTECH"
+    # → "bıstech" olur. İki yazımı da yakalamak için pattern'a ekleniyor.
+    "bistech pay piyasası", "bıstech pay piyasası",
+    "bistech pay piyasasi", "bıstech pay piyasasi",
     "borsa istanbul a.ş. duyuru", "borsa istanbul duyuru",
+    "borsa ıstanbul a.ş. duyuru", "borsa ıstanbul duyuru",
     "brüt takas", "brut takas",
     "açığa satış", "aciga satis", "açığa satış yasağı",
     "kredili işlem", "kredili islem",

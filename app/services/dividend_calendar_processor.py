@@ -159,7 +159,8 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     # BISTECH bulk announcement — title "BISTECH Pay Piyasası Alım Satım Sistemi
     # Duyurusu" generic, body'de "Pay Başına Brüt Temettü" geçiyorsa temettü
     # bulk ödeme/karar duyurusudur (multi-ticker).
-    if "bistech" in t and body:
+    # NOT: lower_tr "BISTECH" → "bıstech" (dotsuz ı) yapar; iki yazimi yakala.
+    if ("bistech" in t or "bıstech" in t) and body:
         b = lower_tr(body)
         bistech_dividend_signals = [
             "pay başına brüt temettü", "pay basina brut temettu",
@@ -454,11 +455,13 @@ async def process_kap_disclosure(
     # için ayrı kayıt oluşturmamalı — body içindeki HER ticker'ın DividendCalendar
     # kaydı 'ödendi' olarak güncellenmeli.
     GENERIC_ISSUERS = {"ISE", "BIST", "BORSA", "MKK", "KAP"}
+    _title_lo = (title or "").lower()
     is_bulk_announcement = (
         ticker.upper() in GENERIC_ISSUERS
-        or "bistech pay piyasas" in (title or "").lower()
-        or "borsa istanbul a.ş." in (title or "").lower()
-        or "borsa istanbul a.s." in (title or "").lower()
+        or "bistech pay piyasas" in _title_lo
+        or "bıstech pay piyasas" in _title_lo
+        or "borsa istanbul a.ş." in _title_lo
+        or "borsa istanbul a.s." in _title_lo
     )
     if is_bulk_announcement and body and is_dividend_payment_announcement(title or "", body):
         logger.info(
