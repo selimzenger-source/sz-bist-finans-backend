@@ -10716,7 +10716,7 @@ async def add_to_watchlist(
     Tier limitleri (2026-05 sonrası — birleşik portföy + watchlist):
     - Free: 5 hisse toplam
     - KAP AI PRO (ana_yildiz): 25 hisse toplam
-    - Diamond: 100 hisse toplam
+    - Diamond: sınırsız
     NOT: portföy frontend-only AsyncStorage'da, backend sadece watchlist sayar.
     Birleşik kontrol frontend'de yapılır; backend watchlist için tier limiti uygular.
     """
@@ -10763,7 +10763,7 @@ async def add_to_watchlist(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Bu hisse zaten takip listenizde")
 
-    # Limit kontrolu (Free: 5, VIP: 25, Diamond: 100)
+    # Limit kontrolu (Free: 5, VIP: 25, Diamond: sınırsız)
     count_result = await db.execute(
         select(func.count(UserWatchlist.id)).where(
             UserWatchlist.device_id == device_id
@@ -10772,16 +10772,12 @@ async def add_to_watchlist(
     current_count = count_result.scalar() or 0
 
     if is_diamond:
-        if current_count >= 100:
-            raise HTTPException(
-                status_code=403,
-                detail="Diamond kullanıcılar toplam 100 hisse takip edebilir."
-            )
+        pass  # sınırsız
     elif is_vip:
         if current_count >= 25:
             raise HTTPException(
                 status_code=403,
-                detail="KAP AI PRO kullanıcılar toplam 25 hisse takip edebilir. Diamond ile 100'e kadar."
+                detail="KAP AI PRO kullanıcılar toplam 25 hisse takip edebilir. Sınırsız için Diamond."
             )
     else:
         if current_count >= 5:
