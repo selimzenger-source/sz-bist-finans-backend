@@ -10713,10 +10713,10 @@ async def add_to_watchlist(
 ):
     """Takip listesine hisse ekle.
 
-    v3.0.0 — Birleşik limit (portföy + watchlist):
-    - Free: 8 hisse toplam
+    Tier limitleri (2026-05 sonrası — birleşik portföy + watchlist):
+    - Free: 5 hisse toplam
     - KAP AI PRO (ana_yildiz): 25 hisse toplam
-    - Diamond: sınırsız
+    - Diamond: 100 hisse toplam
     NOT: portföy frontend-only AsyncStorage'da, backend sadece watchlist sayar.
     Birleşik kontrol frontend'de yapılır; backend watchlist için tier limiti uygular.
     """
@@ -10763,7 +10763,7 @@ async def add_to_watchlist(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Bu hisse zaten takip listenizde")
 
-    # Limit kontrolu (Free: 8, VIP: 25, Diamond: ∞)
+    # Limit kontrolu (Free: 5, VIP: 25, Diamond: 100)
     count_result = await db.execute(
         select(func.count(UserWatchlist.id)).where(
             UserWatchlist.device_id == device_id
@@ -10772,18 +10772,22 @@ async def add_to_watchlist(
     current_count = count_result.scalar() or 0
 
     if is_diamond:
-        pass  # sınırsız
+        if current_count >= 100:
+            raise HTTPException(
+                status_code=403,
+                detail="Diamond kullanıcılar toplam 100 hisse takip edebilir."
+            )
     elif is_vip:
         if current_count >= 25:
             raise HTTPException(
                 status_code=403,
-                detail="KAP AI PRO kullanıcılar toplam 25 hisse takip edebilir. Diamond ile sınırsız."
+                detail="KAP AI PRO kullanıcılar toplam 25 hisse takip edebilir. Diamond ile 100'e kadar."
             )
     else:
-        if current_count >= 8:
+        if current_count >= 5:
             raise HTTPException(
                 status_code=403,
-                detail="Ücretsiz kullanıcılar toplam 8 hisse takip edebilir. Daha fazlası için PRO veya Diamond."
+                detail="Ücretsiz kullanıcılar toplam 5 hisse takip edebilir. Daha fazlası için PRO (25) veya Diamond (100)."
             )
 
     pref = body.notification_preference if body.notification_preference in ("both", "positive_only", "negative_only", "all", "positive_negative") else "both"
@@ -11613,13 +11617,14 @@ async def trim_watchlist(
     device_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    """VIP/Diamond → Free geçişinde watchlist'i FREE limiti (8) ile sınırla.
+    """VIP/Diamond → Free geçişinde watchlist'i FREE limiti ile sınırla.
 
-    v3.0.0: limit 5'ten 8'e çıkarıldı (birleşik limit).
+    Tier limitleri (2026-05 sonrası):
+      Free: 5 — PRO: 25 — Diamond: 100
     En eski eklenen hisseler korunur, fazlası silinir.
     Diamond/PRO aktifse trim yapılmaz.
     """
-    FREE_LIMIT = 8
+    FREE_LIMIT = 5
 
     # Tier kontrolü — hâlâ aktif aboneliği varsa trim yapma
     user_result = await db.execute(
