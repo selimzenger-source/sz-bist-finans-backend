@@ -10018,12 +10018,12 @@ async def admin_route_to_block_trade(request: Request, payload: dict = Body(...)
             ticker=(ticker or parsed.get("ticker") or "?")[:10].upper(),
             transaction_type=tx_type or "satis",
             transaction_date=tx_date or (published_at.date() if published_at else date.today()),
-            broker=(parsed.get("broker") or "")[:200] or None,
-            counterparties=(parsed.get("counterparties") or "")[:500] or None,
+            broker=(parsed.get("broker") or "")[:255] or None,
+            counterparties=(parsed.get("counterparties") or "") or None,
             lot_amount=int(parsed.get("lot_amount")) if parsed.get("lot_amount") else None,
             cost_price=float(parsed.get("cost_price")) if parsed.get("cost_price") else None,
             kap_url=kap_url,
-            disclosure_id=disclosure_id or None,
+            source="manual_route",
         )
         db.add(new)
         await db.commit()
