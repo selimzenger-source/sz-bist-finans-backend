@@ -526,9 +526,19 @@ async def _route_to_calendars(
 
     if is_cautious(title):
         try:
+            # Body kisaysa KAP'tan tam icerigi cek — AI parse tag'leri yakalasin
+            body_for_cs = body or ""
+            if (not body_for_cs or len(body_for_cs) < 200) and kap_url:
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    disc = await fetch_kap_disclosure(kap_url)
+                    if disc and disc.get("full_text"):
+                        body_for_cs = disc["full_text"]
+                except Exception:
+                    pass
             await process_cautious(
                 session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
+                company_name=company_name, title=title, body=body_for_cs,
                 kap_url=kap_url, published_at=published_at,
             )
         except Exception as e:
