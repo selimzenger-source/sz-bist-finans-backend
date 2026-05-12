@@ -173,6 +173,89 @@ KURALLAR: Bilinmeyenler null. SADECE JSON.
 """
 
 
+def _parse_block_trade_regex(body: str) -> dict:
+    """KAP toptan alim satim body'sinden REGEX ile alanlari cikar (AI fallback).
+
+    Body kalibi (KAP form):
+      İŞLEM TİPİ        Satış / Alış
+      ARACI KURUM       İnfo Yatırım Menkul Değerler A.Ş.
+      ALICILAR          Shield Capital Fund SPC
+      SATICILAR         (varsa)
+      LOT MİKTARI       17.272.728
+      MALİYET FİYATI    71,00 TL
+    """
+    out: dict = {}
+    if not body:
+        return out
+    b = body
+
+    def _find(*labels: str, max_len: int = 300) -> Optional[str]:
+        for lbl in labels:
+            # Pattern: "LABEL ... değer" — değer label'dan sonraki anlamlı kelimeleri al
+            m = re.search(
+                rf"{re.escape(lbl)}[\s\:\|]+(.+?)(?=\n(?:[A-ZÇĞİÖŞÜ][A-ZÇĞİÖŞÜ\s/]{{4,40}}[\s\:\|]|$))",
+                b, re.IGNORECASE | re.DOTALL,
+            )
+            if m:
+                v = m.group(1).strip().rstrip(".|").strip()
+                if v and len(v) < max_len:
+                    return v
+        return None
+
+    # transaction_type
+    tx_t = _find("İŞLEM TİPİ", "ISLEM TIPI", "Tip", max_len=20)
+    if tx_t:
+        tl = tx_t.lower()
+        if "satış" in tl or "satis" in tl:
+            out["transaction_type"] = "satis"
+        elif "alış" in tl or "alis" in tl or "alım" in tl or "alim" in tl:
+            out["transaction_type"] = "alis"
+
+    # broker
+    broker = _find("ARACI KURUM", "ARACI KURUMLAR")
+    if broker:
+        out["broker"] = broker[:255]
+
+    # counterparties (alicilar veya saticilar)
+    alicilar = _find("ALICILAR", "ALICI")
+    saticilar = _find("SATICILAR", "SATICI")
+    parts = [p for p in (alicilar, saticilar) if p]
+    if parts:
+        out["counterparties"] = " | ".join(parts)[:1000]
+
+    # lot_amount: "17.272.728 Lot" veya "17.272.728"
+    m_lot = re.search(r"LOT\s*M[İI]KTAR[İI][\s\:\|]+([\d\.\,]+)\s*(?:Lot)?", b, re.IGNORECASE)
+    if m_lot:
+        try:
+            out["lot_amount"] = int(m_lot.group(1).replace(".", "").replace(",", ""))
+        except ValueError:
+            pass
+
+    # cost_price: "71,00 TL" / "71.00 TL" / "71,00 ₺"
+    m_price = re.search(r"MAL[İI]YET\s*F[İI]YAT[İI][\s\:\|]+([\d\.\,]+)\s*(?:TL|₺)?", b, re.IGNORECASE)
+    if m_price:
+        try:
+            raw = m_price.group(1)
+            # Turkce format: 1.234,56 → 1234.56
+            if "," in raw and "." in raw:
+                raw = raw.replace(".", "").replace(",", ".")
+            elif "," in raw:
+                raw = raw.replace(",", ".")
+            out["cost_price"] = float(raw)
+        except ValueError:
+            pass
+
+    # transaction_date — "12.05.2026" / "12/05/2026"
+    m_date = re.search(r"(\d{2})[\./](\d{2})[\./](\d{4})", b)
+    if m_date:
+        try:
+            out["transaction_date"] = f"{m_date.group(3)}-{m_date.group(2)}-{m_date.group(1)}"
+        except Exception:
+            pass
+
+    return out
+
+
 async def process_block_trade(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],
@@ -184,7 +267,15 @@ async def process_block_trade(
         if kap_url and (await db.execute(stmt)).scalar_one_or_none():
             return None
 
+    # AI parse
     parsed = await _call_gemini(_BT_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:3500])) or {}
+
+    # Regex fallback — AI'nın yakalayamadığı alanları KAP form yapısından al
+    regex_parsed = _parse_block_trade_regex(body or "")
+    # AI'da null/eksik olan her alan için regex'i kullan
+    for k in ("transaction_type", "transaction_date", "broker", "counterparties", "lot_amount", "cost_price"):
+        if not parsed.get(k) and regex_parsed.get(k):
+            parsed[k] = regex_parsed[k]
 
     tx_type = parsed.get("transaction_type") if parsed.get("transaction_type") in ("alis", "satis") else "satis"
     tx_date = None

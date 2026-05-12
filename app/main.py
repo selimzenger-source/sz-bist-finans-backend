@@ -9867,6 +9867,69 @@ async def admin_audit_categories(request: Request, payload: dict = Body(...)):
     }
 
 
+@app.post("/api/v1/admin/reparse-empty-block-trades")
+@limiter.limit("3/minute")
+async def admin_reparse_empty_block_trades(request: Request, payload: dict = Body(...)):
+    """Admin: block_trades tablosunda lot/fiyat/broker bos olan kayitlari KAP'tan
+    re-fetch + regex parse ile doldurur. AI parse fail oldugu kayitlari kurtarir.
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.models.block_trade import BlockTrade
+        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+        from app.services.kap_category_processors import _parse_block_trade_regex
+        async with async_session() as db:
+            q = select(BlockTrade).where(
+                and_(
+                    BlockTrade.kap_url.isnot(None),
+                    or_(
+                        BlockTrade.lot_amount.is_(None),
+                        BlockTrade.broker.is_(None),
+                    ),
+                )
+            ).limit(50)
+            rows = (await db.execute(q)).scalars().all()
+            updated = 0
+            for r in rows:
+                try:
+                    disc = await fetch_kap_disclosure(r.kap_url)
+                    body = (disc or {}).get("full_text", "") if disc else ""
+                    if not body or len(body) < 200:
+                        try:
+                            from app.scrapers.kap_all_scraper import fetch_kap_page_content
+                            page_body = await fetch_kap_page_content(r.kap_url)
+                            if page_body and len(page_body) > len(body):
+                                body = page_body
+                        except Exception:
+                            pass
+                    if not body:
+                        continue
+                    rp = _parse_block_trade_regex(body)
+                    changed = False
+                    if not r.lot_amount and rp.get("lot_amount"):
+                        r.lot_amount = rp["lot_amount"]; changed = True
+                    if not r.cost_price and rp.get("cost_price"):
+                        r.cost_price = rp["cost_price"]; changed = True
+                    if not r.broker and rp.get("broker"):
+                        r.broker = rp["broker"]; changed = True
+                    if not r.counterparties and rp.get("counterparties"):
+                        r.counterparties = rp["counterparties"]; changed = True
+                    if rp.get("transaction_type") and r.transaction_type != rp["transaction_type"]:
+                        r.transaction_type = rp["transaction_type"]; changed = True
+                    if changed:
+                        updated += 1
+                except Exception:
+                    continue
+            await db.commit()
+        return {"status": "ok", "scanned": len(rows), "updated": updated}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e), "traceback": traceback.format_exc()[-1500:]}
+
+
 @app.post("/api/v1/admin/delete-bad-block-trade")
 @limiter.limit("5/minute")
 async def admin_delete_bad_block_trade(request: Request, payload: dict = Body(...)):
