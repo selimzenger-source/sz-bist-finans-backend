@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.database import get_db, init_db
+from app.database import get_db, init_db, async_session
 from app.models import (
     IPO, IPOBroker, IPOAllocation, IPOCeilingTrack,
     SPKApplication,
