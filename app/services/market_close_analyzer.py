@@ -160,14 +160,6 @@ def _parse_tavan_taban_rows(table, is_ceiling: bool, direction: str) -> list[dic
 
 
 async def scrape_uzmanpara(is_ceiling: bool) -> list[dict]:
-    """DEVRE DISI — Borsa Istanbul veri lisansi gerekliligi nedeniyle
-    Uzmanpara/BigPara tavan/taban scrape'i kaldirildi.
-    """
-    logger.info("market_close scrape_uzmanpara DEVRE DISI (BIST lisansi)")
-    return []
-
-
-async def scrape_uzmanpara_legacy_disabled(is_ceiling: bool) -> list[dict]:
     """Uzmanpara'dan tavan/taban hisseleri ceker. Boş dönerse BigPara yedek kaynak."""
     direction = "tavan" if is_ceiling else "taban"
     headers = {
@@ -274,11 +266,6 @@ async def scrape_uzmanpara_legacy_disabled(is_ceiling: bool) -> list[dict]:
 
 
 async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list[str] = None, limit: int = 8) -> list[dict]:
-    """DEVRE DISI — BIST lisansi sureci."""
-    return []
-
-
-async def scrape_uzmanpara_supplementary_legacy_disabled(is_ceiling: bool, exclude_tickers: list[str] = None, limit: int = 8) -> list[dict]:
     """Tavan/taban olmayan en çok artan/azalan hisseleri getirir (ek liste için)."""
     url = "https://uzmanpara.milliyet.com.tr/borsa/en-cok-artanlar/" if is_ceiling else "https://uzmanpara.milliyet.com.tr/borsa/en-cok-azalanlar/"
     headers = {
@@ -1089,17 +1076,6 @@ async def _save_market_close_data(session, today, ceilings, floors):
 
 
 async def scrape_and_analyze_market_close(force: bool = False, analyze_only: bool = False):
-    """DEVRE DISI — Borsa Istanbul veri lisansi gerekliligi.
-
-    Tavan/taban kapanis fiyat + yuzde degisim verilerinin 3. parti kaynaktan
-    (Uzmanpara/BigPara/IsYatirim) scrape'i ve Twitter gorseli kaldirildi.
-    Lisansli vendor entegre edilince geri acilacak.
-    """
-    logger.info("market_close pipeline DEVRE DISI (BIST lisansi sureci) — atlandi")
-    return
-
-
-async def scrape_and_analyze_market_close_legacy_disabled(force: bool = False, analyze_only: bool = False):
     """18:50'de calisip en cok artan/azalanlari bulur ve AI ile analiz edip SQL'e kaydeder.
     Eksik veri veya hata durumunda 1 dk arayla 3 kez daha dener (toplam 4 deneme).
     force=True: Mevcut kayıtları silip yeniden analiz + tweet yapar.

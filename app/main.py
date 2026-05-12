@@ -9538,6 +9538,38 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         return {"status": "ok", **summary}
 
 
+@app.post("/api/v1/admin/trigger-market-close")
+@limiter.limit("2/minute")
+async def admin_trigger_market_close(request: Request, payload: dict = Body(...)):
+    """Admin: market_close pipeline'ini elle tetikle.
+    Uzmanpara + BigPara'dan tavan/taban hisselerini scrape eder, AI ile sebep
+    analizi yapar, daily_stock_market_stats tablosuna kaydeder.
+
+    close_price ve percent_change DB'ye 0 yazilir (frontend fiyat gostermez).
+    Sadece: ticker / consec / monthly / reason kaydedilir.
+
+    Body:
+      {"admin_password": "...", "force": true, "analyze_only": false}
+    force=true → bugune ait mevcut kayitlari silip yeniden yapar
+    analyze_only=true → sadece scrape+DB kaydet, tweet ATMAZ
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+
+    import asyncio as _asyncio
+    # Background olarak baslat — endpoint dondukten sonra calismaya devam etsin
+    _asyncio.create_task(scrape_and_analyze_market_close(
+        force=bool(payload.get("force", False)),
+        analyze_only=bool(payload.get("analyze_only", True)),
+    ))
+    return {
+        "status": "started",
+        "message": "Market close pipeline arkaplanda baslatildi. ~3-5 dk surer.",
+    }
+
+
 @app.post("/api/v1/admin/test-bilanco-parse")
 @limiter.limit("10/minute")
 async def admin_test_bilanco_parse(request: Request, payload: dict = Body(...)):
