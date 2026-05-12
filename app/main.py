@@ -8540,11 +8540,19 @@ async def list_cautious_stocks(
     # Sıralama
     if sort == "end":
         # Ceza bitimi yakın → uzak (asc), null'lar sona
-        query = query.order_by(CautiousStock.end_date.asc().nullslast(), desc(CautiousStock.id))
+        # Tie-break: start_date desc (aynı bitişte yeni açıklanmış üstte)
+        query = query.order_by(
+            CautiousStock.end_date.asc().nullslast(),
+            CautiousStock.start_date.desc().nullslast(),
+            desc(CautiousStock.id),
+        )
     else:
-        # Yeni eklenen üstte: önce DB'ye geliş sırası (id desc), tie-break start_date desc
-        # Bu sayede geç bildirilen kayıtlar da üstte görünür
-        query = query.order_by(desc(CautiousStock.id), CautiousStock.start_date.desc().nullslast())
+        # Yeni Eklenen: açıklama tarihi (start_date) yeniden eskiye
+        # Tie-break: id desc (aynı günde birden fazla varsa son giren üstte)
+        query = query.order_by(
+            CautiousStock.start_date.desc().nullslast(),
+            desc(CautiousStock.id),
+        )
     query = query.limit(limit)
     rows = (await db.execute(query)).scalars().all()
     return [{
