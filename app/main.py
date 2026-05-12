@@ -9546,6 +9546,54 @@ async def admin_backfill_payment_announcements(request: Request, payload: dict =
         return {"status": "ok", **summary}
 
 
+@app.post("/api/v1/admin/relabel-market-close-date")
+@limiter.limit("5/minute")
+async def admin_relabel_market_close_date(request: Request, payload: dict = Body(...)):
+    """Admin: daily_stock_market_stats tablosunda belirli bir 'date' satirlarini
+    baska bir tarihe tasi. Manuel tetiklemede 'bugun' yazilmis kayitlari 'dun'e
+    cekmek icin kullanilir.
+
+    Body:
+      {"admin_password": "...",
+       "from_date": "2026-05-12",
+       "to_date":   "2026-05-11"}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from_date_str = payload.get("from_date", "")
+    to_date_str = payload.get("to_date", "")
+    if not from_date_str or not to_date_str:
+        return {"status": "error", "message": "from_date ve to_date gerekli (YYYY-MM-DD)"}
+
+    try:
+        from_d = date.fromisoformat(from_date_str)
+        to_d = date.fromisoformat(to_date_str)
+    except Exception as e:
+        return {"status": "error", "message": f"Tarih parse hata: {e}"}
+
+    async with async_session() as db:
+        # Once hedef tarihte kayit var mi kontrol — duplicate olusursa unique
+        # constraint hatasi vermesin diye conflicting kayitlari sil
+        await db.execute(text(
+            'DELETE FROM daily_stock_market_stats WHERE "date" = :to_d '
+            'AND ticker IN (SELECT ticker FROM daily_stock_market_stats WHERE "date" = :from_d)'
+        ), {"from_d": from_d, "to_d": to_d})
+
+        res = await db.execute(text(
+            'UPDATE daily_stock_market_stats SET "date" = :to_d WHERE "date" = :from_d'
+        ), {"from_d": from_d, "to_d": to_d})
+        affected = res.rowcount if hasattr(res, "rowcount") else None
+        await db.commit()
+
+    return {
+        "status": "ok",
+        "from_date": from_date_str,
+        "to_date": to_date_str,
+        "rows_updated": affected,
+    }
+
+
 @app.post("/api/v1/admin/trigger-market-close")
 @limiter.limit("2/minute")
 async def admin_trigger_market_close(request: Request, payload: dict = Body(...)):
