@@ -8380,8 +8380,13 @@ async def list_share_transactions(
     )
     if ticker:
         query = query.where(ShareTransactionDetail.ticker == ticker.upper())
-    if transaction_type in ("alici", "satici"):
-        query = query.where(ShareTransactionDetail.transaction_type == transaction_type)
+    if transaction_type in ("alici", "satici", "alis", "satis"):
+        # DB'de iki form da var (eski 'alis'/'satis' + yeni 'alici'/'satici').
+        # Hangisi gelirse ikisini de yakala.
+        if transaction_type in ("alici", "alis"):
+            query = query.where(ShareTransactionDetail.transaction_type.in_(["alici", "alis"]))
+        else:
+            query = query.where(ShareTransactionDetail.transaction_type.in_(["satici", "satis"]))
 
     if quality_only:
         # Party adi ZORUNLU
@@ -9859,6 +9864,37 @@ async def admin_audit_categories(request: Request, payload: dict = Body(...)):
         "overlap_samples": multi_match,
         "unclassified_count": len(unclassified),
         "unclassified_samples": unclassified,
+    }
+
+
+@app.post("/api/v1/admin/normalize-share-tx-types")
+@limiter.limit("3/minute")
+async def admin_normalize_share_tx_types(request: Request, payload: dict = Body(...)):
+    """Admin: share_transaction_details.transaction_type alanini normalize et.
+    'alis' -> 'alici', 'satis' -> 'satici' (eski deger → yeni standart).
+
+    Body: {"admin_password": "..."}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    async with async_session() as db:
+        r1 = await db.execute(text(
+            "UPDATE share_transaction_details SET transaction_type='alici' WHERE transaction_type='alis'"
+        ))
+        r2 = await db.execute(text(
+            "UPDATE share_transaction_details SET transaction_type='satici' WHERE transaction_type='satis'"
+        ))
+        await db.commit()
+        cnt_r = await db.execute(text(
+            "SELECT transaction_type, COUNT(*) FROM share_transaction_details GROUP BY transaction_type"
+        ))
+        counts = {row[0]: row[1] for row in cnt_r.fetchall()}
+    return {
+        "status": "ok",
+        "alis_to_alici": r1.rowcount,
+        "satis_to_satici": r2.rowcount,
+        "current_counts": counts,
     }
 
 
