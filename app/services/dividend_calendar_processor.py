@@ -160,9 +160,13 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     # Duyurusu" generic, body'de "Pay Başına Brüt Temettü" geçiyorsa temettü
     # bulk ödeme/karar duyurusudur (multi-ticker).
     # NOT: lower_tr "BISTECH" → "bıstech" (dotsuz ı) yapar; iki yazimi yakala.
+    # ÖNEMLI: KAP bazı bulk bildirimlerde body'yi sadece İngilizce yazıyor
+    # (örn. 1605925 ALGYO/ASUZU/CCOLA/GIPTA/OZGYO/TEZOL → "Gross Dividend
+    # Payment per share" ifadesi). İngilizce variantlar dahil.
     if ("bistech" in t or "bıstech" in t) and body:
         b = lower_tr(body)
         bistech_dividend_signals = [
+            # Türkçe
             "pay başına brüt temettü", "pay basina brut temettu",
             "pay başına net temettü", "pay basina net temettu",
             "teorik fiyat", "teorik fiyati",
@@ -170,6 +174,11 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
             "temettü dağıt", "temettu dagit",
             "temettü ödem", "temettu odem",
             "brüt temettü", "brut temettu",
+            # İngilizce (KAP multi-language bulk)
+            "gross dividend payment per share",
+            "net dividend payment per share",
+            "theoretical price",
+            "dividend payment",
         ]
         if any(s in b for s in bistech_dividend_signals):
             return True
@@ -880,7 +889,9 @@ def is_dividend_payment_announcement(title: str, body: str) -> bool:
         t = lower_tr(title)
         title_signals = [
             "bistech pay piyasasi", "bistech pay piyasası",
+            "bıstech pay piyasasi", "bıstech pay piyasası",  # lower_tr dotless variant
             "borsa istanbul a.ş.", "borsa istanbul a.s.",
+            "borsa ıstanbul a.ş.", "borsa ıstanbul a.s.",
             "hak kullanım işlemleri", "hak kullanim islemleri",
             "temettü ödeme", "temettu odeme",
             "nakit temettü hak kullan", "nakit temettu hak kullan",
