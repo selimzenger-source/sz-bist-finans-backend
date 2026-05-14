@@ -4276,27 +4276,27 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,
     )
 
-    # 7f. temettuhisseleri.com haftalik tam refresh — Pazar 02:00 UTC (TR 05:00)
-    # KAP'tan akan YKK/odeme olaylari anlik mirror ediliyor; bu job 605 hissenin
-    # tum gecmisini haftalik tarayip eski payout/yield rakamlari guncel tutar.
-    async def _weekly_temettu_refresh():
-        try:
-            from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
-            stats = await scrape_temettuhisseleri()
-            logger.info("Haftalik temettu refresh: %s", stats)
-        except Exception as e:
-            logger.error("Haftalik temettu refresh hatasi: %s", e)
-
-    scheduler.add_job(
-        _weekly_temettu_refresh,
-        CronTrigger(day_of_week='sun', hour=2, minute=0),
-        id="weekly_temettu_refresh",
-        name="Haftalik temettuhisseleri.com tam refresh (Pazar 05:00 TR)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=3600,
-    )
+    # 7f. temettuhisseleri.com refresh — KAPATILDI (kullanici talebi).
+    # Periodik calismaya gerek yok: dividend_history DB'si bir kez dolduruldu
+    # (1759 kayit), sonrasinda KAP'tan akan YKK/odeme olaylari zaten anlik
+    # mirror ediliyor. Eski historik veriyi yeniden bozma riski olmasin.
+    # Manuel tetikleme gerekirse:
+    #   POST /api/v1/admin/trigger-temettu-refresh (varsa) veya
+    #   shell: from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+    #
+    # Eski haftalik cron job devre disi — geri acmak icin asagidaki bloku
+    # tekrar aktiflestirin:
+    #
+    # async def _weekly_temettu_refresh():
+    #     try:
+    #         from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+    #         stats = await scrape_temettuhisseleri()
+    #         logger.info("Haftalik temettu refresh: %s", stats)
+    #     except Exception as e:
+    #         logger.error("Haftalik temettu refresh hatasi: %s", e)
+    # scheduler.add_job(_weekly_temettu_refresh, CronTrigger(day_of_week='sun', hour=2, minute=0),
+    #                   id="weekly_temettu_refresh", ...)
+    logger.info("Haftalik temettuhisseleri scraper: KAPATILDI (manuel tetikleme gerekir)")
 
     # 7g. KAP Processor Backfill — günde 1 kez (gece 03:30 UTC = TR 06:30)
     # Geçmiş 3 günü tarar, eksik kalan business_deal tutarlarını ve

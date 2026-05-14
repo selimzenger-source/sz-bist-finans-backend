@@ -3368,6 +3368,35 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.post("/api/v1/admin/trigger-temettu-refresh")
+@limiter.limit("2/minute")
+async def admin_trigger_temettu_refresh(
+    request: Request,
+    payload: dict,
+):
+    """Admin: temettuhisseleri.com scraper'i manuel tetikle.
+
+    Normalde periodik calismaz (haftalik cron KAPATILDI). KAP'tan anlik
+    mirror yapildigi icin sadece eksik veri durumunda manuel calistirilir.
+
+    body: admin_password (zorunlu)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    try:
+        from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+        stats = await scrape_temettuhisseleri()
+        return {
+            "success": True,
+            "stats": stats,
+            "message": "temettuhisseleri.com scraper manuel olarak calistirildi",
+        }
+    except Exception as e:
+        logger.exception("Manuel temettu refresh hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Refresh hatasi: {e}")
+
+
 @app.post("/api/v1/admin/cleanup-isyatirim-dividends")
 @limiter.limit("3/minute")
 async def admin_cleanup_isyatirim_dividends(
