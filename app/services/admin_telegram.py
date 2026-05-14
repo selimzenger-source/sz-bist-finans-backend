@@ -64,12 +64,34 @@ def _should_send_error(error_text: str) -> bool:
 
 
 def _get_admin_config() -> tuple[str, str]:
-    """Admin bot token ve chat ID'yi config'den al."""
+    """Admin bot token ve chat ID'yi config'den al (OPS bildirimleri icin)."""
     settings = get_settings()
     return (
         getattr(settings, "ADMIN_TELEGRAM_BOT_TOKEN", ""),
         getattr(settings, "ADMIN_TELEGRAM_CHAT_ID", ""),
     )
+
+
+def _get_kap_positive_config() -> tuple[str, str]:
+    """KAP pozitif bildirimleri icin bot token ve chat ID.
+
+    KAP_POSITIVE_BOT_TOKEN / KAP_POSITIVE_CHAT_ID env varlari set ise oncelikli.
+    Yoksa ADMIN_TELEGRAM_* fallback (geriye uyumluluk).
+
+    Bu sayede:
+      - OPS bildirimleri (IPO durum, hata vb.) → ADMIN_TELEGRAM_CHAT_ID (grup)
+      - KAP pozitif mesajlari → KAP_POSITIVE_CHAT_ID (ozel DM/farkli kanal)
+    """
+    settings = get_settings()
+    token = (
+        getattr(settings, "KAP_POSITIVE_BOT_TOKEN", "")
+        or getattr(settings, "ADMIN_TELEGRAM_BOT_TOKEN", "")
+    )
+    chat_id = (
+        getattr(settings, "KAP_POSITIVE_CHAT_ID", "")
+        or getattr(settings, "ADMIN_TELEGRAM_CHAT_ID", "")
+    )
+    return (token, chat_id)
 
 
 async def send_admin_message(
@@ -204,9 +226,10 @@ async def send_kap_positive_to_admin_group(
 
     # parse_mode kapalı: emoji + url'leri düz metin olarak gönder
     # (HTML/Markdown parse hataları olmasin)
-    bot_token, chat_id = _get_admin_config()
+    # KAP_POSITIVE_* env varlari oncelikli, yoksa ADMIN_TELEGRAM_* fallback.
+    bot_token, chat_id = _get_kap_positive_config()
     if not bot_token or not chat_id:
-        logger.debug("Admin Telegram yapilandirilmamis, KAP pozitif atlaniyor")
+        logger.debug("KAP pozitif Telegram yapilandirilmamis, atlaniyor")
         return False
 
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"

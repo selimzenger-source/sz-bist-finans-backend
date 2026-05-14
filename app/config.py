@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     ADMIN_TELEGRAM_BOT_TOKEN: str = ""
     ADMIN_TELEGRAM_CHAT_ID: str = ""
 
+    # KAP pozitif bildirimleri icin ayri kanal (opsiyonel).
+    # Set degilse ADMIN_TELEGRAM_* fallback olarak kullanilir.
+    # Tipik kullanim: OPS hatalari grupta, KAP pozitif mesajlari ozel DM'de.
+    KAP_POSITIVE_BOT_TOKEN: str = ""
+    KAP_POSITIVE_CHAT_ID: str = ""
+
     # RevenueCat webhook dogrulama
     REVENUECAT_WEBHOOK_SECRET: str = ""
 
