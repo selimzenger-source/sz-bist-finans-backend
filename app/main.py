@@ -3438,6 +3438,12 @@ async def admin_relabel_ai_sentiment(
         }
 
     try:
+        # Once kolon boyutunu buyut — yeni etiketler 13 karaktere kadar cikabiliyor
+        # (Guclu Olumsuz = 13 char). Eski VARCHAR(10) yetersiz.
+        await db.execute(text(
+            "ALTER TABLE kap_all_disclosures "
+            "ALTER COLUMN ai_sentiment TYPE VARCHAR(32)"
+        ))
         result = await db.execute(text(sql))
         await db.commit()
         rowcount = getattr(result, "rowcount", None) or distribution["total"]

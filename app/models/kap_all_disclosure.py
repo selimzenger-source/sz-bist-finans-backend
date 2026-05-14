@@ -55,8 +55,8 @@ class KapAllDisclosure(Base):
 
     # AI analiz alanlari
     ai_sentiment: Mapped[str | None] = mapped_column(
-        String(10),
-        comment="Olumlu, Olumsuz, Notr"
+        String(32),
+        comment="9 kategori: Guclu Olumlu / Cok Olumlu / Olumlu / Hafif Olumlu / Notr / Hafif Olumsuz / Olumsuz / Cok Olumsuz / Guclu Olumsuz"
     )
     ai_impact_score: Mapped[float | None] = mapped_column(
         Float,
