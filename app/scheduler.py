@@ -5257,7 +5257,7 @@ async def scrape_kurum_onerileri():
                 elif unsent_items:
                     count = len(unsent_items)
 
-                    # ── Detayli oneri ozeti: "Kurum: TICKER hedef X TL (TAVSİYE)" ──
+                    # ── Detayli oneri ozeti: "Kurum: TICKER hedef X TL (+%P) (TAVSİYE)" ──
                     def _format_oneri(item) -> str:
                         """Tek bir kurum onerisini kisa formata donustur."""
                         parts = []
@@ -5267,18 +5267,42 @@ async def scrape_kurum_onerileri():
                         if item.target_price:
                             tp = f"{item.target_price:,.2f}".replace(",", ".")
                             parts.append(f"hedef {tp} TL")
+                        # Getiri potansiyeli
+                        pot = getattr(item, "potential_return", None)
+                        if pot is not None:
+                            try:
+                                pot_v = float(pot)
+                                sign = "+" if pot_v > 0 else ""
+                                parts.append(f"(getiri {sign}%{pot_v:.1f})")
+                            except (TypeError, ValueError):
+                                pass
+                        # Tavsiye — TAM kelime (kısaltma yok, NÖT/TAV gibi)
                         if item.recommendation:
+                            rec_str = str(item.recommendation).strip()
+                            rec_lo = rec_str.lower()
                             rec_map = {
-                                "Endeks Üstü Getiri": "AL",
-                                "Endeks Altı Getiri": "SAT",
-                                "Endekse Paralel Getiri": "TUT",
-                                "Outperform": "AL",
-                                "Underperform": "SAT",
-                                "Neutral": "TUT",
+                                "endeks üstü getiri": "AL",
+                                "endeks altı getiri": "SAT",
+                                "endekse paralel getiri": "TUT",
+                                "outperform": "AL",
+                                "underperform": "SAT",
+                                "neutral": "NÖTR",
+                                "nötr": "NÖTR",
+                                "nötür": "NÖTR",
+                                "al": "AL",
+                                "sat": "SAT",
+                                "tut": "TUT",
+                                "buy": "AL",
+                                "hold": "TUT",
+                                "sell": "SAT",
+                                "tavsiye": "TAVSİYE",
                             }
-                            rec_short = rec_map.get(item.recommendation, item.recommendation.upper()[:3])
-                            parts.append(f"({rec_short})")
-                        # "Kurum: TICKER hedef 71.50 TL (AL)"
+                            rec_pretty = rec_map.get(rec_lo)
+                            if not rec_pretty:
+                                # Yabancı/tanınmayan değer — full uppercase ile yaz, kısaltma yok
+                                rec_pretty = rec_str.upper()
+                            parts.append(f"({rec_pretty})")
+                        # "Kurum: TICKER hedef 71.50 TL (getiri +%12.3) (AL)"
                         if len(parts) >= 2:
                             return f"{parts[0]}: {' '.join(parts[1:])}"
                         return " ".join(parts)
@@ -5313,7 +5337,16 @@ async def scrape_kurum_onerileri():
                             # Detayli tweet: her oneriyi satirda goster (max 5)
                             tweet_lines = []
                             for i in unsent_tweets[:5]:
-                                line = f"{'🟢' if (i.recommendation or '').lower() in ('al', 'buy', 'endeks üstü getiri', 'outperform') else '🟡' if (i.recommendation or '').lower() in ('tut', 'hold', 'neutral', 'endekse paralel getiri') else '🔴'} "
+                                _rec_lo = (i.recommendation or "").strip().lower()
+                                if _rec_lo in ("al", "buy", "endeks üstü getiri", "outperform"):
+                                    _emoji = "🟢"
+                                elif _rec_lo in ("tut", "hold", "neutral", "nötr", "nötür", "endekse paralel getiri"):
+                                    _emoji = "🟡"
+                                elif _rec_lo in ("sat", "sell", "endeks altı getiri", "underperform"):
+                                    _emoji = "🔴"
+                                else:
+                                    _emoji = "⚪"  # bilinmeyen / tavsiye yok
+                                line = f"{_emoji} "
                                 line += _format_oneri(i)
                                 tweet_lines.append(line)
                             tweet_detail = "\n".join(tweet_lines)
@@ -5322,7 +5355,7 @@ async def scrape_kurum_onerileri():
                             tweet_text = (
                                 f"📊 {len(unsent_tweets)} Yeni Kurum Önerisi\n\n"
                                 f"{tweet_detail}\n\n"
-                                f"Detaylar uygulamamızda 👇\n"
+                                f"Detaylı bilgiler için uygulamamızı indirebilirsiniz.\n"
                                 f"#BorsaCebimde #BIST #HisseTavsiye"
                             ).strip()
 
