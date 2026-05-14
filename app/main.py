@@ -3437,12 +3437,18 @@ async def admin_relabel_ai_sentiment(
             "distribution": distribution,
         }
 
-    result = await db.execute(text(sql))
-    await db.commit()
+    try:
+        result = await db.execute(text(sql))
+        await db.commit()
+        rowcount = getattr(result, "rowcount", None) or distribution["total"]
+    except Exception as e:
+        await db.rollback()
+        logger.exception("Relabel SQL hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Relabel hatasi: {e}")
 
     return {
         "success": True,
-        "updated": result.rowcount,
+        "updated": rowcount,
         "distribution": distribution,
         "message": "ai_sentiment 9 kategorili yeni sisteme migrate edildi",
     }
