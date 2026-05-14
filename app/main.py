@@ -10299,11 +10299,46 @@ async def admin_backfill_dividend_bodies(request: Request, payload: dict = Body(
         for d in rows:
             title = d.title or ""
             body = d.body or ""
+            title_lo = title.lower()
+
+            # ★ ÖN-FETCH: BISTECH / Borsa İstanbul bulk başlıkları kısa body ile
+            # is_dividend'a yakalanmaz. Title eşleşirse body'yi önce zenginleştir.
+            needs_prefetch = (
+                len(body) < 500 and d.kap_url and (
+                    "bistech" in title_lo or "bıstech" in title_lo
+                    or "borsa istanbul" in title_lo or "borsa ıstanbul" in title_lo
+                    or "hak kullan" in title_lo
+                    or "temettu" in title_lo or "temettü" in title_lo
+                    or "kar payı" in title_lo or "kar payi" in title_lo
+                    or "kâr payı" in title_lo
+                )
+            )
+            if needs_prefetch:
+                try:
+                    disc = await fetch_kap_disclosure(d.kap_url)
+                    if disc and disc.get("full_text"):
+                        body = disc["full_text"]
+                        d.body = body
+                        stats["body_refetched"] += 1
+                    elif not body or len(body) < 500:
+                        # 2. seviye fallback
+                        try:
+                            from app.scrapers.kap_all_scraper import fetch_kap_page_content
+                            page_body = await fetch_kap_page_content(d.kap_url)
+                            if page_body and len(page_body) > len(body):
+                                body = page_body
+                                d.body = body
+                                stats["body_refetched"] += 1
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             if not is_dividend(title, body):
                 continue
             stats["matched_dividend"] += 1
 
-            # Body kisa ise KAP'tan re-fetch
+            # Eski body re-fetch (is_dividend match olduktan sonra son kontrol)
             if (not body or len(body) < 200) and d.kap_url:
                 try:
                     disc = await fetch_kap_disclosure(d.kap_url)
