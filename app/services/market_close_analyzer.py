@@ -1030,12 +1030,12 @@ async def _save_market_close_data(session, today, ceilings, floors):
     saved_objs: list[DailyStockMarketStat] = []
     for s in prepared:
         try:
-            # BIST veri lisansi sureci: close_price/percent_change DB'ye yazilmaz (0 saklanir).
+            # BIST veri lisansi sureci: close_price tablodan kaldirildi (modeli ve DB sutunu yok).
             # Tavan/taban tespiti, seri, son 30G ve AI nedeni icin price/pct dahili
             # olarak analiz sirasinda kullanilir ama DB'de saklanmaz.
             obj = DailyStockMarketStat(
                 ticker=s["ticker"], date=today,
-                close_price=0, percent_change=0,
+                percent_change=0,
                 is_ceiling=s["is_ceiling"], is_floor=not s["is_ceiling"],
                 consecutive_ceiling_count=s["consec"] if s["is_ceiling"] else 0,
                 monthly_ceiling_count=s["monthly"] if s["is_ceiling"] else 0,

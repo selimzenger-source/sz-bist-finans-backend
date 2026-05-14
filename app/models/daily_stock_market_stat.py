@@ -22,11 +22,10 @@ class DailyStockMarketStat(Base):
     date: Mapped[date] = mapped_column(
         Date, nullable=False, comment="Islem gunu tarihi"
     )
-    close_price: Mapped[Decimal] = mapped_column(
-        Numeric(12, 2), nullable=False, comment="Gun sonu kapanis fiyati"
-    )
-    percent_change: Mapped[Decimal] = mapped_column(
-        Numeric(5, 2), nullable=False, server_default="0.00", comment="Gunluk yuzde degisim"
+    # KALDIRILDI (BIST lisans): close_price — gun sonu kapanis fiyati
+    # is_ceiling / is_floor flag'leri korunuyor (rumour/kategori bilgisi olarak yeterli)
+    percent_change: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True, comment="Gunluk yuzde degisim (UI'da gosterilmez, sadece ic hesap)"
     )
 
     is_ceiling: Mapped[bool] = mapped_column(

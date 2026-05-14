@@ -142,6 +142,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("temel_analiz lisans drop migration atlandi: %s", e)
 
+    # BIST lisans uyumu: daily_stock_market_stats.close_price DROP
+    # (gun sonu kapanis fiyati — BIST lisans gerektiriyor)
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE daily_stock_market_stats DROP COLUMN IF EXISTS close_price"
+            ))
+            await db.commit()
+    except Exception as e:
+        logger.warning("daily_stock_market_stats close_price drop atlandi: %s", e)
+
     # SPK Applications — company_description kolonu ekle (migration)
     try:
         async with async_session() as db:
@@ -686,8 +697,7 @@ async def get_public_daily_market_stats(
             "id": s.id,
             "ticker": s.ticker,
             "date": s.date.isoformat(),
-            "close_price": float(s.close_price),
-            "percent_change": float(s.percent_change),
+            # close_price KALDIRILDI (BIST lisans), percent_change response'a dahil edilmez
             "is_ceiling": s.is_ceiling,
             "is_floor": s.is_floor,
             "consecutive_ceiling_count": s.consecutive_ceiling_count,
@@ -5711,9 +5721,10 @@ async def admin_backfill_market_close_ai(request: Request, payload: dict = Body(
     filled = 0
     for r in rows:
         try:
+            # close_price BIST lisans nedeniyle modelden kaldirildi — 0.0 olarak gec
             reason = await _analyze_reason_with_ai(
                 ticker=r.ticker, is_ceiling=bool(r.is_ceiling),
-                price=float(r.close_price), pct=float(r.percent_change),
+                price=0.0, pct=float(r.percent_change or 0),
                 consec=r.consecutive_ceiling_count if r.is_ceiling else r.consecutive_floor_count,
                 monthly=r.monthly_ceiling_count if r.is_ceiling else r.monthly_floor_count,
             )
@@ -9363,11 +9374,12 @@ async def admin_wipe_daily_stock_prices(request: Request, payload: dict = Body(.
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
 
+    # close_price kolonu artik tablodan DROP edildi (startup migration). Sadece percent_change kalir.
     async with async_session() as db:
         res = await db.execute(text(
             "UPDATE daily_stock_market_stats "
-            "SET close_price = 0, percent_change = 0 "
-            "WHERE close_price <> 0 OR percent_change <> 0"
+            "SET percent_change = 0 "
+            "WHERE percent_change IS NOT NULL AND percent_change <> 0"
         ))
         await db.commit()
         affected = res.rowcount if hasattr(res, "rowcount") else None
