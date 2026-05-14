@@ -3368,6 +3368,48 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.post("/api/v1/admin/sync-bist-tedbir")
+@limiter.limit("3/minute")
+async def admin_sync_bist_tedbir(
+    request: Request,
+    payload: dict,
+):
+    """Admin: Borsa Istanbul resmi tedbirli CSV'sini cek + cautious_stocks'a sync.
+
+    Periodik (TR 09:40 / 19:00 / 00:00) calisir; gerekirse manuel tetiklenir.
+    Ilk kurulum icin de bu endpoint kullanilir — DB'yi sifirdan dolurmak icin.
+
+    body:
+      admin_password: zorunlu
+      rebuild: true ise once tum cautious_stocks tablosunu siler, sonra CSV'den
+               yeniden dolurur (varsayilan false — sadece upsert + deactivate)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    rebuild = bool(payload.get("rebuild", False))
+
+    if rebuild:
+        # Mevcut tum kayitlari sil — sifirdan olustur
+        async with async_session() as db:
+            await db.execute(text("DELETE FROM cautious_stocks"))
+            await db.commit()
+            logger.info("Admin REBUILD: cautious_stocks tablosu sifirlandi")
+
+    try:
+        from app.scrapers.bist_tedbir_csv_scraper import sync_bist_tedbir
+        stats = await sync_bist_tedbir()
+        return {
+            "success": True,
+            "rebuild": rebuild,
+            "stats": stats,
+            "message": "BIST resmi tedbirli CSV sync tamamlandi",
+        }
+    except Exception as e:
+        logger.exception("BIST tedbir sync hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Sync hatasi: {e}")
+
+
 @app.post("/api/v1/admin/trigger-temettu-refresh")
 @limiter.limit("2/minute")
 async def admin_trigger_temettu_refresh(
