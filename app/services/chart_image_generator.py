@@ -481,14 +481,14 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
         y += 15
 
-        # 0: Hisse, 1: Fiyat, 2: Son 30G, 3: Seri, 4: Neden
-        col_x = [padding, 200, 360, 490, 620, 620]
+        # BIST veri lisansı süreci: Fiyat kolonu kaldırıldı.
+        # 0: Hisse, 1: Son 30G, 2: Seri, 3: Neden
+        col_x = [padding, 250, 420, 560, 560]
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
-        draw.text((col_x[1], y), "Fiyat", fill=GRAY, font=font_col)
-        draw.text((col_x[2], y), "Son 30G", fill=GRAY, font=font_col)
-        draw.text((col_x[3], y), "Seri", fill=GRAY, font=font_col)
+        draw.text((col_x[1], y), "Son 30G", fill=GRAY, font=font_col)
+        draw.text((col_x[2], y), "Seri", fill=GRAY, font=font_col)
         neden_header = "Neden Yükseldi (AI)" if is_ceiling else "Neden Düştü (AI)"
-        draw.text((col_x[5], y), neden_header, fill=CYAN, font=font_col)
+        draw.text((col_x[3], y), neden_header, fill=CYAN, font=font_col)
         y += 40
 
         # 0 hisse durumu — bilgi mesajı göster
@@ -506,36 +506,32 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
             # Ticker
             draw.text((col_x[0], text_y), stat.ticker, fill=WHITE, font=font_symbol)
 
-            # Price
-            color = GREEN if is_ceiling else RED
-            draw.text((col_x[1], text_y), f"{stat.close_price:.2f} ₺", fill=color, font=font_row)
-
-            # Son 30G — col_x[2] (eski Değişim yerine)
+            # Son 30G — col_x[1]
             m_count = stat.monthly_ceiling_count if is_ceiling else stat.monthly_floor_count
             m_yazi = f"{m_count} Kez"
             m_color = GOLD if m_count >= 2 else WHITE
             m_font = font_seri_bold if m_count >= 2 else font_reason
-            draw.text((col_x[2], text_y), m_yazi, fill=m_color, font=m_font)
+            draw.text((col_x[1], text_y), m_yazi, fill=m_color, font=m_font)
 
             # Seri — gold+bold if ≥2
             consec = stat.consecutive_ceiling_count if is_ceiling else stat.consecutive_floor_count
             seri_yazi = f"{consec}. Gün"
             seri_color = GOLD if consec >= 2 else WHITE
             seri_font = font_seri_bold if consec >= 2 else font_reason
-            draw.text((col_x[3], text_y), seri_yazi, fill=seri_color, font=seri_font)
+            draw.text((col_x[2], text_y), seri_yazi, fill=seri_color, font=seri_font)
 
-            # Neden (Multi-line) — 15px font, ~9.6px/char, 390px alan → max 35 char/satır
+            # Neden (Multi-line) — 15px font, ~9.6px/char, 440px alan → max 42 char/satır
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
-                wrapped = textwrap.wrap(reason_text, width=35)
+                wrapped = textwrap.wrap(reason_text, width=42)
                 if len(wrapped) > 2:
-                    r_y = text_y - 16   # 3 satır: row_y+17, +39, +61
+                    r_y = text_y - 16
                 elif len(wrapped) > 1:
-                    r_y = text_y - 8    # 2 satır: row_y+25, +47
+                    r_y = text_y - 8
                 else:
-                    r_y = text_y        # 1 satır: row_y+33
-                for line in wrapped[:3]:  # max 3 satır göster
-                    draw.text((col_x[5], r_y), line, fill=GRAY, font=font_reason)
+                    r_y = text_y
+                for line in wrapped[:3]:
+                    draw.text((col_x[3], r_y), line, fill=GRAY, font=font_reason)
                     r_y += 22
 
         # === EK HİSSELER BÖLÜMÜ ===
@@ -564,13 +560,8 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
                     draw.rectangle([(0, s_row_y), (width, s_row_y + supp_row_h)], fill=s_row_bg)
                 
                 s_text_y = s_row_y + 18
-                s_color = GREEN if is_ceiling else RED
-                # Ticker
+                # Ticker (fiyat kaldırıldı)
                 draw.text((s_x_base, s_text_y), s_stat.ticker, fill=(180, 180, 180), font=font_supp_symbol)
-                # Price + %
-                s_pct = getattr(s_stat, "percent_change", 0.0)
-                info_text = f"{s_stat.close_price:.2f}₺ ({s_pct:+.1f}%)"
-                draw.text((s_x_base + 110, s_text_y), info_text, fill=s_color, font=font_footer_disclaimer)
 
         # === FOOTER ===
         footer_y = total_h - footer_h
