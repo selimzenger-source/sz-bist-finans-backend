@@ -28,6 +28,7 @@ Hata Toleransi:
 - Hicbir hata akisi durdurmaz
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -981,42 +982,54 @@ NOTLAR:
             logger.warning("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
 
     # ── Yedek: Anthropic Claude Sonnet 4 (direkt API) ──
+    # 503 (overloaded) gecici hata — 1 retry yap (2 sn beklemeli).
     if not text and anthropic_key:
-        try:
-            # Anthropic Messages API formatı (OpenAI'den farklı)
-            system_content = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
-            user_content = messages[-1]["content"] if messages else ""
-
-            async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
-                resp = await client.post(
-                    _ANTHROPIC_URL,
-                    headers={
-                        "x-api-key": anthropic_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": _CLAUDE_MODEL,
-                        "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
-                        "system": system_content,
-                        "messages": [{"role": "user", "content": user_content}],
-                        "temperature": 0.1,
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    for block in data.get("content", []):
-                        if block.get("type") == "text":
-                            text = block.get("text", "").strip()
-                            break
-                    provider_used = "Claude-Sonnet"
-                else:
-                    logger.error(
-                        "AI News Scorer: Claude HTTP %s (%s) — %s",
-                        resp.status_code, ticker, resp.text[:200],
-                    )
-        except Exception as e:
-            logger.error("AI News Scorer: Claude hata (%s) — %s", ticker, e)
+        system_content = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
+        user_content = messages[-1]["content"] if messages else ""
+        _claude_payload = {
+            "model": _CLAUDE_MODEL,
+            "max_tokens": 4096,
+            "system": system_content,
+            "messages": [{"role": "user", "content": user_content}],
+            "temperature": 0.1,
+        }
+        _claude_headers = {
+            "x-api-key": anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        for _attempt in (1, 2):
+            try:
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(_ANTHROPIC_URL, headers=_claude_headers, json=_claude_payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for block in data.get("content", []):
+                            if block.get("type") == "text":
+                                text = block.get("text", "").strip()
+                                break
+                        provider_used = "Claude-Sonnet"
+                        break
+                    elif resp.status_code in (503, 529, 429) and _attempt == 1:
+                        # Gecici hata — kisa bekle ve tekrar dene
+                        logger.warning(
+                            "AI News Scorer: Claude HTTP %s (%s) — 2sn bekleyip retry",
+                            resp.status_code, ticker,
+                        )
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        logger.error(
+                            "AI News Scorer: Claude HTTP %s (%s) — %s",
+                            resp.status_code, ticker, resp.text[:200],
+                        )
+                        break
+            except Exception as e:
+                logger.error("AI News Scorer: Claude hata (%s, attempt %d) — %s", ticker, _attempt, e)
+                if _attempt == 1:
+                    await asyncio.sleep(2)
+                    continue
+                break
 
     # ── 3. Yedek: Gemini 2.5 Pro ──
     if not text and gemini_key:
@@ -1044,7 +1057,21 @@ NOTLAR:
 
     if not text:
         logger.error("AI News Scorer: Tum AI providerlar basarisiz (%s)", ticker)
-        return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+        # FALLBACK: AI tamamen erisilemez ise akisi kirma — Notr/5.0 + reprocess flag.
+        # Bildirim yine kap_all_disclosures'a + telegram_news'e yazilir, kullanici
+        # haberi gorur ama AI yorumu yerine "yeniden denenecek" mesaji gozukur.
+        # Bir cron job ileride ai_impact_score=5.0 + ai_summary'i kontrol edip yeniden puanlayabilir.
+        return {
+            "score": 5.0,
+            "summary": (
+                f"{ticker} icin KAP bildirimi alindi ancak AI analizi su anda "
+                "yapilamadi (servis gecici hata). Bildirim icerigine KAP linkinden "
+                "ulasabilirsiniz; AI yorumu daha sonra otomatik yeniden uretilecektir."
+            ),
+            "kap_url": kap_url,
+            "hashtags": [],
+            "ai_pending": True,  # Reprocess kuyrugu icin isaretleyici
+        }
 
     try:
         from app.services.ai_json_helper import safe_parse_json
