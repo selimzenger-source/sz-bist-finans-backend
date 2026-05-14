@@ -1162,7 +1162,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             )
 
             # ----------------------------------------------------------------
-            # TWITTER ENTEGRASYONU (Tum haberler — her 3 haberden 1'i)
+            # TWITTER ENTEGRASYONU (Tum haberler — her 5 haberden 1'i)
             # AI skoru dusukse tweet de atilmaz (notr/olumsuz haber)
             # ----------------------------------------------------------------
             if should_notify and message_type != "seans_disi_acilis":  # seans_disi_acilis = sadece acilis gap, tweet atilmaz
@@ -1185,9 +1185,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _db_count = _db_count_result.scalar() or 0
                             if _db_count > 0:
                                 # DB'de bugun kac KAP tweet atilmis → sayaci oradan devam ettir
-                                # Her tweet = 3 haber (1., 4., 7. ...) → toplam haber = tweet * 3 - 2
-                                # Ama basit olsun: tweet * 3 kadar sayalim ki bir sonraki cycle'da dogru calıssin
-                                _kap_tweet_counter["total"] = _db_count * 3
+                                # Her tweet = 5 haber (1., 6., 11. ...) → toplam haber ≈ tweet * 5
+                                _kap_tweet_counter["total"] = _db_count * 5
                                 logger.info(
                                     "[TWEET-FLOW] Sayac DB'den yuklendi: bugun %d KAP tweet atilmis → sayac=%d",
                                     _db_count, _kap_tweet_counter["total"],
@@ -1195,11 +1194,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Her 3 haberden 1'ini tweetle
+                    # Her 5 haberden 1'ini tweetle (spam koruması — Twitter rate limit)
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
 
-                    if _counter_val % 3 == 1:  # 1., 4., 7., 10. ... haber tweet atilir
+                    if _counter_val % 5 == 1:  # 1., 6., 11., 16. ... haber tweet atilir
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"

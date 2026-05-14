@@ -617,6 +617,31 @@ MANAGEMENT CHANGE:
   Board change → 4.5-5.0
   Routine appointment → 5.0
 
+MAJOR SHAREHOLDER PAY SATISI / HOLDING SECONDARY OFFERING (CRITICAL — MILD NEGATIVE):
+  Sirketin BUYUK HISSEDARI (holding, kurucu, %5+ pay sahibi) kendi paylarini
+  satarsa veya kurumsal yatirimcilara block sale yaparsa → BU NEGATIF SINYALDIR.
+  Sebep:
+    a) Insider selling — yonetim/holding "fiyat zirvede" sinyali verir
+    b) Float artisi → arz baskisi
+    c) Gelecekte daha fazla satim ihtimali (lock-up sonrasi)
+  "Kurumsal yatirimci ilgisi" / "talep coklugu" gibi POZITIF gibi sunan ifadeler
+  YANILTICIDIR — esasen pay satim = arz artisi.
+
+  Pattern triggers:
+    • "Holding ... hisselerini ... satti" / "block sale"
+    • "Sermayenin %X'i kurumsal yatirimcilara satildi"
+    • "Hizlandirilmis talep toplama" (accelerated bookbuilding)
+    • "Kurucu/hakim ortak ... pay satti"
+    • "Hisse satisi sonrasi pay orani %X'e dustu"
+
+  Score:
+    Satilan oran <%5    → 4.0-4.5 (mild negative)
+    %5-10               → 3.3-4.0 (negative)
+    %10-25              → 2.5-3.3 (significant negative)
+    >%25                → 1.8-2.5 (major float dump)
+  Lock-up varsa +0.3 (90+ gun satmama taahhudu = piyasa rahatlatici)
+  ASLA "olumlu" olarak puanlamayin, "Notr+" da degil — NEGATIVE.
+
 CIRCUIT BREAKER (Devre Kesici):
   ALWAYS 5.0 neutral — automatic mechanism, unrelated to fundamentals.
 
@@ -664,16 +689,19 @@ DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4)
     • "Bono / Tahvil ihrac" yetki / SPK basvuru
     • "Borclanma Araci Ihracina Iliskin Yonetim Kurulu Karari"
 
-  Score: 4.7-5.3 (Notr). NEVER above 5.5.
+  Score: 4.7-5.3 (Notr). ABSOLUTELY NEVER above 5.5. Sentiment="Nötr".
+  ASLA "Olumlu" sentiment vermeyiniz — bu BORC ihracidir, gelir/kar degil.
+  AI 6.0+ verirse o yanlistir; tertip/finansman/tahvil ihraci her zaman notr.
   Summary should clarify: bu bir borclanma araci (borc) ihracidir, ciroya/kara
-  dogrudan etkisi yoktur; finansman ihtiyacini karsilamak icin yapilir.
+  dogrudan etkisi yoktur; finansman ihtiyacini karsilamak icin yapilir, borc
+  yukunu artirir.
 
   Examples:
-  Ex.D: "TMSN Tertip Ihrac Belgesi (1 milyar TL)" → 5.0
+  Ex.D: "TMSN Tertip Ihrac Belgesi (200M TL sukuk)" → 5.0 (NOTR, asla 6.1 degil)
        Summary: "Sirketin borclanma araci ihracina iliskin SPK belgesi;
                  ek finansman saglar fakat ciro/kar artisi degildir, fiyata
-                 dogrudan pozitif etkisi beklenmez."
-  Ex.E: "ABCD 500M TL finansman bonosu ihraci" → 4.9
+                 dogrudan pozitif etkisi beklenmez, borc yukunu artirir."
+  Ex.E: "ABCD 500M TL finansman bonosu ihraci" → 4.9 (NOTR)
        Summary: "Kisa vadeli borclanma; yatirimci icin notr — borc maliyeti
                  ve geri odeme riski yaratabilir."
 
