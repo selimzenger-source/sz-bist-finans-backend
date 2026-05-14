@@ -116,6 +116,127 @@ async def send_admin_message(
         return False
 
 
+def _score_to_tier(score: float) -> tuple[str, str]:
+    """AI skoru -> (etiket, emoji) pozitif kategoriler icin."""
+    if score >= 9.0:
+        return ("Güçlü Olumlu", "💎")
+    if score >= 8.0:
+        return ("Çok Olumlu", "📈")
+    if score >= 7.0:
+        return ("Olumlu", "✅")
+    if score >= 6.0:
+        return ("Hafif Olumlu", "🟢")
+    return ("Nötr", "⚪")
+
+
+async def send_kap_positive_to_admin_group(
+    ticker: str,
+    ai_score: float,
+    ai_summary: Optional[str],
+    kap_url: Optional[str],
+    message_type: str,
+) -> bool:
+    """KAP pozitif bildirimini admin Telegram grubuna temiz formatla gonder.
+
+    Sadece ai_score >= 6.0 olan (Hafif Olumlu ve uzeri) bildirimler gonderilir.
+    Notr/negatifler bu kanala gitmez.
+
+    Format:
+        ⚡ Seans İçi Pozitif Haber  (veya 🌙 Seans Dışı)
+
+        TICKER
+
+        📊 AI Puanı: 8.3/10
+        📈 Çok Olumlu
+
+        [AI Yorumu]
+
+        🔗 KAP: https://...
+    """
+    if ai_score is None or ai_score < 6.0:
+        return False  # Sadece pozitif (>= 6.0)
+
+    # Seans ici / disi header
+    if message_type == "seans_ici_pozitif":
+        header = "⚡ Seans İçi Pozitif Haber"
+    elif message_type == "borsa_kapali":
+        header = "🌙 Seans Dışı Pozitif Haber"
+    else:
+        header = "📢 Pozitif Haber"
+
+    tier_label, tier_emoji = _score_to_tier(ai_score)
+
+    # Mesaj govdesi
+    parts = [
+        header,
+        "",
+        ticker.upper(),
+        "",
+        f"📊 AI Puanı: {ai_score:.1f}/10",
+        f"{tier_emoji} {tier_label}",
+        "",
+    ]
+
+    if ai_summary:
+        # Telegram mesaj limiti 4096, AI summary genelde 500-1500 char
+        # Cok uzunsa kirp
+        summary_text = ai_summary.strip()
+        if len(summary_text) > 3000:
+            summary_text = summary_text[:2997] + "..."
+        parts.append(summary_text)
+        parts.append("")
+
+    if kap_url:
+        parts.append(f"🔗 KAP: {kap_url}")
+
+    text = "\n".join(parts)
+
+    # Anti-spam: ayni ticker+score icin son 2 dk icindeki duplicate'i engelle
+    _dedup_key = f"kap_positive_{ticker.upper()}_{int(ai_score)}"
+    _now = time.monotonic()
+    _last = _kap_positive_last_send.get(_dedup_key, 0)
+    if _now - _last < 120:
+        logger.info(
+            "Admin KAP pozitif: %s — son 2 dk icinde gonderilmis, atlandi", ticker,
+        )
+        return False
+    _kap_positive_last_send[_dedup_key] = _now
+
+    # parse_mode kapalı: emoji + url'leri düz metin olarak gönder
+    # (HTML/Markdown parse hataları olmasin)
+    bot_token, chat_id = _get_admin_config()
+    if not bot_token or not chat_id:
+        logger.debug("Admin Telegram yapilandirilmamis, KAP pozitif atlaniyor")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": False,  # KAP link onizlemesi gosterilebilir
+            })
+            if resp.status_code != 200:
+                logger.warning(
+                    "Admin KAP pozitif gonderilemedi: %s — %s",
+                    resp.status_code, resp.text[:200],
+                )
+                return False
+            logger.info(
+                "Admin KAP pozitif gonderildi: %s — %.1f/10 (%s)",
+                ticker, ai_score, tier_label,
+            )
+            return True
+    except Exception as e:
+        logger.error("Admin KAP pozitif hata: %s — %s", ticker, e)
+        return False
+
+
+# Anti-spam icin son gonderim zamanlari (ticker+score bazli)
+_kap_positive_last_send: dict[str, float] = {}
+
+
 async def notify_ipo_status_change(
     ticker: Optional[str],
     company_name: str,

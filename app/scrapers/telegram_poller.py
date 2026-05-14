@@ -942,12 +942,18 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     from sqlalchemy import select as _sa_select
 
                     # Sentiment çıkarımı (ai_news_scorer score'dan):
-                    if ai_score >= 6.0:
-                        ka_sentiment = "Olumlu"
-                    elif ai_score < 4.5:
-                        ka_sentiment = "Olumsuz"
-                    else:
-                        ka_sentiment = "Nötr"
+                    # Yeni 9 kategorili etiket sistemi
+                    try:
+                        from app.utils.ai_score_label import score_to_label
+                        ka_sentiment = score_to_label(ai_score) or "Nötr"
+                    except Exception:
+                        # Fallback: eski 3'lu sistem
+                        if ai_score >= 6.0:
+                            ka_sentiment = "Olumlu"
+                        elif ai_score < 4.5:
+                            ka_sentiment = "Olumsuz"
+                        else:
+                            ka_sentiment = "Nötr"
 
                     # Title — yeni bot "Baslik:" satirindan, fallback matched_kw
                     ka_title = (news_title or matched_kw or title or "")[:500]
@@ -1035,6 +1041,27 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 except Exception as _bil_err:
                                     logger.warning(
                                         "Bilanco pipeline tetikleme hata (%s): %s", _tk, _bil_err,
+                                    )
+
+                            # ── ADMIN TELEGRAM GRUBU: POZITIF KAP BILDIRIMI ──
+                            # Sadece ai_score >= 6.0 olan haberler (Hafif Olumlu ve uzeri)
+                            # admin grubuna temiz formatla atilir.
+                            if ai_score is not None and ai_score >= 6.0:
+                                try:
+                                    from app.services.admin_telegram import send_kap_positive_to_admin_group
+                                    import asyncio as _asyncio2
+                                    _asyncio2.create_task(
+                                        send_kap_positive_to_admin_group(
+                                            ticker=_tk,
+                                            ai_score=ai_score,
+                                            ai_summary=ai_summary,
+                                            kap_url=kap_url,
+                                            message_type=message_type,
+                                        )
+                                    )
+                                except Exception as _adm_err:
+                                    logger.warning(
+                                        "Admin grup pozitif gonderim hata (%s): %s", _tk, _adm_err,
                                     )
                         except Exception as _flush_err:
                             logger.warning(
