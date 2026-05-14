@@ -19,14 +19,13 @@ class TemelAnaliz(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     ticker: Mapped[str] = mapped_column(String(10), nullable=False, unique=True, comment="Hisse kodu")
     sektor: Mapped[str | None] = mapped_column(String(100), comment="Sektor")
-    dolasim_lot: Mapped[Decimal | None] = mapped_column(Numeric(18, 0), comment="Dolasimdaki senet sayisi (lot)")
+    # KALDIRILDI (BIST lisans uyumu): dolasim_lot, piyasa_degeri, fk
+    # Bu 3 alan fiyat/piyasa kaynakli olduklari icin lisans gerektiriyor.
     ozsermaye: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), comment="Ozsermaye (TL)")
     yat_fon_oran: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), comment="Yatirim fonu oran (%)")
     emeklilik_fon_oran: Mapped[Decimal | None] = mapped_column(Numeric(15, 4), comment="Emeklilik fonu oran (%)")
-    piyasa_degeri: Mapped[Decimal | None] = mapped_column(Numeric(20, 2), comment="Piyasa degeri (TL)")
     defter_degeri: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Defter degeri")
-    # Banka/sigorta gibi sektorlerde extreme F/K, PD/DD degerleri olabilir (>1M)
-    fk: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="F/K (P/E)")
+    # Banka/sigorta gibi sektorlerde extreme PD/DD degerleri olabilir (>1M)
     pddd: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="PD/DD (P/B)")
     fd_favok: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="FD/FAVOK (EV/EBITDA)")
     pd_efk: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="PD/EFK")

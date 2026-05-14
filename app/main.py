@@ -130,6 +130,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("kap_min_score migration atlandi: %s", e)
 
+    # BIST lisans uyumu: temel_analiz tablosundan piyasa kaynakli alanlari DROP et
+    # (dolasim_lot, piyasa_degeri, fk — fiyat/piyasa kaynakli, lisans gerektiriyor)
+    try:
+        async with async_session() as db:
+            for col in ("dolasim_lot", "piyasa_degeri", "fk"):
+                await db.execute(sa_text(
+                    f"ALTER TABLE temel_analiz DROP COLUMN IF EXISTS {col}"
+                ))
+            await db.commit()
+    except Exception as e:
+        logger.warning("temel_analiz lisans drop migration atlandi: %s", e)
+
     # SPK Applications — company_description kolonu ekle (migration)
     try:
         async with async_session() as db:
@@ -12286,9 +12298,10 @@ async def admin_import_temel_analiz(request: Request, payload: dict = Body(...))
     inserted = 0
     updated = 0
     errors: list[str] = []
+    # KALDIRILDI (BIST lisans): dolasim_lot, piyasa_degeri, fk
     fields = [
-        "sektor", "dolasim_lot", "ozsermaye", "yat_fon_oran", "emeklilik_fon_oran",
-        "piyasa_degeri", "defter_degeri", "fk", "pddd", "fd_favok", "pd_efk",
+        "sektor", "ozsermaye", "yat_fon_oran", "emeklilik_fon_oran",
+        "defter_degeri", "pddd", "fd_favok", "pd_efk",
         "ihracat_yuzdesi",
     ]
 
@@ -14058,10 +14071,11 @@ async def list_latest_bilancos(
                 return _f(r_val)
             return _f(t_val) if t_val is not None and t_val != 0 else None
 
-        fk_val = _r(ratio.fk if ratio else None, temel.fk if temel else None)
+        # F/K ve piyasa_degeri temel'den kaldirildi (BIST lisans) — sadece ratio'dan al
+        fk_val = _f(ratio.fk) if ratio and ratio.fk is not None else None
         pddd_val = _r(ratio.pddd if ratio else None, temel.pddd if temel else None)
         fd_favok_val = _r(ratio.fd_favok if ratio else None, temel.fd_favok if temel else None)
-        piyasa_val = _r(ratio.piyasa_degeri if ratio else None, temel.piyasa_degeri if temel else None)
+        piyasa_val = _f(ratio.piyasa_degeri) if ratio and ratio.piyasa_degeri is not None else None
 
         items.append({
             "ticker": ticker,
@@ -14637,16 +14651,13 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
             "fd_favok": float(ratio.fd_favok) if ratio and ratio.fd_favok else None,
             "piyasa_degeri": float(ratio.piyasa_degeri) if ratio and ratio.piyasa_degeri else None,
         } if ratio else None,
-        # Temel analiz (yerel Excel sync) — eksik alanlar 0 kabul edilir
+        # Temel analiz (yerel Excel sync) — BIST lisans icin dolasim_lot/piyasa_degeri/fk kaldirildi
         "temel_analiz": {
             "sektor": temel.sektor if temel else None,
-            "dolasim_lot": float(temel.dolasim_lot) if temel and temel.dolasim_lot else 0,
             "ozsermaye": float(temel.ozsermaye) if temel and temel.ozsermaye else 0,
             "yat_fon_oran": float(temel.yat_fon_oran) if temel and temel.yat_fon_oran else 0,
             "emeklilik_fon_oran": float(temel.emeklilik_fon_oran) if temel and temel.emeklilik_fon_oran else 0,
-            "piyasa_degeri": float(temel.piyasa_degeri) if temel and temel.piyasa_degeri else 0,
             "defter_degeri": float(temel.defter_degeri) if temel and temel.defter_degeri else 0,
-            "fk": float(temel.fk) if temel and temel.fk else 0,
             "pddd": float(temel.pddd) if temel and temel.pddd else 0,
             "fd_favok": float(temel.fd_favok) if temel and temel.fd_favok else 0,
             "pd_efk": float(temel.pd_efk) if temel and temel.pd_efk else 0,
