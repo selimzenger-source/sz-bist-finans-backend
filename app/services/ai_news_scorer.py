@@ -831,11 +831,27 @@ _DEFAULT_SYSTEM_PROMPT = """You are a CFA-credentialed senior institutional equi
 
 ═══ CORE APPROACH ═══
 • FORWARD-LOOKING: Beyond immediate financial impact, identify potential growth/risk signals.
-• ACTIVE SCORING: Avoid clustering scores in 4.5-5.5 range. Be bold, differentiate every disclosure.
+• ACTIVE SCORING: Avoid clustering scores in 4.5-5.5 range AND 6.0-6.3 range. Be bold,
+  differentiate every disclosure. ASLA "DEFAULT 6.2" ATAMA YAPMA. Eger haber gercekten
+  Hafif Olumlu degil de Olumlu (7.0+) ise CESARETLE 7.0+ ver. Kucuk farklar onemlidir:
+  6.2 vs 7.4 vs 8.6 puan kategorisi (Hafif Olumlu / Olumlu / Cok Olumlu) yatirimci icin
+  cok farkli bilgi tasir.
 • NUANCE: Avoid dismissive phrases like "rutin", "etkisiz", "somut gelisme yok".
   Replace with: "kisa vadede sinirli etki, orta vadede X potansiyeli" (measured commentary).
 • CONTEXT: New deal = big positive for small-cap; limited for mega-cap. Calibrate to company size.
 • OUTPUT IN TURKISH: Summary, sentiment label, hashtags — all in Turkish for retail audience.
+
+═══ ANTI-CLUSTERING UYARISI (ZORUNLU) ═══
+6.0-6.5 araliginda topraklamayin. Asagidaki vakalardan biri varsa MINIMUM 7.0 zorunlu:
+  • Yield %10+ olan temettu → 8.5-9.5 (asla 7.0'in altinda olmasin)
+  • Kurumsal yatirimci blok alimi (>%5 esik asilmis, >50M TL net alim) → 7.0-7.5
+  • Bedelsiz %50+ → 8.0+
+  • Sirket satin alma/M&A (premium ile) → 7.5+
+  • Devlet kurumu sozlesmesi + Savunma/Teknoloji sektor → en az 6.5 + sektor bonusu
+  • >100M TL ihale/sozlesme (tutar acisindan buyuk) → 7.0+
+
+Eger AI cevirip 6.0-6.5'e koymak istiyorsa, KENDISINE SOR: "Bu haber gercekten BIR
+KATEGORI YUKARI tasidigim icin bir adim atamam mi?" — atabiliyorsan AT.
 
 ═══ TAKIP BILDIRIMI FARKINDALIGI — KRITIK ═══
 
@@ -1888,6 +1904,13 @@ _STRONG_POSITIVE_PATTERNS = [
     # Kar artisi
     (r"(?:net\s*)?k[aâ]r[ıi]?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})\s*art", 9.0),  # %100+ kar artisi
     (r"rekor\s*(?:k[aâ]r|gelir|has[ıi]lat)", 8.0),
+    # Yuksek yield temettu — yield% format'i icerikte gecerse
+    (r"(?:verim|yield)\s*%\s*(?:[2-9]\d|\d{3,})\b", 9.0),  # >=%20 yield
+    (r"(?:verim|yield)\s*%\s*(?:1[0-9])\b", 8.5),  # %10-19 yield
+    (r"kar\s*pay[ıi]\s*oran[ıi]\s*%\s*(?:[2-9]\d|\d{3,})", 9.0),  # "kar payi orani %20+"
+    (r"kar\s*pay[ıi]\s*oran[ıi]\s*%\s*(?:1[0-9])", 8.5),  # %10-19
+    # Kurumsal block alim: >%5 esik asma sinyali
+    (r"(?:%\s*5\s*esi[gğ]i?\s*a[sş]t|esik\s*a[sş][ıi]ld[ıi]|payi.*%\s*(?:[2-9]\d|\d{3,}).*y[üu]kseld)", 7.0),
 ]
 
 # Bedelli sermaye artirimi — negatif TAVAN sinirlamasi
@@ -1997,6 +2020,34 @@ async def _check_followup_notification(ticker: str, content: str) -> tuple[bool,
     return (False, None)
 
 
+def _extract_dividend_yield_pct(content: str) -> float | None:
+    """Icerikten temettu yield% degerini cikar (varsa).
+
+    Pattern'lar:
+      "kar payi orani %19.87" -> 19.87
+      "verim %14.3" / "yield %8.2" -> tek sayi
+      "Pay basina brut 5 TL" + "fiyat 50 TL" → asla — yield ozette agirlikla yazilir
+    """
+    if not content:
+        return None
+    lc = content.lower()
+    # Birden cok pattern dene
+    patterns = [
+        r"(?:kar\s*pay[ıi]\s*oran[ıi]?|temettu\s*verim|yield|verim|brut\s*verim|net\s*verim)\s*%?\s*([0-9]{1,3}(?:[.,][0-9]+)?)",
+        r"%\s*([0-9]{1,3}(?:[.,][0-9]+)?)\s*(?:seviye|brut\s*verim|net\s*verim|temettu\s*verim)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, lc)
+        if m:
+            try:
+                val = float(m.group(1).replace(",", "."))
+                if 0 <= val <= 100:
+                    return val
+            except (ValueError, TypeError):
+                pass
+    return None
+
+
 def _validate_score_against_content(score: float, content: str, ticker: str) -> float:
     """Icerik patirnlerine gore skoru dogrular ve gerekirse duzeltir.
 
@@ -2005,6 +2056,60 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
     Notr bildirimler (devre kesici vb.) icin 5.0'a ceker.
     """
     content_lower = content.lower()
+
+    # ─── Kurumsal block alim — HARD FLOOR ──────────────────────────────
+    # Yatirim/portfoy fonu %5 esigi asar veya buyuk net alim yaparsa → 7.0+ zorunlu
+    # PEKGY/TATEN tipi vakalari yakala
+    is_kurumsal_alim = (
+        ("portfoy yonetimi" in content_lower or "portföy yönetimi" in content_lower or "fonlar" in content_lower)
+        and ("alim" in content_lower or "alım" in content_lower or "satın" in content_lower)
+        and ("yukseldi" in content_lower or "yükseldi" in content_lower or "esik" in content_lower or "eşik" in content_lower)
+    )
+    if is_kurumsal_alim:
+        # Tutar tespiti — milyon TL bazli
+        m_amount = re.search(r"(\d+(?:[.,]\d+)?)\s*milyon\s*tl\s*(?:nominal|tutar)", content_lower)
+        if m_amount:
+            try:
+                amount_m = float(m_amount.group(1).replace(",", "."))
+                if amount_m >= 100 and score < 7.5:
+                    logger.info(
+                        "Skor dogrulama [KURUMSAL-ALIM]: %s %dM TL net alim, skor %.1f -> 7.5",
+                        ticker, amount_m, score,
+                    )
+                    return 7.5
+                elif amount_m >= 50 and score < 7.0:
+                    logger.info(
+                        "Skor dogrulama [KURUMSAL-ALIM]: %s %dM TL net alim, skor %.1f -> 7.0",
+                        ticker, amount_m, score,
+                    )
+                    return 7.0
+                elif amount_m >= 25 and score < 6.7:
+                    return 6.7
+            except (ValueError, TypeError):
+                pass
+
+    # ─── Temettu yield% bazli HARD FLOOR ──────────────────────────────
+    # OZKGY-tipi vakayi engelle: %19.87 yield iken AI 7.2 vermesin
+    yield_pct = _extract_dividend_yield_pct(content)
+    if yield_pct is not None:
+        # Sadece temettu bildirimi olduğundan emin ol
+        if any(kw in content_lower for kw in ["kar payi", "kar payı", "temettu", "temettü", "pay basina", "pay başına"]):
+            if yield_pct >= 20:
+                min_floor = 9.0
+            elif yield_pct >= 10:
+                min_floor = 8.5
+            elif yield_pct >= 7:
+                min_floor = 7.8
+            elif yield_pct >= 5:
+                min_floor = 7.0
+            else:
+                min_floor = 0  # Dusuk yield icin floor uygulama
+            if min_floor > 0 and score < min_floor:
+                logger.info(
+                    "Skor dogrulama [TEMETTU-YIELD]: %s yield=%%%.2f, skor %.1f -> %.1f",
+                    ticker, yield_pct, score, min_floor,
+                )
+                return min_floor
 
     # ── Nötr bildirimler — skor 5.0 olmali ──
     _NEUTRAL_PATTERNS = [
