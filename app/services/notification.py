@@ -1147,9 +1147,24 @@ class NotificationService:
         )
         kap_users = list(kap_sub_result.scalars().all())
 
+        # Bu push'in skoru (string olarak data["ai_score"] icinde) — kullanici
+        # tercihiyle karsilastiracagiz
+        try:
+            push_score = float(data.get("ai_score", "0") or 0)
+        except (ValueError, TypeError):
+            push_score = 0.0
+
         sent_count = 0
         failed_count = 0
+        filtered_by_score = 0
         for user in kap_users:
+            # ─── AI Skor Filtresi (kullanicinin secimi) ───
+            # kap_min_score: 6.0=tum pozitifler | 7.0=Olumlu+ | 8.0=Cok+ | 9.0=Guclu+
+            user_min = float(getattr(user, "kap_min_score", 6.0) or 6.0)
+            if push_score > 0 and push_score < user_min:
+                filtered_by_score += 1
+                continue  # Bu kullanici daha yuksek skor istiyor, atla
+
             try:
                 success = await self._send_to_user(
                     user=user,
@@ -1172,8 +1187,8 @@ class NotificationService:
                 logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap_abone=%d)",
-            ticker, sent_count, len(kap_users),
+            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap_abone=%d, skor_filtresiyle_atlanan=%d)",
+            ticker, sent_count, len(kap_users), filtered_by_score,
         )
 
         # Telegram admin raporu

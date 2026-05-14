@@ -35,6 +35,11 @@ class User(Base):
     notify_kap_bist30: Mapped[bool] = mapped_column(Boolean, default=True, comment="BIST 30 KAP ucretsiz bildirim")
     notify_kap_all: Mapped[bool] = mapped_column(Boolean, default=True, comment="Tum KAP haber bildirimi (ucretli aboneler)")
 
+    # AI skor filtresi — kullanicinin sectigi minimum skor (push + feed display).
+    # Frontend modal'dan gonderir. 6.0 = tum pozitifler (default), 7.0 = sadece Olumlu+,
+    # 8.0 = sadece Cok Olumlu+, 9.0 = sadece Guclu Olumlu.
+    kap_min_score: Mapped[float] = mapped_column(Float, default=6.0, comment="Push icin minimum AI puani (6.0/7.0/8.0/9.0)")
+
     # Halka Arz ucretli bildirim tercihleri
     notify_taban_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Taban acilinca bildirimi")
     notify_daily_open_close: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunluk acilis kapanis bildirimi")

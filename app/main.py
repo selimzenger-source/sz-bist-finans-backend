@@ -120,6 +120,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("notify_rehber migration atlandi: %s", e)
 
+    # AI skor filtresi — kullanicinin push tercihi
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS kap_min_score FLOAT DEFAULT 6.0"
+            ))
+            await db.commit()
+    except Exception as e:
+        logger.warning("kap_min_score migration atlandi: %s", e)
+
     # SPK Applications — company_description kolonu ekle (migration)
     try:
         async with async_session() as db:
@@ -12313,6 +12323,69 @@ async def mark_all_notifications_read(
         .values(is_read=True)
     )
     return {"success": True}
+
+
+# ============================================
+# KAP AI SKOR FILTRESI — Kullanici push tercihi
+# ============================================
+
+class KapMinScoreUpdate(BaseModel):
+    """Frontend'den gelen minimum AI skor tercihi."""
+    kap_min_score: float  # 6.0 = tum pozitifler | 7.0 = Olumlu+ | 8.0 = Cok Olumlu+ | 9.0 = Guclu
+
+
+@app.patch("/api/v1/users/{device_id}/kap-min-score")
+@limiter.limit("10/minute")
+async def update_kap_min_score(
+    request: Request,
+    device_id: str,
+    payload: KapMinScoreUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin AI Pozitif filtre tercihi (push + feed display).
+
+    Frontend AIScoreFilterModal "Uygula" basinca cagirilir.
+    Sadece skor >= kap_min_score olan KAP pozitifler kullaniciya push olarak
+    gonderilir. Daha dusuk skorlular feed'de gozukur ama push gelmez.
+
+    Sinirlar: 6.0 - 10.0 arasi.
+    """
+    score = payload.kap_min_score
+    if score < 6.0:
+        score = 6.0  # Min: tum pozitifler
+    elif score > 10.0:
+        score = 10.0
+    score = round(score, 1)
+
+    from app.models.user import User as _User
+    user = await db.execute(
+        select(_User).where(_User.device_id == device_id)
+    )
+    user_obj = user.scalar_one_or_none()
+    if not user_obj:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    user_obj.kap_min_score = score
+    await db.commit()
+    return {"success": True, "kap_min_score": score}
+
+
+@app.get("/api/v1/users/{device_id}/kap-min-score")
+@limiter.limit("30/minute")
+async def get_kap_min_score(
+    request: Request,
+    device_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin mevcut AI skor filtre tercihini dondur."""
+    from app.models.user import User as _User
+    user = await db.execute(
+        select(_User).where(_User.device_id == device_id)
+    )
+    user_obj = user.scalar_one_or_none()
+    if not user_obj:
+        return {"kap_min_score": 6.0}  # Varsayilan
+    return {"kap_min_score": float(user_obj.kap_min_score or 6.0)}
 
 
 # ============================================
