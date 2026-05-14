@@ -3358,6 +3358,96 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.post("/api/v1/admin/relabel-ai-sentiment")
+@limiter.limit("3/minute")
+async def admin_relabel_ai_sentiment(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Tum kap_all_disclosures kayitlarinda ai_sentiment alanini
+    ai_impact_score'a gore yeni 9 kategorili etiketle gunceller.
+
+    Etiketler: Guclu Olumlu / Cok Olumlu / Olumlu / Hafif Olumlu /
+               Notr / Hafif Olumsuz / Olumsuz / Cok Olumsuz / Guclu Olumsuz
+
+    Eski 3 kategorili sistemden (Olumlu/Notr/Olumsuz) yeni sisteme migrate eder.
+    AI yeniden tetiklenmez — sadece SQL update.
+
+    body:
+      admin_password: zorunlu
+      dry_run: true ise sadece sayim yapar (default false)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    dry_run = bool(payload.get("dry_run", False))
+
+    # CASE WHEN ile tek SQL update — Postgresqil-uyumlu, hizli
+    sql = """
+        UPDATE kap_all_disclosures
+        SET ai_sentiment = CASE
+            WHEN ai_impact_score IS NULL THEN ai_sentiment
+            WHEN ai_impact_score >= 9.0 THEN 'Güçlü Olumlu'
+            WHEN ai_impact_score >= 8.0 THEN 'Çok Olumlu'
+            WHEN ai_impact_score >= 7.0 THEN 'Olumlu'
+            WHEN ai_impact_score >= 6.0 THEN 'Hafif Olumlu'
+            WHEN ai_impact_score >= 4.1 THEN 'Nötr'
+            WHEN ai_impact_score >= 3.1 THEN 'Hafif Olumsuz'
+            WHEN ai_impact_score >= 2.1 THEN 'Olumsuz'
+            WHEN ai_impact_score >= 1.1 THEN 'Çok Olumsuz'
+            ELSE 'Güçlü Olumsuz'
+        END
+        WHERE ai_impact_score IS NOT NULL
+    """
+
+    # Once tahmin: kac kayit etkilenecek ve dagilim
+    count_q = await db.execute(text("""
+        SELECT
+            COUNT(*) FILTER (WHERE ai_impact_score >= 9.0) AS guclu_olumlu,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 8.0 AND ai_impact_score < 9.0) AS cok_olumlu,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 7.0 AND ai_impact_score < 8.0) AS olumlu,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 6.0 AND ai_impact_score < 7.0) AS hafif_olumlu,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 4.1 AND ai_impact_score < 6.0) AS notr,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 3.1 AND ai_impact_score < 4.1) AS hafif_olumsuz,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 2.1 AND ai_impact_score < 3.1) AS olumsuz,
+            COUNT(*) FILTER (WHERE ai_impact_score >= 1.1 AND ai_impact_score < 2.1) AS cok_olumsuz,
+            COUNT(*) FILTER (WHERE ai_impact_score < 1.1) AS guclu_olumsuz,
+            COUNT(*) FILTER (WHERE ai_impact_score IS NOT NULL) AS total
+        FROM kap_all_disclosures
+    """))
+    row = count_q.fetchone()
+    distribution = {
+        "guclu_olumlu":  row[0] or 0,
+        "cok_olumlu":    row[1] or 0,
+        "olumlu":        row[2] or 0,
+        "hafif_olumlu":  row[3] or 0,
+        "notr":          row[4] or 0,
+        "hafif_olumsuz": row[5] or 0,
+        "olumsuz":       row[6] or 0,
+        "cok_olumsuz":   row[7] or 0,
+        "guclu_olumsuz": row[8] or 0,
+        "total":         row[9] or 0,
+    }
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_update": distribution["total"],
+            "distribution": distribution,
+        }
+
+    result = await db.execute(text(sql))
+    await db.commit()
+
+    return {
+        "success": True,
+        "updated": result.rowcount,
+        "distribution": distribution,
+        "message": "ai_sentiment 9 kategorili yeni sisteme migrate edildi",
+    }
+
+
 @app.post("/api/v1/admin/backfill-multi-symbol-disclosure")
 @limiter.limit("10/minute")
 async def admin_backfill_multi_symbol(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):

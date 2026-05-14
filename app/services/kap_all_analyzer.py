@@ -518,10 +518,11 @@ def _rule_based_analyze(title: str, body: str) -> dict:
     pos = sum(1 for kw in _POSITIVE_KEYWORDS if kw in text)
     neg = sum(1 for kw in _NEGATIVE_KEYWORDS if kw in text)
 
+    # Yeni 9 kategorili etiket sistemi ile uyumlu rule-based ciktilar
     if pos > neg:
-        return {"sentiment": "Olumlu", "impact_score": 6.5, "summary": None, "category": "finansal", "hashtags": []}
+        return {"sentiment": "Hafif Olumlu", "impact_score": 6.5, "summary": None, "category": "finansal", "hashtags": []}
     elif neg > pos:
-        return {"sentiment": "Olumsuz", "impact_score": 3.5, "summary": None, "category": "finansal", "hashtags": []}
+        return {"sentiment": "Hafif Olumsuz", "impact_score": 3.5, "summary": None, "category": "finansal", "hashtags": []}
     return {"sentiment": "Nötr", "impact_score": 5.0, "summary": None, "category": "bilgi", "hashtags": []}
 
 
@@ -872,6 +873,16 @@ SADECE asagidaki JSON formatinda yanit ver:
         impact_score = round(float(impact_score), 1)
     else:
         impact_score = 5.0
+
+    # Yeni 9 kategorili etiket sistemi — skor varsa daha detayli etiket uretilir.
+    # Eski 3'lu sistem (Olumlu/Notr/Olumsuz) yerine artik tier label kayit edilir.
+    try:
+        from app.utils.ai_score_label import score_to_label
+        _refined = score_to_label(impact_score)
+        if _refined:
+            sentiment = _refined
+    except Exception:
+        pass  # Hata olursa eski 3'lu sentiment kalir
 
     summary = result.get("summary")
     if not isinstance(summary, str) or not summary.strip():
