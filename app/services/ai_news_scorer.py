@@ -547,7 +547,238 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         "Sermaye piyasasi araci notu/izahname onayi bildirimi. Standart prosedur olup bagimsiz ek bilgi katmadan sadece hukuki formaliteyi belgeler.",
         ["bilgilendirme"],
     ),
+
+    # --- TEMETTU PROSEDUR ADIMLARI (ilk karar sonrasi takip bildirimleri) ---
+    # Bu bildirimler ZATEN onceden ilan edilmis temettu kararinin teknik islemleri.
+    # Yatirimci icin yeni bilgi katmaz — fiyat zaten ilk karardan sonra fiyatlandi.
+    # Bunlari tekrar tekrar "olumlu" puanlamak yatirimciyi yaniltir.
+    (
+        r"kar\s*pay[ıi]\s*odeme\s*tarihi|kar\s*pay[ıi]\s*odeme\s*bildirim|"
+        r"temettu\s*odeme\s*tarihi|temettu\s*odeme\s*bildirim|"
+        r"pay\s*basina\s*brut\s*temettu(?!.*onayland|.*karar)",
+        "Temettu Odeme Prosedur",
+        "Onceden Genel Kurul'da onaylanmis temettu dagitiminin odeme tarihi/teknik bildirimi. Yeni bir karar olmayip yalnizca duyurusu yapilan miktar ve tarihin tescili niteliginde. Hisse fiyati ilk karar aciklandiginda fiyatlandi; bu bildirimle ek pozitif etki beklenmez.",
+        ["temettu"],
+    ),
+    (
+        r"hak\s*kullan[ıi]m(?:\s*tarihi|\s*surec)|temettu\s*hak\s*kazanim|"
+        r"ex.?(?:dividend|date)|ex.?temettu",
+        "Hak Kullanim Tarihi",
+        "Hak kullanim/ex-temettu tarih bildirimi. Bu tarihte hisseyi elinde tutan yatirimcilar temettu hak sahibi olur — teknik tescil bildirimi olup ilk karar zaten onceden ilan edildiginden fiyata yeni etki katmaz.",
+        ["temettu"],
+    ),
+    (
+        r"kar\s*pay[ıi]\s*dag[ıi]tim\s*(?:tescil|gerceklesti|tamamland)|"
+        r"temettu\s*dag[ıi]tim[ıi]\s*(?:tescil|gerceklesti|tamamland)",
+        "Temettu Dagitim Tamamlandi",
+        "Temettu dagitiminin tamamlandigi/tescil edildigi bildirimi. Tamamen prosedurel bir adim olup miktar ve tarih onceden ilan edilmistir. Hisse fiyatina yeni etki yaratmaz.",
+        ["temettu"],
+    ),
+
+    # --- SERMAYE ARTIRIMI PROSEDUR ADIMLARI (ilk karar sonrasi takip) ---
+    # Bedelli/bedelsiz sermaye artiriminin ilk YK karari pozitif veya negatif
+    # puanlanir. Sonrasindaki tum adimlar (ihrac belgesi, kullanim suresi,
+    # tescil, dagitim gerceklesti) ZATEN o ilk kararda fiyatlandi. Tekrar
+    # pozitif olarak puanlamak yatirimciyi yaniltir.
+    (
+        r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*(?:tescil|tamamland|gerceklesti)|"
+        r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*(?:islemleri\s*)?ticaret\s*sicil",
+        "Sermaye Artirimi Tescil",
+        "Onceden karar verilmis sermaye artiriminin Ticaret Sicili'nde tescili/tamamlanmasi bildirimi. Karar ve oran onceden aciklandiginda fiyat zaten reaksiyon verdi — bu bildirim teknik tescil adimi olup yeni etki yaratmaz.",
+        ["sermayeartirimi"],
+    ),
+    (
+        r"ihrac\s*belgesi\s*(?:onay|verilm|alin)|"
+        r"spk\s*(?:tarafindan\s*)?ihrac\s*belgesi|"
+        r"bedelli.*ihrac\s*belge|bedelsiz.*ihrac\s*belge",
+        "Ihrac Belgesi SPK Onayi",
+        "Onceden duyurulan sermaye artiriminin SPK ihrac belgesinin onayi/teslimi. Ilk karar duyurusunda fiyat zaten reaksiyon verdi. Bu adim sadece sirketin SPK izniyle ihraci baslatabilecegini gosterir, yeni stratejik bilgi katmaz.",
+        ["sermayeartirimi"],
+    ),
+    (
+        r"r[uü][cç]han\s*hakk[ıi]\s*kullan[ıi]m\s*(?:suresi|tarihi|baslang|bitis|baslad)|"
+        r"r[uü][cç]han\s*hakk[ıi]\s*(?:satis|alimi)\s*baslad",
+        "Ruchan Hakki Kullanim Donemi",
+        "Onceden ilan edilmis bedelli sermaye artiriminin ruçhan hakki kullanim suresi bildirimi. Ilk karar duyurusunda fiyat reaksiyon verdi (negatif), bu sadece kullanim periyodu tescili. Yatirimci icin yeni bilgi katmaz.",
+        ["bedelli"],
+    ),
+    (
+        r"bedelsiz\s*pay\s*(?:dag[ıi]t[ıi]m[ıi])?\s*(?:tarihinin\s*tescil|tescil|gerceklesti|tamamland)|"
+        r"bedelsiz\s*pay\s*dagit[ıi]m[ıi]?\s*tarih",
+        "Bedelsiz Pay Dagitim Tescili",
+        "Onceden duyurulmus bedelsiz sermaye artiriminin pay dagitim tarihinin tescili/uygulamasi. Oran ve karar ilk bildirimi takiben fiyatlandi — bu adim sadece teknik kayit niteliginde olup yeni reaksiyon beklenmez.",
+        ["bedelsiz"],
+    ),
+    (
+        r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*tutar(?:in)?\s*tahsilat|"
+        r"bedelli\s*sermaye\s*art[ıi]r[ıi]m[ıi]\s*nakit\s*girisi",
+        "Bedelli Tahsilat",
+        "Bedelli sermaye artirimi sonucu sirkete nakit girisi tescili. Bu prosedurel bir kapanis bildirimidir; finansman amaci ilk karar duyurusundan beri biliniyordu.",
+        ["bedelli"],
+    ),
+
+    # --- PAY GERI ALIM PROSEDUR (gunluk islemler) ---
+    # Pay geri alimi BIR DEFA pozitif puanlanir (program duyurusu veya buyuk
+    # alim). Sonrasindaki kucuk gunluk alimlar ZATEN biliniyor.
+    (
+        r"pay\s*geri\s*alim\s*program(?:in|i)\s*(?:cerceves|kapsam)|"
+        r"geri\s*al[ıi]m\s*program[ıi]\s*kapsam[ıi]nda(?!.*ilk|.*baslangic)",
+        "Pay Geri Alim Gunluk Islem",
+        "Onceden duyurulmus pay geri alim programinin gunluk uygulama bildirimi. Buyuk tutarli ve son alim sirketin guvenini gostermesi haricinde, kucuk gunluk islemler artik fiyata yansidi.",
+        ["paygerialim"],
+    ),
 ]
+
+
+async def _fetch_context_data(ticker: str, content: str) -> str:
+    """Bildirim icerigine gore ilgili gecmis veriyi DB'den cek + AI prompt'a inject.
+
+    Temettu bildirimleri icin: son 3 yil temettu gecmisi (TL ve yield%)
+    Sermaye artirimi / yeni is ilişkisi icin: son ozsermaye (oran hesabi icin)
+    Pay geri alımı icin: önceki geri alim programi durumu
+
+    Returns: AI prompt'a eklenmek uzere ek context metni (bos string de olabilir)
+    """
+    if not ticker or not content:
+        return ""
+
+    content_lower = content.lower()
+    context_parts: list[str] = []
+
+    try:
+        from app.database import async_session
+        from sqlalchemy import select, desc
+
+        # ─── TEMETTU GECMISI (yield-bazli ve gecmis karsilastirma) ───
+        if any(kw in content_lower for kw in [
+            "kar payi", "kar payı", "kâr payı", "temettu", "temettü",
+            "pay basina brut", "pay başına brüt", "kar dagitim", "kar dağıtım",
+        ]):
+            try:
+                from app.models.dividend import DividendHistory
+                async with async_session() as db:
+                    result = await db.execute(
+                        select(DividendHistory)
+                        .where(DividendHistory.ticker == ticker.upper())
+                        .order_by(desc(DividendHistory.payment_year))
+                        .limit(5)
+                    )
+                    history = result.scalars().all()
+                    if history:
+                        lines = ["═══ TEMETTU GECMISI (son 5 yil — AI: bu veriyi kullan):"]
+                        for h in history:
+                            gross = float(h.gross_dividend_per_share) if h.gross_dividend_per_share else None
+                            yield_pct = float(h.dividend_yield_pct) if h.dividend_yield_pct else None
+                            if gross is not None:
+                                line = f"  - {h.payment_year}: {gross:.4f} TL/hisse"
+                                if yield_pct is not None:
+                                    line += f" (verim %{yield_pct:.2f})"
+                                lines.append(line)
+                        if len(lines) > 1:
+                            context_parts.append("\n".join(lines))
+                            # Trend hesabi
+                            if len(history) >= 2:
+                                latest = float(history[0].gross_dividend_per_share or 0)
+                                prior = float(history[1].gross_dividend_per_share or 0)
+                                if latest > 0 and prior > 0:
+                                    pct_change = ((latest - prior) / prior) * 100
+                                    context_parts.append(
+                                        f"  TREND: son yil ({history[0].payment_year}) "
+                                        f"vs onceki yil ({history[1].payment_year}): "
+                                        f"%{pct_change:+.1f} degisim"
+                                    )
+                            elif len(history) == 1:
+                                context_parts.append(
+                                    "  NOT: Sirket gecmiste sadece 1 kez temettu dagitmis "
+                                    "(neredeyse ilk kez)"
+                                )
+                    else:
+                        context_parts.append(
+                            "═══ TEMETTU GECMISI: BOSH — sirket hic temettu dagitmamis "
+                            "(ILK KEZ TEMETTU sinyali, base score +2.0 bonusu uygulanmali)"
+                        )
+            except Exception as _div_err:
+                logger.debug("Temettu gecmis fetch hata (%s): %s", ticker, _div_err)
+
+        # ─── OZSERMAYE (yeni is iliskisi / sermaye artirimi / pay geri alim oran hesabi) ───
+        if any(kw in content_lower for kw in [
+            "yeni is iliskisi", "yeni iş ilişkisi",
+            "sermaye artir", "sermaye artır",
+            "bedelli", "bedelsiz",
+            "sozlesme imzalan", "sözleşme imzalan",
+            "anlasma imzalan", "anlaşma imzalan",
+            "ihale kazan", "ihale al",
+            "pay geri al", "geri alim programi",
+            "tedarikci", "tedarikçi", "musteri", "müşteri",
+        ]):
+            try:
+                from app.models.company_financial import CompanyFinancial
+                async with async_session() as db:
+                    result = await db.execute(
+                        select(CompanyFinancial)
+                        .where(CompanyFinancial.ticker == ticker.upper())
+                        .where(CompanyFinancial.total_equity.is_not(None))
+                        .order_by(desc(CompanyFinancial.period))
+                        .limit(1)
+                    )
+                    cf = result.scalar_one_or_none()
+                    if cf and cf.total_equity:
+                        eq = float(cf.total_equity)
+                        # Insan-okunabilir format
+                        if eq >= 1_000_000_000:
+                            eq_str = f"{eq/1_000_000_000:.2f} milyar TL"
+                        elif eq >= 1_000_000:
+                            eq_str = f"{eq/1_000_000:.1f} milyon TL"
+                        else:
+                            eq_str = f"{eq:,.0f} TL"
+                        context_parts.append(
+                            f"═══ SIRKET OZSERMAYESI (son donem {cf.period}): {eq_str}\n"
+                            f"  AI: yeni is/sermaye/pay alim tutar(lar)ini bu ozsermayeye "
+                            f"oranla — oran %X = (tutar/ozsermaye)*100. Puanlama icin "
+                            f"system prompt'taki oran tablosunu kullan."
+                        )
+                    else:
+                        # Ozsermaye verisi yok — segment tahmini icin ipucu
+                        context_parts.append(
+                            "═══ SIRKET OZSERMAYESI: Veri bulunamadi — "
+                            "ticker buyukluk segmenti uzerinden tahmin yap "
+                            "(small-cap=500M-2B, mid-cap=5-20B, large-cap=30B+ TL)"
+                        )
+            except Exception as _cf_err:
+                logger.debug("Ozsermaye fetch hata (%s): %s", ticker, _cf_err)
+
+        # ─── ONCEKI POZITIF KARARLAR (takip bildirimi tespiti icin AI'ya ipucu) ───
+        # (DB-based check zaten _check_followup_notification'da yapiliyor,
+        # bu sadece AI'nin context'inde daha bilincli karar vermesi icin not.)
+        try:
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from datetime import timedelta
+
+            cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            async with async_session() as db:
+                result = await db.execute(
+                    select(KapAllDisclosure.title, KapAllDisclosure.ai_impact_score, KapAllDisclosure.published_at)
+                    .where(KapAllDisclosure.company_code == ticker.upper())
+                    .where(KapAllDisclosure.published_at >= cutoff)
+                    .where(KapAllDisclosure.ai_impact_score >= 6.0)
+                    .order_by(desc(KapAllDisclosure.published_at))
+                    .limit(5)
+                )
+                priors = result.fetchall()
+                if priors:
+                    lines = ["═══ SON 30 GUN POZITIF KARARLAR (AI: bunlarin TAKIP bildirimleri ise NOTR 5.0 ver, tekrar yuksek puanlama):"]
+                    for prior_title, prior_score, prior_date in priors[:5]:
+                        date_str = prior_date.strftime("%Y-%m-%d") if prior_date else "?"
+                        title_short = (prior_title or "")[:80]
+                        lines.append(f"  - {date_str} (skor {prior_score:.1f}): {title_short}")
+                    context_parts.append("\n".join(lines))
+        except Exception as _prior_err:
+            logger.debug("Onceki pozitif fetch hata (%s): %s", ticker, _prior_err)
+
+    except Exception as e:
+        logger.debug("Context data fetch genel hata (%s): %s", ticker, e)
+
+    return "\n\n".join(context_parts) if context_parts else ""
 
 
 def _check_routine_pattern(content: str, ticker: str) -> dict | None:
@@ -605,6 +836,52 @@ _DEFAULT_SYSTEM_PROMPT = """You are a CFA-credentialed senior institutional equi
   Replace with: "kisa vadede sinirli etki, orta vadede X potansiyeli" (measured commentary).
 • CONTEXT: New deal = big positive for small-cap; limited for mega-cap. Calibrate to company size.
 • OUTPUT IN TURKISH: Summary, sentiment label, hashtags — all in Turkish for retail audience.
+
+═══ TAKIP BILDIRIMI FARKINDALIGI — KRITIK ═══
+
+ASLA AYNI KARARI 2 KEZ POZITIF PUANLAMA.
+
+Bir sirket pozitif bir karar acikladiginda (orn: "%50 bedelsiz", "2 TL temettu",
+"500M TL ihale") fiyata reaksiyon o ANDA verilir. Sonrasinda gelen ADIM ADIM
+prosedur bildirimleri ZATEN fiyatlandi — yatirimci icin yeni bilgi degildir.
+
+PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
+  TEMETTU:
+    Ilk YK karari ("kar payi dagitilmasi onayland") → POZITIF (gerçek değer)
+    Sonra gelen:
+      - "Kar payi odeme tarihi bildirim"           → NOTR 5.0
+      - "Pay basina brut temettu X TL" (tek basina, karar yok) → NOTR 5.0
+      - "Hak kullanim tarihi tescili"              → NOTR 5.0
+      - "Temettu dagitim tamamlandi"               → NOTR 5.0
+      - "Ex-temettu tarihi"                         → NOTR 5.0
+
+  BEDELSIZ SERMAYE ARTIRIMI:
+    Ilk YK karari "%X bedelsiz onayland"          → POZITIF (gerçek değer)
+    Sonra gelen:
+      - "SPK ihrac belgesi onayi"                   → NOTR 5.0
+      - "Bedelsiz pay dagitim tarihinin tescili"    → NOTR 5.0
+      - "Bedelsiz pay dagitimi gerceklesti"         → NOTR 5.0
+      - "Sermaye artirimi Ticaret Sicili tescili"   → NOTR 5.0
+
+  BEDELLI SERMAYE ARTIRIMI:
+    Ilk YK karari "%X bedelli onayland"           → NEGATIF (gerçek seyreltme sinyali)
+    Sonra gelen:
+      - "SPK ihrac belgesi onayi"                   → NOTR 5.0
+      - "Ruçhan hakki kullanim suresi baslangici"   → NOTR 5.0
+      - "Bedelli sermaye artirimi nakit girisi"     → NOTR 5.0
+      - "Sermaye artirimi tescil edildi"            → NOTR 5.0
+
+  PAY GERI ALIMI:
+    Program duyurusu / ilk buyuk alim             → POZITIF (gerçek değer)
+    Sonra gelen kucuk gunluk alimlar              → NOTR 5.0-5.4 (ZATEN BILINIYOR)
+    Ancak: cok buyuk tutarli ozel alim (>%5 sirket pay) → POZITIF kalir
+
+NASIL TANIRSIN PROSEDUR/TAKIP BILDIRIMINI?
+  - Sistem context'inde "SON 30 GUN POZITIF KARARLAR" listesi gosterilir.
+  - O listede ayni konuda bir bildirim varsa BU TAKIP/PROSEDUR'dur → NOTR 5.0
+  - Baslikta "tescil", "tamamlandi", "kullanim", "odeme tarihi", "ihrac belgesi",
+    "gerceklesti", "tescil edildi" gecmesi guclu prosedur sinyalidir.
+  - Yeni bir oran/tutar VAR mi? Yoksa zaten bilinen miktarin uygulamasi mi?
 
 ═══ DUAL PERSPECTIVE — MANDATORY (HER VAKADA UYGULA) ═══
 HER bildirim icin iki acidan dusun:
@@ -1187,6 +1464,83 @@ Ex.14 (LOW DIVIDEND YIELD — NEGATIVE): "ABC 0.10 TL temettu (hisse 18 TL)" —
 Ex.15 (GOING CONCERN): "DEF denetci raporunda surekliligi konusunda onemli supheler"
 → {{"score": 1.8, "category": "finansal", "summary": "Going concern (sureklilik suphesi) — denetci sirketin mali yapisinda ciddi risk gormus, kritik olumsuz sinyal.", "hashtags": ["sureklilik", "risk"]}}
 
+Ex.16 (TEMETTU ILK KARAR — context'te gecmis yok):
+Title: "Kar Payi Dagitim Karari"
+Body: "YK 2025 yili icin pay basina 2.50 TL brut temettu dagitimini onayladi"
+Context: "TEMETTU GECMISI: BOSH — sirket hic temettu dagitmamis"
+→ {{"score": 9.2, "category": "finansal", "summary": "Sirket hayatinda ILK KEZ temettu dagitiyor — 2.50 TL/hisse brut. Yatirimci icin guclu pozitif sinyal: kar dagitma kultu basliyor. Gecmis verim hesabi olmadigi icin marjinal etki tahmini guc ama 'ilk kez temettu' tek basina manset-degerinde haberdir.", "hashtags": ["temettu", "ilkkez"]}}
+
+Ex.17 (TEMETTU TAKIP — odeme tarihi):
+Title: "Kar Payi Odeme Tarihi Bildirimi"
+Body: "Onceki YK karari uyarinca 2.50 TL temettu 25 Mayis 2026'da odenecektir"
+Context: "SON 30 GUN POZITIF KARARLAR: - 2026-04-15 (skor 9.2): Kar Payi Dagitim Karari (2.50 TL onayland)"
+→ {{"score": 5.0, "category": "bilgi", "summary": "Onceden 15 Nisan'da Genel Kurul'da onaylanan 2.50 TL temettu dagitiminin odeme tarihi tescili. Karar ve miktar onceden ilan edildiginde fiyat reaksiyon verdi — bu sadece teknik takip bildirimi olup yeni etki yaratmaz.", "hashtags": ["temettu"]}}
+
+Ex.18 (TEMETTU ARTIS — gecmis veriyle):
+Title: "Kar Payi Dagitim Karari"
+Body: "YK 2025 yili icin 3.00 TL brut temettu dagitimini onayladi"
+Context: "TEMETTU GECMISI: 2024: 2.60 TL, 2023: 2.10 TL — TREND: +%15 artis"
+→ {{"score": 7.6, "category": "finansal", "summary": "2025 yili icin 3.00 TL temettu — gecen yila gore %15 artis, sirket sureklilik gostererek dagitim tutarini yukseltti. Kalici temettu odeyici sirket profili pozitif.", "hashtags": ["temettu"]}}
+
+Ex.19 (TEMETTU DRAMATIK DUSUS):
+Title: "Kar Payi Dagitim Karari"
+Body: "YK 2025 yili icin 0.50 TL brut temettu dagitimini onayladi"
+Context: "TEMETTU GECMISI: 2024: 2.50 TL, 2023: 2.30 TL — TREND: -%80 dusus"
+→ {{"score": 3.2, "category": "finansal", "summary": "2025 temettu sadece 0.50 TL — gecen yil 2.50 TL idi (-%80 dramatik dusus). Sirket kar dagitma kapasitesinde ciddi azalma sinyali; kasanin daralma veya stratejik nakit korumayi tercih sinyali.", "hashtags": ["temettu"]}}
+
+Ex.20 (BEDELLI %200 — DEVASA NEGATIF):
+Title: "Bedelli Sermaye Artirimi Karari"
+Body: "YK %200 oraninda bedelli sermaye artirimi onayladi"
+→ {{"score": 2.2, "category": "finansal", "summary": "%200 bedelli sermaye artirimi — yatirimci icin devasa seyreltme + ek nakit yatirim yukumlulugu. Sirket kasasi 3 katina cikar AMA hisse fiyati ruçhan price indirimi ve dilution nedeniyle kuvvetli negatif reaksiyon verir.", "hashtags": ["bedelli"]}}
+
+Ex.21 (BEDELLI TAKIP):
+Title: "Sermaye Artirimi Tescil Edildi"
+Body: "Onceki YK karari uyarinca bedelli sermaye artirimi Ticaret Sicili'nde tescil edildi"
+Context: "SON 30 GUN: - 2026-04-10 (skor 2.2): Bedelli Sermaye Artirimi Karari"
+→ {{"score": 5.0, "category": "bilgi", "summary": "Onceden duyurulmus bedelli sermaye artiriminin Ticaret Sicili tescili. Karar 1 ay once aciklandiginda fiyat zaten reaksiyon verdi (negatif yonde) — bu adim teknik kapanis niteliginde olup yeni etki yaratmaz.", "hashtags": ["sermayeartirimi"]}}
+
+Ex.22 (BEDELSIZ %500 — MEGA POZITIF):
+Title: "Bedelsiz Sermaye Artirimi Karari"
+Body: "YK %500 oraninda bedelsiz sermaye artirimi onayladi"
+→ {{"score": 9.7, "category": "finansal", "summary": "%500 bedelsiz sermaye artirimi — devasa pay coklamasi. Yedeklerden dagitilan bu sermaye sirketin nakit/yedek dolulugunu gosterir; retail icin manset-degerinde pozitif.", "hashtags": ["bedelsiz"]}}
+
+Ex.23 (YENI IS ILISKISI — kucuk sirket buyuk anlasma):
+Title: "Yeni Is Iliskisi"
+Body: "Sirketimiz ABCD A.S. ile 5M TL'lik tedarik anlasmasi imzalamistir"
+Context: "OZSERMAYESI: 1.5 milyon TL"
+→ {{"score": 8.7, "category": "strateji", "summary": "5M TL'lik yeni tedarik anlasmasi sirketin 1.5M TL ozsermayesinin %333'u — transformatif buyuklukte. Bu duzeyde sozlesme sirketin gelir tabanini ve operasyonel olcegini kalici olarak buyutebilir.", "hashtags": ["sozlesme", "yeniisiliskisi"]}}
+
+Ex.24 (YENI IS ILISKISI — buyuk sirket kucuk anlasma):
+Title: "Yeni Is Iliskisi"
+Body: "Sirketimiz XYZE Holding ile 5M TL'lik tedarik anlasmasi imzalamistir"
+Context: "OZSERMAYESI: 10 milyar TL"
+→ {{"score": 6.0, "category": "strateji", "summary": "5M TL'lik tedarik anlasmasi 10B TL ozsermaye ile karsilastirildiginda %0.05 — sembolik nitelikte. Yeni musteri kazanmak yine de pozitif sinyal olarak degerlendirilir (en az hafif olumlu).", "hashtags": ["sozlesme"]}}
+
+Ex.25 (PAY GERI ALIM — 15M TL):
+Title: "Pay Geri Alim Programi Kapsaminda Islemler"
+Body: "Sirketimiz 25 TL ortalama fiyatla 600.000 lot pay geri almistir"
+→ {{"score": 6.7, "category": "finansal", "summary": "15M TL'lik pay geri alimi (25 TL × 600K lot) — orta buyuklukte yatirim. Yonetimin hisseyi degerli gordugunu ve mevcut fiyat seviyesinde alici oldugunu gosterir; orta-vade fiyat destekleyici.", "hashtags": ["paygerialim"]}}
+
+Ex.26 (PAY GERI ALIM — 500K TL sembolik):
+Title: "Pay Geri Alim Programi Kapsaminda Islemler"
+Body: "Sirketimiz 5 TL ortalama fiyatla 100.000 lot pay geri almistir"
+→ {{"score": 5.1, "category": "finansal", "summary": "500K TL'lik kucuk geri alim (5 TL × 100K lot) — sembolik islem. Buyuk olcekte fiyat etkisi yaratacak buyuklukte degildir; geri alim programinin rutin gunluk uygulamasi.", "hashtags": ["paygerialim"]}}
+
+Ex.27 (ARGE MERKEZI):
+Title: "Arge Merkezi Kurulmasi"
+Body: "Sirketimiz Bilim Sanayi ve Teknoloji Bakanligi'ndan Arge Merkezi belgesi almistir"
+→ {{"score": 6.9, "category": "strateji", "summary": "Sanayi Bakanligi onayli Arge Merkezi belgesi — vergi tesvigi ve devlet destegine erisim saglar. Uzun vadeli teknoloji yetkinligini buyutme yatirimi; orta vadeli pozitif.", "hashtags": ["arge"]}}
+
+Ex.28 (CED OLUMLU RAPORU):
+Title: "Yatirim Projesi CED Olumlu Karari"
+Body: "Sirketimizin planlamis oldugu rüzgar enerjisi santral yatirimi icin CED Olumlu kararı verilmistir"
+→ {{"score": 7.1, "category": "strateji", "summary": "Buyuk olcekli yatirim projesinin CED onayi — projenin son izninin alinmasi anlamina gelir. Uzun vadeli gelir/kapasite katkisi acisindan pozitif.", "hashtags": ["enerji", "yatirim"]}}
+
+Ex.29 (FAALIYET SONLANDIRMA — NEGATIF):
+Title: "Tesis Faaliyetlerinin Durdurulmasi"
+Body: "Sirketimiz Bursa fabrikasi faaliyetlerinin daimi olarak sonlandirilmasini onaylamistir"
+→ {{"score": 2.8, "category": "strateji", "summary": "Bursa fabrikasi daimi olarak kapatildi — kapasite ve gelir tabaninda ciddi azalma. Personel cikarmalari ve sabit varlik kayiplari ile birlikte ciddi negatif sinyal.", "hashtags": ["kapanis"]}}
+
 Respond with ONLY the JSON specified by the user prompt. No other text."""
 
 
@@ -1243,6 +1597,11 @@ async def score_news(
     # Kaynak bilgisini prompt'a ekle
     source_info = "KAP Bildirim Tam Metni (TradingView)" if has_tv else "Telegram Kanal Ozeti (detay erisilemedi)"
 
+    # ─── CONTEXT DATA INJECTION ─────────────────────────────────────────
+    # Temettu gecmisi, ozsermaye, son 30 gun pozitif kararlar — bu veriler
+    # AI'nin yield-bazli ve oran-bazli puanlamasini dogru yapmasi icin kritik.
+    context_data = await _fetch_context_data(ticker, content)
+
     prompt = f"""Borsa Istanbul (BIST) KAP bildirimi analizi.
 
 Hisse: {ticker}
@@ -1251,6 +1610,8 @@ Kaynak: {source_info}
 --- ICERIK BASLANGIC ---
 {content}
 --- ICERIK BITIS ---
+
+{context_data}
 
 GOREV:
 1. Haberi yatirimci bakis acisiyla Turkce ozetle. Cumle sayisi PUANA gore:
@@ -1457,23 +1818,30 @@ NOTLAR:
         if score is not None and content:
             score = _validate_score_against_content(score, content, ticker)
 
-        # ─── TEKRAR EDEN BILDIRIM DAMPER ───
-        # Ayni ticker icin son 7 gunde benzer konuda yuksek skor verilmisse,
-        # bu yeni bildirim takip-bildirimdir (orn: YKK -> SPK basvuru -> SPK onay
-        # zinciri). Skor 5.5'e cekilir, push/tweet spam'i onlenir.
+        # ─── TEKRAR EDEN BILDIRIM DAMPER (STRICT) ───
+        # Ayni ticker icin son 30 gunde ayni konuda yuksek skor verilmisse,
+        # bu yeni bildirim takip-bildirimdir. Skor TAMAMEN NOTR (5.0) yapilir
+        # ve sentiment "Notr" olur — push/tweet/grup spam'i onlenir.
+        #
+        # Kullanici talebi: temettu kararindan sonra hak kullanim/odeme/tescil
+        # gibi prosedur bildirimleri TEKRAR pozitif sayilmamali. Bedelli/
+        # bedelsiz icin de ayni.
         if score is not None and score >= 6.0 and content:
             try:
                 is_followup, prior_topic = await _check_followup_notification(ticker, content)
                 if is_followup:
                     original_score = score
-                    score = min(score, 5.5)
+                    score = 5.0  # TAM NOTR — 5.5 degil, kullanici "pozitif gozukmesin" istiyor
                     logger.info(
-                        "AI News Scorer [TAKIP-DAMPER] %s: score %s -> %s (konu: %s, son 7 günde benzer pozitif var)",
-                        ticker, original_score, score, prior_topic,
+                        "AI News Scorer [TAKIP-DAMPER-STRICT] %s: score %.1f -> 5.0 NOTR "
+                        "(konu: %s, son 30 gunde benzer pozitif karar var — duplicate engellendi)",
+                        ticker, original_score, prior_topic,
                     )
-                    # Summary'ye not ekle
                     if summary:
-                        summary = f"[Takip bildirimi - {prior_topic}] {summary}"
+                        summary = (
+                            f"[Onceden duyurulmus {prior_topic} kararinin takip/prosedur bildirimi — "
+                            f"ilk karar fiyatlandi, ek pozitif etki beklenmez] {summary}"
+                        )
             except Exception as _follow_err:
                 logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
 
@@ -1512,37 +1880,77 @@ _CRITICAL_NEGATIVE_PATTERNS = [
 
 # Pozitif bildirim kaliplari — skor taban garantisi
 _STRONG_POSITIVE_PATTERNS = [
-    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})", 9.0),  # %100+ bedelsiz
+    # Bedelsiz sermaye artirimi oran-bazli
+    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[5-9]\d{2}|\d{4,})", 9.5),  # %500+ bedelsiz mega
+    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[2-4]\d{2})", 9.0),  # %200-499 bedelsiz
+    (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d{2})", 8.5),  # %100-199 bedelsiz
     (r"bedelsiz\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[5-9]\d)", 8.0),  # %50-99 bedelsiz
+    # Kar artisi
     (r"(?:net\s*)?k[aâ]r[ıi]?\s*%\s*(?:1\d{2}|[2-9]\d{2}|\d{4,})\s*art", 9.0),  # %100+ kar artisi
     (r"rekor\s*(?:k[aâ]r|gelir|has[ıi]lat)", 8.0),
 ]
 
+# Bedelli sermaye artirimi — negatif TAVAN sinirlamasi
+# (score asla bu degeri asmamali — bedelli her zaman negatif)
+_BEDELLI_NEGATIVE_CAPS = [
+    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[2-9]\d{2}|\d{4,})", 2.5),  # %200+ baya negatif
+    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d{2})", 3.0),  # %100-199
+    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[5-9]\d)", 3.5),  # %50-99 hafif negatif
+    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[2-4]\d)", 4.0),  # %20-49
+    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d)", 4.3),  # %10-19
+]
+
 
 _FOLLOWUP_TOPICS = {
-    "bedelsiz": ["bedelsiz", "iç kaynak", "ic kaynak", "sermaye artırımı bedelsiz"],
-    "bedelli": ["bedelli sermaye", "rüçhan hakkı", "ruchan hakki"],
-    "temettü": ["kar payı", "kar payi", "kâr payı", "temettü", "temettu", "pay başına brüt"],
+    "bedelsiz_sermaye_artirimi": [
+        "bedelsiz", "iç kaynak", "ic kaynak", "sermaye artırımı bedelsiz",
+        "bedelsiz pay dagitim", "bedelsiz pay dağıtım",
+        "bedelsiz sermaye artirim", "bedelsiz sermaye artırım",
+    ],
+    "bedelli_sermaye_artirimi": [
+        "bedelli sermaye", "rüçhan hakkı", "ruchan hakki",
+        "bedelli pay", "bedelli sermaye artirim", "bedelli sermaye artırım",
+        "ihrac belgesi bedelli", "ihraç belgesi bedelli",
+        "yeni pay alma hakki", "yeni pay alma hakkı",
+    ],
+    "temettu_kararı": [
+        "kar payı", "kar payi", "kâr payı",
+        "temettü", "temettu",
+        "pay başına brüt", "pay basina brut",
+        "kar dağıtım", "kar dagitim",
+        "kar payı dağıtım", "kar payi dagitim",
+        "ex-dividend", "ex-temettu", "hak kullanım", "hak kullanim",
+    ],
     "spk_onay": ["spk onay", "sermaye piyasası kurulu onay", "spk kabul"],
     "spk_başvuru": ["spk başvuru", "spk basvuru", "kurul'a başvuru"],
     "halka_arz": ["halka arz", "halka acilma", "halka açılma", "ihraç belgesi"],
     "sözleşme": ["sözleşme imzaland", "sozlesme imzaland", "anlaşma imzaland", "ihale kazan", "ihale alın"],
     "satın_alma": ["satın al", "satin al", "iktisap", "devralın", "devralin"],
-    "yeni_iş": ["yeni iş ilişkisi", "yeni is iliskisi", "yeni müşteri", "yeni musteri"],
+    "yeni_iş_ilişkisi": ["yeni iş ilişkisi", "yeni is iliskisi", "yeni müşteri", "yeni musteri"],
     "kapasite": ["kapasite artır", "kapasite artir", "yeni tesis", "yatırım planı"],
+    "pay_geri_alimi": [
+        "pay geri alım", "pay geri alim",
+        "geri alım programı", "geri alim programi",
+        "kendi paylarini geri", "kendi paylarını geri",
+        "buyback",
+    ],
 }
 
 
 async def _check_followup_notification(ticker: str, content: str) -> tuple[bool, str | None]:
-    """Son 7 günde aynı ticker için aynı konuda yüksek skor verilmiş bir
-    bildirim varsa True döner — bu yeni bildirim takip-bildirimdir.
+    """Son 30 gunde ayni ticker icin ayni konuda yuksek skorlu (>=6.0) ya da
+    cok dusuk skorlu (<=3.5) bildirim varsa True doner — bu yeni bildirim
+    takip-bildirimdir.
+
+    Window 30 gun: temettu/bedelli/bedelsiz prosedur bildirimleri ilk karardan
+    haftalar/aylar sonra gelir (GK karari -> SPK -> ihrac belgesi -> kullanim ->
+    tescil zinciri 60+ gune yayilabilir; ama dampera 30 gun pratik standartdir).
 
     Returns: (is_followup, topic_name)
     """
     if not ticker or not content:
         return (False, None)
 
-    # Yeni bildirim hangi konuya ait?
     content_lower = content.lower()
     new_topics = []
     for topic, keywords in _FOLLOWUP_TOPICS.items():
@@ -1554,24 +1962,31 @@ async def _check_followup_notification(ticker: str, content: str) -> tuple[bool,
     try:
         from app.database import async_session
         from app.models.kap_all_disclosure import KapAllDisclosure
-        from sqlalchemy import select, desc
+        from sqlalchemy import select, desc, or_, and_
         from datetime import timedelta
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         async with async_session() as db:
+            # Hem pozitif (>=6.0) hem ciddi negatif (<=3.5) ilk kararlari kapsa —
+            # bedelli sermaye artirimi gibi negatif kararin sonraki adimlari da
+            # tekrar negatif puanlanmasin.
             result = await db.execute(
                 select(KapAllDisclosure)
                 .where(KapAllDisclosure.company_code == ticker.upper())
                 .where(KapAllDisclosure.published_at >= cutoff)
-                .where(KapAllDisclosure.ai_impact_score >= 6.0)
+                .where(
+                    or_(
+                        KapAllDisclosure.ai_impact_score >= 6.0,
+                        KapAllDisclosure.ai_impact_score <= 3.5,
+                    )
+                )
                 .order_by(desc(KapAllDisclosure.published_at))
-                .limit(20)
+                .limit(30)
             )
             recent = result.scalars().all()
 
             for prior in recent:
                 prior_text = ((prior.title or "") + " " + (prior.body or "") + " " + (prior.ai_summary or "")).lower()
-                # Aynı konu eşleşmesi var mı?
                 for topic in new_topics:
                     keywords = _FOLLOWUP_TOPICS[topic]
                     if any(kw in prior_text for kw in keywords):
@@ -1626,6 +2041,16 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
                     ticker, score, min_score, pattern[:30],
                 )
                 return min_score
+
+    # Bedelli sermaye artirimi — skor asla tavanin uzerine cikamaz (her zaman negatif)
+    for pattern, max_score in _BEDELLI_NEGATIVE_CAPS:
+        if re.search(pattern, content_lower):
+            if score > max_score:
+                logger.info(
+                    "Skor dogrulama [BEDELLI]: %s skor %.1f → %.1f (oran patterni: %s)",
+                    ticker, score, max_score, pattern[:40],
+                )
+                return max_score
 
     return score
 
