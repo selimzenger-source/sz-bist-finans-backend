@@ -3358,6 +3358,72 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.post("/api/v1/admin/cleanup-isyatirim-dividends")
+@limiter.limit("3/minute")
+async def admin_cleanup_isyatirim_dividends(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: dividend_history tablosunda source='isyatirim' olan kayitlari siler.
+
+    temettühisseleri scraper'i artik primary kaynak. IsYatirim eski/cift kayit
+    olusturuyor — temizlik icin.
+
+    body:
+      admin_password: zorunlu
+      dry_run: true ise sadece sayim yapar
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    dry_run = bool(payload.get("dry_run", False))
+
+    # Once dagilim
+    count_q = await db.execute(text("""
+        SELECT
+            COUNT(*) FILTER (WHERE source = 'isyatirim') AS isyatirim,
+            COUNT(*) FILTER (WHERE source = 'temettuhisseleri') AS temettuhisseleri,
+            COUNT(*) FILTER (WHERE source IS NULL OR source NOT IN ('isyatirim', 'temettuhisseleri')) AS diger,
+            COUNT(DISTINCT ticker) FILTER (WHERE source = 'isyatirim') AS isyatirim_ticker_sayisi,
+            COUNT(*) AS toplam
+        FROM dividend_history
+    """))
+    row = count_q.fetchone()
+    stats = {
+        "isyatirim_kayit_sayisi": row[0] or 0,
+        "temettuhisseleri_kayit_sayisi": row[1] or 0,
+        "diger_kaynak_kayit_sayisi": row[2] or 0,
+        "isyatirim_ticker_sayisi": row[3] or 0,
+        "toplam_kayit": row[4] or 0,
+    }
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "would_delete": stats["isyatirim_kayit_sayisi"],
+            "stats": stats,
+        }
+
+    try:
+        result = await db.execute(text(
+            "DELETE FROM dividend_history WHERE source = 'isyatirim'"
+        ))
+        await db.commit()
+        deleted = getattr(result, "rowcount", None) or stats["isyatirim_kayit_sayisi"]
+    except Exception as e:
+        await db.rollback()
+        logger.exception("IsYatirim dividend cleanup hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Cleanup hatasi: {e}")
+
+    return {
+        "success": True,
+        "deleted": deleted,
+        "stats_after": stats,
+        "message": "IsYatirim kaynakli dividend_history kayitlari silindi; sadece temettuhisseleri kaldi",
+    }
+
+
 @app.post("/api/v1/admin/relabel-ai-sentiment")
 @limiter.limit("3/minute")
 async def admin_relabel_ai_sentiment(
