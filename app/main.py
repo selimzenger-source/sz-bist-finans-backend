@@ -3368,6 +3368,137 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.post("/api/v1/admin/reprocess-kap-news")
+@limiter.limit("5/minute")
+async def admin_reprocess_kap_news(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Belirli bir KAP haberi icin AI puanlama tekrar calistirip
+    kap_all_disclosures'a yaz.
+
+    Kullanim: AI provider'lar fail oldugu icin score=None ile kalmis veya
+    DB'ye hic yazilmamis bir haberi yeniden puanlamak icin.
+
+    body:
+      admin_password: zorunlu
+      ticker: zorunlu (orn: "GOKNR")
+      matriks_id: zorunlu (Matriks/TradingView haber ID, orn: "6454002")
+      title: opsiyonel (varsa kullanilir, yoksa AI ozet baslik olarak girer)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    ticker = (payload.get("ticker") or "").strip().upper()
+    matriks_id = str(payload.get("matriks_id") or "").strip()
+    explicit_title = (payload.get("title") or "").strip() or None
+
+    if not ticker or not matriks_id:
+        raise HTTPException(status_code=400, detail="ticker ve matriks_id zorunlu")
+
+    try:
+        from app.services.ai_news_scorer import analyze_news, fetch_tradingview_content
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from app.utils.ai_score_label import score_to_label
+        from sqlalchemy import select as _sa_select
+        from datetime import datetime as _dt, timezone as _tz
+
+        # 1) TradingView'dan icerik cek (AI'a beslemek icin)
+        tv_data = await fetch_tradingview_content(matriks_id)
+        tv_text = tv_data.get("full_text", "") if tv_data else ""
+        kap_url = (tv_data or {}).get("real_kap_url") or f"https://tr.tradingview.com/news/matriks:{matriks_id}:0/"
+        tv_title = (tv_data or {}).get("title") or explicit_title or f"KAP Bildirimi - {ticker}"
+
+        if not tv_text or len(tv_text.strip()) < 50:
+            return {
+                "success": False,
+                "ticker": ticker,
+                "matriks_id": matriks_id,
+                "message": "TradingView icerik bos veya cok kisa, AI'a beslenemez",
+            }
+
+        # 2) AI puanla
+        ai_result = await analyze_news(
+            ticker=ticker,
+            raw_text=tv_text,
+            matriks_id=matriks_id,
+        )
+        score = ai_result.get("score")
+        summary = ai_result.get("summary")
+        url_from_ai = ai_result.get("kap_url") or kap_url
+
+        if score is None:
+            return {
+                "success": False,
+                "ticker": ticker,
+                "matriks_id": matriks_id,
+                "message": "AI puanlama basarisiz (tum providerlar fail). Birazdan yeniden deneyin.",
+            }
+
+        # 3) Sentiment label (yeni 9 kategorili sistem)
+        sentiment_label = score_to_label(score) or "Nötr"
+
+        # 4) Mevcut kayit var mi kontrol et — duplicate engelle
+        existing_q = await db.execute(
+            _sa_select(KapAllDisclosure).where(
+                KapAllDisclosure.kap_url == url_from_ai,
+                KapAllDisclosure.company_code == ticker,
+            ).limit(1)
+        )
+        existing = existing_q.scalar_one_or_none()
+
+        if existing:
+            # Update et — eski None skoru AI ile guncelle
+            existing.ai_impact_score = score
+            existing.ai_sentiment = sentiment_label
+            existing.ai_summary = summary
+            existing.ai_analyzed_at = _dt.now(_tz.utc)
+            await db.commit()
+            return {
+                "success": True,
+                "action": "updated",
+                "ticker": ticker,
+                "id": existing.id,
+                "score": score,
+                "sentiment": sentiment_label,
+                "summary_preview": (summary or "")[:200],
+            }
+
+        # 5) Yeni insert
+        new_rec = KapAllDisclosure(
+            company_code=ticker,
+            title=tv_title[:500],
+            body=summary,
+            category="Genel",
+            is_bilanco=False,
+            kap_url=url_from_ai,
+            source="manual_reprocess",
+            published_at=_dt.now(_tz.utc),
+            ai_sentiment=sentiment_label,
+            ai_impact_score=score,
+            ai_summary=summary,
+            ai_analyzed_at=_dt.now(_tz.utc),
+        )
+        db.add(new_rec)
+        await db.commit()
+        await db.refresh(new_rec)
+
+        return {
+            "success": True,
+            "action": "inserted",
+            "ticker": ticker,
+            "id": new_rec.id,
+            "score": score,
+            "sentiment": sentiment_label,
+            "summary_preview": (summary or "")[:200],
+            "kap_url": url_from_ai,
+        }
+    except Exception as e:
+        logger.exception("Reprocess KAP hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Reprocess hatasi: {e}")
+
+
 @app.post("/api/v1/admin/sync-bist-tedbir")
 @limiter.limit("3/minute")
 async def admin_sync_bist_tedbir(
