@@ -1098,14 +1098,15 @@ class NotificationService:
         ticker_upper = ticker.upper()
 
         # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
-        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper)
+        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper, ai_score=ai_score)
 
         # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         # Ucretsiz kullanicilara AI puani GOSTERILMEZ — premium ozellik
+        # AMA filtre uygulanir: kullanicinin kap_min_score'undan dusukse push gonderilmez
         if ticker_upper in BIST50_TICKERS:
-            # Free kullanicinin data'sinda da ai_score olmasin
+            # Free kullanicinin data'sinda ai_score olmasin (UI'da gizli kalsin)
             data_free = {k: v for k, v in data.items() if k != "ai_score"}
-            sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper)
+            sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper, ai_score=ai_score)
 
             # Tweet: poller'da zaten tweet_bist30_news cagriliyor, burada TEKRAR atma (dedup)
 
@@ -1117,6 +1118,7 @@ class NotificationService:
         body: str,
         data: dict,
         ticker: str,
+        ai_score: float | None = None,
     ) -> int:
         """Ucretli abonelere KAP haber bildirimi gonder.
 
@@ -1147,10 +1149,9 @@ class NotificationService:
         )
         kap_users = list(kap_sub_result.scalars().all())
 
-        # Bu push'in skoru (string olarak data["ai_score"] icinde) — kullanici
-        # tercihiyle karsilastiracagiz
+        # Bu push'in skoru — kullanici kap_min_score tercihiyle karsilastiracagiz
         try:
-            push_score = float(data.get("ai_score", "0") or 0)
+            push_score = float(ai_score) if ai_score is not None else float(data.get("ai_score", "0") or 0)
         except (ValueError, TypeError):
             push_score = 0.0
 
@@ -1212,6 +1213,7 @@ class NotificationService:
         body: str,
         data: dict,
         ticker: str,
+        ai_score: float | None = None,
     ) -> int:
         """BIST 50 ucretsiz bildirim — ana_yildiz aboneligi OLMAYAN kullanicilara.
 
@@ -1251,9 +1253,21 @@ class NotificationService:
         )
         users = list(users_result.scalars().all())
 
+        # Push'un skoru — kullanicinin kap_min_score'u ile karsilastirilacak
+        push_score = float(ai_score) if ai_score is not None else 0.0
+
         sent_count = 0
         failed_count = 0
+        filtered_by_score = 0
         for user in users:
+            # ─── AI Skor Filtresi (Free kullanicilar icin de aktif) ───
+            # Modal'da "Sadece Cok Olumlu" secen free kullaniciya BIST50 push'larin
+            # tamami gitmesin — sadece o skor uzeri olanlar gonderilir.
+            user_min = float(getattr(user, "kap_min_score", 6.0) or 6.0)
+            if push_score > 0 and push_score < user_min:
+                filtered_by_score += 1
+                continue
+
             try:
                 success = await self._send_to_user(
                     user=user,
@@ -1272,8 +1286,8 @@ class NotificationService:
                 logger.warning("BIST50 free bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "BIST50 free bildirim: %s — %d ucretsiz kullaniciya gonderildi",
-            ticker, sent_count,
+            "BIST50 free bildirim: %s — %d ucretsiz kullaniciya gonderildi (skor_filtresiyle_atlanan=%d)",
+            ticker, sent_count, filtered_by_score,
         )
 
         # Telegram admin raporu
