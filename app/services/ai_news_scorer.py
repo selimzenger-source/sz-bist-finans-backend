@@ -428,6 +428,149 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
 # ADIM 2: AI Puanlama (Abacus RouteLLM — gpt-4o)
 # -------------------------------------------------------
 
+# ─── ROUTINE PRE-FILTER ───────────────────────────────────────────────────────
+# Fiyat hareketine sebep olmayan, sirket fundamentals'inden bagimsiz teknik/idari
+# bildirimler. Bu pattern'lar tespit edilirse AI'ya gitmeden Notr 5.0 doner.
+# Her yil binlerce KAP bildirimi var, %60+'i bu kategoride → AI kredisi tasarrufu.
+#
+# Her entry: (regex pattern, kategori, standart Turkce summary, hashtag listesi)
+# Pattern eslesirse score=5.0, ai_pending=False, ai_atlandi=True olarak isaretlenir.
+
+_ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
+    # --- BORSA / MKK MEKANIZMALARI (fiyat hareketi ile alakali ama temel etki yok) ---
+    (
+        r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama|pay\s*bazinda\s*devre\s*kesici",
+        "Devre Kesici",
+        "Borsa Istanbul, hissede yasanan ani ve yuksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasinin devreye girdigini bildirmistir. Bu bildirim sirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlik yuksek volatiliteyi kontrol altina almayi amaclayan standart bir borsa mekanizmasidir. Yatirimci acisindan dogrudan pozitif veya negatif etkisi bulunmaz.",
+        ["devrekesici"],
+    ),
+    (
+        r"bistech.*pay\s*piyasasi|merkezi\s*kayit\s*kurulusu\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
+        "BISTECH/MKK/Takasbank Duyurusu",
+        "Bu duyuru Borsa Istanbul/MKK'nin teknik bir bildirimi olup, temettu/bedelsiz/bolunme miktari zaten onceden ilan edilmistir. Sadece ex-div gunu veya kayit tescili niteliginde olup hisse fiyatina ek pozitif etki beklenmez.",
+        ["bistech"],
+    ),
+    # --- IDARI / USUL BILDIRIMLERI (sirket icin sifir mali etki) ---
+    (
+        r"sorumluluk\s*beyani",
+        "Sorumluluk Beyani",
+        "Sorumluluk beyani, finansal raporlarin dogrulugu konusunda yonetim kurulu ve mali isler sorumlusunun verdigi standart imza beyanidir. Idari/usul bildirimi olup hisse fiyatina dogrudan etkisi beklenmemektedir.",
+        ["bilgilendirme"],
+    ),
+    (
+        r"faaliyet\s*raporu(?!\s*hakkinda)",
+        "Faaliyet Raporu",
+        "Yillik veya donemsel faaliyet raporunun yayinlandigi bildirimi. Rapor icerigi onceden bilinen finansal verileri yansitir; rakamlar ayrica aciklanmadigi surece fiyata yeni bilgi katmaz.",
+        ["faaliyetraporu"],
+    ),
+    (
+        r"genel\s*kurul\s*(cagrisi|ilan|davet|toplant[ıi]\s*cagrisi)",
+        "Genel Kurul Cagrisi",
+        "Genel Kurul cagri/ilan bildirimi. Toplanti gundeminde temettu/bedelsiz/sermaye artirimi gibi spesifik kararlar varsa ayri bir bildirimde aciklanir. Bu sadece cagri/davet niteliginde, fiyata dogrudan etkisi yoktur.",
+        ["genelkurul"],
+    ),
+    (
+        r"genel\s*kurul\s*(toplanti\s*sonuc|sonuc\s*bildirim|tutanak)",
+        "Genel Kurul Sonuc",
+        "Genel Kurul toplanti sonuc bildirimi. Onaylanan kararlar onceden gundeme alinmis ve ayrica aciklanmistir. Bu bildirim sadece formal tescil niteliginde olup yeni bir karar icermiyorsa fiyata etkisi sinirlidir.",
+        ["genelkurul"],
+    ),
+    (
+        r"esas\s*sozlesme(\s*tadil|degis)",
+        "Esas Sozlesme Tadili",
+        "Esas sozlesme degisikligi bildirimi. Genellikle SPK uyumlulugu/kurumsal yonetim ilkeleri kapsaminda yapilan teknik duzenleme olup, sirket faaliyetleri veya finansal yapida acik bir degisim yaratmadigi surece fiyata dogrudan etkisi beklenmez.",
+        ["esassozlesme"],
+    ),
+    (
+        r"imza\s*sirkuleri|temsil\s*ve\s*ilzam",
+        "Imza Sirkuleri",
+        "Yonetim kurulu imza yetkilerinin guncellenmesine iliskin formal bildirim. Tamamen idari/hukuki nitelikli olup sirket faaliyetleri ve fiyat uzerinde dogrudan etkisi yoktur.",
+        ["yonetim"],
+    ),
+    (
+        r"sirket\s*genel\s*bilgi\s*formu",
+        "Genel Bilgi Formu",
+        "SPK mevzuati geregi periyodik olarak guncellenen sirket bilgi formu. Yeni stratejik karar veya finansal bilgi icermedikce hisse fiyatina yansiyacak bir bilgi tasimaz.",
+        ["bilgilendirme"],
+    ),
+    (
+        r"yonetim\s*kurulu(nun)?\s*(komite\s*atama|komite\s*olusum|alt\s*komite)",
+        "Yonetim Kurulu Komite",
+        "Yonetim kurulu denetim/risk/kurumsal yonetim komitelerinin atama ve yeniden yapilandirma bildirimi. Standart kurumsal yonetim islemi olup fiyata etkisi yoktur.",
+        ["yonetim"],
+    ),
+    (
+        r"kurumsal\s*yonetim\s*uyum\s*raporu|kurumsal\s*yonetim\s*ilkeleri",
+        "Kurumsal Yonetim Uyum",
+        "Kurumsal yonetim ilkelerine uyum raporunun yayinlandigi standart bildirimi. Rapor icerigi sirket faaliyetlerini etkilemez, sadece formel uyum amaclidir.",
+        ["kurumsalyonetim"],
+    ),
+    (
+        r"yatirimci\s*sunumu|investor\s*presentation",
+        "Yatirimci Sunumu",
+        "Yatirimci sunumunun KAP'ta yayinlandigi bildirim. Sunum genellikle onceden aciklanmis finansal sonuc ve stratejiyi ozetler; yeni bir karar icermedigi surece fiyata bilgi katmaz.",
+        ["bilgilendirme"],
+    ),
+    (
+        r"bagimsiz\s*denetim\s*kurulusu\s*sec|denetim\s*sirketi\s*sec|denetci\s*sec",
+        "Bagimsiz Denetim Secimi",
+        "Bagimsiz denetim kurulusu secimi/atama bildirimi. Standart yillik mevzuat geregi olup sirket fundamentals'ina etkisi yoktur.",
+        ["bilgilendirme"],
+    ),
+    (
+        r"finansal\s*raporlar?in?\s*sunumu|finansal\s*tablolar?in?\s*sunumu",
+        "Finansal Rapor Sunumu",
+        "Periyodik finansal raporlarin SPK formatinda sunumuna iliskin bildirimi. Rakamlar onceden aciklanmis ana finansal verileri tekrar eder; yeni bilgi katmaz.",
+        ["faaliyetraporu"],
+    ),
+    (
+        r"ortaklik\s*yapisi(?!\s*degis)|sermaye\s*ve\s*ortaklik\s*yapisi(?!\s*degis)",
+        "Ortaklik Yapisi Bildirimi",
+        "Sirket ortaklik yapisinin periyodik veya guncel halini gosteren formel bildirim. Yeni bir hissedar degisikligi/satim yoksa fiyata etkisi yoktur.",
+        ["bilgilendirme"],
+    ),
+    (
+        r"kar\s*payi\s*dagitim\s*tablosu(?!\s*kararla|\s*kararl)",
+        "Kar Payi Dagitim Tablosu",
+        "Kar payi dagitim tablosunun SPK formatinda yayinlandigi formel bildirim. Dagitilacak temettu miktari ayrica yonetim kurulu karari ile aciklanir.",
+        ["temettu"],
+    ),
+    (
+        r"kayitli\s*sermaye\s*tavani\s*(arttirim|yukseltil|degis)",
+        "Kayitli Sermaye Tavani",
+        "Sirketin kayitli sermaye tavaninin yukseltilmesi/uzatilmasi bildirimi. Bu yalnizca SPK iznidir; fiili sermaye artirimi (bedelli/bedelsiz) degildir, ayrica yapilirsa o zaman aciklanir.",
+        ["sermayetavani"],
+    ),
+    (
+        r"sermaye\s*piyasasi\s*araci\s*notu|izahname\s*onayi(?!\s*halka\s*arz)",
+        "Sermaye Piyasasi Araci Notu",
+        "Sermaye piyasasi araci notu/izahname onayi bildirimi. Standart prosedur olup bagimsiz ek bilgi katmadan sadece hukuki formaliteyi belgeler.",
+        ["bilgilendirme"],
+    ),
+]
+
+
+def _check_routine_pattern(content: str, ticker: str) -> dict | None:
+    """Rutin bildirim mi diye kontrol et. Eslesme varsa hazir cevap don.
+
+    Returns:
+        {"category": str, "summary": str, "hashtags": list[str]} ya da None.
+    """
+    if not content:
+        return None
+    text_lower = content.lower()
+    for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
+        if re.search(pattern, text_lower):
+            # Ticker'i summary'nin basina ekle (kullanici ne hisse oldugunu bilsin)
+            full_summary = summary
+            return {
+                "category": category,
+                "summary": full_summary,
+                "hashtags": hashtags,
+            }
+    return None
+
+
 # ── Prompt Override Mekanizması ──
 _custom_system_prompt: str | None = None
 
@@ -568,62 +711,249 @@ Investor perception bonus (TR retail davranis layer):
 
 ═══ SPECIAL CASES ═══
 
-NEW BUSINESS RELATIONSHIP (yeni tedarikci/musteri/is ortakligi, amount unspecified):
-  Default to MILD POSITIVE. Never give 5.0 with "no concrete development".
-    Multinational/Fortune 500 partner    → 6.5-7.2
-    Sector-leading Turkish company       → 6.2-6.7
-    Mid-sized domestic company           → 5.9-6.3
-    Amount missing + partner unclear     → 5.8-6.2
-    Routine administrative supplier      → 5.4-5.8
+NEW BUSINESS RELATIONSHIP (Yeni Tedarikci/Musteri/Is Ortakligi) — EQUITY-RATIO BASED:
 
-CAPITAL INCREASE (Sermaye Artirimi):
-  Bedelsiz (free issue — POZITIF, retail favori):
-    %100+         → 9.0-9.5
-    %50-99        → 8.0-8.9
-    %10-49        → 7.0-7.9
-    <%10          → 6.5-7.0
+KRITIK KURAL: 1 milyon TL uzerindeki ilk anlasmalar EN KOTU 6.0 (Hafif Olumlu).
+Yeni is iliskileri sirketin satis kanallarini ve gelir cesitliligini artirir —
+yatirimci buna her zaman pozitif bakmali.
 
-  Bedelli (rights issue — NEGATIVE — DEFAULT NEGATIF olarak puanla):
-    Bedelli sermaye artırımı = yatırımcı icin SEYRELTME + EK NAKIT YATIRIM
-    YUKUMLULUGU. Kasanın guclendigi sirket tarafından bakarsan olumlu gorunur,
-    AMA HISSE FIYATI ACISINDAN her zaman NEGATIVE algılanir (rights price
-    indirimi + sermayenin sulanmasi + ek nakit cikisi).
-    %100+         → 2.5-3.0 (cok seyreltici — major negative)
-    %50-99        → 3.0-3.5 (seyreltici)
-    %20-49        → 3.5-4.0 (mid dilution)
-    %10-19        → 4.0-4.3 (mild seyreltme)
-    <%10          → 4.2-4.5 (minimal seyreltme — yine de negatif)
-    + Sermaye kaybi nedeniyle zorunlu ise (TTK 376) → -0.3 ekstra negatif
-    + Halka acik teklif (genel arz) → -0.2 ekstra (mevcut paydas korunmuyor)
-    + Rüçhan hakki KULLANIM SURESI uzatildi → -0.1
-    + Iptal edildi → 3.0-4.0 (yine negatif — finansman ihtiyaci hala var)
-    NEVER above 5.0 for bedelli unless ozel durum (M&A finansmani vs.)
+PUAN HESAPLAMA:
+  oran = anlasma_tutari / sirket_ozsermayesi (yaklasik degerlendir)
+  Eger ozsermaye verisi yoksa, ticker buyukluk segmenti (small/mid/large cap)
+  uzerinden tahmin et:
+    small-cap  (mcap < 5B TL) → ozsermaye yaklasik 500M-2B TL
+    mid-cap    (5-50B TL)     → ozsermaye yaklasik 5-20B TL
+    large-cap  (>50B TL)      → ozsermaye yaklasik 30B+ TL
+
+  oran >%50          → 8.5-9.0 (transformatif — sirket cap'i degisir)
+  %25-50             → 8.0-8.5 (cok buyuk)
+  %15-25             → 7.5-8.0 (buyuk pozitif)
+  %10-15             → 7.0-7.5 (olumlu)
+  %5-10              → 6.7-7.0 (orta-olumlu)
+  %2-5               → 6.3-6.7 (orta)
+  %1-2               → 6.0-6.3 (hafif olumlu — minimum)
+  <%1 ama tutar >1M  → 6.0 (minimum hafif olumlu)
+  Tutar <1M TL veya sembolik → 5.5-6.0
+  Tutar yok + partner yok    → 5.8-6.2 (yine minimum 5.8)
+
+ORNEKLER:
+  - Ozsermaye 1M TL, anlasma 5M TL (oran %500) → 9.0 (transformatif kucuk sirket)
+  - Ozsermaye 100M TL, anlasma 5M TL (oran %5) → 6.7 (orta-olumlu)
+  - Ozsermaye 10B TL, anlasma 10M TL (oran %0.1) → 6.0 (minimum hafif olumlu)
+  - Fortune 500 ile + tutar belirsiz                 → 6.8 (multinational bonus)
+  - Yerli mid-sized + 50M TL anlasma + ozsermaye 500M → 7.5 (oran %10)
+
+PARTNER PRESTIJ BONUSU:
+  + Multinational/Fortune 500 partner → +0.3
+  + Sektor lideri yerli sirket        → +0.2
+  + Kamu (devlet kurumlari)           → +0.2 (genelde garantili odeme)
+
+SHARE BUYBACK (Pay Geri Alimi) — TL TUTARI BAZINDA SCALE:
+
+KRITIK FORMUL: alim_tutari = ortalama_fiyat × geri_alinan_pay_adedi
+Genelde KAP bildiriminde fiyat aralik olarak verilir (orn: 12.50 - 13.20).
+Ortalama_fiyat = (min + max) / 2. Adet de bildirimde olur.
+
+PUAN TABLOSU:
+  <500 bin TL    → 5.0-5.3 (sembolik — gostermelik geri alim, fiyat etkisi yok)
+  500K-1M TL     → 5.3-5.5 (cok kucuk — Notr+)
+  1-5M TL        → 5.5-6.0 (kucuk — Notr-Hafif olumlu sinir)
+  5-10M TL       → 6.0-6.5 (hafif olumlu — kullanicinin tarifi)
+  10-25M TL      → 6.5-7.0 (olumlu — kullanicinin tarifi)
+  25-50M TL      → 7.0-7.5 (ciddi olumlu — kullanicinin tarifi)
+  50-100M TL     → 7.5-8.0 (cok pozitif — kullanicinin tarifi)
+  100-250M TL    → 8.0-8.5 (mega — fiyata destek garantili)
+  >250M TL       → 8.5-9.0 (devasa — manset olur)
+
+MODIFIER'LAR:
+  + Toplam programin ilk hareketi → +0.0 (sade tutar)
+  + Programin son turlari, program tamamlandi → +0.2 (kararlilik sinyali)
+  + Ortalama fiyat son 30 gun TAVANINDA → +0.2 (yonetim "hisse pahali olmasina ragmen aliyor" sinyali)
+  + Ortalama fiyat son 30 gun TABANINDA → -0.1 (sadece "ucuz yerden topla" rutini)
+  + Fiyat araliginda fitiklilik (cok dar) → +0.1 (kararli, profesyonelce yapilmis)
+  + Cok sik gunluk alim (5+ gun ust uste) → +0.2
+
+ORNEK 1: Sirket 5 TL fiyatla 100.000 lot aldi → tutar = 500K TL → 5.1 (sembolik)
+ORNEK 2: Sirket 8.5 TL fiyatla 1M lot aldi → tutar = 8.5M TL → 6.2 (hafif olumlu)
+ORNEK 3: Sirket 12 TL fiyatla 1.5M lot aldi → tutar = 18M TL → 6.7 (olumlu)
+ORNEK 4: Sirket 25 TL fiyatla 1.5M lot aldi → tutar = 37.5M TL → 7.3 (ciddi olumlu)
+ORNEK 5: Sirket 50 TL fiyatla 2M lot aldi → tutar = 100M TL → 8.0 (cok pozitif)
+
+POZITIF EVENT KUTUPHANESI (Sektoreller — etki tahmini icin rehber):
+
+  ARGE MERKEZI KURULMASI / TUBITAK projesi:
+    Sektor ne olursa olsun → 6.5-7.3 (orta-uzun vadeli teknoloji yatirimi)
+    + Devlet destegi / hibe alindi → +0.2
+
+  SIRKET SATIN ALMA (M&A — bagli ortaklik haricinde):
+    Hedef sirket var mi degerlendir:
+      Stratejik (yeni sektor/cografya) + premium → 8.0-9.0
+      Tamamlayici (mevcut faaliyete deger katiyor) → 7.0-7.8
+      Bagli ortaklik (%100 zaten sahip) → 5.1-5.5 (limited mali etki)
+
+  ARSA / GAYRIMENKUL SATISI:
+    Stratejik atil/kullanilmayan varlik satisi → 6.0-6.8 (nakit girisi pozitif)
+    Faaliyet alani satisi (uretim tesisi vs.)  → 4.0-5.0 (kapasite kaybi)
+    Tutarin ozsermayeye orani:
+      >%20 → +0.5 ekstra pozitif
+      >%50 → +1.0 ekstra (mega varlik takasi)
+
+  FINANSAL DURAN VARLIK EDINME (Hisse/Bono alimi):
+    Stratejik ortakliga giris (partner sirket hissesi) → 6.5-7.5
+    Pasif portfoy yatirimi (kucuk kupur)               → 5.0-5.5
+    Devlet tahvili / bono                              → 4.8-5.2 (nötr — atil nakit park)
+
+  ELEKTRIK URETIM LISANSI / Yenilenebilir Enerji projesi:
+    Yeni lisans alindi → 6.8-7.5 (uzun vadeli gelir kanali)
+    Lisans onayi (basvuru gecmisi) → 6.0-6.5
+    Lisans iptali / red → 3.0-4.0 (NEGATIF)
+
+  CED OLUMLU RAPORU (Cevresel Etki Degerlendirme):
+    Buyuk yatirim projesi onayi (orn: maden, enerji, fabrika) → 6.5-7.5
+    Sirket bunu yatirim onayinin son adimi olarak gorur — proje baslayabilir
+    + Hedeflenen yatirim tutari >%20 ozsermaye → +0.5
+
+  PATENT / MARKA TESCILI:
+    Stratejik teknoloji patenti → 6.0-6.8
+    Marka tescili (rutin) → 5.0-5.3
+
+  YENI URUN LANSE / TICARI URETIME BASLAMA:
+    Yeni urun mass-market giriyor → 6.3-7.0
+    Niche / kucuk urun → 5.5-6.0
+
+  KAPASITE ARTIRIMI / Yeni Tesis Kurulumu:
+    Mevcudun >%30'u kadar kapasite eklenmesi → 7.0-7.8
+    %10-30 kapasite                          → 6.3-7.0
+    <%10                                     → 5.8-6.3
+
+  IHRACAT ANLASMASI (yeni ulkeye / yeni musteriye):
+    Coke buyuk volumlu → 7.0-8.0 (currency conversion sonrasi tutara gore)
+    Standart pilot     → 6.0-6.5
+
+  STRATEJIK ORTAKLIK / Joint Venture:
+    Multinational partner + cash injection → 7.5-8.5
+    Yerli stratejik partner                → 6.8-7.5
+    Niyet anlasmasi / mutabakat (henuz baglayici degil) → 5.8-6.2
+
+  FAALIYETLERIN SONLANDIRILMASI / Tesis Kapatma (NEGATIF):
+    Tum faaliyet durdurulmasi              → 1.5-2.5 (kritik negatif)
+    Belirli urun hatti / fabrika kapatma   → 3.0-4.0 (kayip cirosuna gore)
+    Bagli ortaklik tasfiyesi (kucuk)       → 4.0-4.7
+    + Kaybedilen ciro >%30                 → -0.5 ekstra negatif
+
+  LISANS IPTALI / Ruhsat Kaybi:
+    Faaliyet izni iptal (BDDK/SPK/EPDK)    → 1.5-2.5 (sektorden cikis riski)
+    Marka tescili iptali                   → 3.5-4.5
+    Lisans suresinin uzatilmamasi          → 2.5-3.5
+
+  SPK / BDDK YAPTIRIMLARI:
+    Faaliyet izninin geri alinmasi → 1.0-1.5 (existential)
+    Idari para cezasi >10M TL      → 2.5-3.5
+    Idari para cezasi 1-10M TL     → 3.5-4.0
+    Uyari / kucuk ceza <1M TL      → 4.5-5.0
+
+  IS KAZASI / Cevre Felaketi:
+    Olumlu kaza + uretim duruyor → 1.5-2.5
+    Cevre felaketi (sektor riski) → 2.0-3.0
+    Mahkemeden tedbir alindi → 2.5-3.5
+
+CAPITAL INCREASE (Sermaye Artirimi) — SCALE-DRIVEN:
+
+  Bedelsiz (free issue — POZITIF, retail favorisi, sirket icin guclu pozitif sinyal):
+    Bedelsiz orani arttikca puan dogrusal olarak yukselir. Oran buyukluk
+    icin "pay-coklama" etkisi yaratir, sermaye ic kaynaklardan dagitilir
+    — guclu nakit/yedek sinyali.
+    ≥%500         → 9.5-10.0 (mega bedelsiz — devasa retail ilgi)
+    %200-499      → 9.0-9.5 (cok buyuk, sektor manseti)
+    %100-199      → 8.5-9.0 (buyuk pozitif)
+    %50-99        → 8.0-8.5 (guclu pozitif)
+    %20-49        → 7.0-8.0 (orta-buyuk pozitif)
+    %10-19        → 6.5-7.0 (orta pozitif)
+    <%10          → 6.2-6.5 (sembolik ama yine pozitif)
+    + Sirk ilk kez bedelsiz dagitiyor → +0.2 (yeni temettu/bedelsiz alistirmasi)
+    + Bedelsiz + temettu paralel → +0.2 (cift hediye)
+
+  Bedelli (rights issue — NEGATIF, yatirimci icin SEYRELTME + EK NAKIT YUKU):
+    Oran arttikca seyreltme dramatiklesir → puan dustukce duser.
+    Sirket kasasi guclenir AMA hisse fiyati acisindan ASLA pozitif degildir
+    (ruçhan price indirimi + dilution + ek nakit cikisi).
+
+    ≥%200         → 2.0-2.5 (devasa seyreltme — "baya negatif")
+    %100-199      → 2.5-3.0 (cok agir seyreltme — negatif)
+    %50-99        → 3.0-3.5 (hafif negatif — kullanicinin tarifi)
+    %20-49        → 3.5-4.0 (mid dilution — negatif)
+    %10-19        → 4.0-4.3 (mild seyreltme — yine negatif)
+    <%10          → 4.2-4.5 (minimal seyreltme — yine negatif)
+
+    Modifier'lar:
+      + Sermaye kaybi nedeniyle zorunlu ise (TTK 376) → -0.3 ekstra negatif
+      + Halka acik teklif (genel arz) → -0.2 ekstra (mevcut paydas korunmuyor)
+      + Rüçhan hakki kullanim suresi uzatildi → -0.1
+      + Iptal edildi → 3.0-4.0 (yine negatif — finansman ihtiyaci hala var)
+      + M&A finansmani / yeni tesis kurulumu icin → +0.5 (productive use)
+      + Borc geri odeme icin → 0 nötr (no hidden upside)
+    NEVER above 5.0 for bedelli unless ozel durum (stratejik M&A finansmani)
 
   Tahsisli (private placement — case-by-case):
-    Stratejik yatirimci (mevcut paydas + lock-up) → 6.0-7.0
-    General + dilution                            → 4.0-5.0
+    Stratejik yatirimci (mevcut paydas + lock-up 1+ yil) → 6.5-7.5
+    General + dilution                                   → 4.0-5.0
+    Halka arz iptal sonrasi tahsisli                     → 5.5-6.0
 
-DIVIDEND (Temettu/Kar Payi) — YIELD-BASED SCORING (CRITICAL):
-The system pre-calculates dividend yield% (brut TL / current price) when available.
-USE YIELD, not just TL. TL amount alone is misleading without share price context.
-  Yield ≥%10        → 8.5-9.5 (excellent — attractive, above BIST average)
-  Yield %7-10       → 7.8-8.5 (good — strong dividend)
-  Yield %5-7        → 7.0-7.7 (above BIST average, positive)
-  Yield %3-5        → 6.3-7.0 (BIST average, mild positive)
-  Yield %2-3        → 5.7-6.3 (weak positive)
-  Yield %1-2        → 5.2-5.7 (neutral+, symbolic)
-  Yield %0.5-1      → 4.5-5.2 (weak neutral — insufficient)
-  Yield <%0.5       → 3.0-4.5 (NEGATIVE — symbolic dividend, signal that company
-                                 doesn't want to pay; retail reaction "neden bu kadar az?")
-  Dividend cancelled/none → 3.0-4.5
-  First-time dividend     → +0.3 bonus
-  YoY dividend increase   → +0.2 bonus
+DIVIDEND (Temettu/Kar Payi) — HISTORICAL COMPARISON + YIELD HYBRID:
 
-  Examples:
-  - EREGL 35 TL share, 5 TL gross = %14.3 yield → 8.8
-  - EREGL 35 TL share, 0.50 TL gross = %1.4 yield → 5.4
-  - ECZYT 70 TL share, 5.71 TL gross = %8.2 yield → 8.2
-  - XYZ 20 TL share, 0.05 TL (5 kurus) = %0.25 yield → 3.5 (NEGATIVE)
+KRITIK: Hem YIELD% hem de GECMIS YILLARLA KIYAS sirketin gercek puanini belirler.
+Sistem yield% (brut TL / current price) ve dividend_history'den son 2-3 yil
+verisini onceden hazirlar. Bunlari beraber degerlendir:
+
+  ADIM 1: YIELD-BASED BASE SCORE:
+    Yield ≥%10        → 8.5-9.5 (excellent)
+    Yield %7-10       → 7.8-8.5 (good)
+    Yield %5-7        → 7.0-7.7 (above BIST avg)
+    Yield %3-5        → 6.3-7.0 (BIST avg, mild positive)
+    Yield %2-3        → 5.7-6.3 (weak positive)
+    Yield %1-2        → 5.2-5.7 (neutral+)
+    Yield %0.5-1      → 4.5-5.2 (weak neutral)
+    Yield <%0.5       → 3.0-4.5 (NEGATIVE sembolik)
+    Dividend yok      → 3.0-4.5 (NEGATIVE)
+    Yield bilinmiyor  → TL bazinda hesapla (ortalama 30-50 TL fiyat varsay)
+
+  ADIM 2: HISTORICAL ADJUSTMENT (son 2-3 yil) — KRITIK:
+    Onceki yillarla kiyas yapilarak temel yield skoru ayarlanir.
+    Eger sistem dividend_history saglarsa:
+
+      ILK KEZ TEMETTU (gecmisinde hic dagitmamis):
+        → BASE +2.0 (en kotu 7.0, cogu vakada 8.0+ — "gizli kasayi acti" sinyali)
+        → Sentiment her durumda Olumlu (>= 7.0)
+        Ornek: HEKTS hic dagitmamis, ilk kez 1.5 TL → yield %5 base 7.0 + 2.0 = 9.0
+
+      SON YIL > ONCEKI YIL ARTIS:
+        Artis ≥%100 (iki katina cikti) → BASE + 1.0
+        Artis %50-100                  → BASE + 0.7
+        Artis %20-50                   → BASE + 0.4
+        Artis %5-20                    → BASE + 0.2 (kullanicinin tarifi: 2.1 → 2.6 → 3.0 hafif artis = hafif olumlu)
+        Artis <%5                       → BASE + 0 (yatay)
+
+      SON YIL < ONCEKI YIL DUSUS:
+        Dusus <%20    → BASE - 0.3 (zayif sinyal ama tolere edilebilir)
+        Dusus %20-50  → BASE - 0.7 (dikkat cekici dusus)
+        Dusus %50-80  → BASE - 1.5 (ciddi dusus — kullanici "%50+ dramatik dusus" diyor → ASGARI 4.0'a cek, NEGATIF)
+        Dusus ≥%80    → BASE - 2.5 (yok denecek seviyede — 2.5-3.5 NEGATIF)
+
+      DAGITMAMA KARARI (Yonetim Kurulu "kar dagitilmamasini onayladi"):
+        Eger gecen yil dagitildi → 3.0-3.5 (kotu surprise — NEGATIF)
+        Eger gecen yil da dagitilmadi → 4.0-4.5 (rutin — Notr alt)
+
+  ADIM 3: PATTERN BONUSES:
+      + Bedelsiz + temettu beraber → +0.3
+      + Stopajsiz / mukerrer        → +0.2
+      + Nakit + bedelsiz secenek    → +0.2
+
+  ORNEKLER:
+  - EREGL 35 TL, 5 TL temettu, gecen yil 4.2 TL (artis %19) → yield %14.3 = 8.8 base + 0.2 = 9.0
+  - HEKTS 20 TL, ILK KEZ 1.5 TL dagitiyor → yield %7.5 base 7.9 + 2.0 (ilk kez) = 9.9
+  - SAHOL 25 TL, 2.1 TL gecen yil 3.0 TL (DUSUS %30) → yield %8.4 base 8.2 - 0.7 = 7.5
+  - ABCD 18 TL, 0.10 TL (yield %0.56), gecen yil 0.50 TL (DUSUS %80) → 3.5 base - 2.5 = 2.5 (cok negatif)
+  - XYZAB gecen yil 2 TL bu yil dagitma karari → 3.2 NEGATIF
 
 PROFIT/LOSS:
   Profit increase >%100 → 9.0+ | %50-100 → 8.0-9.0 | %20-50 → 7.0-8.0 | %5-20 → 6.0-7.0
@@ -897,14 +1227,17 @@ async def score_news(
     if not content.strip():
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
-    # ── Devre Kesici: AI'ya gonderme, sabit skor + metin don ──
-    if re.search(r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama", content.lower()):
-        logger.info("Devre kesici tespit edildi, AI atlaniyor (%s)", ticker)
+    # ─── PRE-FILTER: Rutin/idari bildirimleri AI'ya gonderme ───
+    # Sabit Notr 5.0 + standart aciklama don. AI kredisi tasarrufu icin kritik.
+    # Bu pattern'lar fiyat hareketine sebep olmayan teknik/idari duyurular.
+    _routine_filter = _check_routine_pattern(content, ticker)
+    if _routine_filter is not None:
+        logger.info("AI pre-filter: %s — '%s' (AI atlandi)", ticker, _routine_filter["category"])
         return {
             "score": 5.0,
-            "summary": f"Borsa Istanbul, {ticker} hissesinde yasanan ani ve yuksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasinin devreye girdigini bildirmistir. Bu bildirim, sirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlik yuksek volatiliteyi kontrol altina almayi amaclayan standart bir borsa mekanizmasidir.",
+            "summary": _routine_filter["summary"],
             "kap_url": kap_url,
-            "hashtags": ["devrekesici"],
+            "hashtags": _routine_filter["hashtags"],
         }
 
     # Kaynak bilgisini prompt'a ekle
