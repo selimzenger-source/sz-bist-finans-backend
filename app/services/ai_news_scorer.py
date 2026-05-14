@@ -1004,30 +1004,55 @@ Investor perception bonus (TR retail davranis layer):
 
 ═══ SPECIAL CASES ═══
 
-NEW BUSINESS RELATIONSHIP (Yeni Tedarikci/Musteri/Is Ortakligi) — EQUITY-RATIO BASED:
+NEW BUSINESS RELATIONSHIP (Yeni Tedarikci/Musteri/Is Ortakligi) — DUAL SCORING:
 
-KRITIK KURAL: 1 milyon TL uzerindeki ilk anlasmalar EN KOTU 6.0 (Hafif Olumlu).
-Yeni is iliskileri sirketin satis kanallarini ve gelir cesitliligini artirir —
-yatirimci buna her zaman pozitif bakmali.
+KRITIK KURAL: AI Asla 6.0-6.5 araliginda topraklamayin. Yeni is iliskisi
+SEKTOR/MUSTERI CESITLILIGI ve GELIR DIVERSIFIKASYONU acisindan onemlidir.
 
-PUAN HESAPLAMA:
-  oran = anlasma_tutari / sirket_ozsermayesi (yaklasik degerlendir)
-  Eger ozsermaye verisi yoksa, ticker buyukluk segmenti (small/mid/large cap)
-  uzerinden tahmin et:
-    small-cap  (mcap < 5B TL) → ozsermaye yaklasik 500M-2B TL
-    mid-cap    (5-50B TL)     → ozsermaye yaklasik 5-20B TL
-    large-cap  (>50B TL)      → ozsermaye yaklasik 30B+ TL
+ASIL SISTEM: MAX(mutlak_tutar_skoru, oran_skoru) — iki kanaldan en yuksek skor.
 
-  oran >%50          → 8.5-9.0 (transformatif — sirket cap'i degisir)
-  %25-50             → 8.0-8.5 (cok buyuk)
-  %15-25             → 7.5-8.0 (buyuk pozitif)
-  %10-15             → 7.0-7.5 (olumlu)
-  %5-10              → 6.7-7.0 (orta-olumlu)
-  %2-5               → 6.3-6.7 (orta)
-  %1-2               → 6.0-6.3 (hafif olumlu — minimum)
-  <%1 ama tutar >1M  → 6.0 (minimum hafif olumlu)
-  Tutar <1M TL veya sembolik → 5.5-6.0
-  Tutar yok + partner yok    → 5.8-6.2 (yine minimum 5.8)
+KANAL 1 — MUTLAK TUTAR (TL — currency conversion sonrasi):
+Sirket buyuklugune bakilmaksizin yatirimci icin "duyulmaya deger" olan tutarlar:
+  >1 milyar TL        → 8.5-9.0 (devasa is iliskisi)
+  500M-1B             → 8.0-8.5 (cok buyuk)
+  200-500M            → 7.5-8.0 (buyuk)
+  100-200M            → 7.2-7.5 (anlamli)
+  50-100M             → 7.0-7.2 (olumlu — kesin minimum 7.0)
+  25-50M              → 6.7-7.0 (orta-olumlu)
+  10-25M              → 6.5-6.8 (hafif olumlu UST sinir)
+  5-10M               → 6.3-6.5
+  1-5M                → 6.0-6.3 (hafif olumlu)
+  <1M ama duyurulmus  → 5.8-6.0
+
+KANAL 2 — OZSERMAYE/CIRO ORANI (yan dogrulayici):
+  oran >%50          → 8.5-9.0 (transformatif)
+  %25-50             → 8.0-8.5
+  %15-25             → 7.5-8.0
+  %10-15             → 7.0-7.5
+  %5-10              → 6.7-7.0
+  %2-5               → 6.3-6.7
+  <%2                → tutar skorunu kullan
+
+FINAL: max(kanal_1, kanal_2) — yani iki kanaldan yuksek olani. Boylece
+buyuk sirketin kucuk gozuken sozlesmesi tutar acisindan hala anlamli olur.
+
+PARTNER PRESTIJ BONUSU (CUMULATIF UYGULA — TUM bonuslari topla):
+  + Multinational/Fortune 500 partner → +0.3
+  + Sektor lideri yerli sirket        → +0.2
+  + Kamu (devlet kurumlari, SSB, TSK, vb.) → +0.3 (garantili odeme + referans)
+  + Yuksek teknoloji urunu (5G, uydu, AI, savunma)  → +0.3
+  + Ihracat sozlesmesi (USD/EUR/GBP)  → +0.2 (TR retail seviyor)
+  + Cok yillik / uzun vade            → +0.2 (kalici gelir)
+  + Stratejik ortaklik / JV           → +0.3
+  + Backlog %5+ artisi                → +0.4
+  TOPLAM bonus tavani: +1.0 (asla 1'in uzerine cikmasin)
+
+ORNEKLER (yeni kurallar):
+  - 22.5M TL savunma sozlesmesi (devlet+teknoloji): kanal_1=6.5 + 0.3 (kamu)
+    + 0.3 (teknoloji) + 0.2 (ihracat USD) = 7.3 → "Olumlu" ✓
+  - 100M TL Fortune 500 musteri: 7.2 + 0.3 (multinational) + 0.2 (uzun vade)
+    = 7.7 → "Olumlu" ✓
+  - 5M TL kucuk anlasma: 6.3 → "Hafif Olumlu" — burada kalmasi OK
 
 ORNEKLER:
   - Ozsermaye 1M TL, anlasma 5M TL (oran %500) → 9.0 (transformatif kucuk sirket)
@@ -2056,6 +2081,72 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
     Notr bildirimler (devre kesici vb.) icin 5.0'a ceker.
     """
     content_lower = content.lower()
+
+    # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
+    # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
+    is_yeni_is = any(kw in content_lower for kw in [
+        "yeni is iliskisi", "yeni iş ilişkisi",
+        "sozlesme imzaland", "sözleşme imzalan",
+        "anlasma imzaland", "anlaşma imzalan",
+        "ihale kazan", "ihale al",
+        "siparis ald", "sipariş aldı",
+        "tedarik anlasm", "tedarik anlaşm",
+        "yeni musteri", "yeni müşteri",
+        "is ortakligi", "iş ortaklığı",
+    ])
+    if is_yeni_is:
+        # TL tutari cikar — milyon/milyar bazli
+        amount_tl_m = None  # milyon TL bazli
+        # "X milyon TL" / "X milyar TL"
+        m1 = re.search(r"(\d+(?:[.,]\d+)?)\s*milyar\s*tl", content_lower)
+        if m1:
+            try:
+                amount_tl_m = float(m1.group(1).replace(",", ".")) * 1000
+            except (ValueError, TypeError):
+                pass
+        if amount_tl_m is None:
+            m2 = re.search(r"(\d+(?:[.,]\d+)?)\s*milyon\s*tl", content_lower)
+            if m2:
+                try:
+                    amount_tl_m = float(m2.group(1).replace(",", "."))
+                except (ValueError, TypeError):
+                    pass
+        # USD/EUR varsa TL'ye cevir (yaklasik: 1 USD = 40 TL, 1 EUR = 43 TL)
+        if amount_tl_m is None:
+            m_usd = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:milyon\s*)?usd", content_lower)
+            if m_usd:
+                try:
+                    val = float(m_usd.group(1).replace(",", "."))
+                    # "milyon USD" mu yoksa "USD" mi?
+                    if "milyon" in content_lower[:max(0, m_usd.start()-20):m_usd.end()+5]:
+                        amount_tl_m = val * 40  # milyon USD * 40 TL = milyon TL
+                    elif val > 100_000:
+                        amount_tl_m = (val * 40) / 1_000_000  # USD → milyon TL
+                except (ValueError, TypeError):
+                    pass
+
+        if amount_tl_m is not None:
+            # Mutlak tutara gore hard floor (milyon TL bazli)
+            if amount_tl_m >= 1000 and score < 8.5:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 8.5", ticker, amount_tl_m)
+                return 8.5
+            elif amount_tl_m >= 500 and score < 8.0:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 8.0", ticker, amount_tl_m)
+                return 8.0
+            elif amount_tl_m >= 200 and score < 7.5:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 7.5", ticker, amount_tl_m)
+                return 7.5
+            elif amount_tl_m >= 100 and score < 7.2:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 7.2", ticker, amount_tl_m)
+                return 7.2
+            elif amount_tl_m >= 50 and score < 7.0:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 7.0", ticker, amount_tl_m)
+                return 7.0
+            elif amount_tl_m >= 25 and score < 6.7:
+                logger.info("Skor [YENI-IS]: %s %.0fM TL -> 6.7", ticker, amount_tl_m)
+                return 6.7
+            elif amount_tl_m >= 10 and score < 6.5:
+                return 6.5
 
     # ─── Kurumsal block alim — HARD FLOOR ──────────────────────────────
     # Yatirim/portfoy fonu %5 esigi asar veya buyuk net alim yaparsa → 7.0+ zorunlu
