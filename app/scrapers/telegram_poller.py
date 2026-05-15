@@ -1078,10 +1078,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # bildirim gitmez, tweet atilmaz. AI Pozitif Haber sekmesinde gorünmez.
             # NOT: kap_all_disclosures'a yukarida ZATEN yazildi — Tum KAP Haber
             # sekmesinde gorünur (sentiment ne olursa olsun).
-            # ai_score None = AI tamamen basarisiz → push ATILMAZ (AI ozetsiz bildirim
-            # gondermek kullanici kafasini karistiriyor; haber yine kap_all_disclosures'a
-            # yazildigi icin "Tum KAP" sekmesinde gorunur). Sadece skor >= 6 ise push.
-            should_notify = (ai_score is not None) and (ai_score >= 6)
+            # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
+            should_notify = (ai_score is None) or (ai_score >= 6)
 
             if not should_notify:
                 logger.info(
