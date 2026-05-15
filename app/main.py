@@ -3222,7 +3222,10 @@ async def admin_trigger_ceiling_poll_push(
     title = f"\U0001F514 {company} Halka Arzi Bitti — Tavan Anketi Acildi"
     body = f"{summary}. Simdi tavan beklenti anketimiz acildi, oy ver ve sonuclari gor."
 
-    await broadcast_background_task(
+    # Fire-and-forget — broadcast 500+ kullaniciya gondrim 15+ dk surer, HTTP timeout olur.
+    # create_task ile arka planda gonder, endpoint hemen donsun.
+    import asyncio as _asyncio
+    _bg = _asyncio.create_task(broadcast_background_task(
         title=title, body=body, audience="all",
         deep_link_target="halka-arz-detay",
         extra_data={
@@ -3231,12 +3234,18 @@ async def admin_trigger_ceiling_poll_push(
             "scroll_to": "poll",
             "poll_phase": "ceiling",
         },
-    )
+    ))
+    # GC korumasi — task'i tut
+    _admin_bg_tasks = globals().setdefault("_admin_bg_tasks", set())
+    _admin_bg_tasks.add(_bg)
+    _bg.add_done_callback(_admin_bg_tasks.discard)
+
     ipo.ceiling_poll_notified_at = datetime.now(timezone.utc)
     await db.commit()
     return {
-        "status": "sent", "ipo_id": ipo.id, "company": company,
+        "status": "sent_async", "ipo_id": ipo.id, "company": company,
         "total_votes": total, "pct_join": pct_join,
+        "message": "Push arka planda gonderiliyor (~15dk).",
     }
 
 
