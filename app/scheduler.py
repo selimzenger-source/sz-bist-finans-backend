@@ -5,7 +5,7 @@
 3. SPK Bulten Monitor: 21:00-03:00 TR her 1 dk, 03:00-08:00 TR her 5 dk
 4. SPK Basvuru Listesi: gunluk 08:00 (SPKApplication tablosuna)
 5. HalkArz + Gedik: her 2 saatte bir
-6. Telegram Poller: her 10 saniyede bir
+6. Telegram Poller: her 5 saniyede bir
 7. IPO Durum Guncelleme: her saat (5 bolumlu status gecisleri)
 8. 25 Is Gunu Arsiv + Tweet: her gun 12:00 TR (UTC 09:00)
 9. Hatirlatma Zamani Kontrol: her 15 dakika
@@ -4189,7 +4189,7 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 6. Telegram Poller — her 10 saniyede bir
+    # 6. Telegram Poller — her 5 saniyede bir
     # max_instances=1: APScheduler ayni anda sadece 1 instance calistirir
     # Ek olarak telegram_poller.py icinde asyncio.Lock koruması var
     scheduler.add_job(
