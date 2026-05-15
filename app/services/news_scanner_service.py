@@ -222,7 +222,7 @@ _TWEET_EMOJI = {
 # Store linkleri
 _ANDROID_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 _IOS_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
-_WEB_LINK = "https://borsacebimde.app/"
+_WEB_LINK = "https://borsacebimde.com/"
 
 
 def _hash_url(url: str) -> str:

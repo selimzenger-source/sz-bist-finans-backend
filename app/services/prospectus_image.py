@@ -17,7 +17,7 @@ Layout:
   ├─────────────────────────────────────────────────────────┤
   │  📌 ÖZET: ...                                            │  ← Mavi bant
   ├─────────────────────────────────────────────────────────┤
-  │  borsacebimde.app          Yatırım tavsiyesi değildir       │  ← Footer
+  │  borsacebimde.com          Yatırım tavsiyesi değildir       │  ← Footer
   └─────────────────────────────────────────────────────────┘
 
 Her IPO için ayrı PNG üretilir ve /static/prospectus/{ipo_id}.png olarak saklanır.
@@ -91,14 +91,14 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _draw_bg_watermark(img: Image.Image, width: int, height: int):
-    """Diagonal borsacebimde.app watermark."""
+    """Diagonal borsacebimde.com watermark."""
     try:
         wm_font = _load_font(28, bold=False)
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(overlay)
         for yy in range(-height, height * 2, 300):
             for xx in range(-width, width * 2, 550):
-                wm_draw.text((xx, yy), "borsacebimde.app", fill=(255, 255, 255, 14), font=wm_font)
+                wm_draw.text((xx, yy), "borsacebimde.com", fill=(255, 255, 255, 14), font=wm_font)
         overlay = overlay.rotate(-30, resample=Image.BICUBIC, expand=False)
         img_rgba = img.convert("RGBA")
         img_rgba = Image.alpha_composite(img_rgba, overlay)
@@ -414,7 +414,7 @@ def generate_prospectus_analysis_image(
         except Exception:
             pass
 
-        draw.text((footer_logo_x, y + 14), "borsacebimde.app", fill=ORANGE, font=f_footer)
+        draw.text((footer_logo_x, y + 14), "borsacebimde.com", fill=ORANGE, font=f_footer)
 
         # Sayfa sayısı + dipnot sayısı — orta
         dipnot_count = len(positives) + len(negatives)

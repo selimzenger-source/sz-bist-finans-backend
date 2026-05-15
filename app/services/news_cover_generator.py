@@ -265,7 +265,7 @@ def _overlay_text(
         draw.text((30, footer_y), f"Kaynak: {source}", fill=(180, 195, 210), font=src_font)
 
     brand_font = _load_font(_BOLD_FONTS, 18)
-    brand = "Borsa Cebimde | borsacebimde.app"
+    brand = "Borsa Cebimde | borsacebimde.com"
     bb = brand_font.getbbox(brand)
     draw.text((W - (bb[2] - bb[0]) - 30, footer_y), brand, fill=(140, 210, 160), font=brand_font)
 

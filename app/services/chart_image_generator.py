@@ -74,10 +74,10 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
 
 
 def _draw_bg_watermark(img: Image.Image, width: int, height: int):
-    """Gorsel uzerine silik capraz 'borsacebimde.app' watermark basar."""
+    """Gorsel uzerine silik capraz 'borsacebimde.com' watermark basar."""
     try:
         wm_font = _load_font(30, bold=False)
-        wm_text = "borsacebimde.app"
+        wm_text = "borsacebimde.com"
         # Seffaf katman olustur
         overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
         wm_draw = ImageDraw.Draw(overlay)
@@ -190,7 +190,7 @@ def generate_25day_image(
         if banner_img:
             img.paste(banner_img, (0, 0))
 
-        # ── ARKA PLAN WATERMARK (silik çapraz borsacebimde.app) ──
+        # ── ARKA PLAN WATERMARK (silik çapraz borsacebimde.com) ──
         _draw_bg_watermark(img, width, total_h)
 
         draw = ImageDraw.Draw(img)
@@ -340,8 +340,8 @@ def generate_25day_image(
                   f"Tavan: {ceiling_days}  |  Taban: {floor_days}  |  Normal İşlem: {normal_days}",
                   fill=GRAY, font=font_footer_sm)
 
-        # borsacebimde.app
-        draw.text((padding, footer_y + 70), "borsacebimde.app", fill=ORANGE, font=font_watermark)
+        # borsacebimde.com
+        draw.text((padding, footer_y + 70), "borsacebimde.com", fill=ORANGE, font=font_watermark)
 
         # ── KAYDET ─────────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -567,7 +567,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         footer_y = total_h - footer_h
         draw.line([(padding, footer_y), (width - padding, footer_y)], fill=DIVIDER, width=2)
         footer_y += 12
-        draw.text((padding, footer_y), "borsacebimde.app", fill=ORANGE, font=_load_font(18, bold=True))
+        draw.text((padding, footer_y), "borsacebimde.com", fill=ORANGE, font=_load_font(18, bold=True))
         line1 = "Borsa Cebimde Özel Eğitimli Modeller Tarafından Üretilmiştir."
         line2 = "Yatırım yaparken mutlaka kendi araştırmanızı yapınız."
         draw.text((padding + 170, footer_y), line1, fill=GRAY, font=_load_font(16, bold=False))
@@ -765,13 +765,13 @@ def generate_daily_tracking_image(
                 else:
                     draw.text((col_x[5], text_y), "—", fill=GRAY, font=font_row)
 
-        # ── FOOTER (sadece borsacebimde.app) ────────────────
+        # ── FOOTER (sadece borsacebimde.com) ────────────────
         footer_y = banner_h + header_h + table_h + 15
 
         draw.line([(padding, footer_y - 5), (width - padding, footer_y - 5)],
                   fill=DIVIDER, width=2)
 
-        draw.text((padding, footer_y + 10), "borsacebimde.app", fill=ORANGE, font=font_watermark)
+        draw.text((padding, footer_y + 10), "borsacebimde.com", fill=ORANGE, font=font_watermark)
 
         # ── KAYDET ───────────────────────────────────────
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -917,7 +917,7 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         header_h = 90      # Baslik (42pt GOLD) + tarih
         card_h = 90         # Her kart yuksekligi
         card_gap = 4        # Kartlar arasi bosluk
-        footer_h = 45       # Footer (sadece borsacebimde.app)
+        footer_h = 45       # Footer (sadece borsacebimde.com)
         accent_w = 5        # Sol kenar renk cizgisi genisligi
 
         num_cards = len(snapshot_data)
@@ -1080,8 +1080,8 @@ def generate_market_snapshot_image(snapshot_data: list) -> Optional[str]:
         footer_y += 8
         draw.rectangle([(0, footer_y), (width, footer_y + footer_h)], fill=HEADER_BG)
 
-        # borsacebimde.app (orta)
-        footer_text = "borsacebimde.app"
+        # borsacebimde.com (orta)
+        footer_text = "borsacebimde.com"
         ft_bbox = font_footer_bold.getbbox(footer_text)
         ft_w = ft_bbox[2] - ft_bbox[0]
         draw.text(((width - ft_w) // 2, footer_y + 8), footer_text, fill=ORANGE, font=font_footer_bold)
@@ -1418,8 +1418,8 @@ def generate_opening_summary_image(stocks: list) -> Optional[str]:
         except Exception:
             pass
 
-        # borsacebimde.app (logo'nun yaninda)
-        site_text = "borsacebimde.app"
+        # borsacebimde.com (logo'nun yaninda)
+        site_text = "borsacebimde.com"
         draw.text((logo_x, footer_y + 12), site_text,
                   fill=ORANGE, font=font_footer)
 
@@ -1682,7 +1682,7 @@ def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
                 logo_xx += 40
         except Exception:
             pass
-        draw.text((logo_xx, footer_y + 24), "borsacebimde.app",
+        draw.text((logo_xx, footer_y + 24), "borsacebimde.com",
                   fill=ORANGE_C, font=f_footer)
 
         # Sağ: disclaimer

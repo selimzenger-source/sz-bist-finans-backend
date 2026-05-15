@@ -1095,8 +1095,8 @@ HALKAARZ_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.ap
 HALKAARZ_BEKLEYENLER_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 KAP_HABER_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 APP_STORE_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
-WEB_LINK = "https://borsacebimde.app"
-WEB_SPK_BULTEN_LINK = "https://borsacebimde.app/spk-bulten"
+WEB_LINK = "https://borsacebimde.com"
+WEB_SPK_BULTEN_LINK = "https://borsacebimde.com/spk-bulten"
 SLOGAN = _DynSetting("SLOGAN")
 DISCLAIMER = _DynSetting("DISCLAIMER")
 DISCLAIMER_SHORT = _DynSetting("DISCLAIMER_SHORT")

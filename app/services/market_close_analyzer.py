@@ -18,7 +18,7 @@ from app.config import get_settings
 # Store linkleri — tweet metinlerinde kullanılır
 HALKAARZ_LINK = "https://play.google.com/store/apps/details?id=com.bistfinans.app"
 APP_STORE_LINK = "https://apps.apple.com/tr/app/borsa-cebimde-haber-arz/id6760570446?l=tr"
-WEB_LINK = "https://borsacebimde.app/"
+WEB_LINK = "https://borsacebimde.com/"
 
 # Gemini SDK kaldırıldı — diğer servisler REST API kullanıyor, bu dosyada artık gerek yok
 
