@@ -4433,7 +4433,13 @@ def _setup_scheduler_impl():
             logger.error("[IPO-POLL-07:00] Genel hata: %s", e)
 
     async def _ipo_ceiling_poll_notification():
-        """17:00 TR — Dagitim biten halka arzlar icin tavan anketi push + sonuc ozeti."""
+        """Her 15 dk - kapanis saati gecmis halka arzlar icin tavan anketi push.
+
+        Eskiden sabit 17:00 cron'du. Yeni: her 15 dakikada bir tarar, her IPO'nun
+        kendi subscription_hours close saatine bakar. 'Su an >= kapanis saati' ise
+        push atar. Boylece 18:30'da kapanan bir IPO 18:30'da bildirim alir, 17:00'da
+        kapanan 17:00'de — sabit saat yerine her IPO kendi saatinde.
+        """
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date
         from sqlalchemy import select as _sel, and_, func as _func
         try:
@@ -4442,6 +4448,7 @@ def _setup_scheduler_impl():
             from app.services.broadcast import broadcast_background_task
 
             today = _date.today()
+            now_tr = _dt.now(_tz(_td(hours=3)))
             async with async_session() as db:
                 # Dagitim bugun biten (subscription_end == today) IPO'lar
                 # Henuz ceiling poll push'u atilmamis olanlar
@@ -4452,10 +4459,32 @@ def _setup_scheduler_impl():
                     )
                 )
                 result = await db.execute(stmt)
-                ipos = result.scalars().all()
+                ipos_all = result.scalars().all()
+
+                # Sadece kapanis saati gecmis olanlari filtrele
+                ipos = []
+                for _ipo in ipos_all:
+                    close_h, close_m = 17, 0
+                    sh = (_ipo.subscription_hours or "").strip()
+                    if sh and "-" in sh:
+                        try:
+                            close_part = sh.split("-")[1].strip()
+                            if ":" in close_part:
+                                _h, _m = close_part.split(":", 1)
+                                close_h = int(_h.strip())
+                                close_m = int(_m.strip()[:2])
+                        except (ValueError, IndexError):
+                            pass
+                    if (now_tr.hour, now_tr.minute) >= (close_h, close_m):
+                        ipos.append(_ipo)
+                    else:
+                        logger.info(
+                            "[IPO-POLL-AUTO] %s henuz kapanmadi (now=%02d:%02d, close=%02d:%02d)",
+                            _ipo.ticker or _ipo.company_name, now_tr.hour, now_tr.minute,
+                            close_h, close_m,
+                        )
 
                 if not ipos:
-                    logger.info("[IPO-POLL-17:00] Bildirim icin uygun IPO yok (dagitim biten)")
                     return
 
                 for ipo in ipos:
@@ -4523,12 +4552,13 @@ def _setup_scheduler_impl():
         coalesce=True,
         misfire_grace_time=600,
     )
-    # 17:00 TR = 14:00 UTC (aksam dagitim biten icin tavan anketi push)
+    # Her 15 dakikada bir: kapanis saati gecmis IPO'lar icin push at
+    # (eskiden sabit 17:00 cron'du; her IPO'nun kendi close hour'una gore ateslesin)
     scheduler.add_job(
         _ipo_ceiling_poll_notification,
-        CronTrigger(hour=14, minute=0),
-        id="ipo_ceiling_poll_17",
-        name="IPO Tavan Anketi Push (17:00 TR)",
+        IntervalTrigger(minutes=15),
+        id="ipo_ceiling_poll_auto",
+        name="IPO Tavan Anketi Push (her IPO kendi kapanis saatinde)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
