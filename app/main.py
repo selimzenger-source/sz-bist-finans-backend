@@ -4780,7 +4780,7 @@ async def wallet_redeem_coupon(
                     f"🎟🔴 <b>Kupon Tükendi!</b>\n"
                     f"Kod: <code>{code}</code>\n"
                     f"Puan: +{int(amount)}\n"
-                    f"Kullanan: {device_id[:12]}…\n"
+                    f"Kullanan: <code>{device_id}</code>\n"
                     f"Kullanım: {db_coupon.uses_count}/{db_coupon.max_uses} ✅\n"
                     f"Tüm haklar kullanıldı!",
                     silent=False,
@@ -4790,7 +4790,7 @@ async def wallet_redeem_coupon(
                     f"🎟 <b>Kupon Kullanıldı!</b>\n"
                     f"Kod: <code>{code}</code>\n"
                     f"Puan: +{int(amount)}\n"
-                    f"Kullanan: {device_id[:12]}…\n"
+                    f"Kullanan: <code>{device_id}</code>\n"
                     f"Kullanım: {db_coupon.uses_count}/{db_coupon.max_uses}\n"
                     f"Kalan: {remaining}",
                     silent=False,
@@ -8423,7 +8423,7 @@ async def submit_feedback(request: Request, body: FeedbackRequest):
     if body.phone:
         lines.append(f"<b>Telefon:</b> {body.phone}")
     if body.device_id:
-        lines.append(f"<b>Cihaz ID:</b> <code>{body.device_id[:16]}</code>")
+        lines.append(f"<b>Cihaz ID:</b> <code>{body.device_id}</code>")
     lines.append("")
     lines.append(f"<b>Mesaj:</b>\n{body.message}")
 
@@ -8462,7 +8462,7 @@ async def submit_error_report(
         "",
         f"<b>Platform:</b> {body.platform}",
         f"<b>Versiyon:</b> {body.app_version}",
-        f"<b>Cihaz:</b> <code>{body.device_id[:16]}</code>",
+        f"<b>Cihaz:</b> <code>{body.device_id}</code>",
         f"<b>Zaman:</b> {body.timestamp[:19]}",
     ]
     if body.user_note:

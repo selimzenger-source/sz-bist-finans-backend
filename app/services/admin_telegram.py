@@ -521,7 +521,7 @@ async def notify_subscription_purchase(
         f"{emoji} <b>{label}</b>\n"
         f"━━━━━━━━━━━━━━\n"
         f"User ID: <code>{user_id}</code>\n"
-        f"Cihaz: {platform_emoji} {platform or '?'} — <code>{device_id[:12]}...</code>\n"
+        f"Cihaz: {platform_emoji} {platform or '?'} — <code>{device_id}</code>\n"
         f"Ürün: <code>{product_id}</code>\n"
         f"Paket: <b>{package}</b>"
         f"{price_line}"
