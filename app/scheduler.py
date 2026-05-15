@@ -4344,6 +4344,171 @@ def _setup_scheduler_impl():
     )
     logger.info("BIST resmi tedbirli CSV scheduler: 3x gunluk aktif (TR 09:40, 19:00, 00:00)")
 
+    # 7h. IPO POLL BILDIRIM SISTEMI — 07:00 katilim, 17:00 tavan anketi (TR)
+    # ────────────────────────────────────────────────────────────
+    # 07:00 TR (04:00 UTC): SPK onaylandiktan sonraki ilk sabah katilim anketi push
+    # 17:00 TR (14:00 UTC): Dagitim biten halka arzlar icin tavan anketi push + sonuc ozeti
+    async def _ipo_hype_poll_notification():
+        """07:00 TR — SPK onay sonrasi katilim anketi push (her IPO icin 1 kez)."""
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date
+        from sqlalchemy import select as _sel, and_
+        try:
+            from app.models.ipo import IPO
+            from app.services.broadcast import broadcast_background_task
+
+            today = _date.today()
+            yesterday = today - _td(days=1)
+            # SPK onayi dun veya bugun olan, hype anketi push'u henuz gitmemis
+            # ve statu uygun (henuz dagitim baslamamis veya yeni baslayan)
+            async with async_session() as db:
+                stmt = _sel(IPO).where(
+                    and_(
+                        IPO.hype_poll_notified_at.is_(None),
+                        IPO.spk_approval_date.is_not(None),
+                        IPO.spk_approval_date >= today - _td(days=7),  # son 7 gun icinde SPK onayi
+                        IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
+                    )
+                )
+                result = await db.execute(stmt)
+                ipos = result.scalars().all()
+
+                if not ipos:
+                    logger.info("[IPO-POLL-07:00] Bildirim icin uygun IPO yok")
+                    return
+
+                for ipo in ipos:
+                    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+                    title = f"📊 {company} Anketi Açıldı"
+                    body = (
+                        f"{company} halka arzına katılacak mısınız? "
+                        "Topluluğun beklentisini öğrenmek için hemen oy verin."
+                    )
+                    try:
+                        await broadcast_background_task(
+                            title=title,
+                            body=body,
+                            audience="all",
+                            deep_link_target="halka-arz-detay",
+                            extra_data={
+                                "screen": "halka-arz-detay",
+                                "ipo_id": str(ipo.id),
+                                "scroll_to": "poll",  # frontend: anket bolumune scroll
+                                "poll_phase": "hype",
+                            },
+                        )
+                        ipo.hype_poll_notified_at = _dt.now(_tz.utc)
+                        await db.commit()
+                        logger.info("[IPO-POLL-07:00] Push gonderildi: %s (id=%d)", company, ipo.id)
+                    except Exception as e:
+                        logger.error("[IPO-POLL-07:00] Push hata %s: %s", company, e)
+                        await db.rollback()
+        except Exception as e:
+            logger.error("[IPO-POLL-07:00] Genel hata: %s", e)
+
+    async def _ipo_ceiling_poll_notification():
+        """17:00 TR — Dagitim biten halka arzlar icin tavan anketi push + sonuc ozeti."""
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date
+        from sqlalchemy import select as _sel, and_, func as _func
+        try:
+            from app.models.ipo import IPO
+            from app.models.ipo_poll_vote import IPOPollVote
+            from app.services.broadcast import broadcast_background_task
+
+            today = _date.today()
+            async with async_session() as db:
+                # Dagitim bugun biten (subscription_end == today) IPO'lar
+                # Henuz ceiling poll push'u atilmamis olanlar
+                stmt = _sel(IPO).where(
+                    and_(
+                        IPO.ceiling_poll_notified_at.is_(None),
+                        IPO.subscription_end == today,
+                    )
+                )
+                result = await db.execute(stmt)
+                ipos = result.scalars().all()
+
+                if not ipos:
+                    logger.info("[IPO-POLL-17:00] Bildirim icin uygun IPO yok (dagitim biten)")
+                    return
+
+                for ipo in ipos:
+                    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+
+                    # Hype anketi sonuclarini hesapla
+                    vote_q = _sel(
+                        IPOPollVote.choice, _func.count(IPOPollVote.id).label("cnt"),
+                    ).where(
+                        and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype")
+                    ).group_by(IPOPollVote.choice)
+                    vote_result = await db.execute(vote_q)
+                    counts = {row.choice: row.cnt for row in vote_result.all()}
+                    participate = counts.get("participate", 0)
+                    undecided = counts.get("undecided", 0)
+                    skip = counts.get("skip", 0)
+                    total = participate + undecided + skip
+                    pct_join = (participate / total * 100) if total else 0
+
+                    if total > 0:
+                        summary = (
+                            f"{total} oy verildi: %{pct_join:.0f} katılıyor "
+                            f"({participate} kişi)"
+                        )
+                    else:
+                        summary = "Anket sonucu henüz oluşmadı"
+
+                    title = f"🔔 {company} Halka Arzı Bitti — Tavan Anketi Açıldı"
+                    body = (
+                        f"{summary}. "
+                        f"Şimdi tavan beklenti anketimiz açıldı, "
+                        f"oy ver ve sonuçları gör."
+                    )
+                    try:
+                        await broadcast_background_task(
+                            title=title,
+                            body=body,
+                            audience="all",
+                            deep_link_target="halka-arz-detay",
+                            extra_data={
+                                "screen": "halka-arz-detay",
+                                "ipo_id": str(ipo.id),
+                                "scroll_to": "poll",
+                                "poll_phase": "ceiling",
+                            },
+                        )
+                        ipo.ceiling_poll_notified_at = _dt.now(_tz.utc)
+                        await db.commit()
+                        logger.info("[IPO-POLL-17:00] Push gonderildi: %s (id=%d, %d oy)",
+                                    company, ipo.id, total)
+                    except Exception as e:
+                        logger.error("[IPO-POLL-17:00] Push hata %s: %s", company, e)
+                        await db.rollback()
+        except Exception as e:
+            logger.error("[IPO-POLL-17:00] Genel hata: %s", e)
+
+    # 07:00 TR = 04:00 UTC (sabah katilim anketi push)
+    scheduler.add_job(
+        _ipo_hype_poll_notification,
+        CronTrigger(hour=4, minute=0),
+        id="ipo_hype_poll_07",
+        name="IPO Katilim Anketi Push (07:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    # 17:00 TR = 14:00 UTC (aksam dagitim biten icin tavan anketi push)
+    scheduler.add_job(
+        _ipo_ceiling_poll_notification,
+        CronTrigger(hour=14, minute=0),
+        id="ipo_ceiling_poll_17",
+        name="IPO Tavan Anketi Push (17:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    logger.info("IPO poll bildirim scheduler: aktif (07:00 + 17:00 TR)")
+
     # 7g. KAP Processor Backfill — günde 1 kez (gece 03:30 UTC = TR 06:30)
     # Geçmiş 3 günü tarar, eksik kalan business_deal tutarlarını ve
     # MKK/temettü ödeme duyurularını yeni RSC extractor ile günceller.

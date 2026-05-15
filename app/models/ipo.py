@@ -190,6 +190,16 @@ class IPO(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+    # Poll bildirim takibi — her IPO icin tek seferlik gonderim
+    hype_poll_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="07:00 katilim anketi push gonderildi mi? (SPK onayindan sonraki ilk sabah)"
+    )
+    ceiling_poll_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="17:00 tavan anketi push gonderildi mi? (dagitim bitiminde, sonuc ozeti ile)"
+    )
+
     # --- Iliskiler ---
     brokers: Mapped[list["IPOBroker"]] = relationship(back_populates="ipo", cascade="all, delete-orphan")
     allocations: Mapped[list["IPOAllocation"]] = relationship(back_populates="ipo", cascade="all, delete-orphan")

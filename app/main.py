@@ -153,6 +153,19 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("daily_stock_market_stats close_price drop atlandi: %s", e)
 
+    # IPO poll bildirim takibi — 07:00 (hype) ve 17:00 (ceiling) ayri timestamp'ler
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS hype_poll_notified_at TIMESTAMPTZ"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ceiling_poll_notified_at TIMESTAMPTZ"
+            ))
+            await db.commit()
+    except Exception as e:
+        logger.warning("ipo poll notif migration atlandi: %s", e)
+
     # SPK Applications — company_description kolonu ekle (migration)
     try:
         async with async_session() as db:
