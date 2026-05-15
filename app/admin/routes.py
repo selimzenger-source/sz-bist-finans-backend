@@ -2828,9 +2828,10 @@ async def broadcast_preview(
 
     form = await request.form()
     audience = form.get("audience", "all")
+    device_id = (form.get("device_id") or "").strip() or None
 
     from app.services.broadcast import count_recipients
-    count = await count_recipients(db, audience)
+    count = await count_recipients(db, audience, device_id=device_id)
 
     from fastapi.responses import JSONResponse
     return JSONResponse({"count": count, "audience": audience})
@@ -2855,6 +2856,7 @@ async def broadcast_send(
     body = (form.get("body") or "").strip()
     audience = form.get("audience", "all")
     deep_link_target = form.get("deep_link_target", "none")
+    device_id = (form.get("device_id") or "").strip()
 
     # Validasyon
     if not title or len(title) > 100:
@@ -2867,12 +2869,17 @@ async def broadcast_send(
             url="/admin/broadcast?error=Mesaj 1-500 karakter olmali",
             status_code=303,
         )
-    if audience not in ("all", "paid", "free"):
+    if audience not in ("all", "paid", "free", "device"):
         return RedirectResponse(
             url="/admin/broadcast?error=Gecersiz hedef kitle",
             status_code=303,
         )
-    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar"):
+    if audience == "device" and (not device_id or len(device_id) < 4):
+        return RedirectResponse(
+            url="/admin/broadcast?error=Cihaz ID en az 4 karakter olmali (tam veya prefix)",
+            status_code=303,
+        )
+    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar", "store"):
         deep_link_target = "none"
 
     from app.services.broadcast import can_broadcast, mark_broadcast_sent, count_recipients
@@ -2900,7 +2907,7 @@ async def broadcast_send(
         )
 
     from app.services.broadcast import _get_target_users
-    users = await _get_target_users(db, audience)
+    users = await _get_target_users(db, audience, device_id=device_id if audience == "device" else None)
     total = len(users)
 
     if total == 0:
@@ -3013,15 +3020,18 @@ async def broadcast_send_api(
     body = (payload.get("body") or "").strip()
     audience = payload.get("audience", "all")
     deep_link_target = payload.get("deep_link_target", "none")
+    device_id = (payload.get("device_id") or "").strip()
 
     # Validasyon
     if not title or len(title) > 100:
         return JSONResponse({"success": False, "detail": "Baslik 1-100 karakter olmali"}, status_code=400)
     if not body or len(body) > 500:
         return JSONResponse({"success": False, "detail": "Mesaj 1-500 karakter olmali"}, status_code=400)
-    if audience not in ("all", "paid", "free"):
+    if audience not in ("all", "paid", "free", "device"):
         return JSONResponse({"success": False, "detail": "Gecersiz hedef kitle"}, status_code=400)
-    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar"):
+    if audience == "device" and (not device_id or len(device_id) < 4):
+        return JSONResponse({"success": False, "detail": "Cihaz ID en az 4 karakter olmali"}, status_code=400)
+    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar", "store"):
         deep_link_target = "none"
 
     from app.services.broadcast import can_broadcast, mark_broadcast_sent
@@ -3045,7 +3055,7 @@ async def broadcast_send_api(
         )
 
     from app.services.broadcast import _get_target_users
-    users = await _get_target_users(db, audience)
+    users = await _get_target_users(db, audience, device_id=device_id if audience == "device" else None)
     total = len(users)
 
     if total == 0:

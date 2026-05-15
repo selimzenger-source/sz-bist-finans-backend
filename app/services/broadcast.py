@@ -88,14 +88,25 @@ def _paid_user_ids_subquery():
     return union_all(sub_ids, stock_ids).subquery()
 
 
-async def count_recipients(db: AsyncSession, audience: str) -> int:
+async def count_recipients(db: AsyncSession, audience: str, device_id: str | None = None) -> int:
     """Hedef kitleye gore alici sayisini hesapla (onizleme icin).
 
-    audience: "all" | "paid" | "free"
+    audience: "all" | "paid" | "free" | "device"
+    device_id: audience="device" iken zorunlu (prefix match destekli — kismi ID girilebilir)
     """
     base = _base_filter()
 
-    if audience == "all":
+    if audience == "device":
+        if not device_id or not device_id.strip():
+            return 0
+        # Tam veya prefix (kismi) eslesme
+        device_id = device_id.strip()
+        result = await db.execute(
+            select(func.count(User.id)).where(
+                and_(base, User.device_id.like(f"{device_id}%"))
+            )
+        )
+    elif audience == "all":
         result = await db.execute(
             select(func.count(User.id)).where(base)
         )
@@ -119,11 +130,24 @@ async def count_recipients(db: AsyncSession, audience: str) -> int:
     return result.scalar() or 0
 
 
-async def _get_target_users(db: AsyncSession, audience: str) -> list:
-    """Hedef kullanicilari sorgula."""
+async def _get_target_users(db: AsyncSession, audience: str, device_id: str | None = None) -> list:
+    """Hedef kullanicilari sorgula.
+
+    audience="device" + device_id verilirse o cihaza (veya prefix eslesen
+    cihazlara — kismi ID girisi destekli) tek push gonderilir.
+    """
     base = _base_filter()
 
-    if audience == "all":
+    if audience == "device":
+        if not device_id or not device_id.strip():
+            return []
+        device_id = device_id.strip()
+        result = await db.execute(
+            select(User).where(
+                and_(base, User.device_id.like(f"{device_id}%"))
+            )
+        )
+    elif audience == "all":
         result = await db.execute(select(User).where(base))
     elif audience == "paid":
         paid_sub = _paid_user_ids_subquery()
@@ -162,6 +186,7 @@ async def broadcast_background_task(
     audience: str,
     deep_link_target: str,
     extra_data: dict | None = None,
+    device_id: str | None = None,
 ):
     """Broadcast gonderim gorevi — asyncio.create_task() ile cagrilir.
 
@@ -180,7 +205,7 @@ async def broadcast_background_task(
     try:
         async with async_session() as db:
             # Hedef kullanicilari sorgula
-            users = await _get_target_users(db, audience)
+            users = await _get_target_users(db, audience, device_id=device_id)
             total = len(users)
 
             if total == 0:
@@ -279,7 +304,7 @@ async def _send_telegram_report(
     error_details: list[str] | None = None,
 ):
     """Broadcast sonucunu admin Telegram'a raporla (hata detaylari dahil)."""
-    audience_labels = {"all": "Tum Kullanicilar", "paid": "Ucretli Aboneler", "free": "Ucretsiz Kullanicilar"}
+    audience_labels = {"all": "Tum Kullanicilar", "paid": "Ucretli Aboneler", "free": "Ucretsiz Kullanicilar", "device": "Tek Cihaz"}
     target_labels = {
         "none": "Yok",
         "halka-arz": "Halka Arz",
