@@ -3192,12 +3192,18 @@ async def admin_trigger_ceiling_poll_push(
     ipo = (await db.execute(_sel(IPO).where(IPO.id == ipo_id))).scalar_one_or_none()
     if not ipo:
         raise HTTPException(status_code=404, detail="IPO bulunamadi")
-    if ipo.ceiling_poll_notified_at:
+
+    # force=true ise ceiling_poll_notified_at flag'ini ignore et + sifirla
+    _force = (request.query_params.get("force") or "").lower() in ("1", "true", "yes")
+    if ipo.ceiling_poll_notified_at and not _force:
         return {
             "status": "skipped",
-            "reason": "ceiling_poll_notified_at zaten dolu",
+            "reason": "ceiling_poll_notified_at zaten dolu (force=true ile zorlayabilirsin)",
             "notified_at": ipo.ceiling_poll_notified_at.isoformat(),
         }
+    if _force:
+        ipo.ceiling_poll_notified_at = None
+        await db.commit()
 
     company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
     # Hype anketi sonuclarini hesapla
