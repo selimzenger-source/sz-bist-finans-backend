@@ -1674,8 +1674,9 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
 
     # HYPE fazi: SPK onayi bekleyen veya dagitim surecindeyken "Katilacak misin?" anketi
     # ONEMLI: Dagitim surecinde (in_distribution) olsa bile subscription_end gunu
-    # SAAT 17:00 gectiyse, artik 'sure doldu' anlamina gelir -> ceiling fazina gec
-    # (status henuz guncellenmemis olabilir ama UX olarak tahmin anketi baslamali).
+    # KAPANIS SAATI gectiyse, artik 'sure doldu' anlamina gelir -> ceiling fazina gec.
+    # Kapanis saati subscription_hours'tan parse edilir (orn: "09:00-17:00" -> 17:00).
+    # Eger subscription_hours yoksa default 17:00 kullanilir.
     if status in ("newly_approved", "in_distribution"):
         from datetime import date as _date, datetime as _dt, timezone as _tz, timedelta as _td
         if status == "in_distribution" and ipo.subscription_end:
@@ -1685,10 +1686,22 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
                 _today = _date.today()
                 if _today > end_date:
                     return "ceiling"
-                # subscription_end GUNU saat 17:00 TR'den sonra -> ceiling
+                # subscription_end GUNU + kapanis saati gectiyse -> ceiling
                 if _today == end_date:
+                    # subscription_hours parse et: "09:00-17:00" -> hour=17, minute=0
+                    close_hour, close_minute = 17, 0
+                    sh = (ipo.subscription_hours or "").strip()
+                    if sh and "-" in sh:
+                        try:
+                            close_part = sh.split("-")[1].strip()
+                            if ":" in close_part:
+                                _h, _m = close_part.split(":", 1)
+                                close_hour = int(_h.strip())
+                                close_minute = int(_m.strip()[:2])
+                        except (ValueError, IndexError):
+                            pass
                     _now_tr = _dt.now(_tz(_td(hours=3)))
-                    if _now_tr.hour >= 17:
+                    if (_now_tr.hour, _now_tr.minute) >= (close_hour, close_minute):
                         return "ceiling"
             except Exception:
                 pass
@@ -3137,6 +3150,74 @@ async def admin_set_ipo_status(
         "ticker": ipo.ticker,
         "old_status": old_status,
         "new_status": new_status,
+    }
+
+
+@app.post("/api/v1/admin/trigger-ceiling-poll-push")
+@limiter.limit("5/minute")
+async def admin_trigger_ceiling_poll_push(
+    request: Request,
+    ipo_id: int = Query(..., description="Hangi IPO icin push atilacak"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli IPO icin tavan anketi push'unu manuel tetikle.
+
+    Scheduler 17:00 TR cron'u kacirdiysa veya yeni bir IPO icin acil push
+    gerekirse kullanilir. ceiling_poll_notified_at zaten dolu ise atlanir.
+    """
+    from app.models.ipo import IPO
+    from app.models.ipo_poll_vote import IPOPollVote
+    from app.services.broadcast import broadcast_background_task
+    from sqlalchemy import select as _sel, and_, func as _func
+
+    ipo = (await db.execute(_sel(IPO).where(IPO.id == ipo_id))).scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+    if ipo.ceiling_poll_notified_at:
+        return {
+            "status": "skipped",
+            "reason": "ceiling_poll_notified_at zaten dolu",
+            "notified_at": ipo.ceiling_poll_notified_at.isoformat(),
+        }
+
+    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+    # Hype anketi sonuclarini hesapla
+    vote_q = _sel(
+        IPOPollVote.choice, _func.count(IPOPollVote.id).label("cnt"),
+    ).where(
+        and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype")
+    ).group_by(IPOPollVote.choice)
+    vote_result = await db.execute(vote_q)
+    counts = {row.choice: row.cnt for row in vote_result.all()}
+    participate = counts.get("participate", 0)
+    undecided = counts.get("undecided", 0)
+    skip = counts.get("skip", 0)
+    total = participate + undecided + skip
+    pct_join = (participate / total * 100) if total else 0
+
+    if total > 0:
+        summary = f"{total} oy verildi: %{pct_join:.0f} katiliyor ({participate} kisi)"
+    else:
+        summary = "Anket sonucu henuz olusmadi"
+
+    title = f"\U0001F514 {company} Halka Arzi Bitti — Tavan Anketi Acildi"
+    body = f"{summary}. Simdi tavan beklenti anketimiz acildi, oy ver ve sonuclari gor."
+
+    await broadcast_background_task(
+        title=title, body=body, audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={
+            "screen": "halka-arz-detay",
+            "ipo_id": str(ipo.id),
+            "scroll_to": "poll",
+            "poll_phase": "ceiling",
+        },
+    )
+    ipo.ceiling_poll_notified_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {
+        "status": "sent", "ipo_id": ipo.id, "company": company,
+        "total_votes": total, "pct_join": pct_join,
     }
 
 
