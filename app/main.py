@@ -3153,6 +3153,25 @@ async def admin_set_ipo_status(
     }
 
 
+@app.post("/api/v1/admin/trigger-spk-bulten-push")
+@limiter.limit("5/minute")
+async def admin_trigger_spk_bulten_push(
+    request: Request,
+    bulletin_no: str = Query(..., description="Bulten numarasi, orn: 2026/29"),
+    summary: str = Query("", description="Ozet (opsiyonel, AI analiz konu basliklari)"),
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK bulteni push bildirimini manuel tetikle.
+
+    Scheduler/scraper push atmayi kacirdiysa (NameError, cooldown vs.)
+    admin elle calistirir.
+    """
+    from app.services.notification import NotificationService
+    notif = NotificationService(db)
+    n = await notif.notify_spk_bulletin(bulletin_no, summary)
+    return {"status": "sent", "bulletin_no": bulletin_no, "recipients": n}
+
+
 @app.post("/api/v1/admin/trigger-ceiling-poll-push")
 @limiter.limit("5/minute")
 async def admin_trigger_ceiling_poll_push(

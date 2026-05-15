@@ -697,6 +697,10 @@ async def _check_spk_bulletins_inner():
 
                 # Bu bultendeki yeni IPO'lari topla — sonra tek tweet atilacak
                 new_ipos_this_bulletin = []
+                # Push bildirim ozeti — analiz tweetinden gelecek, default bos
+                # ASLA undefined olmasin (analiz atlanirsa NameError'a sebep oluyordu)
+                _bulletin_notif_summary = ""
+                _analiz_already_tweeted = False
 
                 for approval in approvals:
                     ipo_data = {
