@@ -1200,7 +1200,10 @@ class NotificationService:
                 title=title,
                 sent_count=sent_count,
                 failed_count=failed_count,
-                detail=f"KAP abone: {len(kap_users)}",
+                detail=(
+                    f"KAP abone: {len(kap_users)}"
+                    + (f" | Skor filtresine takilan: {filtered_by_score}" if filtered_by_score > 0 else "")
+                ),
             )
         except Exception:
             pass
@@ -1298,6 +1301,9 @@ class NotificationService:
                 title=title,
                 sent_count=sent_count,
                 failed_count=failed_count,
+                detail=(
+                    f"Skor filtresine takilan: {filtered_by_score}" if filtered_by_score > 0 else ""
+                ),
             )
         except Exception:
             pass
