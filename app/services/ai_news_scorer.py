@@ -1757,8 +1757,24 @@ NOTLAR:
     }
 
     # ── Birincil: Gemini 2.5 Flash (~10x ucuz, KAP scoring icin yeterli) ──
+    # NOT: Her provider'in cevabini ANINDA parse etmeye calisiyoruz; basarisiz olursa
+    # sonraki provider'a fail-over ediyoruz. Boylece Gemini malformed JSON dondurse
+    # bile Claude/Abacus devreye girer ve AI ozetsiz push atilmaz.
+    from app.services.ai_json_helper import safe_parse_json as _sp_early
     text = None
     provider_used = None
+    parsed_result = None  # Erken parse basarili olursa burada tutulur
+
+    def _try_parse_text(_txt: str | None, _src: str) -> dict | None:
+        if not _txt:
+            return None
+        _r = _sp_early(_txt, required_key="score")
+        if _r is None:
+            logger.warning(
+                "AI News Scorer: %s JSON parse basarisiz (%s) — icerik: %s",
+                _src, ticker, _txt[:200],
+            )
+        return _r
 
     if gemini_key:
         try:
@@ -1775,6 +1791,10 @@ NOTLAR:
                     data = resp.json()
                     text = data["choices"][0]["message"]["content"].strip()
                     provider_used = "Gemini-Flash"
+                    # Hemen parse et — basarisizsa text'i sifirla ki sonraki provider denesin
+                    parsed_result = _try_parse_text(text, "Gemini")
+                    if parsed_result is None:
+                        text = None  # fail-over icin sifirla
                 else:
                     logger.warning(
                         "AI News Scorer: Gemini HTTP %s (%s) — %s",
@@ -1820,6 +1840,10 @@ NOTLAR:
                                 text = block.get("text", "").strip()
                                 break
                         provider_used = "Claude-Sonnet"
+                        # Erken parse — basarisizsa Abacus'a fail-over
+                        parsed_result = _try_parse_text(text, "Claude")
+                        if parsed_result is None:
+                            text = None
                         break
                     elif resp.status_code in (503, 529, 429) and _attempt == 1:
                         # Gecici hata — kisa bekle ve tekrar dene
@@ -1858,6 +1882,9 @@ NOTLAR:
                     data = resp.json()
                     text = data["choices"][0]["message"]["content"].strip()
                     provider_used = "Abacus"
+                    parsed_result = _try_parse_text(text, "Abacus")
+                    if parsed_result is None:
+                        text = None
                 else:
                     logger.error(
                         "AI News Scorer: Abacus HTTP %s (%s) — %s",
@@ -1866,8 +1893,13 @@ NOTLAR:
         except Exception as e:
             logger.error("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
 
-    if not text:
-        logger.error("AI News Scorer: Tum AI providerlar basarisiz (%s)", ticker)
+    # text=None ama parsed_result var = imkansiz; text var ama parsed_result None = imkansiz
+    # (cunku her provider parse edip text=None yapiyor). Yani text=None iff parsed_result=None.
+    if not text or parsed_result is None:
+        logger.error(
+            "AI News Scorer: Tum AI providerlar basarisiz (%s, text_var=%s, parse_var=%s)",
+            ticker, bool(text), parsed_result is not None,
+        )
         # FALLBACK: AI tamamen erisilemez ise akisi kirma — Notr/5.0 + reprocess flag.
         # Bildirim yine kap_all_disclosures'a + telegram_news'e yazilir, kullanici
         # haberi gorur ama AI yorumu yerine "yeniden denenecek" mesaji gozukur.
@@ -1885,10 +1917,10 @@ NOTLAR:
         }
 
     try:
-        from app.services.ai_json_helper import safe_parse_json
-
-        result = safe_parse_json(text, required_key="score")
-        if result is None:
+        # parsed_result yukarida her provider call'unda ANINDA parse edilip dolduruldu.
+        # Buraya gelindiyse text + parsed_result var demektir.
+        result = parsed_result
+        if result is None:  # savunma — yukaridaki if not text dali tetiklenmis olmali
             logger.error("AI News Scorer: JSON parse basarisiz (%s) — icerik: %s", ticker, text[:200])
             return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
