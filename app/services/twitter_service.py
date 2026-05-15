@@ -1984,10 +1984,17 @@ def tweet_kap_news(
     Blue Tick hesap — 4000 karakter limiti.
     """
     try:
-        # Görsel yolu
-        img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
+        # Görsel yolu — yuksek puan (>= 8.0) Cok Olumlu/Guclu Olumlu icin FLASH banner,
+        # diger pozitiflerde standart KAP bildirim banner.
+        if ai_score is not None and ai_score >= 8.0:
+            img_path = os.path.join(_IMG_DIR, "flash_gelismeler_banner.png")
+        else:
+            img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
         if not os.path.exists(img_path):
-            img_path = None  # Gorsel yoksa sadece text at
+            # Fallback: kap_bildirim.png her zaman var
+            img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
+            if not os.path.exists(img_path):
+                img_path = None  # Hicbir gorsel yoksa sadece text at
 
         # Anlik zaman — Turkiye saati (UTC+3)
         now_str = datetime.now(_TR_TZ).strftime("%H:%M:%S")
