@@ -27,9 +27,10 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Bilanço pipeline — KAP'tan gelen Q1 2026 vb. raporlar parse edilsin diye AÇIK.
-# Tab mobilde gizli ama backend veri toplama devam eder (sirket-karti vb. için).
-BILANCO_PIPELINE_ENABLED = True
+# Bilanço pipeline — TEKRAR KAPATILDI (yasal hazirlik donemi).
+# BFREN Q1 bilanco tweet'i atildigi icin geri False'a alindi. Tab mobilde gizli +
+# tweet atilmamali. AI scoring bilanco bildirimini Notr olarak puanlayip atlamali.
+BILANCO_PIPELINE_ENABLED = False
 
 # Bilanco sezonu yogunluk kontrolu
 _bilanco_queue: asyncio.Queue | None = None
