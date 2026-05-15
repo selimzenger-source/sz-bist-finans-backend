@@ -13004,6 +13004,91 @@ async def admin_test_rg_pdf(request: Request, payload: dict):
 # Admin: VİOP Seans Bildirim Trigger
 # -------------------------------------------------------
 
+@app.post("/api/v1/admin/tweet-with-banner")
+@limiter.limit("20/minute")
+async def admin_tweet_with_banner(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli kategoriye gore otomatik banner ile tweet at.
+
+    Banner eslesmeleri:
+      - "viop_sabah"     -> viop_sabah_acilis_banner.png   (VIOP gunduz acilis)
+      - "viop_aksam"     -> viop_aksam_kapanis_banner.png  (VIOP aksam kapanis)
+      - "ogle_arasi"     -> ogle_piyasa_ozeti_banner.png   (15:31 ozet)
+      - "flash"          -> flash_gelismeler_banner.png    (%1/%2/%5 hareketler)
+
+    Body:
+      admin_password: str (zorunlu)
+      category: str (yukaridakilerden biri)
+      text: str (tweet metni)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    category = (payload.get("category") or "").strip().lower()
+    text = (payload.get("text") or "").strip()
+
+    if not text:
+        raise HTTPException(status_code=400, detail="text zorunlu")
+
+    banner_map = {
+        "viop_sabah":  "viop_sabah_acilis_banner.png",
+        "viop_aksam":  "viop_aksam_kapanis_banner.png",
+        "ogle_arasi":  "ogle_piyasa_ozeti_banner.png",
+        "flash":       "flash_gelismeler_banner.png",
+    }
+    if category not in banner_map:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gecersiz category. Gecerli: {list(banner_map.keys())}",
+        )
+
+    banner_file = banner_map[category]
+    banner_path = os.path.join(
+        os.path.dirname(__file__), "static", "img", banner_file
+    )
+    if not os.path.exists(banner_path):
+        logger.warning("Banner bulunamadi: %s — bannersiz tweet atilacak", banner_path)
+        banner_path = None
+
+    try:
+        from app.services.twitter_service import (
+            _safe_tweet_with_media, _safe_tweet,
+        )
+        if banner_path:
+            tweet_id = _safe_tweet_with_media(text, banner_path, source=f"admin_{category}")
+        else:
+            tweet_id = _safe_tweet(text, source=f"admin_{category}")
+    except Exception as e:
+        logger.exception("Tweet hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Tweet hatasi: {e}")
+
+    # PendingTweet'e kaydet (uygulamadaki VIOP/Tavan-Taban feed'leri icin)
+    pending_tweet_id = None
+    try:
+        from app.models.pending_tweet import PendingTweet
+        from datetime import datetime as _dt_now
+        async with async_session() as db_sess:
+            pt = PendingTweet(
+                text=text,
+                source=f"admin_{category}",
+                status="sent" if tweet_id else "failed",
+                sent_at=_dt_now.utcnow(),
+            )
+            db_sess.add(pt)
+            await db_sess.commit()
+            await db_sess.refresh(pt)
+            pending_tweet_id = pt.id
+    except Exception as _pt_err:
+        logger.warning("PendingTweet kayit hatasi: %s", _pt_err)
+
+    return {
+        "status": "ok" if tweet_id else "failed",
+        "category": category,
+        "banner": banner_file,
+        "tweet_id": tweet_id,
+        "pending_tweet_id": pending_tweet_id,
+    }
+
+
 @app.post("/api/v1/admin/trigger-viop-notification")
 @limiter.limit("10/minute")
 async def admin_trigger_viop_notification(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
