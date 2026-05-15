@@ -1666,18 +1666,30 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
         None      — Anket kapali
     """
     status = (ipo.status or "").strip()
+
+    # GUVENLI YOL: ceiling_poll_notified_at set edildiyse (17:00 push atildi)
+    # zaten tavan fazina gecmis demektir. Bu en kesin sinyal.
+    if getattr(ipo, "ceiling_poll_notified_at", None):
+        return "ceiling"
+
     # HYPE fazi: SPK onayi bekleyen veya dagitim surecindeyken "Katilacak misin?" anketi
-    # ONEMLI: Dagitim surecinde (in_distribution) olsa bile subscription_end GECTIYSE,
-    # artik 'sure doldu' anlamina gelir \u2192 ceiling fazina gec (status henuz guncellenmemis
-    # olabilir ama UX olarak tahmin anketi baslamali).
+    # ONEMLI: Dagitim surecinde (in_distribution) olsa bile subscription_end gunu
+    # SAAT 17:00 gectiyse, artik 'sure doldu' anlamina gelir -> ceiling fazina gec
+    # (status henuz guncellenmemis olabilir ama UX olarak tahmin anketi baslamali).
     if status in ("newly_approved", "in_distribution"):
-        from datetime import date as _date
+        from datetime import date as _date, datetime as _dt, timezone as _tz, timedelta as _td
         if status == "in_distribution" and ipo.subscription_end:
             try:
                 end = ipo.subscription_end
                 end_date = end.date() if hasattr(end, 'date') else end
-                if _date.today() > end_date:
+                _today = _date.today()
+                if _today > end_date:
                     return "ceiling"
+                # subscription_end GUNU saat 17:00 TR'den sonra -> ceiling
+                if _today == end_date:
+                    _now_tr = _dt.now(_tz(_td(hours=3)))
+                    if _now_tr.hour >= 17:
+                        return "ceiling"
             except Exception:
                 pass
         return "hype"
