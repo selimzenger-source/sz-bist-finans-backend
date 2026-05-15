@@ -1,0 +1,121 @@
+{% extends "admin/base.html" %}
+{% block title %}Uygulama Sürüm Yönetimi{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+
+    {% if success %}
+    <div class="bg-green-900/50 border border-green-600 text-green-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">✅</span>
+        <span>{{ success }}</span>
+    </div>
+    {% endif %}
+
+    {% if error %}
+    <div class="bg-red-900/50 border border-red-600 text-red-300 px-4 py-3 rounded-lg flex items-center gap-2">
+        <span class="text-lg">❌</span>
+        <span>{{ error }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Baslik -->
+    <div class="bg-gray-800 rounded-lg p-6">
+        <h2 class="text-xl font-bold text-gray-100 mb-2">📱 Uygulama Sürüm Yönetimi</h2>
+        <p class="text-sm text-gray-400">
+            Frontend her açılışta backend'e sorar. Burada gireceğiniz değerler anlık aktif olur
+            (Render restart gerekmez). Eski sürüm kullanıcılar güncelleme uyarısı görür.
+        </p>
+    </div>
+
+    <!-- Bilgi kutusu -->
+    <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 text-sm text-blue-200">
+        <p class="font-semibold mb-2">💡 Nasıl kullanılır?</p>
+        <ul class="space-y-1 list-disc pl-5">
+            <li><strong>Latest Version:</strong> Mağazada yayında olan son sürüm</li>
+            <li><strong>Min Required:</strong> Bu sürümün altındakiler ZORUNLU güncelleme görür</li>
+            <li><strong>Release Notes:</strong> Modal'da yenilik listesi (• ya da \n ile ayır)</li>
+            <li><strong>Önemli:</strong> Latest'i ancak mağazada yayınlandıktan sonra güncelle</li>
+        </ul>
+    </div>
+
+    <!-- Form -->
+    <form action="/admin/app-version/save" method="POST" class="bg-gray-800 rounded-lg p-6 space-y-5">
+
+        <!-- iOS -->
+        <div class="border-b border-gray-700 pb-4">
+            <h3 class="text-md font-semibold text-gray-200 mb-3 flex items-center gap-2">
+                <span>🍏</span>
+                <span>iOS</span>
+            </h3>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Latest Version</label>
+                    <input type="text" name="ios_latest" value="{{ current.ios_latest }}"
+                           placeholder="3.0.0"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Min Required</label>
+                    <input type="text" name="ios_min" value="{{ current.ios_min }}"
+                           placeholder="2.9.5"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Android -->
+        <div class="border-b border-gray-700 pb-4">
+            <h3 class="text-md font-semibold text-gray-200 mb-3 flex items-center gap-2">
+                <span>🤖</span>
+                <span>Android</span>
+            </h3>
+
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Latest Version</label>
+                    <input type="text" name="android_latest" value="{{ current.android_latest }}"
+                           placeholder="3.0.0"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" />
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Min Required</label>
+                    <input type="text" name="android_min" value="{{ current.android_min }}"
+                           placeholder="2.9.5"
+                           class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Release notes -->
+        <div>
+            <label class="block text-sm font-medium text-gray-300 mb-2">📝 Release Notes (Modal'da gösterilir)</label>
+            <textarea name="release_notes" rows="4"
+                      placeholder="9 kategorili AI puan sistemi · Kişisel bildirim filtresi · Hata düzeltmeleri"
+                      class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 text-gray-100">{{ current.release_notes }}</textarea>
+            <p class="text-xs text-gray-500 mt-1">Maddeleri • veya yeni satır (\n) ile ayır</p>
+        </div>
+
+        <!-- Kaydet -->
+        <div class="pt-2">
+            <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 rounded-lg transition">
+                💾 Kaydet ve Yayınla
+            </button>
+            <p class="text-xs text-gray-500 mt-2 text-center">
+                Kaydetme anında aktif olur. Frontend kullanıcılar bir sonraki açılışta yeni değerleri görür.
+            </p>
+        </div>
+    </form>
+
+    <!-- Mevcut durum -->
+    <div class="bg-gray-800 rounded-lg p-4 text-xs text-gray-400">
+        <p class="font-semibold text-gray-300 mb-2">🔍 Şu anki canlı değerler (frontend'in gördüğü):</p>
+        <pre class="bg-gray-900 p-3 rounded overflow-x-auto">{{ current | tojson(indent=2) }}</pre>
+        <p class="mt-2">
+            API endpoint: <code class="bg-gray-900 px-1 rounded">GET /api/v1/app-version</code>
+        </p>
+    </div>
+
+</div>
+{% endblock %}

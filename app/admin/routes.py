@@ -2710,6 +2710,88 @@ async def tweet_image(
 # BROADCAST — Toplu Bildirim Gonderimi
 # -------------------------------------------------------
 
+@router.get("/app-version", response_class=HTMLResponse)
+async def app_version_page(
+    request: Request,
+    success: Optional[str] = None,
+    error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Uygulama sürüm yönetimi sayfası."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+    from app.config import get_settings as _gs
+
+    s = _gs()
+    keys = {
+        "ios_latest_version": s.IOS_LATEST_VERSION,
+        "ios_min_required_version": s.IOS_MIN_REQUIRED_VERSION,
+        "android_latest_version": s.ANDROID_LATEST_VERSION,
+        "android_min_required_version": s.ANDROID_MIN_REQUIRED_VERSION,
+        "app_release_notes": s.APP_RELEASE_NOTES,
+    }
+    current = {}
+    for key, fallback in keys.items():
+        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+        row = result.scalar_one_or_none()
+        current[key] = row.value if row and row.value else fallback
+
+    template_data = {
+        "ios_latest": current["ios_latest_version"],
+        "ios_min": current["ios_min_required_version"],
+        "android_latest": current["android_latest_version"],
+        "android_min": current["android_min_required_version"],
+        "release_notes": current["app_release_notes"],
+    }
+
+    return templates.TemplateResponse("admin/app_version.html", {
+        "request": request,
+        "success": success,
+        "error": error,
+        "current": template_data,
+    })
+
+
+@router.post("/app-version/save")
+async def app_version_save(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Form'dan gelen değerleri DB'ye yaz."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+
+    form = await request.form()
+    updates = {
+        "ios_latest_version": (form.get("ios_latest") or "").strip(),
+        "ios_min_required_version": (form.get("ios_min") or "").strip(),
+        "android_latest_version": (form.get("android_latest") or "").strip(),
+        "android_min_required_version": (form.get("android_min") or "").strip(),
+        "app_release_notes": (form.get("release_notes") or "").strip(),
+    }
+
+    saved_count = 0
+    for key, value in updates.items():
+        if value:
+            result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+            row = result.scalar_one_or_none()
+            if row:
+                row.value = value
+            else:
+                db.add(AppSetting(key=key, value=value))
+            saved_count += 1
+    await db.commit()
+
+    return RedirectResponse(
+        url=f"/admin/app-version?success={saved_count} ayar kaydedildi ve anlik aktif",
+        status_code=303,
+    )
+
+
 @router.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(
     request: Request,

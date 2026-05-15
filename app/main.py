@@ -3390,34 +3390,104 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+async def _get_app_setting(db: AsyncSession, key: str, fallback: str) -> str:
+    """app_settings tablosundan key oku. Yoksa fallback (env) don."""
+    try:
+        from app.models.app_setting import AppSetting
+        result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+        row = result.scalar_one_or_none()
+        if row and row.value:
+            return row.value
+    except Exception:
+        pass
+    return fallback
+
+
+async def _set_app_setting(db: AsyncSession, key: str, value: str) -> None:
+    """app_settings tablosuna yaz (upsert)."""
+    from app.models.app_setting import AppSetting
+    result = await db.execute(select(AppSetting).where(AppSetting.key == key))
+    row = result.scalar_one_or_none()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+
+
 @app.get("/api/v1/app-version")
 @limiter.limit("60/minute")
-async def get_app_version(request: Request):
+async def get_app_version(request: Request, db: AsyncSession = Depends(get_db)):
     """Uygulamanın güncel sürüm bilgisi — frontend her açılışta sorgular.
+
+    Oncelik sirasi:
+      1) app_settings DB tablosu (admin panel ya da auto-sync ile yazilir)
+      2) Render env var fallback
 
     Frontend cevabı kendi versiyonu ile karşılaştırır:
       - current < min_required → ZORUNLU update modal (kapatılamaz)
       - current < latest → ÖNERİLEN update modal (kapatılabilir, cooldown'lu)
       - current >= latest → hiçbir şey
-
-    Render env var'lar ile kontrol edilir:
-      IOS_MIN_REQUIRED_VERSION, IOS_LATEST_VERSION,
-      ANDROID_MIN_REQUIRED_VERSION, ANDROID_LATEST_VERSION,
-      APP_RELEASE_NOTES
     """
     s = get_settings()
     return {
         "ios": {
-            "latest": s.IOS_LATEST_VERSION,
-            "min_required": s.IOS_MIN_REQUIRED_VERSION,
+            "latest": await _get_app_setting(db, "ios_latest_version", s.IOS_LATEST_VERSION),
+            "min_required": await _get_app_setting(db, "ios_min_required_version", s.IOS_MIN_REQUIRED_VERSION),
             "store_url": "https://apps.apple.com/app/id6760570446",
         },
         "android": {
-            "latest": s.ANDROID_LATEST_VERSION,
-            "min_required": s.ANDROID_MIN_REQUIRED_VERSION,
+            "latest": await _get_app_setting(db, "android_latest_version", s.ANDROID_LATEST_VERSION),
+            "min_required": await _get_app_setting(db, "android_min_required_version", s.ANDROID_MIN_REQUIRED_VERSION),
             "store_url": "https://play.google.com/store/apps/details?id=com.bistfinans.app",
         },
-        "release_notes": s.APP_RELEASE_NOTES,
+        "release_notes": await _get_app_setting(db, "app_release_notes", s.APP_RELEASE_NOTES),
+    }
+
+
+@app.post("/api/v1/admin/set-app-version")
+@limiter.limit("30/minute")
+async def admin_set_app_version(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: app_settings DB'ye sürüm bilgilerini yaz.
+
+    Restart gerekmez — anlik aktif olur. Render env'i bypass eder.
+
+    body (tum alanlar opsiyonel — sadece verilen alanlar guncellenir):
+      admin_password: zorunlu
+      ios_latest_version: "3.0.0"
+      ios_min_required_version: "2.9.5"
+      android_latest_version: "3.0.0"
+      android_min_required_version: "2.9.5"
+      app_release_notes: "..."
+      source: "admin_panel" | "auto_sync" | "manual"  (telemetri)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    updates = {}
+    for key in (
+        "ios_latest_version", "ios_min_required_version",
+        "android_latest_version", "android_min_required_version",
+        "app_release_notes",
+    ):
+        val = payload.get(key)
+        if val is not None and str(val).strip():
+            updates[key] = str(val).strip()
+            await _set_app_setting(db, key, str(val).strip())
+
+    if not updates:
+        return {"success": False, "message": "Guncellenecek alan yok"}
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "updated": updates,
+        "source": payload.get("source", "manual"),
+        "message": f"{len(updates)} ayar guncellendi (anlik aktif)",
     }
 
 
