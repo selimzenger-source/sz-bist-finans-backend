@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 # tweet atilmamali. AI scoring bilanco bildirimini Notr olarak puanlayip atlamali.
 BILANCO_PIPELINE_ENABLED = False
 
+# Bagimsiz kill-switch — pipeline acilsa bile TWEET kesinlikle atilmaz.
+# Bilanco tweetleri pespese atildigi icin defense-in-depth olarak eklendi.
+# Acmak icin: BILANCO_TWEET_ENABLED = True yapilmali (manuel karar).
+BILANCO_TWEET_ENABLED = False
+
 # Bilanco sezonu yogunluk kontrolu
 _bilanco_queue: asyncio.Queue | None = None
 _queue_worker_running = False
@@ -498,6 +503,12 @@ async def _run_ai_analysis(ticker: str, periods: list[dict]) -> dict | None:
 
 async def _tweet_bilanco_analysis(ticker: str, kap_title: str, ai_result: dict):
     """Bilanco AI analizini Fintables X tarzinda Twitter'a tweet at."""
+    # ★ HARD KILL-SWITCH — bilanco tweetleri kapatildi (yasal donem)
+    if not BILANCO_TWEET_ENABLED:
+        logger.info(
+            "🚫 Bilanco TWEET atlandi (BILANCO_TWEET_ENABLED=False): %s", ticker,
+        )
+        return
     try:
         summary = ai_result.get("summary", "")
         health_label = ai_result.get("overall_health_label", "")
