@@ -850,8 +850,26 @@ async def _check_spk_bulletins_inner():
                 # ────────────────────────────────────────────
                 # SPK Bulten Analiz Tweeti — senkron, ana akışta
                 # (asyncio.create_task güvenilmez, eski çalışan yapıya geri dönüldü)
+                # DUPLICATE KORUMA: bu bulten icin analiz tweeti zaten atilmissa
+                # tekrar atma (scraper restart/concurrent run sorunlarini onler).
                 # ────────────────────────────────────────────
                 if full_bulletin_text:
+                    _analiz_key = f"spk_bulten_analiz_{bno_str_val}"
+                    _analiz_already_tweeted = False
+                    try:
+                        from app.models.pending_tweet import PendingTweet
+                        _an_check = await db.execute(
+                            select(PendingTweet).where(
+                                PendingTweet.source == _analiz_key
+                            ).limit(1)
+                        )
+                        if _an_check.scalar_one_or_none():
+                            _analiz_already_tweeted = True
+                            logger.info("SPK bulten analiz tweeti ZATEN atilmis: %s — atlandi", _analiz_key)
+                    except Exception:
+                        pass
+
+                if full_bulletin_text and not _analiz_already_tweeted:
                     try:
                         if new_ipos_this_bulletin:
                             # IPO tweeti atıldıysa 3dk bekle (çakışma olmasın)
@@ -865,6 +883,21 @@ async def _check_spk_bulletins_inner():
                         # tweet_spk_bulletin_analysis basarili olursa AI text doner (str), basarisiz olursa False
                         _ba_result = tweet_spk_bulletin_analysis(full_bulletin_text, bno_str_val)
                         _ba_ok = bool(_ba_result)
+
+                        # Basarili tweet sonrasi FLAG kaydet — tekrar atilmasin
+                        if _ba_ok:
+                            try:
+                                from app.models.pending_tweet import PendingTweet
+                                _an_flag = PendingTweet(
+                                    source=_analiz_key,
+                                    status="sent",
+                                    text=f"SPK {bno_str_val} bulten analiz tweet flag",
+                                )
+                                db.add(_an_flag)
+                                await db.commit()
+                                logger.info("SPK analiz tweet flag kaydedildi: %s", _analiz_key)
+                            except Exception as _flag_err:
+                                logger.warning("SPK analiz tweet flag kaydedilemedi: %s", _flag_err)
 
                         # AI text'ten konu basliklarini cikar (bildirim icin)
                         if isinstance(_ba_result, str) and _ba_result:
