@@ -441,7 +441,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     (
         r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama|pay\s*bazinda\s*devre\s*kesici",
         "Devre Kesici",
-        "Borsa İstanbul, hissede yaşanan ani ve yüksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasının devreye girdiğini bildirmiştir. Bu bildirim şirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlık yuksek volatiliteyi kontrol altına almayı amaçlayan standart bir borsa mekanizmasıdır. Yatırımcı açısından doğrudan pozitif veya negatif etkisi bulunmaz.",
+        "Borsa İstanbul, hissede yaşanan ani ve yüksek fiyat hareketi nedeniyle Pay Bazında Devre Kesici uygulamasının devreye girdiğini bildirmiştir. Bu bildirim şirketin temel faaliyetleriyle ilgili bir gelişme olmayıp, hisse senedinde anlık yüksek volatiliteyi kontrol altına almayı amaçlayan standart bir borsa mekanizmasıdır. Yatırımcı açısından doğrudan pozitif veya negatif etkisi bulunmaz.",
         ["devrekesici"],
     ),
     (
@@ -495,7 +495,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     ),
     (
         r"yonetim\s*kurulu(nun)?\s*(komite\s*atama|komite\s*olusum|alt\s*komite)",
-        "Yonetim Kurulu Komite",
+        "Yönetim Kurulu Komite",
         "Yönetim kurulu denetim/risk/kurumsal yönetim komitelerinin atama ve yeniden yapılandırma bildirimi. Standart kurumsal yönetim işlemi olup fiyata etkisi yoktur.",
         ["yonetim"],
     ),
@@ -577,7 +577,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
 
     # --- SERMAYE ARTIRIMI PROSEDUR ADIMLARI (ilk karar sonrasi takip) ---
     # Bedelli/bedelsiz sermaye artiriminin ilk YK karari pozitif veya negatif
-    # puanlanir. Sonrasindaki tum adimlar (ihrac belgesi, kullanim suresi,
+    # puanlanir. Sonrasindaki tum adimlar (ihraç belgesi, kullanim suresi,
     # tescil, dagitim gerceklesti) ZATEN o ilk kararda fiyatlandi. Tekrar
     # pozitif olarak puanlamak yatirimciyi yaniltir.
     (
@@ -613,7 +613,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*tutar(?:in)?\s*tahsilat|"
         r"bedelli\s*sermaye\s*art[ıi]r[ıi]m[ıi]\s*nakit\s*girisi",
         "Bedelli Tahsilat",
-        "Bedelli sermaye artırımı sonucu şirkete nakit girişi tescili. Bu prosedürel bir kapanış bildiridir; finansman amacı ilk karar duyurusundan beri biliniyordu.",
+        "Bedelli sermaye artırımı sonucu şirkete nakit girişi tescili. Bu prosedürel bir kapanış bildirisidir; finansman amacı ilk karar duyurusundan beri biliniyordu.",
         ["bedelli"],
     ),
 
@@ -667,8 +667,8 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["bilgilendirme"],
     ),
 
-    # 5. Yonetim Kurulu Numarali Toplanti ("4. Yönetim Kurulu-II" gibi)
-    # Periyodik yonetim kurulu toplantilari — gundem ayri bildirimle aciklanir.
+    # 5. Yönetim Kurulu Numarali Toplanti ("4. Yönetim Kurulu-II" gibi)
+    # Periyodik yonetim kurulu toplantilari — gundem ayrı bildirimle aciklanir.
     (
         r"\d+\.?\s*y[öo]netim\s*kurulu\s*(?:-\s*[iı]+)?(?!\s*karar)",
         "Numaralı Yönetim Kurulu Toplantısı",
@@ -685,8 +685,8 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["faaliyetraporu"],
     ),
 
-    # 7. Tertip Ihrac Belgesi (borclanma araci ihrac — Notr)
-    # Bono/sukuk/finansman bonosu ihrac belgesi. Borc ihraci = gelir/kar degil.
+    # 7. Tertip Ihrac Belgesi (borçlanma aracı ihrac — Notr)
+    # Bono/sukuk/finansman bonosu ihraç belgesi. Borc ihraci = gelir/kar degil.
     (
         r"tertip\s*ihra[cç]\s*belgesi|borclanma\s*arac[ıi]\s*ihra[cç]|"
         r"finansman\s*bonosu\s*ihra[cç]|kira\s*sertifikas[ıi]\s*ihra[cç]",
@@ -941,7 +941,7 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
   BEDELSIZ SERMAYE ARTIRIMI:
     Ilk YK karari "%X bedelsiz onayland"          → POZITIF (gerçek değer)
     Sonra gelen:
-      - "SPK ihrac belgesi onayi"                   → NOTR 5.0
+      - "SPK ihraç belgesi onayi"                   → NOTR 5.0
       - "Bedelsiz pay dagitim tarihinin tescili"    → NOTR 5.0
       - "Bedelsiz pay dagitimi gerceklesti"         → NOTR 5.0
       - "Sermaye artirimi Ticaret Sicili tescili"   → NOTR 5.0
@@ -949,7 +949,7 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
   BEDELLI SERMAYE ARTIRIMI:
     Ilk YK karari "%X bedelli onayland"           → NEGATIF (gerçek seyreltme sinyali)
     Sonra gelen:
-      - "SPK ihrac belgesi onayi"                   → NOTR 5.0
+      - "SPK ihraç belgesi onayi"                   → NOTR 5.0
       - "Ruçhan hakki kullanim suresi baslangici"   → NOTR 5.0
       - "Bedelli sermaye artirimi nakit girisi"     → NOTR 5.0
       - "Sermaye artirimi tescil edildi"            → NOTR 5.0
@@ -962,7 +962,7 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
 NASIL TANIRSIN PROSEDUR/TAKIP BILDIRIMINI?
   - Sistem context'inde "SON 30 GUN POZITIF KARARLAR" listesi gosterilir.
   - O listede ayni konuda bir bildirim varsa BU TAKIP/PROSEDUR'dur → NOTR 5.0
-  - Baslikta "tescil", "tamamlandi", "kullanim", "odeme tarihi", "ihrac belgesi",
+  - Baslikta "tescil", "tamamlandi", "kullanim", "odeme tarihi", "ihraç belgesi",
     "gerceklesti", "tescil edildi" gecmesi guclu prosedur sinyalidir.
   - Yeni bir oran/tutar VAR mi? Yoksa zaten bilinen miktarin uygulamasi mi?
 
@@ -981,7 +981,7 @@ bazi olaylar sirket icin "iyi" gorulse de yatirimci icin "kotu" olabilir:
 Yatirimci acisi her zaman BASKINDIR (puan asgari %60 buradan).
 
 ═══ ANALYSIS STEPS (chain-of-thought — sequential per disclosure) ═══
-1. DISCLOSURE TYPE: sozlesme/ihale, sermaye artirimi, bedelsiz, temettu, kar/zarar,
+1. DISCLOSURE TYPE: sozlesme/ihale, sermaye artirimi, bedelsiz, temettu, kâr/zarar,
    dava-ceza, M&A, yonetim degisikligi, lisans-ruhsat, sermaye kaybi (TTK 376),
    idari/usul, yeni ticari iliski, bilanco, vs.
 2. QUANTITATIVE IMPACT: TL amount, %, contract size. If no number, type itself signals direction.
@@ -1023,7 +1023,7 @@ STRONG POSITIVE (8.0-10.0):
 
 ═══ MANDATORY CATEGORY (every disclosure must have one) ═══
 
-"finansal" → kar/zarar, temettu, bedelsiz, sermaye artirimi, sozlesme/ihale tutari, ceza,
+"finansal" → kâr/zarar, temettu, bedelsiz, sermaye artirimi, sozlesme/ihale tutari, ceza,
             dava, vergi, sermaye kaybi (numerical/financial direct impact)
 "strateji" → M&A, yeni tesis, yeni urun, lisans, kapasite artirimi, sektor liderligi,
             stratejik ortaklik (business model / competitive position changes)
@@ -1324,7 +1324,7 @@ verisini onceden hazirlar. Bunlari beraber degerlendir:
         Dusus %50-80  → BASE - 1.5 (ciddi dusus — kullanici "%50+ dramatik dusus" diyor → ASGARI 4.0'a cek, NEGATIF)
         Dusus ≥%80    → BASE - 2.5 (yok denecek seviyede — 2.5-3.5 NEGATIF)
 
-      DAGITMAMA KARARI (Yonetim Kurulu "kar dagitilmamasini onayladi"):
+      DAGITMAMA KARARI (Yönetim Kurulu "kar dagitilmamasini onayladi"):
         Eger gecen yil dagitildi → 3.0-3.5 (kotu surprise — NEGATIF)
         Eger gecen yil da dagitilmadi → 4.0-4.5 (rutin — Notr alt)
 
@@ -1379,7 +1379,7 @@ MANAGEMENT CHANGE:
 
 MAJOR SHAREHOLDER PAY SATISI / HOLDING SECONDARY OFFERING (CRITICAL — MILD NEGATIVE):
   Sirketin BUYUK HISSEDARI (holding, kurucu, %5+ pay sahibi) kendi paylarini
-  satarsa veya kurumsal yatirimcilara block sale yaparsa → BU NEGATIF SINYALDIR.
+  satarsa veya kurumsal yatırımcılara block sale yaparsa → BU NEGATIF SINYALDIR.
   Sebep:
     a) Insider selling — yonetim/holding "fiyat zirvede" sinyali verir
     b) Float artisi → arz baskisi
@@ -1389,7 +1389,7 @@ MAJOR SHAREHOLDER PAY SATISI / HOLDING SECONDARY OFFERING (CRITICAL — MILD NEG
 
   Pattern triggers:
     • "Holding ... hisselerini ... satti" / "block sale"
-    • "Sermayenin %X'i kurumsal yatirimcilara satildi"
+    • "Sermayenin %X'i kurumsal yatırımcılara satildi"
     • "Hizlandirilmis talep toplama" (accelerated bookbuilding)
     • "Kurucu/hakim ortak ... pay satti"
     • "Hisse satisi sonrasi pay orani %X'e dustu"
@@ -1435,32 +1435,32 @@ BISTECH / PAY PIYASASI / MKK / KAP SISTEM DUYURULARI (CRITICAL — neutral 5.0-5
 DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4):
   Bu KAP bildirimleri sirketin BORC alma yetkisi/uygulamasi icindir — gelir
   veya kar getirmez, fiyat etkisi sinirlidir. Asla "olumlu haber" sayilmamalidir.
-  Hisse fiyatina dogrudan pozitif etkisi yoktur; aksine seyreltme/borc yuku
+  Hisse fiyatina doğrudan pozitif etkisi yoktur; aksine seyreltme/borc yuku
   sinyali olabilir.
 
   Triggering keywords/patterns in title or body:
-    • "Tertip Ihrac Belgesi" / "ihrac belgesi"
-    • "Borclanma Araci Ihrac Limiti / Tavani"
+    • "Tertip Ihrac Belgesi" / "ihraç belgesi"
+    • "Borçlanma Araci Ihrac Limiti / Tavani"
     • "Finansman Bonosu" ihraci / itfa
     • "Ozel Sektor Tahvili" ihraci
     • "Banka Bonosu" ihraci
     • "Kira Sertifikasi" ihraci (sukuk)
     • "VDMK" / "Varliga Dayali Menkul Kiymet"
     • "Bono / Tahvil ihrac" yetki / SPK basvuru
-    • "Borclanma Araci Ihracina Iliskin Yonetim Kurulu Karari"
+    • "Borçlanma Araci Ihracina Iliskin Yönetim Kurulu Karari"
 
   Score: 4.7-5.3 (Notr). ABSOLUTELY NEVER above 5.5. Sentiment="Nötr".
   ASLA "Olumlu" sentiment vermeyiniz — bu BORC ihracidir, gelir/kar degil.
   AI 6.0+ verirse o yanlistir; tertip/finansman/tahvil ihraci her zaman notr.
-  Summary should clarify: bu bir borclanma araci (borc) ihracidir, ciroya/kara
-  dogrudan etkisi yoktur; finansman ihtiyacini karsilamak icin yapilir, borc
+  Summary should clarify: bu bir borçlanma aracı (borc) ihracidir, ciroya/kara
+  dogrudan etkisi yoktur; finansman ihtiyacını karşılamak icin yapilir, borc
   yukunu artirir.
 
   Examples:
   Ex.D: "TMSN Tertip Ihrac Belgesi (200M TL sukuk)" → 5.0 (NOTR, asla 6.1 degil)
-       Summary: "Sirketin borclanma araci ihracina iliskin SPK belgesi;
+       Summary: "Sirketin borçlanma aracı ihracina iliskin SPK belgesi;
                  ek finansman saglar fakat ciro/kar artisi degildir, fiyata
-                 dogrudan pozitif etkisi beklenmez, borc yukunu artirir."
+                 doğrudan pozitif etkisi beklenmez, borc yukunu artirir."
   Ex.E: "ABCD 500M TL finansman bonosu ihraci" → 4.9 (NOTR)
        Summary: "Kisa vadeli borclanma; yatirimci icin notr — borc maliyeti
                  ve geri odeme riski yaratabilir."
@@ -1472,7 +1472,7 @@ DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4)
   generic — score by CONTENT, not title.
 
   CRITICAL: Bu basliklar altinda sirket ya:
-    (a) ILK KEZ kararini ilan ediyor olabilir (ornegin "Yonetim Kurulu kar
+    (a) ILK KEZ kararini ilan ediyor olabilir (ornegin "Yönetim Kurulu kar
         payi DAGITILMAMASINI onayladi" → bu yeni karar, AI puanla); veya
     (b) Onceden ilan edilen miktarin uygulamasi/tekrari olabilir (zaten
         fiyatlanmis → notr-yakin).
@@ -1488,7 +1488,7 @@ DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4)
 
   Examples:
   Ex.A: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
-        "Yonetim Kurulu 2025 yili kar payi DAGITILMAMASINI onaylamistir"
+        "Yönetim Kurulu 2025 yili kar payi DAGITILMAMASINI onaylamistir"
         → 3.8 (NEGATIVE — yeni karar, sifir verim)
   Ex.B: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
         "X tarihinde aciklanan brut Y TL temettu odemesi gerceklesecektir"
@@ -2034,7 +2034,7 @@ _FOLLOWUP_TOPICS = {
     "bedelli_sermaye_artirimi": [
         "bedelli sermaye", "rüçhan hakkı", "ruchan hakki",
         "bedelli pay", "bedelli sermaye artirim", "bedelli sermaye artırım",
-        "ihrac belgesi bedelli", "ihraç belgesi bedelli",
+        "ihraç belgesi bedelli", "ihraç belgesi bedelli",
         "yeni pay alma hakki", "yeni pay alma hakkı",
     ],
     "temettu_kararı": [
@@ -2067,7 +2067,7 @@ async def _check_followup_notification(ticker: str, content: str) -> tuple[bool,
     takip-bildirimdir.
 
     Window 30 gun: temettu/bedelli/bedelsiz prosedur bildirimleri ilk karardan
-    haftalar/aylar sonra gelir (GK karari -> SPK -> ihrac belgesi -> kullanim ->
+    haftalar/aylar sonra gelir (GK karari -> SPK -> ihraç belgesi -> kullanim ->
     tescil zinciri 60+ gune yayilabilir; ama dampera 30 gun pratik standartdir).
 
     Returns: (is_followup, topic_name)
