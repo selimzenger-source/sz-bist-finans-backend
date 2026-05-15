@@ -945,13 +945,41 @@ async def _check_spk_bulletins_inner():
 
                 # ────────────────────────────────────────────
                 # Push Bildirim: Yeni SPK Bülteni (AI analizden sonra)
+                # 4. SAVUNMA KATMANI: Push icin de PendingTweet flag — daha once
+                # gonderildiyse atla. In-memory cooldown'a guvenmiyoruz (restart
+                # sonrasi resetlenir).
                 # ────────────────────────────────────────────
+                _push_key = f"spk_bulten_push_{bno_str_val}"
+                _push_already_sent = False
                 try:
-                    await notif_service.notify_spk_bulletin(bno_str_val, _bulletin_notif_summary)
-                    await session.commit()
-                    logger.info("SPK bulten push bildirim gonderildi: %s (ozet: %s)", bno_str_val, _bulletin_notif_summary[:80] if _bulletin_notif_summary else "yok")
-                except Exception as _push_err:
-                    logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
+                    from app.models.pending_tweet import PendingTweet as _PT
+                    _push_check = await db.execute(
+                        select(_PT).where(_PT.source == _push_key).limit(1)
+                    )
+                    if _push_check.scalar_one_or_none():
+                        _push_already_sent = True
+                        logger.info("SPK bulten push ZATEN gonderilmis: %s — atlandi", _push_key)
+                except Exception:
+                    pass
+
+                if not _push_already_sent:
+                    try:
+                        await notif_service.notify_spk_bulletin(bno_str_val, _bulletin_notif_summary)
+                        # Flag kaydet — sonraki run tekrar push atmasin
+                        try:
+                            from app.models.pending_tweet import PendingTweet as _PT
+                            _push_flag = _PT(
+                                source=_push_key, status="sent",
+                                text=f"SPK {bno_str_val} push flag",
+                            )
+                            db.add(_push_flag)
+                            await db.commit()
+                            logger.info("SPK bulten push flag kaydedildi: %s", _push_key)
+                        except Exception as _flag_err:
+                            logger.warning("SPK push flag kaydedilemedi: %s", _flag_err)
+                        logger.info("SPK bulten push bildirim gonderildi: %s (ozet: %s)", bno_str_val, _bulletin_notif_summary[:80] if _bulletin_notif_summary else "yok")
+                    except Exception as _push_err:
+                        logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
 
                 # ────────────────────────────────────────────
                 # Capital Increase state machine — SPK onay/red yansit
