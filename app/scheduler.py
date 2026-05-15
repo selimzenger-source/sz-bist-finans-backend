@@ -5398,11 +5398,19 @@ async def scrape_kurum_onerileri():
                             tweet_detail = "\n".join(tweet_lines)
                             if len(unsent_tweets) > 5:
                                 tweet_detail += f"\n+{len(unsent_tweets) - 5} öneri daha"
+                            # Ticker hashtaglari — tweet'teki onerilerden uretilir
+                            # Maksimum 5 ticker (Twitter mesaj uzunlugu sinirini asmamak icin)
+                            _ticker_tags = []
+                            for _i in unsent_tweets[:5]:
+                                _t = (getattr(_i, "ticker", "") or "").strip().upper()
+                                if _t and _t not in _ticker_tags:
+                                    _ticker_tags.append(_t)
+                            hashtag_line = " ".join(f"#{_t}" for _t in _ticker_tags)
                             tweet_text = (
                                 f"📊 {len(unsent_tweets)} Yeni Kurum Önerisi\n\n"
                                 f"{tweet_detail}\n\n"
                                 f"Detaylı bilgiler için uygulamamızı indirebilirsiniz.\n"
-                                f"#BorsaCebimde #BIST #HisseTavsiye"
+                                f"{hashtag_line}"
                             ).strip()
 
                             # Gemini kapak resmi
