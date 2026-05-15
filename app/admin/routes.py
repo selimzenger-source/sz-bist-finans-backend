@@ -4329,6 +4329,130 @@ async def kap_source_update(
     )
 
 
+# -------------------------------------------------------
+# HABER HAVUZU — Son 4 saatteki pozitif/negatif KAP haberleri
+# Admin manuel tweet atabilir (Nötr/Hafif olanlar filtrelenir)
+# -------------------------------------------------------
+
+@router.get("/news-pool", response_class=HTMLResponse)
+async def news_pool(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    status: Optional[str] = None,
+):
+    """Son 4 saatteki olumlu + olumsuz KAP haberleri — manuel tweet havuzu.
+
+    Filtreleme:
+      - Son 4 saat (published_at veya created_at son 4 saatte)
+      - ai_sentiment 'Notr' ve 'Hafif*' iceren satirlar DISARIDA
+      - Yalnizca skoru bilinen ve >= 6.0 (pozitif) veya <= 4.0 (negatif) olanlar
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from datetime import timedelta as _td, timezone as _tz
+
+    now_utc = datetime.now(_tz.utc)
+    cutoff = now_utc - _td(hours=4)
+
+    q = (
+        select(KapAllDisclosure)
+        .where(
+            or_(
+                and_(KapAllDisclosure.published_at.isnot(None),
+                     KapAllDisclosure.published_at >= cutoff),
+                and_(KapAllDisclosure.published_at.is_(None),
+                     KapAllDisclosure.created_at >= cutoff),
+            )
+        )
+        .where(KapAllDisclosure.ai_impact_score.isnot(None))
+        .where(
+            or_(
+                KapAllDisclosure.ai_impact_score >= 6.0,
+                KapAllDisclosure.ai_impact_score <= 4.0,
+            )
+        )
+        .order_by(
+            desc(sa_func.coalesce(KapAllDisclosure.published_at, KapAllDisclosure.created_at))
+        )
+        .limit(150)
+    )
+    result = await db.execute(q)
+    items = list(result.scalars().all())
+
+    # Pozitif/negatif ayir
+    positives = [x for x in items if x.ai_impact_score and x.ai_impact_score >= 6.0]
+    negatives = [x for x in items if x.ai_impact_score and x.ai_impact_score <= 4.0]
+
+    return templates.TemplateResponse("admin/news_pool.html", {
+        "request": request,
+        "positives": positives,
+        "negatives": negatives,
+        "status": status,
+        "cutoff_hours": 4,
+    })
+
+
+@router.post("/news-pool/{disclosure_id}/tweet")
+async def news_pool_tweet(
+    disclosure_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Havuzdaki bir haberi MANUEL olarak tweet at — KAP pozitif bildirim formatinda.
+
+    "Her 4 haberden 1'i" CTA'si is_manual=True ile kaldirilir. force_send=True ile
+    TWITTER_AUTO_SEND'den bagimsiz direkt yayinlanir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.twitter_service import tweet_kap_news
+
+    row = (await db.execute(
+        select(KapAllDisclosure).where(KapAllDisclosure.id == disclosure_id)
+    )).scalar_one_or_none()
+
+    if not row:
+        return RedirectResponse(url="/admin/news-pool?status=notfound", status_code=303)
+
+    # Sentiment string: skora gore positive/negative
+    if row.ai_impact_score and row.ai_impact_score >= 6.0:
+        sentiment_str = "positive"
+    else:
+        sentiment_str = "negative"
+
+    # Keyword: title varsa onu kullan, yoksa "KAP Bildirimi"
+    matched_kw = (row.title or "KAP Bildirimi").strip()
+    if len(matched_kw) > 80:
+        matched_kw = matched_kw[:80] + "..."
+
+    # tweet_kap_news senkron — thread havuzunda calistir ki event loop bloklamasin
+    loop = asyncio.get_event_loop()
+    try:
+        ok = await loop.run_in_executor(
+            None,
+            lambda: tweet_kap_news(
+                ticker=row.company_code or "",
+                matched_keyword=matched_kw,
+                sentiment=sentiment_str,
+                ai_score=row.ai_impact_score,
+                ai_summary=row.ai_summary,
+                kap_url=row.kap_url,
+                ai_hashtags=None,  # Manuel paylasimda extra hashtag yok
+                is_manual=True,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Manuel tweet hatasi (disclosure_id={disclosure_id}): {e}")
+        ok = False
+
+    status_msg = "tweet_basarili" if ok else "tweet_hatasi"
+    return RedirectResponse(url=f"/admin/news-pool?status={status_msg}", status_code=303)
+
+
 @router.post("/toggle-kap-source")
 async def toggle_kap_source(request: Request, redirect: Optional[str] = None):
     """Tek tikla KAP kaynagi toggle: telegram <-> uzmanpara.

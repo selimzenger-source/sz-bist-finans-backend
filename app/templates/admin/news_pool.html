@@ -1,0 +1,129 @@
+{% extends "admin/base.html" %}
+{% block title %}Haber Havuzu — Manuel Tweet{% endblock %}
+{% block content %}
+
+<div class="mb-6">
+  <h1 class="text-2xl font-bold mb-2">📰 Haber Havuzu — Son {{ cutoff_hours }} Saat</h1>
+  <p class="text-gray-400 text-sm">
+    Sadece pozitif (skor ≥ 6.0) ve negatif (skor ≤ 4.0) haberler — Nötr/Hafif olanlar gizli.
+    Tweetle butonuna basildiginda KAP bildirim formatinda anlik paylasilir (4 haberden 1 kurali UYGULANMAZ).
+  </p>
+
+  {% if status == "tweet_basarili" %}
+    <div class="mt-3 bg-green-900/40 border border-green-700 text-green-200 px-4 py-2 rounded">
+      ✅ Tweet basariyla atildi.
+    </div>
+  {% elif status == "tweet_hatasi" %}
+    <div class="mt-3 bg-red-900/40 border border-red-700 text-red-200 px-4 py-2 rounded">
+      ❌ Tweet atilirken hata olustu. Render loglarini kontrol et.
+    </div>
+  {% elif status == "notfound" %}
+    <div class="mt-3 bg-yellow-900/40 border border-yellow-700 text-yellow-200 px-4 py-2 rounded">
+      ⚠️ Haber bulunamadi.
+    </div>
+  {% endif %}
+</div>
+
+<!-- POZITIF HABERLER -->
+<div class="mb-10">
+  <h2 class="text-xl font-semibold mb-3 text-green-400">
+    🟢 Pozitif Haberler ({{ positives|length }})
+  </h2>
+  {% if positives %}
+    <div class="space-y-3">
+      {% for row in positives %}
+      <div class="bg-gray-800 border border-green-700/40 rounded-lg p-4 shadow">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="font-mono font-bold text-green-300">#{{ row.company_code }}</span>
+              <span class="text-xs bg-green-700/50 text-green-100 px-2 py-0.5 rounded">
+                AI: {{ "%.1f"|format(row.ai_impact_score) }}/10
+              </span>
+              {% if row.ai_sentiment %}
+              <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                {{ row.ai_sentiment }}
+              </span>
+              {% endif %}
+              <span class="text-xs text-gray-500">
+                {{ (row.published_at or row.created_at).strftime("%H:%M") }}
+              </span>
+            </div>
+            <p class="text-sm text-gray-100 font-medium mb-1">{{ row.title }}</p>
+            {% if row.ai_summary %}
+            <p class="text-xs text-gray-400 line-clamp-3">{{ row.ai_summary[:300] }}{% if row.ai_summary|length > 300 %}...{% endif %}</p>
+            {% endif %}
+            {% if row.kap_url %}
+            <a href="{{ row.kap_url }}" target="_blank" class="text-xs text-blue-400 hover:underline mt-1 inline-block">
+              🔗 KAP linki
+            </a>
+            {% endif %}
+          </div>
+          <form method="post" action="/admin/news-pool/{{ row.id }}/tweet" class="shrink-0"
+                onsubmit="return confirm('Bu haberi tweetlemek istedigine emin misin?\n\n#{{ row.company_code }} — {{ row.title[:80] }}');">
+            <button type="submit"
+                    class="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded transition">
+              🐦 Tweetle
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-gray-500 text-sm italic">Son {{ cutoff_hours }} saatte pozitif haber yok.</p>
+  {% endif %}
+</div>
+
+<!-- NEGATIF HABERLER -->
+<div>
+  <h2 class="text-xl font-semibold mb-3 text-red-400">
+    🔴 Negatif Haberler ({{ negatives|length }})
+  </h2>
+  {% if negatives %}
+    <div class="space-y-3">
+      {% for row in negatives %}
+      <div class="bg-gray-800 border border-red-700/40 rounded-lg p-4 shadow">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <span class="font-mono font-bold text-red-300">#{{ row.company_code }}</span>
+              <span class="text-xs bg-red-700/50 text-red-100 px-2 py-0.5 rounded">
+                AI: {{ "%.1f"|format(row.ai_impact_score) }}/10
+              </span>
+              {% if row.ai_sentiment %}
+              <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                {{ row.ai_sentiment }}
+              </span>
+              {% endif %}
+              <span class="text-xs text-gray-500">
+                {{ (row.published_at or row.created_at).strftime("%H:%M") }}
+              </span>
+            </div>
+            <p class="text-sm text-gray-100 font-medium mb-1">{{ row.title }}</p>
+            {% if row.ai_summary %}
+            <p class="text-xs text-gray-400 line-clamp-3">{{ row.ai_summary[:300] }}{% if row.ai_summary|length > 300 %}...{% endif %}</p>
+            {% endif %}
+            {% if row.kap_url %}
+            <a href="{{ row.kap_url }}" target="_blank" class="text-xs text-blue-400 hover:underline mt-1 inline-block">
+              🔗 KAP linki
+            </a>
+            {% endif %}
+          </div>
+          <form method="post" action="/admin/news-pool/{{ row.id }}/tweet" class="shrink-0"
+                onsubmit="return confirm('Bu NEGATIF haberi tweetlemek istedigine emin misin?\n\n#{{ row.company_code }} — {{ row.title[:80] }}');">
+            <button type="submit"
+                    class="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded transition">
+              🐦 Tweetle
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-gray-500 text-sm italic">Son {{ cutoff_hours }} saatte negatif haber yok.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

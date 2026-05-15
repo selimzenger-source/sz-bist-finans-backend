@@ -1976,6 +1976,7 @@ def tweet_kap_news(
     ai_summary: str | None = None,
     kap_url: str | None = None,
     ai_hashtags: list | None = None,
+    is_manual: bool = False,
 ) -> bool:
     """KAP haberi tweeti — tum hisseler (her 3 haberden 1'i tweetlenir).
 
@@ -2044,10 +2045,16 @@ def tweet_kap_news(
             extra_hashtags = f" {tags}"
 
         # CTA: uygulama indirme yonlendirmesi
-        cta_text = (
-            "Her 4 haberden 1'i gönderilmektedir.\n"
-            f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
-        )
+        # is_manual=True (admin panelden manuel tweet) ise "4 haberden 1" satiri YAZILMAZ.
+        if is_manual:
+            cta_text = (
+                "Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
+            )
+        else:
+            cta_text = (
+                "Her 4 haberden 1'i gönderilmektedir.\n"
+                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
+            )
 
         text = (
             f"{emoji} #{ticker} — Haber Bildirimi\n\n"
