@@ -3390,6 +3390,37 @@ async def admin_check_kap_indexes(request: Request, payload: dict, db: AsyncSess
     return {"indexes": indexes}
 
 
+@app.get("/api/v1/app-version")
+@limiter.limit("60/minute")
+async def get_app_version(request: Request):
+    """Uygulamanın güncel sürüm bilgisi — frontend her açılışta sorgular.
+
+    Frontend cevabı kendi versiyonu ile karşılaştırır:
+      - current < min_required → ZORUNLU update modal (kapatılamaz)
+      - current < latest → ÖNERİLEN update modal (kapatılabilir, cooldown'lu)
+      - current >= latest → hiçbir şey
+
+    Render env var'lar ile kontrol edilir:
+      IOS_MIN_REQUIRED_VERSION, IOS_LATEST_VERSION,
+      ANDROID_MIN_REQUIRED_VERSION, ANDROID_LATEST_VERSION,
+      APP_RELEASE_NOTES
+    """
+    s = get_settings()
+    return {
+        "ios": {
+            "latest": s.IOS_LATEST_VERSION,
+            "min_required": s.IOS_MIN_REQUIRED_VERSION,
+            "store_url": "https://apps.apple.com/app/id6760570446",
+        },
+        "android": {
+            "latest": s.ANDROID_LATEST_VERSION,
+            "min_required": s.ANDROID_MIN_REQUIRED_VERSION,
+            "store_url": "https://play.google.com/store/apps/details?id=com.bistfinans.app",
+        },
+        "release_notes": s.APP_RELEASE_NOTES,
+    }
+
+
 @app.post("/api/v1/admin/reprocess-kap-news")
 @limiter.limit("5/minute")
 async def admin_reprocess_kap_news(

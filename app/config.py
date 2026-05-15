@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     KAP_POSITIVE_BOT_TOKEN: str = ""
     KAP_POSITIVE_CHAT_ID: str = ""
 
+    # Uygulama sürüm yönetimi — frontend her açılışta sorar
+    # Bu altındaki sürümler force update modal görür (kapatılamaz)
+    IOS_MIN_REQUIRED_VERSION: str = "2.9.5"
+    IOS_LATEST_VERSION: str = "3.0.0"
+    ANDROID_MIN_REQUIRED_VERSION: str = "2.9.5"
+    ANDROID_LATEST_VERSION: str = "3.0.0"
+    APP_RELEASE_NOTES: str = "9 kategorili AI puan sistemi · Kişisel bildirim filtresi · Resmi tedbirli hisse listesi · Hata düzeltmeleri"
+
     # RevenueCat webhook dogrulama
     REVENUECAT_WEBHOOK_SECRET: str = ""
 
