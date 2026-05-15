@@ -10017,12 +10017,15 @@ async def admin_backfill_cautious_stocks(request: Request, payload: dict = Body(
 async def admin_seed_ipo_poll_votes(request: Request, payload: dict = Body(...)):
     """Admin: Bir IPO için sahte oy ekle (test/demo için).
 
-    Body: {
-      "admin_password": "...",
-      "ipo_id": 47,
-      "participate": 11,
-      "skip": 3,
+    Body (hype): {
+      "admin_password": "...", "ipo_id": 47,
+      "participate": 11, "skip": 3, "undecided": 2,
       "phase": "hype"
+    }
+    Body (ceiling): {
+      "admin_password": "...", "ipo_id": 47,
+      "phase": "ceiling",
+      "ceiling_votes": {"8": 3, "5": 1, "11": 2}  // tavan_sayisi: oy_sayisi
     }
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
@@ -10032,29 +10035,47 @@ async def admin_seed_ipo_poll_votes(request: Request, payload: dict = Body(...))
     import uuid as _uuid
 
     ipo_id = int(payload.get("ipo_id", 0))
-    participate = int(payload.get("participate", 0))
-    skip = int(payload.get("skip", 0))
     phase = payload.get("phase", "hype")
 
     if ipo_id <= 0:
         return {"status": "error", "message": "ipo_id gerekli"}
 
+    added: dict[str, int] = {}
+
     async for db in get_db():
-        added = {"participate": 0, "skip": 0}
-        for choice, count in [("participate", participate), ("skip", skip)]:
-            for _ in range(count):
-                fake_device = f"seed-{_uuid.uuid4().hex[:24]}"
-                vote = IPOPollVote(
-                    ipo_id=ipo_id,
-                    phase=phase,
-                    choice=choice,
-                    device_id=fake_device,
-                    ip_address=None,
-                )
-                db.add(vote)
-                added[choice] += 1
+        if phase == "ceiling":
+            ceiling_votes = payload.get("ceiling_votes") or {}
+            if not isinstance(ceiling_votes, dict):
+                return {"status": "error", "message": "ceiling_votes dict olmali"}
+            for ceil_val, count in ceiling_votes.items():
+                choice = str(ceil_val).strip()
+                try:
+                    n = int(count)
+                except (TypeError, ValueError):
+                    continue
+                for _ in range(n):
+                    fake_device = f"seed-{_uuid.uuid4().hex[:24]}"
+                    vote = IPOPollVote(
+                        ipo_id=ipo_id, phase="ceiling", choice=choice,
+                        device_id=fake_device, ip_address=None,
+                    )
+                    db.add(vote)
+                    added[choice] = added.get(choice, 0) + 1
+        else:
+            participate = int(payload.get("participate", 0))
+            skip = int(payload.get("skip", 0))
+            undecided = int(payload.get("undecided", 0))
+            for choice, count in [("participate", participate), ("skip", skip), ("undecided", undecided)]:
+                for _ in range(count):
+                    fake_device = f"seed-{_uuid.uuid4().hex[:24]}"
+                    vote = IPOPollVote(
+                        ipo_id=ipo_id, phase=phase, choice=choice,
+                        device_id=fake_device, ip_address=None,
+                    )
+                    db.add(vote)
+                    added[choice] = added.get(choice, 0) + 1
         await db.commit()
-        return {"status": "ok", "ipo_id": ipo_id, "added": added}
+        return {"status": "ok", "ipo_id": ipo_id, "phase": phase, "added": added}
 
 
 @app.post("/api/v1/admin/backfill-payment-announcements")
