@@ -691,6 +691,25 @@ async def _check_spk_bulletins_inner():
                 bno = bulletin["bulletin_no"]
                 bno_str_val = bulletin_no_str(*bno)
 
+                # ★ CRITICAL FIX: Bulten numarasini HEMEN, herhangi bir tweet/push'tan
+                # ONCE kaydet. Boylece scraper crash/restart olursa veya bir asama
+                # patlarsa, bir sonraki run AYNI BULTENI TEKRAR ISLEMEZ.
+                # Eskiden bu satir loop sonunda idi -> her crash'te tweet duplicate.
+                if highest_no is None or is_newer(bno, highest_no):
+                    highest_no = bno
+                    try:
+                        await _save_last_bulletin_no(db, highest_no)
+                        await db.commit()
+                        logger.info(
+                            "SPK bulten no ERKEN kaydedildi (idempotent): %s",
+                            bulletin_no_str(*highest_no),
+                        )
+                    except Exception as _save_err:
+                        logger.error(
+                            "SPK bulten no kaydedilemedi: %s - %s",
+                            bulletin_no_str(*highest_no), _save_err,
+                        )
+
                 approvals, full_bulletin_text = await scraper.process_bulletin(
                     bulletin["pdf_url"], bno,
                 )
@@ -955,13 +974,9 @@ async def _check_spk_bulletins_inner():
                 except Exception as _ci_err:
                     logger.warning("SPK Bulten cap_inc state machine hata: %s", _ci_err)
 
-                # Bulten numarasini HEMEN guncelle — tweet/analiz basarisiz olsa bile
-                # bir sonraki calistirmada ayni bulteni tekrar islemesin
-                if highest_no is None or is_newer(bno, highest_no):
-                    highest_no = bno
-                    await _save_last_bulletin_no(db, highest_no)
-                    await db.commit()
-                    logger.info("SPK bulten no guncellendi: %s", bulletin_no_str(*highest_no))
+                # NOT: bulten_no zaten LOOP BASINDA kaydedildi (idempotent guvence).
+                # Burada tekrar kaydetmiyoruz — eski duplicate save sebebiydi.
+                pass
 
             logger.info(
                 "SPK Monitor tamamlandi: %d bulten, %d onay, son=%s",
