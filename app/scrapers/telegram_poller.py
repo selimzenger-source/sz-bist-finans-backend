@@ -1212,8 +1212,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _db_count = _db_count_result.scalar() or 0
                             if _db_count > 0:
                                 # DB'de bugun kac KAP tweet atilmis → sayaci oradan devam ettir
-                                # Her tweet = 5 haber (1., 6., 11. ...) → toplam haber ≈ tweet * 5
-                                _kap_tweet_counter["total"] = _db_count * 5
+                                # Her tweet = 4 haber (1., 5., 9. ...) → toplam haber ≈ tweet * 4
+                                _kap_tweet_counter["total"] = _db_count * 4
                                 logger.info(
                                     "[TWEET-FLOW] Sayac DB'den yuklendi: bugun %d KAP tweet atilmis → sayac=%d",
                                     _db_count, _kap_tweet_counter["total"],
@@ -1221,11 +1221,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Her 5 haberden 1'ini tweetle (spam koruması — Twitter rate limit)
+                    # Her 4 haberden 1'ini tweetle (spam koruması — Twitter rate limit)
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
 
-                    if _counter_val % 5 == 1:  # 1., 6., 11., 16. ... haber tweet atilir
+                    if _counter_val % 4 == 1:  # 1., 5., 9., 13. ... haber tweet atilir
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"

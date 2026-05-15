@@ -2038,7 +2038,7 @@ def tweet_kap_news(
 
         # CTA: uygulama indirme yonlendirmesi
         cta_text = (
-            "Her 3 haberden 1'i gönderilmektedir.\n"
+            "Her 4 haberden 1'i gönderilmektedir.\n"
             f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
         )
 
