@@ -285,6 +285,7 @@ async def _send_telegram_report(
         "halka-arz": "Halka Arz",
         "ai-haberler": "KAP Haberler",
         "ayarlar": "Ayarlar",
+        "store": "Mağaza (Güncelleme)",
     }
 
     msg = (
