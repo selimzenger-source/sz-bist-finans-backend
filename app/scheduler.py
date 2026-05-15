@@ -5,7 +5,7 @@
 3. SPK Bulten Monitor: 21:00-03:00 TR her 1 dk, 03:00-08:00 TR her 5 dk
 4. SPK Basvuru Listesi: gunluk 08:00 (SPKApplication tablosuna)
 5. HalkArz + Gedik: her 2 saatte bir
-6. Telegram Poller: her 5 saniyede bir
+6. Telegram Poller: seans ici 3sn / seans disi 15sn
 7. IPO Durum Guncelleme: her saat (5 bolumlu status gecisleri)
 8. 25 Is Gunu Arsiv + Tweet: her gun 12:00 TR (UTC 09:00)
 9. Hatirlatma Zamani Kontrol: her 15 dakika
@@ -719,8 +719,33 @@ async def check_viop_notifications():
         logger.error("VİOP bildirim kontrol hatasi: %s", e)
 
 
+_telegram_last_run_ts: float = 0.0
+
+
+def _telegram_poll_interval_sec() -> int:
+    """Su anki interval — hafta ici 10:00-18:00 TR seans icindeyse 3sn, disinda 15sn."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    now_tr = _dt.now(_tz(_td(hours=3)))
+    if now_tr.weekday() < 5 and 10 <= now_tr.hour < 18:
+        return 3
+    return 15
+
+
 async def poll_telegram_job():
-    """Telegram kanalindan mesajlari ceker ve DB'ye yazar."""
+    """Telegram kanalindan mesajlari ceker ve DB'ye yazar.
+
+    Scheduler her 3sn'de bir cagiriyor ama seans dısında 15sn'ye dusurulur
+    (gereksiz API cagrilari sistemi yormasin diye).
+    """
+    import time as _t
+    global _telegram_last_run_ts
+
+    interval = _telegram_poll_interval_sec()
+    now = _t.time()
+    if (now - _telegram_last_run_ts) < (interval - 0.5):  # 0.5sn tolerans
+        return  # Bu tick'i atla
+    _telegram_last_run_ts = now
+
     try:
         from app.scrapers.telegram_poller import poll_telegram
         await poll_telegram()
@@ -4189,12 +4214,14 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
-    # 6. Telegram Poller — her 5 saniyede bir
+    # 6. Telegram Poller — scheduler 3sn'de tetikler, job icinde dinamik gate:
+    #    Hafta ici 10:00-18:00 TR seans ici: 3sn (her tick calisir)
+    #    Disinda (seans disi, hafta sonu): 15sn (5 tick'te 1 calisir)
     # max_instances=1: APScheduler ayni anda sadece 1 instance calistirir
     # Ek olarak telegram_poller.py icinde asyncio.Lock koruması var
     scheduler.add_job(
         poll_telegram_job,
-        IntervalTrigger(seconds=5),
+        IntervalTrigger(seconds=3),
         id="telegram_poller",
         name="Telegram Kanal Poller",
         replace_existing=True,
