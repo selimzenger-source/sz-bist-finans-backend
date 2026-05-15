@@ -441,110 +441,110 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     (
         r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama|pay\s*bazinda\s*devre\s*kesici",
         "Devre Kesici",
-        "Borsa Istanbul, hissede yasanan ani ve yuksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasinin devreye girdigini bildirmistir. Bu bildirim sirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlik yuksek volatiliteyi kontrol altina almayi amaclayan standart bir borsa mekanizmasidir. Yatirimci acisindan dogrudan pozitif veya negatif etkisi bulunmaz.",
+        "Borsa İstanbul, hissede yaşanan ani ve yüksek fiyat hareketi nedeniyle Pay Bazinda Devre Kesici uygulamasının devreye girdiğini bildirmiştir. Bu bildirim şirketin temel faaliyetleriyle ilgili bir gelisme olmayip, hisse senedinde anlık yuksek volatiliteyi kontrol altına almayı amaçlayan standart bir borsa mekanizmasıdır. Yatırımcı açısından doğrudan pozitif veya negatif etkisi bulunmaz.",
         ["devrekesici"],
     ),
     (
         r"bistech.*pay\s*piyasasi|merkezi\s*kayit\s*kurulusu\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
         "BISTECH/MKK/Takasbank Duyurusu",
-        "Bu duyuru Borsa Istanbul/MKK'nin teknik bir bildirimi olup, temettu/bedelsiz/bolunme miktari zaten onceden ilan edilmistir. Sadece ex-div gunu veya kayit tescili niteliginde olup hisse fiyatina ek pozitif etki beklenmez.",
+        "Bu duyuru Borsa İstanbul/MKK'nin teknik bir bildirimi olup, temettü/bedelsiz/bölünme miktarı zaten önceden ilan edilmiştir. Sadece ex-div günü veya kayıt tescili niteliğinde olup hisse fiyatına ek pozitif etki beklenmez.",
         ["bistech"],
     ),
     # --- IDARI / USUL BILDIRIMLERI (sirket icin sifir mali etki) ---
     (
         r"sorumluluk\s*beyani",
         "Sorumluluk Beyani",
-        "Sorumluluk beyani, finansal raporlarin dogrulugu konusunda yonetim kurulu ve mali isler sorumlusunun verdigi standart imza beyanidir. Idari/usul bildirimi olup hisse fiyatina dogrudan etkisi beklenmemektedir.",
+        "Sorumluluk beyanı, finansal raporların doğruluğu konusunda yönetim kurulu ve mali işler sorumlusunun verdiği standart imza beyanıdır. İdari/usul bildirimi olup hisse fiyatına doğrudan etkisi beklenmemektedir.",
         ["bilgilendirme"],
     ),
     (
         r"faaliyet\s*raporu(?!\s*hakkinda)",
         "Faaliyet Raporu",
-        "Yillik veya donemsel faaliyet raporunun yayinlandigi bildirimi. Rapor icerigi onceden bilinen finansal verileri yansitir; rakamlar ayrica aciklanmadigi surece fiyata yeni bilgi katmaz.",
+        "Yıllık veya dönemsel faaliyet raporunun yayınlandığı bildirimi. Rapor içeriği önceden bilinen finansal verileri yansıtır; rakamlar ayrıca açıklanmadığı sürece fiyata yeni bilgi katmaz.",
         ["faaliyetraporu"],
     ),
     (
         r"genel\s*kurul\s*(cagrisi|ilan|davet|toplant[ıi]\s*cagrisi)",
         "Genel Kurul Cagrisi",
-        "Genel Kurul cagri/ilan bildirimi. Toplanti gundeminde temettu/bedelsiz/sermaye artirimi gibi spesifik kararlar varsa ayri bir bildirimde aciklanir. Bu sadece cagri/davet niteliginde, fiyata dogrudan etkisi yoktur.",
+        "Genel Kurul çağrı/ilan bildirimi. Toplantı gündeminde temettü/bedelsiz/sermaye artırımı gibi spesifik kararlar varsa ayrı bir bildirimde açıklanır. Bu sadece çağrı/davet niteliğinde, fiyata doğrudan etkisi yoktur.",
         ["genelkurul"],
     ),
     (
         r"genel\s*kurul\s*(toplanti\s*sonuc|sonuc\s*bildirim|tutanak)",
         "Genel Kurul Sonuc",
-        "Genel Kurul toplanti sonuc bildirimi. Onaylanan kararlar onceden gundeme alinmis ve ayrica aciklanmistir. Bu bildirim sadece formal tescil niteliginde olup yeni bir karar icermiyorsa fiyata etkisi sinirlidir.",
+        "Genel Kurul toplantı sonuç bildirimi. Onaylanan kararlar önceden gündeme alınmış ve ayrıca açıklanmıştır. Bu bildirim sadece formal tescil niteliğinde olup yeni bir karar içermiyorsa fiyata etkisi sınırlıdır.",
         ["genelkurul"],
     ),
     (
         r"esas\s*sozlesme(\s*tadil|degis)",
         "Esas Sozlesme Tadili",
-        "Esas sozlesme degisikligi bildirimi. Genellikle SPK uyumlulugu/kurumsal yonetim ilkeleri kapsaminda yapilan teknik duzenleme olup, sirket faaliyetleri veya finansal yapida acik bir degisim yaratmadigi surece fiyata dogrudan etkisi beklenmez.",
+        "Esas sözleşme değişikliği bildirimi. Genellikle SPK uyumluluğu/kurumsal yönetim ilkeleri kapsamında yapılan teknik düzenleme olup, şirket faaliyetleri veya finansal yapıda açık bir değişim yaratmadığı sürece fiyata doğrudan etkisi beklenmez.",
         ["esassozlesme"],
     ),
     (
         r"imza\s*sirkuleri|temsil\s*ve\s*ilzam",
         "Imza Sirkuleri",
-        "Yonetim kurulu imza yetkilerinin guncellenmesine iliskin formal bildirim. Tamamen idari/hukuki nitelikli olup sirket faaliyetleri ve fiyat uzerinde dogrudan etkisi yoktur.",
+        "Yönetim kurulu imza yetkilerinin güncellenmesine ilişkin formal bildirim. Tamamen idari/hukuki nitelikli olup şirket faaliyetleri ve fiyat üzerinde doğrudan etkisi yoktur.",
         ["yonetim"],
     ),
     (
         r"sirket\s*genel\s*bilgi\s*formu",
         "Genel Bilgi Formu",
-        "SPK mevzuati geregi periyodik olarak guncellenen sirket bilgi formu. Yeni stratejik karar veya finansal bilgi icermedikce hisse fiyatina yansiyacak bir bilgi tasimaz.",
+        "SPK mevzuatı gereği periyodik olarak güncellenen şirket bilgi formu. Yeni stratejik karar veya finansal bilgi içermedikçe hisse fiyatına yansıyacak bir bilgi taşımaz.",
         ["bilgilendirme"],
     ),
     (
         r"yonetim\s*kurulu(nun)?\s*(komite\s*atama|komite\s*olusum|alt\s*komite)",
         "Yonetim Kurulu Komite",
-        "Yonetim kurulu denetim/risk/kurumsal yonetim komitelerinin atama ve yeniden yapilandirma bildirimi. Standart kurumsal yonetim islemi olup fiyata etkisi yoktur.",
+        "Yönetim kurulu denetim/risk/kurumsal yönetim komitelerinin atama ve yeniden yapılandırma bildirimi. Standart kurumsal yönetim işlemi olup fiyata etkisi yoktur.",
         ["yonetim"],
     ),
     (
         r"kurumsal\s*yonetim\s*uyum\s*raporu|kurumsal\s*yonetim\s*ilkeleri",
         "Kurumsal Yonetim Uyum",
-        "Kurumsal yonetim ilkelerine uyum raporunun yayinlandigi standart bildirimi. Rapor icerigi sirket faaliyetlerini etkilemez, sadece formel uyum amaclidir.",
+        "Kurumsal yönetim ilkelerine uyum raporunun yayınlandığı standart bildirimi. Rapor içeriği şirket faaliyetlerini etkilemez, sadece formel uyum amaçlıdır.",
         ["kurumsalyonetim"],
     ),
     (
         r"yatirimci\s*sunumu|investor\s*presentation",
         "Yatirimci Sunumu",
-        "Yatirimci sunumunun KAP'ta yayinlandigi bildirim. Sunum genellikle onceden aciklanmis finansal sonuc ve stratejiyi ozetler; yeni bir karar icermedigi surece fiyata bilgi katmaz.",
+        "Yatırımcı sunumunun KAP'ta yayınlandığı bildirim. Sunum genellikle önceden açıklanmış finansal sonuç ve stratejiyi özetler; yeni bir karar içermediği sürece fiyata bilgi katmaz.",
         ["bilgilendirme"],
     ),
     (
         r"bagimsiz\s*denetim\s*kurulusu\s*sec|denetim\s*sirketi\s*sec|denetci\s*sec",
         "Bagimsiz Denetim Secimi",
-        "Bagimsiz denetim kurulusu secimi/atama bildirimi. Standart yillik mevzuat geregi olup sirket fundamentals'ina etkisi yoktur.",
+        "Bağımsız denetim kuruluşu seçimi/atama bildirimi. Standart yıllık mevzuat gereği olup şirket fundamentals'ina etkisi yoktur.",
         ["bilgilendirme"],
     ),
     (
         r"finansal\s*raporlar?in?\s*sunumu|finansal\s*tablolar?in?\s*sunumu",
         "Finansal Rapor Sunumu",
-        "Periyodik finansal raporlarin SPK formatinda sunumuna iliskin bildirimi. Rakamlar onceden aciklanmis ana finansal verileri tekrar eder; yeni bilgi katmaz.",
+        "Periyodik finansal raporların SPK formatında sunumuna ilişkin bildirimi. Rakamlar önceden açıklanmış ana finansal verileri tekrar eder; yeni bilgi katmaz.",
         ["faaliyetraporu"],
     ),
     (
         r"ortaklik\s*yapisi(?!\s*degis)|sermaye\s*ve\s*ortaklik\s*yapisi(?!\s*degis)",
         "Ortaklik Yapisi Bildirimi",
-        "Sirket ortaklik yapisinin periyodik veya guncel halini gosteren formel bildirim. Yeni bir hissedar degisikligi/satim yoksa fiyata etkisi yoktur.",
+        "Şirket ortaklık yapısının periyodik veya güncel halini gösteren formel bildirim. Yeni bir hissedar değişikliği/satım yoksa fiyata etkisi yoktur.",
         ["bilgilendirme"],
     ),
     (
         r"kar\s*payi\s*dagitim\s*tablosu(?!\s*kararla|\s*kararl)",
         "Kar Payi Dagitim Tablosu",
-        "Kar payi dagitim tablosunun SPK formatinda yayinlandigi formel bildirim. Dagitilacak temettu miktari ayrica yonetim kurulu karari ile aciklanir.",
+        "Kar payı dağıtım tablosunun SPK formatında yayınlandığı formel bildirim. Dağıtılacak temettü miktarı ayrıca yönetim kurulu kararı ile açıklanır.",
         ["temettu"],
     ),
     (
         r"kayitli\s*sermaye\s*tavani\s*(arttirim|yukseltil|degis)",
         "Kayitli Sermaye Tavani",
-        "Sirketin kayitli sermaye tavaninin yukseltilmesi/uzatilmasi bildirimi. Bu yalnizca SPK iznidir; fiili sermaye artirimi (bedelli/bedelsiz) degildir, ayrica yapilirsa o zaman aciklanir.",
+        "Şirketin kayıtlı sermaye tavanının yükseltilmesi/uzatılması bildirimi. Bu yalnızca SPK iznidir; fiili sermaye artırımı (bedelli/bedelsiz) değildir, ayrıca yapılırsa o zaman açıklanır.",
         ["sermayetavani"],
     ),
     (
         r"sermaye\s*piyasasi\s*araci\s*notu|izahname\s*onayi(?!\s*halka\s*arz)",
         "Sermaye Piyasasi Araci Notu",
-        "Sermaye piyasasi araci notu/izahname onayi bildirimi. Standart prosedur olup bagimsiz ek bilgi katmadan sadece hukuki formaliteyi belgeler.",
+        "Sermaye piyasası aracı notu/izahname onayı bildirimi. Standart prosedür olup bağımsız ek bilgi katmadan sadece hukuki formaliteyi belgeler.",
         ["bilgilendirme"],
     ),
 
@@ -557,21 +557,21 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"temettu\s*odeme\s*tarihi|temettu\s*odeme\s*bildirim|"
         r"pay\s*basina\s*brut\s*temettu(?!.*onayland|.*karar)",
         "Temettu Odeme Prosedur",
-        "Onceden Genel Kurul'da onaylanmis temettu dagitiminin odeme tarihi/teknik bildirimi. Yeni bir karar olmayip yalnizca duyurusu yapilan miktar ve tarihin tescili niteliginde. Hisse fiyati ilk karar aciklandiginda fiyatlandi; bu bildirimle ek pozitif etki beklenmez.",
+        "Önceden Genel Kurul'da onaylanmış temettü dağıtımının ödeme tarihi/teknik bildirimi. Yeni bir karar olmayıp yalnızca duyurusu yapılan miktar ve tarihin tescili niteliğinde. Hisse fiyatı ilk karar açıklandığında fiyatlandı; bu bildirimle ek pozitif etki beklenmez.",
         ["temettu"],
     ),
     (
         r"hak\s*kullan[ıi]m(?:\s*tarihi|\s*surec)|temettu\s*hak\s*kazanim|"
         r"ex.?(?:dividend|date)|ex.?temettu",
         "Hak Kullanim Tarihi",
-        "Hak kullanim/ex-temettu tarih bildirimi. Bu tarihte hisseyi elinde tutan yatirimcilar temettu hak sahibi olur — teknik tescil bildirimi olup ilk karar zaten onceden ilan edildiginden fiyata yeni etki katmaz.",
+        "Hak kullanım/ex-temettü tarih bildirimi. Bu tarihte hisseyi elinde tutan yatırımcılar temettü hak sahibi olur — teknik tescil bildirimi olup ilk karar zaten önceden ilan edildiğinden fiyata yeni etki katmaz.",
         ["temettu"],
     ),
     (
         r"kar\s*pay[ıi]\s*dag[ıi]tim\s*(?:tescil|gerceklesti|tamamland)|"
         r"temettu\s*dag[ıi]tim[ıi]\s*(?:tescil|gerceklesti|tamamland)",
         "Temettu Dagitim Tamamlandi",
-        "Temettu dagitiminin tamamlandigi/tescil edildigi bildirimi. Tamamen prosedurel bir adim olup miktar ve tarih onceden ilan edilmistir. Hisse fiyatina yeni etki yaratmaz.",
+        "Temettü dağıtımının tamamlandığı/tescil edildiği bildirimi. Tamamen prosedürel bir adım olup miktar ve tarih önceden ilan edilmiştir. Hisse fiyatına yeni etki yaratmaz.",
         ["temettu"],
     ),
 
@@ -584,7 +584,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*(?:tescil|tamamland|gerceklesti)|"
         r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*(?:islemleri\s*)?ticaret\s*sicil",
         "Sermaye Artirimi Tescil",
-        "Onceden karar verilmis sermaye artiriminin Ticaret Sicili'nde tescili/tamamlanmasi bildirimi. Karar ve oran onceden aciklandiginda fiyat zaten reaksiyon verdi — bu bildirim teknik tescil adimi olup yeni etki yaratmaz.",
+        "Önceden karar verilmiş sermaye artırımının Ticaret Sicili'nde tescili/tamamlanması bildirimi. Karar ve oran önceden açıklandığında fiyat zaten reaksiyon verdi — bu bildirim teknik tescil adımı olup yeni etki yaratmaz.",
         ["sermayeartirimi"],
     ),
     (
@@ -592,28 +592,28 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"spk\s*(?:tarafindan\s*)?ihrac\s*belgesi|"
         r"bedelli.*ihrac\s*belge|bedelsiz.*ihrac\s*belge",
         "Ihrac Belgesi SPK Onayi",
-        "Onceden duyurulan sermaye artiriminin SPK ihrac belgesinin onayi/teslimi. Ilk karar duyurusunda fiyat zaten reaksiyon verdi. Bu adim sadece sirketin SPK izniyle ihraci baslatabilecegini gosterir, yeni stratejik bilgi katmaz.",
+        "Önceden duyurulan sermaye artırımının SPK ihraç belgesinin onayı/teslimi. İlk karar duyurusunda fiyat zaten reaksiyon verdi. Bu adım sadece şirketin SPK izniyle ihracı başlatabileceğini gösterir, yeni stratejik bilgi katmaz.",
         ["sermayeartirimi"],
     ),
     (
         r"r[uü][cç]han\s*hakk[ıi]\s*kullan[ıi]m\s*(?:suresi|tarihi|baslang|bitis|baslad)|"
         r"r[uü][cç]han\s*hakk[ıi]\s*(?:satis|alimi)\s*baslad",
         "Ruchan Hakki Kullanim Donemi",
-        "Onceden ilan edilmis bedelli sermaye artiriminin ruçhan hakki kullanim suresi bildirimi. Ilk karar duyurusunda fiyat reaksiyon verdi (negatif), bu sadece kullanim periyodu tescili. Yatirimci icin yeni bilgi katmaz.",
+        "Önceden ilan edilmiş bedelli sermaye artırımının rüçhan hakkı kullanım süresi bildirimi. İlk karar duyurusunda fiyat reaksiyon verdi (negatif), bu sadece kullanım periyodu tescili. Yatırımcı için yeni bilgi katmaz.",
         ["bedelli"],
     ),
     (
         r"bedelsiz\s*pay\s*(?:dag[ıi]t[ıi]m[ıi])?\s*(?:tarihinin\s*tescil|tescil|gerceklesti|tamamland)|"
         r"bedelsiz\s*pay\s*dagit[ıi]m[ıi]?\s*tarih",
         "Bedelsiz Pay Dagitim Tescili",
-        "Onceden duyurulmus bedelsiz sermaye artiriminin pay dagitim tarihinin tescili/uygulamasi. Oran ve karar ilk bildirimi takiben fiyatlandi — bu adim sadece teknik kayit niteliginde olup yeni reaksiyon beklenmez.",
+        "Önceden duyurulmuş bedelsiz sermaye artırımının pay dağıtım tarihinin tescili/uygulaması. Oran ve karar ilk bildirimi takiben fiyatlandı — bu adım sadece teknik kayıt niteliğinde olup yeni reaksiyon beklenmez.",
         ["bedelsiz"],
     ),
     (
         r"sermaye\s*art[ıi]r[ıi]m[ıi]\s*tutar(?:in)?\s*tahsilat|"
         r"bedelli\s*sermaye\s*art[ıi]r[ıi]m[ıi]\s*nakit\s*girisi",
         "Bedelli Tahsilat",
-        "Bedelli sermaye artirimi sonucu sirkete nakit girisi tescili. Bu prosedurel bir kapanis bildirimidir; finansman amaci ilk karar duyurusundan beri biliniyordu.",
+        "Bedelli sermaye artırımı sonucu şirkete nakit girişi tescili. Bu prosedürel bir kapanış bildiridir; finansman amacı ilk karar duyurusundan beri biliniyordu.",
         ["bedelli"],
     ),
 
@@ -623,9 +623,76 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     (
         r"pay\s*geri\s*alim\s*program(?:in|i)\s*(?:cerceves|kapsam)|"
         r"geri\s*al[ıi]m\s*program[ıi]\s*kapsam[ıi]nda(?!.*ilk|.*baslangic)",
-        "Pay Geri Alim Gunluk Islem",
-        "Onceden duyurulmus pay geri alim programinin gunluk uygulama bildirimi. Buyuk tutarli ve son alim sirketin guvenini gostermesi haricinde, kucuk gunluk islemler artik fiyata yansidi.",
+        "Pay Geri Alım Günlük İşlem",
+        "Önceden duyurulmuş pay geri alım programının günlük uygulama bildirimi. Büyük tutarlı ve son alım şirketin güvenini göstermesi haricinde, küçük günlük işlemler artık fiyata yansıdı.",
         ["paygerialim"],
+    ),
+
+    # --- YENI EKLENEN PATTERN'LAR (son 30 gun analizi sonrasi en sik tekrarlayan Notr basliklar) ---
+
+    # 1. Pay Disinda Sermaye Piyasasi Araci Islemlerine Iliskin Bildirim (Faiz Iceren/Faizsiz)
+    # 19 ornek son 30 gunde. Genelde bono/finansman bonosu/tahvil islem bildirimi — sirket
+    # geliri/kari ile ilgili degil, sadece kayit/teknik islem.
+    (
+        r"pay\s*d[ıi][sş][ıi]nda\s*sermaye\s*piyasas[ıi]\s*arac[ıi]\s*i[sş]lemleri",
+        "Pay Dışında Sermaye Piyasası Aracı İşlemleri",
+        "Pay dışındaki sermaye piyasası aracı (bono, finansman bonosu, tahvil, sukuk) işlem bildirimi. Bu duyuru ihraç/itfa kapsamında teknik kayıt niteliğindedir; şirketin geliri veya kârı ile doğrudan ilgili değildir. Yatırımcı açısından hisse fiyatına etki yaratacak yeni bir bilgi içermez.",
+        ["bilgilendirme"],
+    ),
+
+    # 2. Herhangi Bir Otoriteye Mali Tablo Verilmesi
+    # SPK/EPDK/BDDK gibi otoritelere mali tablo gonderim kaydi. Bilgisel.
+    (
+        r"herhangi\s*bir\s*otoriteye\s*mali\s*tablo|otoriteye\s*finansal\s*tablo",
+        "Otoriteye Mali Tablo Verilmesi",
+        "SPK, BDDK, EPDK gibi düzenleyici otoritelere periyodik mali tablo gönderildiğinin tescili. Tablo içeriği ayrı bildirimle KAP'a yayınlanmadığı sürece yeni bilgi katmaz; tamamen formal/idari bir kayıttır.",
+        ["bilgilendirme"],
+    ),
+
+    # 3. Piyasa Yapiciligi Kapsaminda Gerceklestirilen Islemler
+    # Piyasa yapici (market maker) sirketin gunluk islem raporu. Manipulatif degil — gunluk kayit.
+    (
+        r"piyasa\s*yap[ıi]c[ıi]l[ıi][gğ][ıi]\s*kapsam[ıi]nda|piyasa\s*yap[ıi]c[ıi]s[ıi]\s*i[sş]lem",
+        "Piyasa Yapıcılığı Kapsamında İşlemler",
+        "Piyasa yapıcısı şirketin günlük likidite sağlama amaçlı işlem bildirimi. SPK düzenlemesi gereği şeffaflık amaçlı yapılan rutin kayıt olup şirketin temel faaliyetleri veya kârlılığı ile ilgili değildir.",
+        ["bilgilendirme"],
+    ),
+
+    # 4. KAP Genel Duyurusu (Kamuyu Aydinlatma Platformu Duyurusu)
+    # Mevcut bistech pattern yetersiz — "KAP Duyurusu" basligi ayri olabiliyor.
+    (
+        r"kamuyu\s*ayd[ıi]nlatma\s*platformu\s*duyuru|kap\s*duyuru(?:\s*-\s*\d+)?",
+        "KAP Genel Duyurusu",
+        "Kamuyu Aydınlatma Platformu'nun teknik veya sistem düzeyinde duyurusu. Şirket bazlı bir karar değil, KAP işleyişi ile ilgili bilgilendirme niteliğindedir. Hisse fiyatına doğrudan etkisi bulunmaz.",
+        ["bilgilendirme"],
+    ),
+
+    # 5. Yonetim Kurulu Numarali Toplanti ("4. Yönetim Kurulu-II" gibi)
+    # Periyodik yonetim kurulu toplantilari — gundem ayri bildirimle aciklanir.
+    (
+        r"\d+\.?\s*y[öo]netim\s*kurulu\s*(?:-\s*[iı]+)?(?!\s*karar)",
+        "Numaralı Yönetim Kurulu Toplantısı",
+        "Şirketin periyodik (numaralı) Yönetim Kurulu toplantısı bildirimi. Toplantı gündemindeki spesifik karar varsa ayrı bir KAP bildirimi ile açıklanır. Bu duyuru sadece toplantının yapıldığını teyit eder, finansal etkisi yoktur.",
+        ["yönetim"],
+    ),
+
+    # 6. Ozkaynaklar Degisim Tablosu (mali tablo eki)
+    # Ana finansal tablonun ekidir, ayri analizi gerektirmez.
+    (
+        r"[öo]zkaynaklar\s*de[gğ]i[sş]im\s*tablosu",
+        "Özkaynaklar Değişim Tablosu",
+        "Finansal raporların ekinde yer alan özkaynak hareket tablosunun KAP'a sunumu. Ana finansal sonuçlar (kâr/zarar, gelir tablosu) ayrıca açıklandığı için yeni bilgi katmaz.",
+        ["faaliyetraporu"],
+    ),
+
+    # 7. Tertip Ihrac Belgesi (borclanma araci ihrac — Notr)
+    # Bono/sukuk/finansman bonosu ihrac belgesi. Borc ihraci = gelir/kar degil.
+    (
+        r"tertip\s*ihra[cç]\s*belgesi|borclanma\s*arac[ıi]\s*ihra[cç]|"
+        r"finansman\s*bonosu\s*ihra[cç]|kira\s*sertifikas[ıi]\s*ihra[cç]",
+        "Tertip İhraç Belgesi (Borçlanma)",
+        "Borçlanma aracı (bono, finansman bonosu, sukuk, kira sertifikası) ihraç belgesi bildirimi. Şirket gelir veya kârı değildir — yalnızca finansman ihtiyacını karşılamak için borç ihracı yetkisidir. Borç yükünü artırabilir; hisse fiyatına doğrudan pozitif etkisi beklenmez.",
+        ["borclanma"],
     ),
 ]
 
@@ -1354,7 +1421,7 @@ BISTECH / PAY PIYASASI / MKK / KAP SISTEM DUYURULARI (CRITICAL — neutral 5.0-5
 
   Score: ALWAYS 5.0-5.4 (Nötr). NEVER higher, even if dividend yield is high.
   Summary kisaca aciklamali (3-4 cumle): bu duyuru borsanin/MKK'nin teknik
-  bildirimi olup, temettu/bedelsiz/bolunme miktari ZATEN onceden ilan
+  bildirimi olup, temettü/bedelsiz/bölünme miktarı ZATEN onceden ilan
   edilmistir. Bu yuzden hisse fiyatina ek pozitif etki beklenmemektedir.
 
   Examples:
@@ -1718,13 +1785,22 @@ NOTLAR:
 
     # ── Yedek 1: Anthropic Claude Sonnet 4 (Gemini fail olursa) ──
     # 503 (overloaded) gecici hata — 1 retry yap (2 sn beklemeli).
+    # PROMPT CACHING aktif: 5000+ token system prompt cache'lenir,
+    # 5 dakika icindeki sonraki Claude cagrilarinda %90 input maliyeti tasarrufu.
     if not text and anthropic_key:
         system_content = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
         user_content = messages[-1]["content"] if messages else ""
         _claude_payload = {
             "model": _CLAUDE_MODEL,
             "max_tokens": 4096,
-            "system": system_content,
+            # Prompt caching: system'i dizi yap + cache_control isareti
+            "system": [
+                {
+                    "type": "text",
+                    "text": system_content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             "messages": [{"role": "user", "content": user_content}],
             "temperature": 0.1,
         }
