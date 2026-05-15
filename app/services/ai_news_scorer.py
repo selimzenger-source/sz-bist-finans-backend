@@ -47,7 +47,7 @@ _CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
 # Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-_GEMINI_MODEL = "gemini-2.5-pro"
+_GEMINI_MODEL = "gemini-2.5-flash"  # Pro yerine Flash — KAP scoring icin yeterli, 10x daha ucuz
 
 # Versiyon — deploy dogrulama icin
 _SCORER_VERSION = "v5-research"
@@ -1689,34 +1689,34 @@ NOTLAR:
         "max_tokens": 4096,  # Gemini 2.5 thinking token yiyor
     }
 
-    # ── Birincil: Abacus AI ──
+    # ── Birincil: Gemini 2.5 Flash (~10x ucuz, KAP scoring icin yeterli) ──
     text = None
     provider_used = None
 
-    if api_key:
+    if gemini_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
                 resp = await client.post(
-                    _ABACUS_URL,
+                    _GEMINI_URL,
                     headers={
-                        "Authorization": f"Bearer {api_key}",
+                        "Authorization": f"Bearer {gemini_key}",
                         "Content-Type": "application/json",
                     },
-                    json={**payload_base, "model": _AI_MODEL},
+                    json={**payload_base, "model": _GEMINI_MODEL},
                 )
                 if resp.status_code == 200:
                     data = resp.json()
                     text = data["choices"][0]["message"]["content"].strip()
-                    provider_used = "Abacus"
+                    provider_used = "Gemini-Flash"
                 else:
                     logger.warning(
-                        "AI News Scorer: Abacus HTTP %s (%s) — %s",
+                        "AI News Scorer: Gemini HTTP %s (%s) — %s",
                         resp.status_code, ticker, resp.text[:200],
                     )
         except Exception as e:
-            logger.warning("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
+            logger.warning("AI News Scorer: Gemini hata (%s) — %s", ticker, e)
 
-    # ── Yedek: Anthropic Claude Sonnet 4 (direkt API) ──
+    # ── Yedek 1: Anthropic Claude Sonnet 4 (Gemini fail olursa) ──
     # 503 (overloaded) gecici hata — 1 retry yap (2 sn beklemeli).
     if not text and anthropic_key:
         system_content = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
@@ -1766,29 +1766,29 @@ NOTLAR:
                     continue
                 break
 
-    # ── 3. Yedek: Gemini 2.5 Pro ──
-    if not text and gemini_key:
+    # ── Yedek 2: Abacus RouteLLM (kredi varsa) ──
+    if not text and api_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
                 resp = await client.post(
-                    _GEMINI_URL,
+                    _ABACUS_URL,
                     headers={
-                        "Authorization": f"Bearer {gemini_key}",
+                        "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                     },
-                    json={**payload_base, "model": _GEMINI_MODEL},
+                    json={**payload_base, "model": _AI_MODEL},
                 )
                 if resp.status_code == 200:
                     data = resp.json()
                     text = data["choices"][0]["message"]["content"].strip()
-                    provider_used = "Gemini-Pro"
+                    provider_used = "Abacus"
                 else:
                     logger.error(
-                        "AI News Scorer: Gemini HTTP %s (%s) — %s",
+                        "AI News Scorer: Abacus HTTP %s (%s) — %s",
                         resp.status_code, ticker, resp.text[:200],
                     )
         except Exception as e:
-            logger.error("AI News Scorer: Gemini hata (%s) — %s", ticker, e)
+            logger.error("AI News Scorer: Abacus hata (%s) — %s", ticker, e)
 
     if not text:
         logger.error("AI News Scorer: Tum AI providerlar basarisiz (%s)", ticker)

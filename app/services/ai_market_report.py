@@ -90,9 +90,9 @@ _AI_TIMEOUT = 60  # Daha fazla veri isliyor, daha uzun sure
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-pro"
 
-# Anthropic Claude Sonnet 4 — 3. yedek (direkt API)
+# Anthropic Claude Haiku 4.5 — 3. yedek (Tavan/taban kisa cumle sebep — Sonnet'in 1/4 maliyeti, ayni kalite)
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 # Yahoo Finance ticker'lari
 _MARKET_TICKERS = {
