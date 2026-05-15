@@ -4182,6 +4182,60 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/cleanup-spk-bulten-duplicates")
+@limiter.limit("3/minute")
+async def admin_cleanup_spk_bulten_duplicates(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: SPK bulten analiz tweet'leri pespese duplicate atildiysa temizle.
+
+    Her bulten icin EN ESKI kaydi (id en kucuk) tutar, digerlerini siler.
+    PendingTweet text icinde bulten no'su (orn '2026/29') gectigi icin
+    text uzerinden grup olusturulur.
+
+    Body: {'admin_password': '...'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    import re as _re
+    # tum spk bulten analiz tweet'lerini cek
+    rows = (await db.execute(
+        select(PendingTweet).where(
+            PendingTweet.source.in_(["tweet_spk_bulletin_analysis", "spk_bulten_analiz_flag"]),
+        ).order_by(PendingTweet.id.asc())
+    )).scalars().all()
+
+    # Bulten numarasina gore grup yap (text icindeki YYYY/NN paterninden)
+    groups: dict[str, list] = {}
+    for r in rows:
+        m = _re.search(r"(\d{4})/(\d{1,3})", r.text or "")
+        if not m:
+            continue
+        key = f"{m.group(1)}/{m.group(2)}"
+        groups.setdefault(key, []).append(r)
+
+    deleted = 0
+    kept = 0
+    detail = []
+    for bno, lst in groups.items():
+        if len(lst) <= 1:
+            kept += 1
+            continue
+        # Ilk kaydi tut, gerisini sil
+        keep_row = lst[0]
+        kept += 1
+        for r in lst[1:]:
+            await db.delete(r)
+            deleted += 1
+        detail.append({"bulletin_no": bno, "kept_id": keep_row.id, "deleted_count": len(lst) - 1})
+
+    await db.commit()
+    return {"status": "ok", "deleted": deleted, "kept": kept, "detail": detail}
+
+
 @app.post("/api/v1/admin/cleanup-spk-spam")
 @limiter.limit("5/minute")
 async def admin_cleanup_spk_spam(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
