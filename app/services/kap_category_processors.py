@@ -542,7 +542,13 @@ async def process_cautious(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],
 ) -> Optional[CautiousStock]:
-    if not is_cautious(title):
+    # ★ DEVRE DISI: KAP haberinden tedbir parse edip CautiousStock'a yazmiyoruz artik.
+    # Tek dogru kaynak: BIST resmi CSV (bist_tedbir_csv_scraper). KAP'tan parse
+    # ediliyordu ama AI yanlis ticker'lar (PETKM vb.) ekliyordu. Tedbirli hisseler
+    # listesi sadece resmi CSV'den senkronize edilir.
+    return None
+    # eski mantik asagida — geri acmak istersen yukaridaki return'u kaldir
+    if not is_cautious(title):  # noqa: F841
         return None
 
     parsed = await _call_gemini(_CS_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:3000])) or {}
@@ -643,7 +649,9 @@ async def process_cautious_bistech_multi(
     """BISTECH VBTS bildiriminden body'deki tum ticker'lari cikart, her biri icin
     cautious_stocks kaydini merge et. Tek AI cagrisiyla ortak tag/tarih cikarilir.
     """
-    if not body or not is_bistech_vbts(title, body):
+    # ★ DEVRE DISI: KAP'tan tedbir parse etmiyoruz. Tek kaynak: BIST CSV.
+    return []
+    if not body or not is_bistech_vbts(title, body):  # noqa: F841
         return []
 
     tickers = sorted(set(_TICKER_DOT_E_RE.findall(body)))

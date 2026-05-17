@@ -4197,6 +4197,58 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/cleanup-non-csv-cautious")
+@limiter.limit("3/minute")
+async def admin_cleanup_non_csv_cautious(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: BIST resmi CSV disindan gelen cautious_stocks kayitlarini sil.
+
+    Sadece kaynak resmi CSV'den olsun (source='bist_csv' veya benzeri).
+    'kap_ai_parse', 'halkarz_tedbirli' gibi yanlis kaynaklar temizlenir.
+
+    Body: {'admin_password': '...'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.cautious_stock import CautiousStock
+    rows = (await db.execute(
+        select(CautiousStock).where(
+            CautiousStock.source.notin_(["bist_csv", "manual_import"]),
+        )
+    )).scalars().all()
+
+    deleted_by_source: dict[str, int] = {}
+    for r in rows:
+        src = r.source or "null"
+        deleted_by_source[src] = deleted_by_source.get(src, 0) + 1
+        await db.delete(r)
+
+    await db.commit()
+    return {
+        "status": "ok",
+        "deleted_total": sum(deleted_by_source.values()),
+        "by_source": deleted_by_source,
+    }
+
+
+@app.post("/api/v1/admin/sync-bist-tedbir-now")
+@limiter.limit("5/minute")
+async def admin_sync_bist_tedbir_now(
+    request: Request,
+    payload: dict = Body(...),
+):
+    """Admin: BIST resmi tedbir CSV'sini SIMDI senkronize et (cron beklemeden)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.scrapers.bist_tedbir_csv_scraper import sync_bist_tedbir
+    stats = await sync_bist_tedbir()
+    return {"status": "ok", "stats": stats}
+
+
 @app.post("/api/v1/admin/cleanup-spk-bulten-duplicates")
 @limiter.limit("3/minute")
 async def admin_cleanup_spk_bulten_duplicates(
