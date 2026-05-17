@@ -93,7 +93,21 @@ _CURRENCY_GROUP = (
 )
 
 _AMOUNT_RE = re.compile(
-    r"(?:İhale\s*bedeli|sözleşme\s*bedeli|sözleşme\s*tutarı|toplam\s*bedel|sözleşme\s*değeri|işin\s*bedeli|alım\s*bedeli|satım\s*bedeli|tutarı|bedeli)"
+    r"(?:"
+    r"İhale\s*bedeli|"
+    r"sözleşme\s*bedeli|sözleşme\s*tutarı|sözleşme\s*değeri|"
+    r"toplam\s*bedel|toplam\s*tutar|"
+    r"işin\s*bedeli|işin\s*tutarı|"
+    r"alım\s*bedeli|satım\s*bedeli|"
+    r"yatırım\s*tutarı|yatırım\s*bedeli|yatırım\s*maliyeti|yatırım\s*değeri|"
+    r"proje\s*bedeli|proje\s*değeri|proje\s*tutarı|"
+    r"anlaşma\s*bedeli|anlaşma\s*tutarı|anlaşma\s*değeri|"
+    r"iş\s*anlaşması\s*bedeli|"
+    r"sipariş\s*bedeli|sipariş\s*tutarı|"
+    r"hizmet\s*bedeli|hizmet\s*tutarı|"
+    r"satış\s*tutarı|satış\s*bedeli|"
+    r"tutarı|bedeli"
+    r")"
     r"[\s:]*"
     r"(?:KDV\s*hariç|KDV\s*dahil|net|brüt)?[\s:]*"
     r"([\d]{1,3}(?:[.\s]\d{3})*(?:,\d+)?|[\d]+(?:,\d+)?)"

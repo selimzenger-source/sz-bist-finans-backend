@@ -4197,6 +4197,61 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/set-business-deal-amount")
+@limiter.limit("10/minute")
+async def admin_set_business_deal_amount(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Bir BusinessDeal kaydinin tutar/para birimini manuel olarak duzelt.
+
+    Body: {
+      'admin_password': '...',
+      'deal_id': 61,                 # zorunlu
+      'amount_original': 17800000,   # zorunlu (kaynak para biriminde)
+      'currency': 'USD',             # TRY|USD|EUR|GBP
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.business_deal import BusinessDeal
+    from app.services.business_deal_processor import get_exchange_rate
+
+    deal_id = int(payload.get("deal_id") or 0)
+    amount_original = float(payload.get("amount_original") or 0)
+    currency = (payload.get("currency") or "TRY").upper()
+    if currency not in ("TRY", "USD", "EUR", "GBP"):
+        raise HTTPException(status_code=400, detail="Gecersiz currency (TRY|USD|EUR|GBP)")
+    if not deal_id or amount_original <= 0:
+        raise HTTPException(status_code=400, detail="deal_id + amount_original gerekli")
+
+    row = (await db.execute(select(BusinessDeal).where(BusinessDeal.id == deal_id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Deal bulunamadi")
+
+    if currency == "TRY":
+        amount_try = amount_original
+        rate_used = 1.0
+        rate_date = row.deal_date or date.today()
+    else:
+        rate_used, rate_date = await get_exchange_rate(currency)
+        amount_try = (amount_original * rate_used) if rate_used else None
+
+    old_try = row.amount_try
+    row.amount_original = amount_original
+    row.currency = currency
+    row.amount_try = amount_try
+    row.exchange_rate_used = rate_used
+    row.rate_date = rate_date
+    await db.commit()
+    return {
+        "status": "ok", "id": row.id, "ticker": row.ticker,
+        "old_try": old_try, "new_try": amount_try,
+        "rate": rate_used, "currency": currency,
+    }
+
+
 @app.post("/api/v1/admin/reparse-business-deals")
 @limiter.limit("3/minute")
 async def admin_reparse_business_deals(
