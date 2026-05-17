@@ -4325,9 +4325,10 @@ def _setup_scheduler_impl():
     #                   id="weekly_temettu_refresh", ...)
     logger.info("Haftalik temettuhisseleri scraper: KAPATILDI (manuel tetikleme gerekir)")
 
-    # 7f-bis. BIST resmi tedbirli CSV sync — TR 09:40, 19:00, 00:00 (UTC 06:40, 16:00, 21:00)
+    # 7f-bis. BIST resmi tedbirli CSV sync — her 30 dakikada bir
     # Kaynak: https://www.borsaistanbul.com/erd/menkul_tedbir_listesi.csv
-    # Her gun 3 kez tarar; yeni tedbir/iptal varsa cautious_stocks tablosuna senkronize eder.
+    # Tedbirli hisseler listesi yeni eklenir/iptal olur — yakin gercek-zamanli
+    # olmali. Her 30 dk'da bir CSV tarar, cautious_stocks tablosunu senkronize eder.
     async def _bist_tedbir_csv_sync():
         try:
             from app.scrapers.bist_tedbir_csv_scraper import sync_bist_tedbir
@@ -4336,40 +4337,17 @@ def _setup_scheduler_impl():
         except Exception as e:
             logger.error("BIST tedbir CSV sync hatasi: %s", e)
 
-    # 09:40 TR = 06:40 UTC (seans acilmasi sonrasi)
     scheduler.add_job(
         _bist_tedbir_csv_sync,
-        CronTrigger(hour=6, minute=40),
-        id="bist_tedbir_morning",
-        name="BIST resmi tedbirli CSV sync — sabah 09:40 TR",
+        IntervalTrigger(minutes=30),
+        id="bist_tedbir_csv_sync",
+        name="BIST resmi tedbirli CSV sync — her 30dk",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=600,
     )
-    # 19:00 TR = 16:00 UTC (seans sonrasi gunluk update)
-    scheduler.add_job(
-        _bist_tedbir_csv_sync,
-        CronTrigger(hour=16, minute=0),
-        id="bist_tedbir_evening",
-        name="BIST resmi tedbirli CSV sync — aksam 19:00 TR",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
-    # 00:00 TR = 21:00 UTC (gun sonu, ertesi gun icin guncel liste)
-    scheduler.add_job(
-        _bist_tedbir_csv_sync,
-        CronTrigger(hour=21, minute=0),
-        id="bist_tedbir_midnight",
-        name="BIST resmi tedbirli CSV sync — gece 00:00 TR",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
-    logger.info("BIST resmi tedbirli CSV scheduler: 3x gunluk aktif (TR 09:40, 19:00, 00:00)")
+    logger.info("BIST resmi tedbirli CSV scheduler: her 30dk aktif")
 
     # 7h. IPO POLL BILDIRIM SISTEMI — 07:00 katilim, 17:00 tavan anketi (TR)
     # ────────────────────────────────────────────────────────────
