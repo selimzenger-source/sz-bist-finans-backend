@@ -111,6 +111,24 @@ async def fetch_bist_tedbir_csv() -> list[dict]:
         if not ticker:
             continue
 
+        # ───── VARANT / WARRANT FILTRESI ─────
+        # Varantlar hisse degil turev urun — tedbirli hisseler listesinde gosterilmez.
+        # Tipik isaretler:
+        #   - Ticker'in son karakteri rakam ve oncesinde V/W var (orn: AKBNK_V1, GARAN.W2)
+        #   - Company name 'VARANT' iceriyor
+        _name_upper = company_name.upper()
+        if "VARANT" in _name_upper or "WARRANT" in _name_upper:
+            continue
+        # Ticker pattern: harfler + V/W + rakam (orn: AKBNV1, GARANV2)
+        # BIST normal ticker max 5-6 karakter, varantlar genelde 7-8 karakter ve sonu V[0-9] veya W[0-9]
+        if len(ticker) >= 6 and ticker[-2] in ("V", "W") and ticker[-1].isdigit():
+            continue
+        # Bazi varantlar nokta veya alt cizgi ile: 'AKBNK.V1', 'AKBNK_W2'
+        if "." in ticker or "_" in ticker:
+            _suffix = ticker.split(".")[-1].split("_")[-1]
+            if _suffix and _suffix[0] in ("V", "W") and any(c.isdigit() for c in _suffix):
+                continue
+
         tag = TEDBIR_CODE_TO_TAG.get(tedbir_code, tedbir_code[:3])  # Bilinmeyen kod ilk 3 harfi
 
         if ticker not in aggregated:
