@@ -4291,6 +4291,7 @@ async def admin_reparse_business_deals(
         q.order_by(BusinessDeal.id.desc()).offset(offset).limit(limit)
     )).scalars().all()
 
+    from app.models.kap_all_disclosure import KapAllDisclosure
     updated = 0
     skipped = 0
     unchanged = 0
@@ -4298,12 +4299,35 @@ async def admin_reparse_business_deals(
     for row in rows:
         try:
             body = ""
+            # 1) KAP URL'den canli fetch (en taze veri)
             if row.kap_url:
-                disc = await _fetch_kap(row.kap_url)
-                if disc and disc.get("full_text"):
-                    body = disc["full_text"]
+                try:
+                    disc = await _fetch_kap(row.kap_url)
+                    if disc and disc.get("full_text"):
+                        body = disc["full_text"]
+                except Exception:
+                    pass
+            # 2) Fallback: kap_all_disclosures.body (DB'de cached)
+            if not body and row.kap_disclosure_id:
+                ka = (await db.execute(
+                    select(KapAllDisclosure).where(
+                        KapAllDisclosure.id == row.kap_disclosure_id
+                    )
+                )).scalar_one_or_none()
+                if ka and ka.body:
+                    body = ka.body
+            # 3) Fallback: kap_url ile kap_all_disclosures'a bak
+            if not body and row.kap_url:
+                ka = (await db.execute(
+                    select(KapAllDisclosure).where(
+                        KapAllDisclosure.kap_url == row.kap_url
+                    ).limit(1)
+                )).scalar_one_or_none()
+                if ka and ka.body:
+                    body = ka.body
             if not body:
                 skipped += 1
+                detail.append({"id": row.id, "ticker": row.ticker, "skip_reason": "body_yok"})
                 continue
             parsed = await ai_parse_business_deal(row.ticker, row.title or "", body)
             amount_orig = parsed.get("amount_original")
