@@ -175,27 +175,20 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
     if not body:
         return out
 
-    # 1) Çarpanlı pattern: "5,5 milyon Euro"
+    # ★ SIRALAMA ONEMLI: Yapilandirilmis ("ihale bedeli: ... TL") EN ONCE.
+    # Multiplier ("X milyar TL") en son — cunku body'de gecen acklama metni
+    # ("yaklasik 177 milyar TL'lik proje") yanlis yakalanabilir.
     amount = None
     currency = None
-    m = _MULTIPLIER_RE.search(body)
+
+    # 1) Yapılandırılmış: "ihale bedeli ... 12.100.000 TL" — EN GUVENILIR
+    m = _AMOUNT_RE.search(body)
     if m:
-        base = _parse_tr_number(m.group(1))
-        mult_word = m.group(2).lower()
-        mult = {"bin": 1_000, "milyon": 1_000_000, "milyar": 1_000_000_000, "trilyon": 1_000_000_000_000}.get(mult_word, 1)
-        if base:
-            amount = base * mult
-            currency = _normalize_currency(m.group(3))
+        a = _parse_tr_number(m.group(1))
+        if a:
+            amount, currency = a, _normalize_currency(m.group(2))
 
-    # 2) Yapılandırılmış: "ihale bedeli ... 12.100.000 TL"
-    if amount is None:
-        m = _AMOUNT_RE.search(body)
-        if m:
-            a = _parse_tr_number(m.group(1))
-            if a:
-                amount, currency = a, _normalize_currency(m.group(2))
-
-    # 3) Action-coupled: "76.650 ABD Doları satışı/ihracatı"
+    # 2) Action-coupled: "76.650 ABD Doları satışı/ihracatı"
     if amount is None:
         m = _AMOUNT_ACTION_RE.search(body)
         if m:
@@ -203,7 +196,18 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
             if a:
                 amount, currency = a, _normalize_currency(m.group(2))
 
-    # 4) En geniş fallback: "X TL/Doları" cümle içinde
+    # 3) Çarpanlı pattern: "5,5 milyon Euro" — orta guvenirlik
+    if amount is None:
+        m = _MULTIPLIER_RE.search(body)
+        if m:
+            base = _parse_tr_number(m.group(1))
+            mult_word = m.group(2).lower()
+            mult = {"bin": 1_000, "milyon": 1_000_000, "milyar": 1_000_000_000, "trilyon": 1_000_000_000_000}.get(mult_word, 1)
+            if base:
+                amount = base * mult
+                currency = _normalize_currency(m.group(3))
+
+    # 4) En geniş fallback: "X TL/Doları" cümle içinde — son care
     if amount is None:
         m = _AMOUNT_FALLBACK_RE.search(body)
         if m:

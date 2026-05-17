@@ -4197,6 +4197,85 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/reparse-business-deals")
+@limiter.limit("3/minute")
+async def admin_reparse_business_deals(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: business_deals tablosundaki kayitlari (veya belirli ticker'i) yeniden parse et.
+
+    Yeni regex sirasiyla amount yeniden cikarilir, KAP body'si tekrar fetch edilir.
+
+    Body: {
+      'admin_password': '...',
+      'ticker': 'PSGYO' (opsiyonel — yoksa son N gun hepsi),
+      'days': 30 (opsiyonel, default 30)
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.business_deal import BusinessDeal
+    from app.services.business_deal_processor import (
+        ai_parse_business_deal, get_exchange_rate,
+    )
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure as _fetch_kap
+
+    ticker = (payload.get("ticker") or "").strip().upper() or None
+    days = int(payload.get("days", 30))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    q = select(BusinessDeal).where(BusinessDeal.created_at >= cutoff)
+    if ticker:
+        q = q.where(BusinessDeal.ticker == ticker)
+    rows = (await db.execute(q.order_by(BusinessDeal.id.desc()))).scalars().all()
+
+    updated = 0
+    skipped = 0
+    detail: list[dict] = []
+    for row in rows[:50]:  # max 50 rate-limit
+        try:
+            body = ""
+            if row.kap_url:
+                disc = await _fetch_kap(row.kap_url)
+                if disc and disc.get("full_text"):
+                    body = disc["full_text"]
+            if not body:
+                skipped += 1
+                continue
+            parsed = await ai_parse_business_deal(row.ticker, row.title or "", body)
+            amount_orig = parsed.get("amount_original")
+            cur = parsed.get("currency") or "TRY"
+            if not amount_orig:
+                skipped += 1
+                continue
+            if cur == "TRY":
+                amount_try = amount_orig
+                rate_used = 1.0
+                rate_date = row.deal_date or date.today()
+            else:
+                rate_used, rate_date = await get_exchange_rate(cur)
+                amount_try = (amount_orig * rate_used) if rate_used else None
+            old_try = row.amount_try
+            row.amount_original = amount_orig
+            row.currency = cur
+            row.amount_try = amount_try
+            row.exchange_rate_used = rate_used
+            row.rate_date = rate_date
+            updated += 1
+            detail.append({
+                "ticker": row.ticker, "kap_id": row.kap_disclosure_id,
+                "old_try": old_try, "new_try": amount_try,
+                "orig": amount_orig, "currency": cur,
+            })
+        except Exception as e:
+            detail.append({"ticker": row.ticker, "error": str(e)[:200]})
+    await db.commit()
+    return {"status": "ok", "updated": updated, "skipped": skipped, "detail": detail}
+
+
 @app.post("/api/v1/admin/cleanup-non-csv-cautious")
 @limiter.limit("3/minute")
 async def admin_cleanup_non_csv_cautious(
