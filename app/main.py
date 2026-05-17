@@ -4279,18 +4279,23 @@ async def admin_reparse_business_deals(
     from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure as _fetch_kap
 
     ticker = (payload.get("ticker") or "").strip().upper() or None
-    days = int(payload.get("days", 30))
+    days = int(payload.get("days", 365))  # default 365 — hepsini kontrol et
+    offset = int(payload.get("offset", 0))
+    limit = min(int(payload.get("limit", 100)), 200)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     q = select(BusinessDeal).where(BusinessDeal.created_at >= cutoff)
     if ticker:
         q = q.where(BusinessDeal.ticker == ticker)
-    rows = (await db.execute(q.order_by(BusinessDeal.id.desc()))).scalars().all()
+    rows = (await db.execute(
+        q.order_by(BusinessDeal.id.desc()).offset(offset).limit(limit)
+    )).scalars().all()
 
     updated = 0
     skipped = 0
+    unchanged = 0
     detail: list[dict] = []
-    for row in rows[:50]:  # max 50 rate-limit
+    for row in rows:
         try:
             body = ""
             if row.kap_url:
@@ -4313,7 +4318,11 @@ async def admin_reparse_business_deals(
             else:
                 rate_used, rate_date = await get_exchange_rate(cur)
                 amount_try = (amount_orig * rate_used) if rate_used else None
-            old_try = row.amount_try
+            old_try = row.amount_try or 0
+            # Sadece DEGER FARKLI ise update (gereksiz commit'i onle)
+            if abs((old_try or 0) - (amount_try or 0)) < 0.01 and row.currency == cur:
+                unchanged += 1
+                continue
             row.amount_original = amount_orig
             row.currency = cur
             row.amount_try = amount_try
@@ -4321,14 +4330,21 @@ async def admin_reparse_business_deals(
             row.rate_date = rate_date
             updated += 1
             detail.append({
+                "id": row.id,
                 "ticker": row.ticker, "kap_id": row.kap_disclosure_id,
                 "old_try": old_try, "new_try": amount_try,
                 "orig": amount_orig, "currency": cur,
+                "kap_url": row.kap_url,
             })
         except Exception as e:
-            detail.append({"ticker": row.ticker, "error": str(e)[:200]})
+            detail.append({"id": row.id, "ticker": row.ticker, "error": str(e)[:200]})
     await db.commit()
-    return {"status": "ok", "updated": updated, "skipped": skipped, "detail": detail}
+    return {
+        "status": "ok", "updated": updated, "skipped": skipped,
+        "unchanged": unchanged, "fetched": len(rows),
+        "next_offset": offset + len(rows) if len(rows) == limit else None,
+        "detail": detail,
+    }
 
 
 @app.post("/api/v1/admin/cleanup-non-csv-cautious")
