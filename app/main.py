@@ -4227,12 +4227,21 @@ async def admin_process_kap_as_block_trade(
         r"(?:İlgili\s*Şirketler?|Hisse\s*Kodu|Sembol|Pay\s*Kodu)\s*[:\|]?\s*([A-Z, ]+?)(?:\n|$)",
         body, _re.IGNORECASE,
     )
-    if not m:
-        return {"status": "error", "message": "İlgili Şirketler bulunamadi"}
-    tickers = [t.strip().upper() for t in m.group(1).split(",") if t.strip()]
+    # Once payload'dan elle gelen ticker(lar) varsa onu kullan
+    forced_tickers = payload.get("tickers") or ([payload["ticker"]] if payload.get("ticker") else [])
+    if forced_tickers:
+        tickers = [str(t).strip().upper() for t in forced_tickers if str(t).strip()]
+    elif m:
+        tickers = [t.strip().upper() for t in m.group(1).split(",") if t.strip()]
+    else:
+        return {"status": "error", "message": "İlgili Şirketler bulunamadi (ticker/tickers parametresi gerekli)"}
     if not tickers:
         return {"status": "error", "message": "ticker yok"}
     # İlk ticker ile çağır — process_block_trade multi-ticker destekli, hepsini ekler
+    # Eger zorla ticker verildiyse related_tickers'a da set edip body'yi onunla zenginlestir
+    if forced_tickers and not m:
+        # Body'ye "İlgili Şirketler" satiri injekt et (process_block_trade ticker validation'i icin)
+        body = f"İlgili Şirketler: {', '.join(tickers)}\n\n{body}"
     result = await process_block_trade(
         db, disclosure_id=0, ticker=tickers[0],
         company_name=None, title="Multi-Ticker Block Trade",
