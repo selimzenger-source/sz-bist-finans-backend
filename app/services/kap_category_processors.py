@@ -234,11 +234,40 @@ def _parse_block_trade_regex(body: str) -> dict:
         out["broker"] = broker[:255]
 
     # counterparties (alicilar veya saticilar)
-    alicilar = _find("ALICILAR", "ALICI")
-    saticilar = _find("SATICILAR", "SATICI")
+    # Form'da placeholder kelimeleri (Listesi/Liste/Yok) value zannedilebilir —
+    # bunlari REDDET, AI fallback gercek karşı tarafı bulsun.
+    _JUNK_CP = {"listesi", "liste", "yok", "-", "none", "null", "n/a", "boş", "bos", "tablo"}
+    def _clean_cp(val: Optional[str]) -> Optional[str]:
+        if not val:
+            return None
+        v = val.strip().rstrip(".|").strip()
+        if not v or v.lower() in _JUNK_CP or len(v) < 4:
+            return None
+        return v
+    alicilar = _clean_cp(_find("ALICILAR", "ALICI"))
+    saticilar = _clean_cp(_find("SATICILAR", "SATICI"))
     parts = [p for p in (alicilar, saticilar) if p]
     if parts:
         out["counterparties"] = " | ".join(parts)[:1000]
+
+    # Body'den ek karşı taraf isim arama — "X'in sahibi olduğu", "X tarafından"
+    # patternleri (KAP body'sindeki anlatim metninde gercek isim gecer)
+    if not out.get("counterparties"):
+        # "GIC Private Limited... sahibi olduğu" / "Zekeriya Zeray'ın sahibi olduğu"
+        _name_patterns = [
+            r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi\s+oldu(?:ğ|g)u|\s+tarafından)",
+            r"pay\s*sahiplerinden\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n",
+            r"ortaklarından,?\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi)",
+        ]
+        for pat in _name_patterns:
+            mm = re.search(pat, b)
+            if mm:
+                _nm = mm.group(1).strip().rstrip(",.")
+                if _nm and 4 < len(_nm) < 200 and _nm.lower() not in _JUNK_CP:
+                    # "Ek-1'deki listede yer alan yatırımcılar" suffix'i ekle
+                    _suffix = " (Ek-1'deki yatırımcılar)" if "ek-1" in b.lower() or "annex-1" in b.lower() else ""
+                    out["counterparties"] = (_nm + _suffix)[:1000]
+                    break
 
     # lot_amount: "17.272.728 Lot" veya "17.272.728"
     m_lot = re.search(r"LOT\s*M[İI]KTAR[İI][\s\:\|]+([\d\.\,]+)\s*(?:Lot)?", b, re.IGNORECASE)

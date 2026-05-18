@@ -4255,11 +4255,16 @@ async def admin_reparse_block_trades(
     limit = min(int(payload.get("limit", 50)), 100)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
+    # Junk degerleri de yakalanmali — "Listesi" gibi placeholder kelimeler.
+    _JUNK_CP_SET = ("listesi", "liste", "yok", "-", "none", "null", "n/a")
+    junk_filter = sa_func.lower(BlockTrade.counterparties).in_(_JUNK_CP_SET)
     q = select(BlockTrade).where(
         BlockTrade.created_at >= cutoff,
         or_(
             BlockTrade.lot_amount.is_(None),
             BlockTrade.counterparties.is_(None),
+            sa_func.length(BlockTrade.counterparties) < 4,
+            junk_filter,
         ),
     ).order_by(BlockTrade.id.desc()).limit(limit)
     rows = (await db.execute(q)).scalars().all()
@@ -4287,10 +4292,16 @@ async def admin_reparse_block_trades(
                     parsed[k] = regex_parsed[k]
 
             changed = False
+            # counterparties: hem NULL hem de "Listesi" gibi placeholder degerler icin overwrite
+            _cp_is_junk = (
+                not row.counterparties
+                or (row.counterparties or "").strip().lower() in ("listesi", "liste", "yok", "-", "none", "null", "n/a")
+                or len((row.counterparties or "").strip()) < 4
+            )
             if not row.lot_amount and isinstance(parsed.get("lot_amount"), (int, float)):
                 row.lot_amount = int(parsed["lot_amount"])
                 changed = True
-            if not row.counterparties and parsed.get("counterparties"):
+            if _cp_is_junk and parsed.get("counterparties"):
                 row.counterparties = parsed["counterparties"][:1000]
                 changed = True
             if not row.broker and parsed.get("broker"):
