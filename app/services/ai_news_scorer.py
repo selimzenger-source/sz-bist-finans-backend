@@ -618,15 +618,11 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     ),
 
     # --- PAY GERI ALIM PROSEDUR (gunluk islemler) ---
-    # Pay geri alimi BIR DEFA pozitif puanlanir (program duyurusu veya buyuk
-    # alim). Sonrasindaki kucuk gunluk alimlar ZATEN biliniyor.
-    (
-        r"pay\s*geri\s*alim\s*program(?:in|i)\s*(?:cerceves|kapsam)|"
-        r"geri\s*al[ıi]m\s*program[ıi]\s*kapsam[ıi]nda(?!.*ilk|.*baslangic)",
-        "Pay Geri Alım Günlük İşlem",
-        "Önceden duyurulmuş pay geri alım programının günlük uygulama bildirimi. Büyük tutarlı ve son alım şirketin güvenini göstermesi haricinde, küçük günlük işlemler artık fiyata yansıdı.",
-        ["paygerialim"],
-    ),
+    # NOT: analyze_news icinde BUYBACK BYPASS deterministik skor ile hallediyor.
+    # Bu routine pattern KALDIRILDI — eskiden 'geri alim programi kapsamında'
+    # geçen TUM bildirimleri 5.0 Notr yapiyordu, hatta buyuk tutarli olanlari
+    # bile. Artik buyback_processor TL tutarina gore esik bazli skor veriyor
+    # (kucuk -> 5.0 Notr, buyuk -> 7.0+ Olumlu).
 
     # --- YENI EKLENEN PATTERN'LAR (son 30 gun analizi sonrasi en sik tekrarlayan Notr basliklar) ---
 
@@ -2368,6 +2364,66 @@ async def analyze_news(
     """
     tv_content = None
     kap_url = None
+
+    # ★ BUYBACK BYPASS: Pay geri alimi bildirimleri AI'a gitmeden once
+    # deterministik olarak skorlanir. TL tutarina gore esik bazli skor +
+    # standart ozet. AI cagrilmaz — hizli, ucuz, dogru. Tablo karismasi yok.
+    try:
+        # raw_text'in baslarinda title olur (orn "⚡ Seans Disi Pozitif Haber Yakalandi - ENERY\nPaylarin Geri Alinmasina Iliskin Bildirim ...")
+        _title_check = raw_text[:300] if raw_text else ""
+        from app.services.buyback_processor import is_buyback as _is_bb
+        if _is_bb(_title_check) and ticker:
+            # KAP body fetch (TradingView eski/silinmis olabilir, KAP direkt deneyelim)
+            _bb_body = ""
+            if matriks_id:
+                try:
+                    _tv = await fetch_tradingview_content(matriks_id)
+                    if _tv and _tv.get("full_text"):
+                        _bb_body = _tv["full_text"]
+                        if _tv.get("real_kap_url"):
+                            kap_url = _tv["real_kap_url"]
+                except Exception:
+                    pass
+            if not _bb_body:
+                try:
+                    _kd = await fetch_kap_direct_content(ticker)
+                    if _kd:
+                        _bb_body = _kd.get("full_text") or ""
+                        if _kd.get("kap_url"):
+                            kap_url = _kd["kap_url"]
+                except Exception:
+                    pass
+            if _bb_body:
+                from app.services.buyback_processor import (
+                    parse_buyback_today, buyback_score_and_summary,
+                )
+                _bb_parsed = parse_buyback_today(_bb_body)
+                if _bb_parsed and _bb_parsed.get("lot"):
+                    _lot = _bb_parsed["lot"]
+                    _pavg = _bb_parsed.get("price_avg") or 0
+                    if not _pavg and _bb_parsed.get("price_low") and _bb_parsed.get("price_high"):
+                        _pavg = (_bb_parsed["price_low"] + _bb_parsed["price_high"]) / 2
+                    _bb_parsed["total_tl"] = _lot * _pavg if _pavg else 0
+                    if _pavg:
+                        _bb_parsed["price_avg"] = _pavg
+                    _bb_score, _bb_summary = buyback_score_and_summary(_bb_parsed, ticker)
+                    logger.info(
+                        "Buyback deterministik skor: %s — lot=%s avg=%.2f total=%.0f -> %.1f",
+                        ticker, _lot, _pavg or 0, _bb_parsed.get("total_tl", 0), _bb_score,
+                    )
+                    return {
+                        "score": _bb_score,
+                        "summary": _bb_summary,
+                        "kap_url": kap_url,
+                        "hashtags": ["paygerialim"],
+                    }
+                else:
+                    logger.info(
+                        "Buyback parse fail (lot/fiyat cikarilamadi) — AI scorer'a devam: %s",
+                        ticker,
+                    )
+    except Exception as _bb_err:
+        logger.warning("Buyback bypass hata (%s): %s — normal akisa donulu yor", ticker, _bb_err)
 
     # ── Oncelik 1: TradingView'dan icerik cek (Matriks ID varsa) ──
     if matriks_id:

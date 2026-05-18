@@ -42,13 +42,33 @@ def is_buyback(title: str) -> bool:
     return any(p in t for p in _BUYBACK_TITLE_PATTERNS)
 
 
-# Pattern: "DD.MM.YYYY (bugün) tarihinde ... pay başına X TL – Y TL ... ağırlıklı ortalama Z TL ... toplam N adet pay geri alın"
+# Pattern 1 (klasik): "DD.MM.YYYY (bugün) tarihinde ... pay başına X TL – Y TL ... toplam N adet pay geri alın"
 _TODAY_RE = re.compile(
     r"(\d{1,2}\.\d{1,2}\.\d{4})\s*(?:\([^)]*\))?\s*tarihinde[^.]*?"
     r"pay\s+başına\s+([\d.,]+)\s*TL\s*[–-]\s*([\d.,]+)\s*TL[^.]*?"
     r"(?:ağırlıklı\s+ortalama\s+([\d.,]+)\s*TL[^.]*?)?"
     r"toplam\s+([\d.,]+)\s*adet\s+pay\s+geri\s+al",
     re.IGNORECASE | re.DOTALL,
+)
+
+# Pattern 2 (gevsek): "DD.MM.YYYY tarihinde X TL – Y TL fiyat ... N adet"
+# "pay başına" zorunlu degil. GLYHO Ek Aciklamalar format'i icin.
+_TODAY_RE_LOOSE = re.compile(
+    r"(\d{1,2}\.\d{1,2}\.\d{4})\s*(?:\([^)]*\))?\s*tarihinde[^.]*?"
+    r"([\d.,]+)\s*TL\s*[–-]\s*([\d.,]+)\s*TL[^.]*?"
+    r"(?:fiyat[ \w]*?)?[^.]*?"
+    r"([\d.,]+)\s*adet[^.]*?(?:pay|sirket(?:imiz)?\s*pay[ıi])",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Pattern 3 (cok gevsek): Ek Aciklamalar bolumunden "N adet ... pay geri alin" formati
+_LOT_FALLBACK_RE = re.compile(
+    r"([\d.,]+)\s*adet[^.]*?(?:pay\s+geri\s+al|sirket(?:imiz)?\s*pay[ıi]\s+geri\s+al)",
+    re.IGNORECASE | re.DOTALL,
+)
+_PRICE_FALLBACK_RE = re.compile(
+    r"([\d.,]+)\s*TL\s*[–-]\s*([\d.,]+)\s*TL",
+    re.IGNORECASE,
 )
 
 # Tablo satır pattern: "B Grubu, AHGAZ, TREAHLA00019 04.05.2026 227.291 0,00874 26,988"
@@ -86,6 +106,25 @@ def _parse_dt(s: str) -> Optional[date]:
     return None
 
 
+def _extract_ek_aciklamalar(body: str) -> str:
+    """Body'den 'Ek Açıklamalar' bolumunu cikar.
+
+    KAP form'unda 'Ek Açıklamalar' baslıgindan sonra gercek bugunku islem
+    aciklamasi gelir. Uzun tablolarin AI'yi karistirmasini onlemek icin
+    sadece bu bolum yorum/parse'a girer.
+    """
+    if not body:
+        return ""
+    # 'Ek Açıklamalar' veya benzeri header sonrasi metin
+    m = re.search(
+        r"Ek\s*A[çc][ıi]klama(?:lar)?[\s:|]*([\s\S]+?)(?:Y(?:uk|uk)ar[ıi]daki|İmzal[ıi]\s*G[öo]r[üu]nt[üu]le|\Z)",
+        body, re.IGNORECASE,
+    )
+    if m:
+        return m.group(1).strip()[:3000]
+    return ""
+
+
 def parse_buyback_today(body: str) -> Optional[dict]:
     """Body'den BUGÜNKÜ geri alım işlemini çıkar.
 
@@ -94,17 +133,42 @@ def parse_buyback_today(body: str) -> Optional[dict]:
     if not body:
         return None
 
-    m = _TODAY_RE.search(body)
-    if not m:
-        return None
+    # Once Ek Aciklamalar bolumune odakla (uzun tablodan kacin)
+    ek = _extract_ek_aciklamalar(body)
+    search_target = ek if ek else body
 
-    return {
-        "transaction_date": _parse_dt(m.group(1)),
-        "price_low": _parse_tr_num(m.group(2)),
-        "price_high": _parse_tr_num(m.group(3)),
-        "price_avg": _parse_tr_num(m.group(4)) if m.group(4) else None,
-        "lot": int(_parse_tr_num(m.group(5)) or 0) or None,
-    }
+    # Pattern 1: klasik "pay başına X TL"
+    m = _TODAY_RE.search(search_target)
+    if m:
+        return {
+            "transaction_date": _parse_dt(m.group(1)),
+            "price_low": _parse_tr_num(m.group(2)),
+            "price_high": _parse_tr_num(m.group(3)),
+            "price_avg": _parse_tr_num(m.group(4)) if m.group(4) else None,
+            "lot": int(_parse_tr_num(m.group(5)) or 0) or None,
+        }
+    # Pattern 2: gevsek (Ek Aciklamalar tipik formati)
+    m2 = _TODAY_RE_LOOSE.search(search_target)
+    if m2:
+        return {
+            "transaction_date": _parse_dt(m2.group(1)),
+            "price_low": _parse_tr_num(m2.group(2)),
+            "price_high": _parse_tr_num(m2.group(3)),
+            "price_avg": None,
+            "lot": int(_parse_tr_num(m2.group(4)) or 0) or None,
+        }
+    # Pattern 3: en gevsek — sadece lot + fiyat yakala
+    m_lot = _LOT_FALLBACK_RE.search(search_target)
+    if m_lot:
+        m_price = _PRICE_FALLBACK_RE.search(search_target)
+        return {
+            "transaction_date": date.today(),
+            "price_low": _parse_tr_num(m_price.group(1)) if m_price else None,
+            "price_high": _parse_tr_num(m_price.group(2)) if m_price else None,
+            "price_avg": None,
+            "lot": int(_parse_tr_num(m_lot.group(1)) or 0) or None,
+        }
+    return None
 
 
 async def process_buyback(
