@@ -4197,6 +4197,97 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/reparse-telegram-news")
+@limiter.limit("5/minute")
+async def admin_reparse_telegram_news(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: telegram_news kayitlarinin AI puan/ozetini yeniden uret.
+
+    Buyback (pay geri alimi) ise process_buyback parse + buyback_score_and_summary
+    ile deterministik skor verir. Diger durumlarda analyze_news cagrilir.
+
+    Body: {
+      'admin_password': '...',
+      'tickers': ['GLYHO','ENERY'],   // veya 'ticker': 'GLYHO'
+      'only_null': true,              // sadece AI null olanlar (default true)
+      'days': 7                       // son N gun
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.telegram_news import TelegramNews
+    from app.services.buyback_processor import is_buyback, parse_buyback_today, buyback_score_and_summary
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+
+    tickers = payload.get("tickers") or ([payload["ticker"]] if payload.get("ticker") else [])
+    tickers = [str(t).strip().upper() for t in tickers if str(t).strip()]
+    only_null = bool(payload.get("only_null", True))
+    days = int(payload.get("days", 7))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    q = select(TelegramNews).where(TelegramNews.message_date >= cutoff)
+    if tickers:
+        q = q.where(TelegramNews.ticker.in_(tickers))
+    if only_null:
+        q = q.where(TelegramNews.ai_score.is_(None))
+    rows = (await db.execute(q.order_by(TelegramNews.id.desc()).limit(50))).scalars().all()
+
+    updated = 0
+    skipped = 0
+    detail: list[dict] = []
+    for row in rows:
+        try:
+            ticker = (row.ticker or "").upper()
+            title = row.parsed_title or ""
+            if not row.kap_url:
+                skipped += 1
+                continue
+            # KAP body'sini fetch et
+            disc = await fetch_kap_disclosure(row.kap_url)
+            body = (disc or {}).get("full_text") or ""
+            if not body:
+                skipped += 1
+                continue
+            score = None
+            summary = None
+            # Buyback ise deterministik
+            if is_buyback(title) or "geri al" in title.lower():
+                parsed = parse_buyback_today(body)
+                if parsed and parsed.get("lot"):
+                    lot = parsed["lot"]
+                    price_avg = parsed.get("price_avg") or 0
+                    if not price_avg and parsed.get("price_low") and parsed.get("price_high"):
+                        price_avg = (parsed["price_low"] + parsed["price_high"]) / 2
+                    total_tl = lot * price_avg if price_avg else 0
+                    parsed["total_tl"] = total_tl
+                    score, summary = buyback_score_and_summary(parsed, ticker)
+            # Hala None ise AI scorer cagir
+            if score is None:
+                from app.services.ai_news_scorer import analyze_news
+                ai_result = await analyze_news(ticker, body[:5000], matriks_id=None)
+                score = ai_result.get("score")
+                summary = ai_result.get("summary")
+            if score is None:
+                skipped += 1
+                detail.append({"id": row.id, "ticker": ticker, "skip": "ai_fail"})
+                continue
+            row.ai_score = score
+            row.ai_summary = summary
+            updated += 1
+            detail.append({
+                "id": row.id, "ticker": ticker, "score": score,
+                "summary": (summary or "")[:80],
+            })
+        except Exception as e:
+            detail.append({"id": row.id, "ticker": row.ticker, "error": str(e)[:150]})
+    await db.commit()
+    return {"status": "ok", "fetched": len(rows), "updated": updated, "skipped": skipped, "detail": detail}
+
+
 @app.post("/api/v1/admin/set-block-trade")
 @limiter.limit("10/minute")
 async def admin_set_block_trade(
