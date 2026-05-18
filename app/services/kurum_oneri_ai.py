@@ -56,29 +56,22 @@ def _build_prompt(oneri: KurumOneri, night_rate: float = _TCMB_NIGHT_RATE) -> st
                 f"altinda (-%{diff:.1f}) — risk-getiri bakimindan nakit/mevduat daha rekabetci."
             )
 
-    return f"""BIST hisse analizcisin. Asagidaki aracı kurum onerisi icin yatirimci icin 3-4 cumlelik kisa, ozlu bir yorum yaz.
+    return f"""BIST analizcisin. Asagidaki kurum onerisi icin MAX 3 CUMLE yorum yaz.
 
 Hisse: {ticker} ({company})
-Kurum: {inst}
-Oneri: {rec}
-Son fiyat: {current if current is not None else 'N/A'} TL
-Hedef fiyat: {target if target is not None else 'N/A'} TL
-Potansiyel getiri: %{pot if pot is not None else 'N/A'}
-Rapor tarihi: {report_date}
-TCMB gecelik politika faizi: %{night_rate:.1f} yillik
+Kurum: {inst} | Oneri: {rec}
+Son: {current if current is not None else 'N/A'} TL | Hedef: {target if target is not None else 'N/A'} TL | Potansiyel: %{pot if pot is not None else 'N/A'}
+TCMB gecelik faiz: %{night_rate:.1f}
 
-Onemli karsilastirma:
 {comparison_hint}
 
 KURALLAR:
-- TAM 3-4 cumle. Fazla uzun yazma.
-- Profesyonel, netrol ve olculu ton. Clickbait yok.
-- Kesinlikle "yatirim tavsiyesi" verme.
-- Hedef getiri ile gecelik faiz karsilastirmasini MUTLAKA ciltsel olarak vurgula (yukari/asagi durumunu soyle).
-- Sirketin sektorune/buyuklugune kisaca deginebilirsin ama uydurma yapma.
-- Oneri turu (Al/Tut/Sat) ile hedef getiri tutarli mi degil mi belirt.
-
-SADECE yorumu yaz, ek basina cumle/paragraf etiketi koyma."""
+- MAKSIMUM 3 cumle. KISA tut.
+- 1. cumle: oneri + hedef getiri ozet
+- 2. cumle: getiri vs faiz karsilastirma (yukarida/altinda)
+- 3. cumle (opsiyonel): oneri-getiri tutarliligi veya kisa risk notu
+- Yatirim tavsiyesi degildir, soyleme. Clickbait yok.
+- SADECE yorumu yaz."""
 
 
 async def generate_ai_comment(oneri: KurumOneri) -> str | None:
@@ -99,8 +92,8 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-5-20250929",
-                    "max_tokens": 500,
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 300,
                     "messages": [{"role": "user", "content": prompt}],
                 },
             )
@@ -114,7 +107,12 @@ async def generate_ai_comment(oneri: KurumOneri) -> str | None:
                 return None
             # Temizle: Baslangictaki tirnaklari, gereksiz markdown kaldir
             text = text.strip('"\' \n')
-            return text[:1500]
+            # Max 3 cumle ile sınırla — Haiku bazen 4-5 cumle yazabiliyor
+            import re as _re
+            _sentences = _re.split(r'(?<=[.!?])\s+', text)
+            if len(_sentences) > 3:
+                text = " ".join(_sentences[:3]).strip()
+            return text[:800]
     except Exception as e:
         logger.error("Claude hata (ticker=%s): %s", oneri.ticker, e)
         return None
