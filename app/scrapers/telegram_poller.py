@@ -1263,6 +1263,51 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as tw_err:
                     logger.error("[TWEET-FLOW] Twitter tweet hatasi (poller devam eder): %s", tw_err, exc_info=True)
 
+            # ----------------------------------------------------------------
+            # NEGATIF HABER TWEET — HER Olumsuz/Cok Olumsuz haberin TAMAMI tweet
+            # AI skoru < 4 (Olumsuz veya Cok Olumsuz/Guclu Olumsuz) -> sayac YOK,
+            # her bir negatif haber icin tweet at. Push atilmaz (should_notify
+            # zaten False), sadece Twitter'da yayinlanir.
+            # NOT: "Hafif Olumsuz" (skor 4-4.5) dahil DEGIL — kullanici sadece
+            # Olumsuz + Cok Olumsuz icin istedi.
+            # ----------------------------------------------------------------
+            if (
+                not should_notify
+                and message_type != "seans_disi_acilis"
+                and ai_score is not None
+                and ai_score < 4.0
+                and ticker
+            ):
+                try:
+                    from app.services.twitter_service import tweet_kap_news
+                    tweet_kw_neg = matched_kw
+                    if not tweet_kw_neg or "BULUNAMADI" in tweet_kw_neg.upper() or tweet_kw_neg == ticker:
+                        tweet_kw_neg = "Yeni KAP Bildirimi"
+                    logger.info(
+                        "[TWEET-FLOW-NEG] Negatif KAP tweet baslatiliyor: %s | skor=%.1f | kw=%s",
+                        ticker, ai_score, tweet_kw_neg,
+                    )
+                    tw_neg_success = tweet_kap_news(
+                        ticker, tweet_kw_neg, "negative",
+                        ai_score=ai_score,
+                        ai_summary=ai_summary,
+                        kap_url=kap_url,
+                        ai_hashtags=ai_hashtags,
+                    )
+                    logger.info(
+                        "[TWEET-FLOW-NEG] Negatif KAP tweet sonuc: %s (basarili=%s, skor=%.1f)",
+                        ticker, tw_neg_success, ai_score,
+                    )
+                    from app.services.admin_telegram import notify_tweet_sent
+                    await notify_tweet_sent(
+                        "kap_haber_negatif", ticker, tw_neg_success,
+                        f"Anahtar: {tweet_kw_neg} | AI: {ai_score:.1f}/10 (Olumsuz)",
+                    )
+                except Exception as tw_neg_err:
+                    logger.error(
+                        "[TWEET-FLOW-NEG] Negatif tweet hatasi: %s", tw_neg_err, exc_info=True,
+                    )
+
         # Commit her zaman yapilir — score < 6 mesajlari telegram_news'e yazilmaz
         # ama kap_all_disclosures'a yazilir. Eger sadece new_count > 0 kontrolu
         # yaparsak, kap_all_disclosures INSERT'leri commit edilmez ve rollback olur.
