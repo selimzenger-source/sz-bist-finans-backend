@@ -270,6 +270,23 @@ async def process_block_trade(
         if kap_url and (await db.execute(stmt)).scalar_one_or_none():
             return None
 
+    # KAP body'sini canli fetch et — process_block_trade'a gelen body genelde
+    # ai_summary (kisa Turkce ozet), KAP form alanlari (LOT MIKTARI, ALICILAR,
+    # SATICILAR, MALIYET FIYATI) bu ozette OLMAZ. Regex parse'in calismasi
+    # icin KAP sayfasinin tam metnine ihtiyac var.
+    if kap_url and (not body or len(body) < 500):
+        try:
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            disc = await fetch_kap_disclosure(kap_url)
+            if disc and disc.get("full_text") and len(disc["full_text"]) > 100:
+                body = disc["full_text"]
+                logger.info(
+                    "BlockTrade body KAP'tan fetch edildi: %s — %d char",
+                    ticker, len(body),
+                )
+        except Exception as fe:
+            logger.warning("BlockTrade body fetch hata (%s): %s", ticker, fe)
+
     # AI parse
     parsed = await _call_gemini(_BT_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:3500])) or {}
 

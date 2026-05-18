@@ -4197,6 +4197,92 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/reparse-block-trades")
+@limiter.limit("3/minute")
+async def admin_reparse_block_trades(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: block_trades tablosunda lot_amount VEYA counterparties NULL olan
+    kayitlari KAP'tan tekrar fetch edip regex+AI ile re-parse et.
+
+    Body: {
+      'admin_password': '...',
+      'days': 30 (opsiyonel),
+      'limit': 50 (opsiyonel),
+    }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.block_trade import BlockTrade
+    from app.services.kap_category_processors import _parse_block_trade_regex, _call_gemini, _BT_PROMPT
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+
+    days = int(payload.get("days", 30))
+    limit = min(int(payload.get("limit", 50)), 100)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    q = select(BlockTrade).where(
+        BlockTrade.created_at >= cutoff,
+        or_(
+            BlockTrade.lot_amount.is_(None),
+            BlockTrade.counterparties.is_(None),
+        ),
+    ).order_by(BlockTrade.id.desc()).limit(limit)
+    rows = (await db.execute(q)).scalars().all()
+
+    updated = 0
+    skipped = 0
+    detail: list[dict] = []
+    for row in rows:
+        try:
+            if not row.kap_url:
+                skipped += 1
+                continue
+            disc = await fetch_kap_disclosure(row.kap_url)
+            if not disc or not disc.get("full_text"):
+                skipped += 1
+                continue
+            body = disc["full_text"]
+            # AI parse + regex fallback
+            parsed = await _call_gemini(_BT_PROMPT.format(
+                ticker=row.ticker, title="", body=body[:3500],
+            )) or {}
+            regex_parsed = _parse_block_trade_regex(body)
+            for k in ("transaction_type", "transaction_date", "broker", "counterparties", "lot_amount", "cost_price"):
+                if not parsed.get(k) and regex_parsed.get(k):
+                    parsed[k] = regex_parsed[k]
+
+            changed = False
+            if not row.lot_amount and isinstance(parsed.get("lot_amount"), (int, float)):
+                row.lot_amount = int(parsed["lot_amount"])
+                changed = True
+            if not row.counterparties and parsed.get("counterparties"):
+                row.counterparties = parsed["counterparties"][:1000]
+                changed = True
+            if not row.broker and parsed.get("broker"):
+                row.broker = parsed["broker"][:255]
+                changed = True
+            if not row.cost_price and isinstance(parsed.get("cost_price"), (int, float)):
+                row.cost_price = float(parsed["cost_price"])
+                changed = True
+            if changed:
+                updated += 1
+                detail.append({
+                    "id": row.id, "ticker": row.ticker,
+                    "lot": row.lot_amount, "broker": (row.broker or "")[:50],
+                    "counterparties": (row.counterparties or "")[:60],
+                })
+            else:
+                skipped += 1
+        except Exception as e:
+            detail.append({"id": row.id, "ticker": row.ticker, "error": str(e)[:200]})
+    await db.commit()
+    return {"status": "ok", "updated": updated, "skipped": skipped, "fetched": len(rows), "detail": detail}
+
+
 @app.post("/api/v1/admin/set-business-deal-amount")
 @limiter.limit("10/minute")
 async def admin_set_business_deal_amount(
