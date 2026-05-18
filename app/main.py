@@ -4197,6 +4197,37 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/delete-block-trade")
+@limiter.limit("10/minute")
+async def admin_delete_block_trade(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: belirli block_trade kaydini sil. Yanlis ticker / yanlis kategorize
+    edilmis kayitlari temizlemek icin.
+
+    Body: {'admin_password': '...', 'id': 140}   veya
+          {'admin_password': '...', 'ids': [140, 142]}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.block_trade import BlockTrade
+    ids = payload.get("ids")
+    if not ids and payload.get("id"):
+        ids = [int(payload["id"])]
+    if not ids:
+        raise HTTPException(status_code=400, detail="id veya ids gerekli")
+    deleted = []
+    for _id in ids:
+        row = (await db.execute(select(BlockTrade).where(BlockTrade.id == int(_id)))).scalar_one_or_none()
+        if row:
+            deleted.append({"id": row.id, "ticker": row.ticker, "kap_url": row.kap_url})
+            await db.delete(row)
+    await db.commit()
+    return {"status": "ok", "deleted": len(deleted), "detail": deleted}
+
+
 @app.post("/api/v1/admin/reparse-block-trades")
 @limiter.limit("3/minute")
 async def admin_reparse_block_trades(

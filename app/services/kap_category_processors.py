@@ -139,9 +139,23 @@ def is_block_trade(title: str, body: str = "") -> bool:
       a) "toptan alış satış" gibi tek başına güçlü sinyal varsa True
       b) Combo pattern'lardan en az 3 tanesi varsa True (alıcılar/satıcılar
          + aracı kurum + lot miktarı + maliyet fiyatı iskeleti)
+
+    ★ DISLAMA: Title'da "tipe donusum" / "donusum" / "borsa disi pay" varsa
+      ASLA block_trade degil — bu tipe donusum / pay devri duyurulari, ayri
+      kategori. (ENDAE 1606871 gibi yanlis kayitlari onler.)
     """
     if title:
         t = lower_tr(title)
+        # ★ Tipe donusum / borsada islem gormeyen pay / pay devri — ASLA block_trade
+        _exclude_patterns = [
+            "tipe donus", "tipe dönüş",
+            "borsada islem goren tipe",
+            "borsa disi pay devri", "borsa dışı pay devri",
+            "donusum duyuru", "dönüşüm duyuru",
+            "donusum talep", "dönüşüm talep",
+        ]
+        if any(p in t for p in _exclude_patterns):
+            return False
         if any(p in t for p in _BT_TITLE_PATTERNS):
             return True
     if body:
@@ -274,18 +288,38 @@ async def process_block_trade(
     # ai_summary (kisa Turkce ozet), KAP form alanlari (LOT MIKTARI, ALICILAR,
     # SATICILAR, MALIYET FIYATI) bu ozette OLMAZ. Regex parse'in calismasi
     # icin KAP sayfasinin tam metnine ihtiyac var.
+    fetched_kap_data = None
     if kap_url and (not body or len(body) < 500):
         try:
             from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
             disc = await fetch_kap_disclosure(kap_url)
             if disc and disc.get("full_text") and len(disc["full_text"]) > 100:
                 body = disc["full_text"]
+                fetched_kap_data = disc
                 logger.info(
                     "BlockTrade body KAP'tan fetch edildi: %s — %d char",
                     ticker, len(body),
                 )
         except Exception as fe:
             logger.warning("BlockTrade body fetch hata (%s): %s", ticker, fe)
+
+    # ★ TICKER VALIDATION: KAP body'sinde gercek "İlgili Şirketler" / "Hisse Kodu"
+    # alani var mi kontrol et. Eger varsa ve verilen ticker bu listede DEGILSE,
+    # o ticker yanlis (aracı kurum / karşı taraf adi parser tarafindan ticker
+    # zannedilmis olabilir — TERA Yatirim -> TERA gibi). Bu durumda kayit olusturma.
+    if body:
+        m_related = re.search(
+            r"(?:İlgili\s*Şirketler?|Hisse\s*Kodu|Sembol|Pay\s*Kodu)\s*[:\|]?\s*([A-Z, ]+?)(?:\n|$)",
+            body, re.IGNORECASE,
+        )
+        if m_related:
+            related_tickers = {t.strip().upper() for t in m_related.group(1).split(",") if t.strip()}
+            if related_tickers and ticker.upper() not in related_tickers:
+                logger.warning(
+                    "BlockTrade ticker uyumsuz: gelen=%s, KAP'taki İlgili Sirketler=%s — kayit olusturulmuyor",
+                    ticker, related_tickers,
+                )
+                return None
 
     # AI parse
     parsed = await _call_gemini(_BT_PROMPT.format(ticker=ticker, title=title or "", body=(body or "")[:3500])) or {}
