@@ -1265,16 +1265,20 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
             # ----------------------------------------------------------------
             # NEGATIF HABER TWEET — Her 2 negatif haberden 1 tweet
-            # AI skoru < 4 (Olumsuz / Cok Olumsuz / Guclu Olumsuz) -> sayac
+            # AI skoru < 3.1 (Olumsuz / Cok Olumsuz / Guclu Olumsuz) -> sayac
             # 2'de 1 (1., 3., 5. ...). Push atilmaz (should_notify zaten False),
             # sadece Twitter'da kirmizi banner ile yayinlanir.
-            # NOT: "Hafif Olumsuz" (4.0-4.5) dahil DEGIL.
+            # ETIKETLER:
+            #   0.0-1.0 -> Guclu Olumsuz
+            #   1.1-2.0 -> Cok Olumsuz
+            #   2.1-3.0 -> Olumsuz
+            #   3.1-4.0 -> Hafif Olumsuz  (DAHIL DEGIL — atlanir)
             # ----------------------------------------------------------------
             if (
                 not should_notify
                 and message_type != "seans_disi_acilis"
                 and ai_score is not None
-                and ai_score < 4.0
+                and ai_score < 3.1
                 and ticker
             ):
                 try:
