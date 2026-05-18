@@ -436,6 +436,7 @@ async def _route_to_calendars(
     # Buyback ile share_transaction patterns'ı çakışıyor ("geri alın").
     # is_buyback True ise share_transaction'a HİÇ gitmesin (duplicate önlenir).
     is_bb = False
+    bb_parsed = None  # buyback parse sonucu — AI fail durumunda fallback skor icin
     try:
         from app.services.buyback_processor import is_buyback, process_buyback
         if is_buyback(title):
@@ -449,13 +450,22 @@ async def _route_to_calendars(
                         body_for_bb = disc["full_text"]
                 except Exception:
                     pass
-            await process_buyback(
+            bb_parsed = await process_buyback(
                 session, ticker=ticker, body=body_for_bb,
                 kap_url=kap_url, disclosure_id=disclosure_id,
                 published_at=published_at,
             )
     except Exception as e:
         logger.warning("Router→buyback hata (%s): %s", ticker, e)
+    # is_bb + bb_parsed bilgisini sonradan AI fail durumunda kullanmak icin sakla
+    if is_bb and bb_parsed:
+        # _route_to_calendars'in cagiren fonksiyona dondurmesi gerekiyor — burada
+        # session attribute olarak set edip telegram_poller ana akisinda okuyacagiz
+        try:
+            session.info["last_buyback_parsed"] = bb_parsed
+            session.info["last_buyback_ticker"] = ticker.upper()
+        except Exception:
+            pass
 
     # ÖNCE block_trade kontrol — toptan/borsa dışı pay devri bildirimleri
     # bazen başlıkta sadece "Pay Alım Satım Bildirimi" der ama body'de
@@ -892,6 +902,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as ai_err:
                     logger.warning("AI puanlama hatasi (%s): %s", ticker, ai_err)
 
+                # ★ BUYBACK FALLBACK: AI score None/dusukse buyback parsed
+                # data'sindan deterministik skor + standart ozet uret. Buyback'ler
+                # KAP form yapisindan tutar cikarilabilir oldugu icin AI'a guvenmek
+                # zorunda degiliz — TL tutarina gore esik bazli skor daha guvenli.
+                try:
+                    _bb_parsed = (session.info or {}).get("last_buyback_parsed") if hasattr(session, 'info') else None
+                    _bb_ticker = (session.info or {}).get("last_buyback_ticker") if hasattr(session, 'info') else None
+                    if _bb_parsed and _bb_ticker and _bb_ticker == (ticker or "").upper():
+                        if (ai_score is None) or (ai_summary is None) or (ai_score < 5.0):
+                            from app.services.buyback_processor import buyback_score_and_summary
+                            fb_score, fb_summary = buyback_score_and_summary(_bb_parsed, ticker)
+                            ai_score = fb_score
+                            ai_summary = fb_summary
+                            ai_hashtags = ai_hashtags or ["paygerialim"]
+                            logger.info(
+                                "Buyback fallback skor: %s — total_tl=%s -> skor=%.1f",
+                                ticker, _bb_parsed.get("total_tl"), fb_score,
+                            )
+                        # tek seferlik kullan, temizle
+                        session.info.pop("last_buyback_parsed", None)
+                        session.info.pop("last_buyback_ticker", None)
+                except Exception as _bb_fb_err:
+                    logger.warning("Buyback fallback hata (%s): %s", ticker, _bb_fb_err)
+
             # KAP URL yoksa TradingView + Matriks ID ile olustur
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
@@ -1221,11 +1255,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Her 4 haberden 1'ini tweetle (spam koruması — Twitter rate limit)
+                    # Tweet politikasi:
+                    #   - Yuksek skor (>= 7.0 = "Olumlu" / "Cok Olumlu" / "Guclu Olumlu"):
+                    #     SAYAC YOK, HER birini tweet at (onemli haberler kacmasin).
+                    #   - Dusuk skor (6.0-6.9 = "Hafif Olumlu"):
+                    #     Sayac 4'te 1 (spam koruma).
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
+                    _high_impact = ai_score is not None and ai_score >= 7.0
 
-                    if _counter_val % 4 == 1:  # 1., 5., 9., 13. ... haber tweet atilir
+                    if _high_impact or _counter_val % 4 == 1:
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
@@ -1256,8 +1295,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         )
                     else:
                         logger.info(
-                            "[TWEET-FLOW] Sayac %d, tweet atilmadi (her 3'te 1): %s",
-                            _counter_val, ticker,
+                            "[TWEET-FLOW] Sayac %d (Hafif Olumlu skor=%.1f), tweet atlandi (her 4'te 1): %s",
+                            _counter_val, ai_score or 0, ticker,
                         )
 
                 except Exception as tw_err:

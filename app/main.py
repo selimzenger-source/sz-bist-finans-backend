@@ -4197,6 +4197,57 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/set-block-trade")
+@limiter.limit("10/minute")
+async def admin_set_block_trade(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: BlockTrade kaydinin alanlarini manuel duzelt.
+
+    Body: {
+      'admin_password': '...',
+      'id': 151,
+      'broker': 'Tera Yatırım Menkul Değerler A.Ş.',
+      'counterparties': 'Kevok Gayrimenkul İnşaat A.Ş.',
+      'lot_amount': 32300000,
+      'cost_price': 24.0,
+      'transaction_type': 'satis',
+      'transaction_date': '2026-05-13'
+    }
+    Sadece verilen alanlar guncellenir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.block_trade import BlockTrade
+    _id = int(payload.get("id") or 0)
+    if not _id:
+        raise HTTPException(status_code=400, detail="id gerekli")
+    row = (await db.execute(select(BlockTrade).where(BlockTrade.id == _id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Kayit bulunamadi")
+    changes = {}
+    for fld in ("broker", "counterparties"):
+        if fld in payload and payload[fld] is not None:
+            setattr(row, fld, str(payload[fld])[:1000 if fld == "counterparties" else 255])
+            changes[fld] = getattr(row, fld)
+    if "lot_amount" in payload and payload["lot_amount"] is not None:
+        row.lot_amount = int(payload["lot_amount"]); changes["lot_amount"] = row.lot_amount
+    if "cost_price" in payload and payload["cost_price"] is not None:
+        row.cost_price = float(payload["cost_price"]); changes["cost_price"] = row.cost_price
+    if "transaction_type" in payload and payload["transaction_type"] in ("alis", "satis"):
+        row.transaction_type = payload["transaction_type"]; changes["transaction_type"] = row.transaction_type
+    if "transaction_date" in payload and isinstance(payload["transaction_date"], str):
+        try:
+            row.transaction_date = date.fromisoformat(payload["transaction_date"])
+            changes["transaction_date"] = str(row.transaction_date)
+        except ValueError:
+            pass
+    await db.commit()
+    return {"status": "ok", "id": row.id, "ticker": row.ticker, "changes": changes}
+
+
 @app.post("/api/v1/admin/process-kap-as-block-trade")
 @limiter.limit("5/minute")
 async def admin_process_kap_as_block_trade(

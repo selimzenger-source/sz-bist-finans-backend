@@ -115,15 +115,16 @@ async def process_buyback(
     kap_url: Optional[str],
     disclosure_id: Optional[int],
     published_at: Optional[datetime] = None,
-) -> bool:
+) -> Optional[dict]:
     """KAP buyback bildirimini share_transaction_details'a kaydet.
 
     Sadece BUGÜNKÜ işlemi yazar (tabloda eski tarihler varsa onları atla).
+    Returns: parsed buyback data (lot/price/total_tl) ya da None.
     """
     parsed = parse_buyback_today(body or "")
     if not parsed or not parsed.get("transaction_date"):
         logger.info("Buyback parse fail: %s", ticker)
-        return False
+        return None
 
     tx_date = parsed["transaction_date"]
     lot = parsed.get("lot")
@@ -172,4 +173,90 @@ async def process_buyback(
         """), payload)
 
     logger.info("Buyback islendi: %s %s lot=%s avg=%s", ticker, tx_date, lot, price_avg)
-    return True
+    # TL tutar hesabi — fallback skor icin
+    total_tl = None
+    if lot and price_avg:
+        total_tl = lot * price_avg
+    elif lot and price_low and price_high:
+        total_tl = lot * ((price_low + price_high) / 2)
+    return {
+        "transaction_date": tx_date,
+        "lot": lot,
+        "price_low": price_low,
+        "price_high": price_high,
+        "price_avg": price_avg,
+        "total_tl": total_tl,
+    }
+
+
+def buyback_score_and_summary(parsed: dict, ticker: str) -> tuple[float, str]:
+    """Buyback TL tutarina gore deterministik skor + standart ozet uret.
+
+    Esikler:
+      < 1M TL       -> 5.0  (sembolik, Notr)
+      1M - 10M TL   -> 5.5  (gostermelik, Notr)
+      10M - 50M TL  -> 6.3  (Hafif Olumlu)
+      50M - 200M TL -> 7.0  (Olumlu)
+      200M - 1B TL  -> 7.8  (Olumlu/Cok Olumlu sinir)
+      > 1B TL       -> 8.3  (Cok Olumlu — sirket guveni)
+    """
+    total_tl = parsed.get("total_tl") or 0
+    lot = parsed.get("lot") or 0
+    price_avg = parsed.get("price_avg") or 0
+    if total_tl < 1_000_000:
+        score = 5.0
+        tier = "sembolik"
+    elif total_tl < 10_000_000:
+        score = 5.5
+        tier = "gostermelik"
+    elif total_tl < 50_000_000:
+        score = 6.3
+        tier = "anlamli"
+    elif total_tl < 200_000_000:
+        score = 7.0
+        tier = "buyuk"
+    elif total_tl < 1_000_000_000:
+        score = 7.8
+        tier = "cok_buyuk"
+    else:
+        score = 8.3
+        tier = "guclu_guven"
+
+    # TR formatli sayi
+    def _fmt(n: float | None) -> str:
+        if not n:
+            return "?"
+        if n >= 1_000_000_000:
+            return f"{n/1_000_000_000:.1f} milyar"
+        if n >= 1_000_000:
+            return f"{n/1_000_000:.1f} milyon"
+        if n >= 1_000:
+            return f"{n/1_000:.0f} bin"
+        return f"{n:.0f}"
+
+    summary = (
+        f"{ticker} bugün kendi paylarından {lot:,} lot geri aldı "
+        f"(ortalama {price_avg:.2f} TL/pay, toplam ~{_fmt(total_tl)} TL). "
+    )
+    if score >= 7.8:
+        summary += (
+            "Bu çok büyük tutarlı bir geri alım — şirket yönetiminin paya olan "
+            "güveni güçlü bir sinyal veriyor. Arzı azaltıcı etkiyle birlikte "
+            "fiyat üzerinde olumlu baskı yaratabilir."
+        )
+    elif score >= 7.0:
+        summary += (
+            "Tutar büyüklüğü dikkat çekici — şirket güveni sinyali olarak "
+            "yorumlanabilir, fiyat üzerinde destekleyici etki beklenir."
+        )
+    elif score >= 6.3:
+        summary += (
+            "Tutar anlamlı seviyede; şirket güveni gösteren bir adım, ancak "
+            "tek başına büyük fiyat hareketi yaratacak ölçüde değil."
+        )
+    else:
+        summary += (
+            "Tutar görece küçük, sembolik nitelikte. Önceden duyurulan geri "
+            "alım programının rutin günlük işlem bildirimidir."
+        )
+    return score, summary
