@@ -1264,12 +1264,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     logger.error("[TWEET-FLOW] Twitter tweet hatasi (poller devam eder): %s", tw_err, exc_info=True)
 
             # ----------------------------------------------------------------
-            # NEGATIF HABER TWEET — HER Olumsuz/Cok Olumsuz haberin TAMAMI tweet
-            # AI skoru < 4 (Olumsuz veya Cok Olumsuz/Guclu Olumsuz) -> sayac YOK,
-            # her bir negatif haber icin tweet at. Push atilmaz (should_notify
-            # zaten False), sadece Twitter'da yayinlanir.
-            # NOT: "Hafif Olumsuz" (skor 4-4.5) dahil DEGIL — kullanici sadece
-            # Olumsuz + Cok Olumsuz icin istedi.
+            # NEGATIF HABER TWEET — Her 2 negatif haberden 1 tweet
+            # AI skoru < 4 (Olumsuz / Cok Olumsuz / Guclu Olumsuz) -> sayac
+            # 2'de 1 (1., 3., 5. ...). Push atilmaz (should_notify zaten False),
+            # sadece Twitter'da kirmizi banner ile yayinlanir.
+            # NOT: "Hafif Olumsuz" (4.0-4.5) dahil DEGIL.
             # ----------------------------------------------------------------
             if (
                 not should_notify
@@ -1279,30 +1278,66 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 and ticker
             ):
                 try:
-                    from app.services.twitter_service import tweet_kap_news
-                    tweet_kw_neg = matched_kw
-                    if not tweet_kw_neg or "BULUNAMADI" in tweet_kw_neg.upper() or tweet_kw_neg == ticker:
-                        tweet_kw_neg = "Yeni KAP Bildirimi"
-                    logger.info(
-                        "[TWEET-FLOW-NEG] Negatif KAP tweet baslatiliyor: %s | skor=%.1f | kw=%s",
-                        ticker, ai_score, tweet_kw_neg,
+                    from app.services.twitter_service import (
+                        tweet_kap_news, _kap_negative_tweet_counter,
                     )
-                    tw_neg_success = tweet_kap_news(
-                        ticker, tweet_kw_neg, "negative",
-                        ai_score=ai_score,
-                        ai_summary=ai_summary,
-                        kap_url=kap_url,
-                        ai_hashtags=ai_hashtags,
-                    )
-                    logger.info(
-                        "[TWEET-FLOW-NEG] Negatif KAP tweet sonuc: %s (basarili=%s, skor=%.1f)",
-                        ticker, tw_neg_success, ai_score,
-                    )
-                    from app.services.admin_telegram import notify_tweet_sent
-                    await notify_tweet_sent(
-                        "kap_haber_negatif", ticker, tw_neg_success,
-                        f"Anahtar: {tweet_kw_neg} | AI: {ai_score:.1f}/10 (Olumsuz)",
-                    )
+
+                    # Restart sonrasi negatif sayaci DB'den yukle
+                    if _kap_negative_tweet_counter["total"] == 0:
+                        try:
+                            from app.models.pending_tweet import PendingTweet
+                            from sqlalchemy import func as sqlfunc
+                            from datetime import time as _time_type
+                            _today_start = datetime.combine(date.today(), _time_type.min)
+                            _db_neg_count_result = await session.execute(
+                                select(sqlfunc.count(PendingTweet.id)).where(
+                                    PendingTweet.source == "kap_haber_negatif",
+                                    PendingTweet.created_at >= _today_start,
+                                )
+                            )
+                            _db_neg_count = _db_neg_count_result.scalar() or 0
+                            if _db_neg_count > 0:
+                                # Her tweet = 2 negatif haber (1., 3., 5. ...)
+                                _kap_negative_tweet_counter["total"] = _db_neg_count * 2
+                                logger.info(
+                                    "[TWEET-FLOW-NEG] Sayac DB'den yuklendi: bugun %d negatif tweet -> sayac=%d",
+                                    _db_neg_count, _kap_negative_tweet_counter["total"],
+                                )
+                        except Exception as _ncnt_err:
+                            logger.warning("[TWEET-FLOW-NEG] Sayac DB yuklemesi basarisiz: %s", _ncnt_err)
+
+                    _kap_negative_tweet_counter["total"] += 1
+                    _neg_counter_val = _kap_negative_tweet_counter["total"]
+
+                    if _neg_counter_val % 2 == 1:  # 1., 3., 5. ... haber tweet atilir
+                        tweet_kw_neg = matched_kw
+                        if not tweet_kw_neg or "BULUNAMADI" in tweet_kw_neg.upper() or tweet_kw_neg == ticker:
+                            tweet_kw_neg = "Yeni KAP Bildirimi"
+                        logger.info(
+                            "[TWEET-FLOW-NEG] Negatif KAP tweet baslatiliyor (%d. haber): %s | skor=%.1f | kw=%s",
+                            _neg_counter_val, ticker, ai_score, tweet_kw_neg,
+                        )
+                        tw_neg_success = tweet_kap_news(
+                            ticker, tweet_kw_neg, "negative",
+                            ai_score=ai_score,
+                            ai_summary=ai_summary,
+                            kap_url=kap_url,
+                            ai_hashtags=ai_hashtags,
+                        )
+                        logger.info(
+                            "[TWEET-FLOW-NEG] Negatif KAP tweet sonuc: %s (basarili=%s, skor=%.1f)",
+                            ticker, tw_neg_success, ai_score,
+                        )
+                        from app.services.admin_telegram import notify_tweet_sent
+                        await notify_tweet_sent(
+                            "kap_haber_negatif", ticker, tw_neg_success,
+                            f"Anahtar: {tweet_kw_neg} | AI: {ai_score:.1f}/10 (Olumsuz) | Sayac: {_neg_counter_val}",
+                        )
+                    else:
+                        logger.info(
+                            "[TWEET-FLOW-NEG] Sayac %d, tweet atilmadi (her 2'de 1): %s",
+                            _neg_counter_val, ticker,
+                        )
                 except Exception as tw_neg_err:
                     logger.error(
                         "[TWEET-FLOW-NEG] Negatif tweet hatasi: %s", tw_neg_err, exc_info=True,

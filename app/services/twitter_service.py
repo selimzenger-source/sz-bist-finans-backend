@@ -1966,6 +1966,7 @@ def tweet_yearly_summary(
 
 # Sayac: her 3 haberden 1'ini tweetlemek icin (restart'ta sifirlanir, sorun degil)
 _kap_tweet_counter = {"total": 0}
+_kap_negative_tweet_counter = {"total": 0}
 
 
 def tweet_kap_news(
@@ -1985,9 +1986,13 @@ def tweet_kap_news(
     Blue Tick hesap — 4000 karakter limiti.
     """
     try:
-        # Görsel yolu — yuksek puan (>= 8.0) Cok Olumlu/Guclu Olumlu icin FLASH banner,
-        # diger pozitiflerde standart KAP bildirim banner.
-        if ai_score is not None and ai_score >= 8.0:
+        # Görsel yolu — sentiment'e + skora gore secilir:
+        # - negative: kap_bildirim_negatif.png (kirmizi banner)
+        # - positive & skor >= 8.0: flash_gelismeler_banner.png (parlak)
+        # - diger pozitiflerde: kap_bildirim.png (yesil/standart)
+        if sentiment == "negative":
+            img_path = os.path.join(_IMG_DIR, "kap_bildirim_negatif.png")
+        elif ai_score is not None and ai_score >= 8.0:
             img_path = os.path.join(_IMG_DIR, "flash_gelismeler_banner.png")
         else:
             img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
@@ -2045,14 +2050,16 @@ def tweet_kap_news(
             extra_hashtags = f" {tags}"
 
         # CTA: uygulama indirme yonlendirmesi
-        # is_manual=True (admin panelden manuel tweet) ise "4 haberden 1" satiri YAZILMAZ.
+        # is_manual=True (admin panelden manuel tweet) ise "X haberden 1" satiri YAZILMAZ.
+        # Negatif tweetler her 2 negatif haberden 1, pozitifler her 4 pozitif haberden 1.
         if is_manual:
             cta_text = (
                 "Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             )
         else:
+            _ratio_text = "Her 2 olumsuz haberden 1'i gönderilmektedir." if sentiment == "negative" else "Her 4 olumlu haberden 1'i gönderilmektedir."
             cta_text = (
-                "Her 4 haberden 1'i gönderilmektedir.\n"
+                f"{_ratio_text}\n"
                 f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             )
 
