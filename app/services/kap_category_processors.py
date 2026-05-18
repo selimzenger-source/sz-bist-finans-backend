@@ -179,13 +179,18 @@ JSON:
 {{
   "transaction_type": "alis" | "satis",
   "transaction_date": "YYYY-MM-DD",
-  "broker": "Aracı kurum adi",
-  "counterparties": "Alıcılar veya satıcılar listesi (virgulle ayrili tek string)",
-  "lot_amount": <int sayi>,
-  "cost_price": <sayi>
+  "broker": "Aracı kurum adi (orn: Tera Yatırım Menkul Değerler A.Ş.)",
+  "counterparties": "KARSI TARAF — satis ise ALICILAR, alis ise SATICILAR (virgulle ayrili)",
+  "lot_amount": <int sayi (nominal TL toplam degil, LOT sayisi)>,
+  "cost_price": <pay basina fiyat sayi>
 }}
 
-KURALLAR: Bilinmeyenler null. SADECE JSON.
+KURALLAR:
+- transaction_type SATIS ise counterparties = ALICILAR (kim aldi). Satici sirket
+  ortagi/pay sahibi olduğu icin counterparty DEGIL.
+- transaction_type ALIS ise counterparties = SATICILAR (kim satti).
+- Alicilar/Saticilar 'Ek-1'deki listede' gibi ise o ifadeyi yazabilirsin.
+- Bilinmeyenler null. SADECE JSON.
 """
 
 
@@ -232,7 +237,9 @@ def _parse_block_trade_regex(body: str) -> dict:
     if broker:
         out["broker"] = broker[:255]
 
-    # counterparties (alicilar veya saticilar)
+    # counterparties = islem tipine gore KARSI tarafi:
+    #   satis -> ALICILAR (kim aldi)
+    #   alis  -> SATICILAR (kim satti)
     # Form'da placeholder kelimeleri (Listesi/Liste/Yok) value zannedilebilir —
     # bunlari REDDET, AI fallback gercek karşı tarafı bulsun.
     _JUNK_CP = {"listesi", "liste", "yok", "-", "none", "null", "n/a", "boş", "bos", "tablo"}
@@ -245,28 +252,48 @@ def _parse_block_trade_regex(body: str) -> dict:
         return v
     alicilar = _clean_cp(_find("ALICILAR", "ALICI"))
     saticilar = _clean_cp(_find("SATICILAR", "SATICI"))
-    parts = [p for p in (alicilar, saticilar) if p]
-    if parts:
-        out["counterparties"] = " | ".join(parts)[:1000]
+    tx_type = out.get("transaction_type")
+    if tx_type == "satis":
+        # SATIS -> KARSI TARAF = ALICILAR (satici zaten KAP'taki sirket)
+        if alicilar:
+            out["counterparties"] = alicilar[:1000]
+        elif saticilar:
+            out["counterparties"] = saticilar[:1000]
+    elif tx_type == "alis":
+        # ALIS -> KARSI TARAF = SATICILAR
+        if saticilar:
+            out["counterparties"] = saticilar[:1000]
+        elif alicilar:
+            out["counterparties"] = alicilar[:1000]
+    else:
+        # Tip belirsiz — ikisini birlestir
+        parts = [p for p in (alicilar, saticilar) if p]
+        if parts:
+            out["counterparties"] = " | ".join(parts)[:1000]
 
-    # Body'den ek karşı taraf isim arama — "X'in sahibi olduğu", "X tarafından"
-    # patternleri (KAP body'sindeki anlatim metninde gercek isim gecer)
+    # Body'den ek karşı taraf isim arama — sadece counterparties bossa
     if not out.get("counterparties"):
-        # "GIC Private Limited... sahibi olduğu" / "Zekeriya Zeray'ın sahibi olduğu"
-        _name_patterns = [
-            r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi\s+oldu(?:ğ|g)u|\s+tarafından)",
-            r"pay\s*sahiplerinden\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n",
-            r"ortaklarından,?\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi)",
-        ]
-        for pat in _name_patterns:
-            mm = re.search(pat, b)
-            if mm:
-                _nm = mm.group(1).strip().rstrip(",.")
-                if _nm and 4 < len(_nm) < 200 and _nm.lower() not in _JUNK_CP:
-                    # "Ek-1'deki listede yer alan yatırımcılar" suffix'i ekle
-                    _suffix = " (Ek-1'deki yatırımcılar)" if "ek-1" in b.lower() or "annex-1" in b.lower() else ""
-                    out["counterparties"] = (_nm + _suffix)[:1000]
-                    break
+        # SATIS islemi ise body'den ALICI bulmaya odaklan
+        # "Ek-1'deki listede yer alan yatirimcilar" — alicilar genelde ek dosyada
+        if tx_type == "satis":
+            # Ek-1'deki yatirimcilara satis pattern'i
+            if re.search(r"ek[\s\-]?1.{0,30}(?:yer\s+alan|listedeki|listenin).{0,30}yat[ıi]r[ıi]mc", b, re.IGNORECASE):
+                out["counterparties"] = "Ek-1'deki listede yer alan yatırımcılar"
+        # ALIS islemi ise body'den SATICI bulmaya odaklan
+        elif tx_type == "alis":
+            # "X'in sahibi olduğu" -> X = satici
+            _seller_patterns = [
+                r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi\s+oldu(?:ğ|g)u|\s+tarafından)",
+                r"pay\s*sahiplerinden\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n",
+                r"ortaklarından,?\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&'\"]{4,80}?)['ı’]?n(?:\s+sahibi)",
+            ]
+            for pat in _seller_patterns:
+                mm = re.search(pat, b)
+                if mm:
+                    _nm = mm.group(1).strip().rstrip(",.")
+                    if _nm and 4 < len(_nm) < 200 and _nm.lower() not in _JUNK_CP:
+                        out["counterparties"] = _nm[:1000]
+                        break
 
     # lot_amount: "17.272.728 Lot" veya "17.272.728"
     m_lot = re.search(r"LOT\s*M[İI]KTAR[İI][\s\:\|]+([\d\.\,]+)\s*(?:Lot)?", b, re.IGNORECASE)
