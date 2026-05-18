@@ -2057,7 +2057,16 @@ def tweet_kap_news(
                 "Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             )
         else:
-            _ratio_text = "Her 2 olumsuz haberden 1'i gönderilmektedir." if sentiment == "negative" else "Her 4 olumlu haberden 1'i gönderilmektedir."
+            # Sentiment + skor'a gore oran metni
+            if sentiment == "negative":
+                if ai_score is not None and ai_score < 2.1:
+                    # Guclu Olumsuz + Cok Olumsuz: tamami atilir
+                    _ratio_text = "Tüm Çok Olumsuz ve Güçlü Olumsuz haberler paylaşılmaktadır."
+                else:
+                    # Olumsuz (2.1-3.0): 2'de 1
+                    _ratio_text = "Her 2 olumsuz haberden 1'i gönderilmektedir."
+            else:
+                _ratio_text = "Her 4 olumlu haberden 1'i gönderilmektedir."
             cta_text = (
                 f"{_ratio_text}\n"
                 f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
