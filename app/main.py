@@ -4197,6 +4197,51 @@ async def admin_delete_tweets(request: Request, payload: dict, db: AsyncSession 
     return {"status": "ok", "deleted": deleted}
 
 
+@app.post("/api/v1/admin/process-kap-as-block-trade")
+@limiter.limit("5/minute")
+async def admin_process_kap_as_block_trade(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: KAP URL'sini block_trade processor'a goder, ilgili tum ticker'lar
+    icin kayit olustur (multi-ticker destek). Tipe donusum gibi cokli hisse
+    duyurularinda kullanilir.
+
+    Body: {'admin_password': '...', 'kap_url': 'https://www.kap.org.tr/tr/Bildirim/1606871'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    kap_url = (payload.get("kap_url") or "").strip()
+    if not kap_url:
+        raise HTTPException(status_code=400, detail="kap_url gerekli")
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from app.services.kap_category_processors import process_block_trade
+    import re as _re
+    disc = await fetch_kap_disclosure(kap_url)
+    if not disc or not disc.get("full_text"):
+        return {"status": "error", "message": "KAP fetch basarisiz"}
+    body = disc["full_text"]
+    # İlgili Şirketler'i bul
+    m = _re.search(
+        r"(?:İlgili\s*Şirketler?|Hisse\s*Kodu|Sembol|Pay\s*Kodu)\s*[:\|]?\s*([A-Z, ]+?)(?:\n|$)",
+        body, _re.IGNORECASE,
+    )
+    if not m:
+        return {"status": "error", "message": "İlgili Şirketler bulunamadi"}
+    tickers = [t.strip().upper() for t in m.group(1).split(",") if t.strip()]
+    if not tickers:
+        return {"status": "error", "message": "ticker yok"}
+    # İlk ticker ile çağır — process_block_trade multi-ticker destekli, hepsini ekler
+    result = await process_block_trade(
+        db, disclosure_id=0, ticker=tickers[0],
+        company_name=None, title="Multi-Ticker Block Trade",
+        body=body, kap_url=kap_url, published_at=datetime.now(timezone.utc),
+    )
+    await db.commit()
+    return {"status": "ok", "tickers_found": tickers, "kap_url": kap_url}
+
+
 @app.post("/api/v1/admin/delete-block-trade")
 @limiter.limit("10/minute")
 async def admin_delete_block_trade(

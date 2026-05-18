@@ -146,17 +146,16 @@ def is_block_trade(title: str, body: str = "") -> bool:
     """
     if title:
         t = lower_tr(title)
-        # ★ Tipe donusum / borsada islem gormeyen pay / pay devri — ASLA block_trade
-        _exclude_patterns = [
-            "tipe donus", "tipe dönüş",
-            "borsada islem goren tipe",
-            "borsa disi pay devri", "borsa dışı pay devri",
-            "donusum duyuru", "dönüşüm duyuru",
-            "donusum talep", "dönüşüm talep",
-        ]
-        if any(p in t for p in _exclude_patterns):
-            return False
+        # NOT: "tipe donusum" / "borsa disi pay devri" eskiden harici tutuluyordu
+        # ama kullanici bunlari da Toptan Alim Satim listesinde gormek istiyor
+        # (cunku coklu hisse senedinin tipe donusumu de bir islem). Bu yuzden
+        # haric tutma kaldirildi — tum "donusum" duyurulari da block_trade'e gelir.
         if any(p in t for p in _BT_TITLE_PATTERNS):
+            return True
+        # Tipe donusum baslıkları da block_trade kabul (multi-ticker destekli)
+        if "tipe donus" in t or "tipe dönüş" in t or "borsada islem goren tipe" in t:
+            return True
+        if "borsa disi pay devri" in t or "borsa dışı pay devri" in t:
             return True
     if body:
         b = lower_tr(body)
@@ -336,6 +335,7 @@ async def process_block_trade(
     # alani var mi kontrol et. Eger varsa ve verilen ticker bu listede DEGILSE,
     # o ticker yanlis (aracı kurum / karşı taraf adi parser tarafindan ticker
     # zannedilmis olabilir — TERA Yatirim -> TERA gibi). Bu durumda kayit olusturma.
+    related_tickers: set[str] = set()
     if body:
         m_related = re.search(
             r"(?:İlgili\s*Şirketler?|Hisse\s*Kodu|Sembol|Pay\s*Kodu)\s*[:\|]?\s*([A-Z, ]+?)(?:\n|$)",
@@ -370,22 +370,39 @@ async def process_block_trade(
     if not tx_date:
         tx_date = published_at.date() if published_at else date.today()
 
-    new_row = BlockTrade(
-        ticker=ticker,
-        company_name=company_name,
-        transaction_date=tx_date,
-        transaction_type=tx_type,
-        broker=(parsed.get("broker") or None),
-        counterparties=(parsed.get("counterparties") or None),
-        lot_amount=(int(parsed["lot_amount"]) if isinstance(parsed.get("lot_amount"), (int, float)) else None),
-        cost_price=(float(parsed["cost_price"]) if isinstance(parsed.get("cost_price"), (int, float)) else None),
-        kap_url=kap_url,
-        source="kap_ai_parse",
-    )
-    db.add(new_row)
-    await db.flush()
-    logger.info("BlockTrade: yeni (%s, %s)", ticker, tx_type)
-    return new_row
+    # Hangi ticker'lar icin kayit acilacak? Eger KAP body'sinde "İlgili Şirketler:"
+    # alaninda birden fazla ticker varsa (orn tipe donusum duyurusu: ENDAE, ISKPL,
+    # SKYLP, TMPOL, YBTAS), HER biri icin ayri kayit ac. Tek ticker varsa sadece o.
+    _ticker_list = sorted(related_tickers) if len(related_tickers) > 1 else [ticker.upper()]
+    last_row = None
+    for _tk in _ticker_list:
+        # Duplicate guard: ayni ticker + ayni kap_url varsa atla
+        if kap_url:
+            _dup = (await db.execute(
+                select(BlockTrade).where(
+                    BlockTrade.ticker == _tk,
+                    BlockTrade.kap_url == kap_url,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if _dup:
+                continue
+        new_row = BlockTrade(
+            ticker=_tk,
+            company_name=company_name if _tk == ticker.upper() else None,
+            transaction_date=tx_date,
+            transaction_type=tx_type,
+            broker=(parsed.get("broker") or None),
+            counterparties=(parsed.get("counterparties") or None),
+            lot_amount=(int(parsed["lot_amount"]) if isinstance(parsed.get("lot_amount"), (int, float)) else None),
+            cost_price=(float(parsed["cost_price"]) if isinstance(parsed.get("cost_price"), (int, float)) else None),
+            kap_url=kap_url,
+            source="kap_ai_parse",
+        )
+        db.add(new_row)
+        await db.flush()
+        logger.info("BlockTrade: yeni (%s, %s)", _tk, tx_type)
+        last_row = new_row
+    return last_row
 
 
 # ═══════════════════════════════════════════════════════════════════
