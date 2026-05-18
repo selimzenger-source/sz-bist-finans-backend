@@ -856,7 +856,13 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
     """
     if not content:
         return None
-    text_lower = content.lower()
+    # ★ Turkce-aware lowercase: "İ".lower() Python'da "i̇" (combining dot above)
+    # uretiyor — pattern'deki "i" ile eslesmiyor. lower_tr "i" donduruyor.
+    try:
+        from app.utils.tr_text import lower_tr
+        text_lower = lower_tr(content)
+    except Exception:
+        text_lower = content.lower()
     for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
         if re.search(pattern, text_lower):
             # Ticker'i summary'nin basina ekle (kullanici ne hisse oldugunu bilsin)
@@ -1692,7 +1698,11 @@ async def score_news(
     # ─── PRE-FILTER: Rutin/idari bildirimleri AI'ya gonderme ───
     # Sabit Notr 5.0 + standart aciklama don. AI kredisi tasarrufu icin kritik.
     # Bu pattern'lar fiyat hareketine sebep olmayan teknik/idari duyurular.
-    _routine_filter = _check_routine_pattern(content, ticker)
+    # HEM Telegram raw_text HEM de TV/KAP content kontrol edilir — JANTS
+    # ornegi: Telegram baslıgı 'Devre Kesici' iken KAP fallback yanlis 3 gun
+    # onceki sermaye artırımı bildirimini cekti -> content'te 'devre kesici'
+    # yoktu -> pre-filter eslesmedi -> AI yanlis 7.9 verdi.
+    _routine_filter = _check_routine_pattern(raw_text or "", ticker) or _check_routine_pattern(content, ticker)
     if _routine_filter is not None:
         logger.info("AI pre-filter: %s — '%s' (AI atlandi)", ticker, _routine_filter["category"])
         return {
