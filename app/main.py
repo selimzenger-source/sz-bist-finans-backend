@@ -14581,6 +14581,39 @@ async def get_kurum_onerileri(
     }
 
 
+@app.post("/api/v1/admin/cleanup-kurum-oneri-indexes")
+@limiter.limit("3/minute")
+async def admin_cleanup_kurum_oneri_indexes(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: kurum_oneri'den endeks ticker'larini sil (XU100, XBANK vs.)."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.kurum_oneri import KurumOneri
+    INDEX = ["XU100","XU030","XU050","XBANK","XKURU","XSPOR","XTUMY","XGIDA",
+             "XKMYA","XMANA","XKAGT","XMESY","XILTM","XGMYO","XUMAL","XUSIN",
+             "XHOLD","XINSA","XELKT","XTEKS","XTAST","XTRZM","XSGRT","XFINK",
+             "XHARZ","XYORT","XBLSM","XUTEK","XTRAS","XKOBI","XKURY","XSANT",
+             "XYUZO","XMADN","XSAVE"]
+    rows = (await db.execute(
+        select(KurumOneri).where(
+            or_(
+                KurumOneri.ticker.in_(INDEX),
+                KurumOneri.ticker.like("XU0%"),
+                KurumOneri.ticker.like("XU1%"),
+            )
+        )
+    )).scalars().all()
+    deleted = 0
+    for r in rows:
+        await db.delete(r)
+        deleted += 1
+    await db.commit()
+    return {"status": "ok", "deleted": deleted}
+
+
 @app.post("/api/v1/admin/kurum-oneri-ai-backfill")
 async def admin_kurum_oneri_backfill(body: dict, db: AsyncSession = Depends(get_db)):
     """AI yorumu eksik olan kurum onerilerine Claude Sonnet ile yorum ekle.

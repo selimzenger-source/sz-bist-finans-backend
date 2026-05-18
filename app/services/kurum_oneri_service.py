@@ -15,6 +15,15 @@ from app.models.kurum_oneri import KurumOneri
 
 logger = logging.getLogger(__name__)
 
+# Endeks ticker'lari — kurum onerilerine eklenmez (hisse degil).
+_INDEX_TICKERS = {
+    "XU100", "XU030", "XU050", "XBANK", "XKURU", "XSPOR", "XTUMY",
+    "XGIDA", "XKMYA", "XMANA", "XKAGT", "XMESY", "XILTM", "XGMYO",
+    "XUMAL", "XUSIN", "XHOLD", "XINSA", "XELKT", "XTEKS", "XTAST",
+    "XTRZM", "XSGRT", "XFINK", "XHARZ", "XYORT", "XBLSM", "XUTEK",
+    "XTRAS", "XKOBI", "XKURY", "XSANT", "XYUZO", "XMADN", "XSAVE",
+}
+
 
 class KurumOneriService:
     """Kurum onerileri CRUD ve bildirim servisi."""
@@ -30,6 +39,11 @@ class KurumOneriService:
 
         if not ticker or not institution or not report_date:
             logger.debug("Eksik veri: ticker=%s, institution=%s, date=%s", ticker, institution, report_date)
+            return None, False
+
+        # Endeks ticker'larini reddet (XU100, XU030, XBANK vs.) — bunlar hisse degil
+        if ticker in _INDEX_TICKERS or ticker.startswith("XU0") or ticker.startswith("XU1"):
+            logger.info("Endeks ticker atlandi: %s", ticker)
             return None, False
 
         # Mevcut kayit var mi?
