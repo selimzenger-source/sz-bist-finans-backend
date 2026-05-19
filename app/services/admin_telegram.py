@@ -532,6 +532,27 @@ async def notify_subscription_purchase(
     await send_admin_message(text, silent=(event_type in ("RENEWAL",)))
 
 
+async def notify_new_install(
+    user_id: int,
+    device_id: str,
+    platform: str,
+    app_version: str,
+    is_recovery: bool = False,
+):
+    """Yeni uygulama kurulumu / hesap kurtarma bildirimi."""
+    plat_emoji = "🍎" if (platform or "").lower() == "ios" else "🤖"
+    title = "🔄 Hesap Kurtarma" if is_recovery else "🆕 Yeni Kullanıcı"
+    text = (
+        f"{title}\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"User ID: {user_id}\n"
+        f"Cihaz: {plat_emoji} {platform} — {device_id}\n"
+        f"Sürüm: v{app_version}"
+    )
+    # Yeni kurulum = sesli, recovery = sessiz (zaten kullaniciydi)
+    await send_admin_message(text, silent=is_recovery)
+
+
 async def notify_push_health_report(
     total_users: int,
     with_fcm_token: int,

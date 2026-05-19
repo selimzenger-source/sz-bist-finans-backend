@@ -2679,6 +2679,9 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
     clean_persistent = data.persistent_id.strip() if data.persistent_id else None
     clean_persistent = clean_persistent or None
 
+    is_new_install = False  # Telegram admin bildirimi icin
+    is_recovery = False
+
     result = await db.execute(
         select(User).where(User.device_id == data.device_id)
     )
@@ -2716,6 +2719,7 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
             recovered_user.platform = data.platform
             recovered_user.app_version = data.app_version
             user = recovered_user
+            is_recovery = True
             logger.info(
                 "Hesap kurtarma basarili: persistent_id=%s, eski_device=%s → yeni_device=%s, user_id=%d",
                 clean_persistent, "?", data.device_id, user.id,
@@ -2731,6 +2735,7 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
                 app_version=data.app_version,
             )
             db.add(user)
+            is_new_install = True
 
             await db.flush()
             subscription = UserSubscription(
@@ -2749,6 +2754,7 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
             app_version=data.app_version,
         )
         db.add(user)
+        is_new_install = True
 
         await db.flush()
         subscription = UserSubscription(
@@ -2759,6 +2765,21 @@ async def register_device(request: Request, data: UserRegister, db: AsyncSession
         db.add(subscription)
 
     await db.flush()
+
+    # ─── Telegram admin bildirimi: yeni kurulum / hesap kurtarma ───
+    if is_new_install or is_recovery:
+        try:
+            from app.services.admin_telegram import notify_new_install
+            await notify_new_install(
+                user_id=user.id,
+                device_id=user.device_id or "?",
+                platform=data.platform or "?",
+                app_version=data.app_version or "?",
+                is_recovery=is_recovery,
+            )
+        except Exception as _e:
+            logger.warning("Yeni install Telegram bildirim hatasi: %s", _e)
+
     return user
 
 
