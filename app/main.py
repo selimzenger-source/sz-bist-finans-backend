@@ -1992,6 +1992,7 @@ async def list_telegram_news(
     offset: int = Query(0, ge=0),
     device_id: Optional[str] = Query(None, description="Abonelik kontrolu icin device_id"),
     package: Optional[str] = Query(None, description="Frontend'den gelen aktif paket (ana_yildiz)"),
+    apply_user_filters: bool = Query(True, description="User'in DB'deki tercih filtrelerini uygula (market+seans+skor)"),
     db: AsyncSession = Depends(get_db),
 ):
     """Telegram kanalindan gelen AI haberler.
@@ -2073,6 +2074,35 @@ async def list_telegram_news(
             query = query.where(TelegramNews.message_type == message_type)
         if sentiment:
             query = query.where(TelegramNews.sentiment == sentiment)
+
+        # User tercih filtreleri — DB'deki notify_market_filter + notify_seans_filter
+        # Push bildirimlerinde de ayni filtre uygulanir (notify_kap_news'da).
+        if apply_user_filters and device_id and user and not message_type and not ticker:
+            _mkt = (getattr(user, "notify_market_filter", "all") or "all").lower()
+            _seans = (getattr(user, "notify_seans_filter", "all") or "all").lower()
+
+            # Seans filtresi
+            if _seans == "seans_ici":
+                query = query.where(TelegramNews.message_type == "seans_ici_pozitif")
+            elif _seans == "seans_disi":
+                query = query.where(TelegramNews.message_type.in_(["borsa_kapali", "seans_disi_acilis"]))
+
+            # Pazar filtresi — stock_markets tablosundan ticker'lari cek
+            if _mkt != "all":
+                from app.models.stock_market import StockMarket
+                if _mkt == "ana":
+                    allowed = ["ana_pazar"]
+                elif _mkt == "yildiz":
+                    allowed = ["yildiz_pazar"]
+                elif _mkt == "ana_yildiz":
+                    allowed = ["ana_pazar", "yildiz_pazar"]
+                else:
+                    allowed = []
+                if allowed:
+                    market_subq = select(StockMarket.ticker).where(
+                        StockMarket.market_segment.in_(allowed)
+                    )
+                    query = query.where(TelegramNews.ticker.in_(market_subq))
 
         query = query.limit(min(limit, 50)).offset(offset)
     else:
