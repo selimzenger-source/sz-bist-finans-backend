@@ -2,27 +2,21 @@
 
 Kaynak: https://borsaistanbul.com/datum/hisse_endeks_ds.csv
 CSV format (utf-8-sig BOM'lu):
-  - Satir 1: Header (Borsa İstanbul A.Ş ... timestamp)
-  - Satir 2: Kolon basliklari (HISSE KODU; SIRKET ADI; ESHAM KISITLI ESHAM ENDEKSLERI;
-             PAZAR/PIYASA; ...)
+  - Satir 1 (header TR): BILESEN KODU;BULTEN_ADI;ENDEKS KODU;ENDEKS ADI;...
+  - Satir 2 (header EN): CONSTITUENT CODE;CONSTITUENT NAME;INDEX CODE;...
   - Satir 3+: Data, semicolon ';' ile ayrili
 
-PAZAR/PIYASA degerleri:
-  - Yildiz Pazar
-  - Ana Pazar
-  - Alt Pazar
-  - Yakin Izleme Pazari
-  - GIP Aday Pazari
-  - Yapilandirilmis Urunler ve Fon Pazari
-  - Pre-Market Trading Platformu (PMTP)
-  - vb.
+Her hisse 1+ endeks uyesi. Her satir bir uyelik kaydi.
+Ornek:
+  AEFES.E;ANADOLU EFES;XU100;BIST 100;...
+  AEFES.E;ANADOLU EFES;XYLDZ;BIST YILDIZ;...
 
-Mapping → stock_markets.market_segment:
-  'Yildiz' → 'yildiz_pazar'
-  'Ana'    → 'ana_pazar'
-  'Alt'    → 'alt_pazar'
-  'Yakin'  → 'yakin_izleme'
-  diger    → 'diger'
+Pazar belirleme (per ticker):
+  XYLDZ uyesi -> 'yildiz_pazar'
+  XBANA uyesi -> 'ana_pazar'
+  hicbiri    -> 'diger' (alt pazar, yakin izleme vs.)
+
+Ticker AEFES.E -> AEFES'e normalize edilir (.E suffix kaldirilir).
 """
 
 from __future__ import annotations
@@ -36,32 +30,33 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.utils.tr_text import lower_tr
-
 logger = logging.getLogger(__name__)
 
 BIST_URL = "https://borsaistanbul.com/datum/hisse_endeks_ds.csv"
 
-
-def _normalize_segment(raw: str) -> str:
-    if not raw:
-        return "diger"
-    s = lower_tr(raw)
-    if "yildiz" in s:
-        return "yildiz_pazar"
-    if "ana" in s and "pazar" in s:
-        return "ana_pazar"
-    if "alt" in s and "pazar" in s:
-        return "alt_pazar"
-    if "yakin" in s and "izleme" in s:
-        return "yakin_izleme"
-    if "kollektif" in s or "yatirim urun" in s or "gip" in s or "fon pazar" in s:
-        return "kollektif_yat"
-    return "diger"
+# Pazar endeks kodlari (BIST resmi)
+_MARKET_INDEX_MAP = {
+    "XYLDZ": "yildiz_pazar",
+    "XBANA": "ana_pazar",
+    # Diger ozel pazarlar (zaman icinde tespit edersek ekleriz)
+}
 
 
-async def fetch_bist_market_csv() -> list[dict[str, Any]]:
-    """BIST CSV'sini cek ve parse et."""
+def _normalize_ticker(raw: str) -> str:
+    """AEFES.E -> AEFES (BIST .E suffix kaldirilir)."""
+    t = (raw or "").strip().upper()
+    # .E, .F, .Y gibi suffixleri kaldir
+    if "." in t:
+        t = t.split(".")[0]
+    return t
+
+
+async def fetch_bist_market_csv() -> dict[str, dict[str, Any]]:
+    """BIST CSV'sini cek + her ticker icin uyeligi oldugu endeksleri grupla.
+
+    Returns:
+        {ticker: {company_name, market_segment, indexes_list}}
+    """
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(BIST_URL)
@@ -69,77 +64,65 @@ async def fetch_bist_market_csv() -> list[dict[str, Any]]:
             text = resp.content.decode("utf-8-sig", errors="replace")
     except Exception as e:
         logger.error("BIST market CSV fetch hatasi: %s", e)
-        return []
+        return {}
 
     lines = text.splitlines()
     if len(lines) < 3:
         logger.warning("BIST market CSV cok kisa (%d satir)", len(lines))
-        return []
+        return {}
 
-    # Header analizi — kolon konumlarini bul
-    header_line = lines[1] if len(lines) >= 2 else ""
-    header_cols = [c.strip() for c in header_line.split(";")]
-    idx = {name: i for i, name in enumerate(header_cols)}
-
-    # Kolon isimleri tam Turkce — esleyelim
-    def _find_col(*candidates: str) -> int | None:
-        for cand in candidates:
-            cl = lower_tr(cand)
-            for i, h in enumerate(header_cols):
-                if cl in lower_tr(h):
-                    return i
-        return None
-
-    col_ticker = _find_col("hisse kodu", "kod")
-    col_name = _find_col("sirket adi", "sirket")
-    col_market = _find_col("pazar", "piyasa")
-    col_index = _find_col("endeks")
-
-    if col_ticker is None or col_market is None:
-        logger.warning(
-            "BIST market CSV kolon bulunamadi (header: %s)",
-            header_cols[:5],
-        )
-        return []
-
-    items: list[dict[str, Any]] = []
+    # Header'i atla — satir 0 (TR) ve satir 1 (EN) header
+    # Data satir 2'den baslar. Kolon sirasi: ticker, name, index_code, index_tr_name, ...
     reader = csv.reader(io.StringIO("\n".join(lines[2:])), delimiter=";")
+    grouped: dict[str, dict[str, Any]] = {}
+
     for row in reader:
-        if not row or len(row) <= col_market:
+        if not row or len(row) < 3:
             continue
-        ticker = (row[col_ticker] or "").strip().upper()
+        ticker = _normalize_ticker(row[0])
         if not ticker:
             continue
-        name = (row[col_name] or "").strip() if col_name is not None else None
-        market_raw = (row[col_market] or "").strip()
-        index_raw = (row[col_index] or "").strip() if col_index is not None else None
-        items.append({
+        company_name = (row[1] or "").strip()
+        index_code = (row[2] or "").strip().upper()
+        if not index_code:
+            continue
+
+        entry = grouped.setdefault(ticker, {
             "ticker": ticker,
-            "company_name": name,
-            "market_segment": _normalize_segment(market_raw),
-            "market_raw": market_raw,
-            "indexes": index_raw,
+            "company_name": company_name or None,
+            "market_segment": "diger",
+            "indexes": [],
         })
-    return items
+        if index_code not in entry["indexes"]:
+            entry["indexes"].append(index_code)
+        if company_name and not entry.get("company_name"):
+            entry["company_name"] = company_name
+        # Pazar belirleme — XYLDZ veya XBANA varsa pazar set edilir
+        if index_code in _MARKET_INDEX_MAP:
+            seg = _MARKET_INDEX_MAP[index_code]
+            # XYLDZ > XBANA oncelikli olmaz, her ikisi ayri pazar — ilk gelen kalir
+            if entry["market_segment"] == "diger":
+                entry["market_segment"] = seg
+
+    logger.info("BIST market CSV: %d unique ticker", len(grouped))
+    return grouped
 
 
 async def sync_bist_markets(db: AsyncSession) -> dict[str, int]:
     """BIST CSV'sini DB'ye senkronize et. (insert/update)."""
     from app.models.stock_market import StockMarket
 
-    items = await fetch_bist_market_csv()
-    if not items:
+    items_map = await fetch_bist_market_csv()
+    if not items_map:
         return {"fetched": 0, "inserted": 0, "updated": 0}
 
     inserted = 0
     updated = 0
-    # Tek seferde tum tickerlari cek
-    existing_q = select(StockMarket)
-    existing_rows = (await db.execute(existing_q)).scalars().all()
+    existing_rows = (await db.execute(select(StockMarket))).scalars().all()
     by_ticker = {r.ticker: r for r in existing_rows}
 
-    for it in items:
-        tk = it["ticker"]
+    for tk, it in items_map.items():
+        indexes_csv = ",".join(it["indexes"])[:500]
         existing = by_ticker.get(tk)
         if existing:
             changed = False
@@ -149,8 +132,8 @@ async def sync_bist_markets(db: AsyncSession) -> dict[str, int]:
             if it.get("company_name") and existing.company_name != it["company_name"]:
                 existing.company_name = it["company_name"]
                 changed = True
-            if it.get("indexes") and existing.indexes != it["indexes"]:
-                existing.indexes = it["indexes"][:500]
+            if existing.indexes != indexes_csv:
+                existing.indexes = indexes_csv
                 changed = True
             if changed:
                 updated += 1
@@ -159,7 +142,7 @@ async def sync_bist_markets(db: AsyncSession) -> dict[str, int]:
                 ticker=tk,
                 company_name=it.get("company_name"),
                 market_segment=it["market_segment"],
-                indexes=(it.get("indexes") or "")[:500] or None,
+                indexes=indexes_csv or None,
             )
             db.add(row)
             inserted += 1
@@ -167,6 +150,6 @@ async def sync_bist_markets(db: AsyncSession) -> dict[str, int]:
     await db.commit()
     logger.info(
         "BIST market segment sync: %d fetched, %d inserted, %d updated",
-        len(items), inserted, updated,
+        len(items_map), inserted, updated,
     )
-    return {"fetched": len(items), "inserted": inserted, "updated": updated}
+    return {"fetched": len(items_map), "inserted": inserted, "updated": updated}
