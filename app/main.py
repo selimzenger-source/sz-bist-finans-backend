@@ -4862,6 +4862,29 @@ async def admin_cleanup_non_csv_cautious(
     }
 
 
+@app.get("/api/v1/stock-market/{ticker}")
+@limiter.limit("30/minute")
+async def get_stock_market(
+    request: Request,
+    ticker: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Hisse pazar bilgisi — frontend/test icin."""
+    from app.models.stock_market import StockMarket
+    row = (await db.execute(
+        select(StockMarket).where(StockMarket.ticker == ticker.upper())
+    )).scalar_one_or_none()
+    if not row:
+        return {"ticker": ticker.upper(), "found": False}
+    return {
+        "ticker": row.ticker,
+        "company_name": row.company_name,
+        "market_segment": row.market_segment,
+        "indexes": row.indexes,
+        "found": True,
+    }
+
+
 @app.post("/api/v1/admin/sync-bist-markets-now")
 @limiter.limit("3/minute")
 async def admin_sync_bist_markets_now(
