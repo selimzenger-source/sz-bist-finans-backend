@@ -19,7 +19,11 @@ class Settings(BaseSettings):
     # App
     APP_ENV: str = "development"
     SECRET_KEY: str = ""
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
+    # Production hostnames default'a eklendi — Render env tarafindan override edilebilir.
+    CORS_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:8081,http://localhost:3001,"
+        "https://borsacebimde.com,https://www.borsacebimde.com"
+    )
     PORT: int = 8001
 
     # Firebase

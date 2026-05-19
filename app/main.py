@@ -1917,12 +1917,14 @@ async def get_poll_stats(ipo_id: int, request: Request, db: AsyncSession = Depen
     )
     ceiling_rows = (await db.execute(ceiling_stmt)).all()
     ceiling_values = []
-    distribution: dict[str, int] = {}
+    # Distribution'i 1..25 ile init et — frontend bos olsa da 25 bar render edebilsin.
+    distribution: dict[str, int] = {str(i): 0 for i in range(1, 26)}
     for (choice,) in ceiling_rows:
         try:
             v = int(choice)
-            ceiling_values.append(v)
-            distribution[str(v)] = distribution.get(str(v), 0) + 1
+            if 1 <= v <= 25:
+                ceiling_values.append(v)
+                distribution[str(v)] = distribution.get(str(v), 0) + 1
         except (ValueError, TypeError):
             continue
     ceiling_avg = round(sum(ceiling_values) / len(ceiling_values), 1) if ceiling_values else None
