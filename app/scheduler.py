@@ -4598,6 +4598,13 @@ def _setup_scheduler_impl():
                         ipo.ticker or ipo.company_name, hours_left,
                     )
 
+                    # ★ KESIN SPAM KORUMASI: Flag'i HEMEN set + commit et.
+                    # Push donguso patlasa veya restart olsa bile bu IPO icin
+                    # bir daha calismaz. Kullanici 1 push alir, en kotu durumda
+                    # hic almaz (ama asla 2+ almaz).
+                    ipo.hype_6h_notified_at = _dt.now(_tz.utc)
+                    await db.commit()
+
                     # Oy vermemis kullanicilari bul (device_id ile join)
                     voted_subq = _sel(distinct(IPOPollVote.device_id)).where(
                         and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype"),
@@ -4612,8 +4619,6 @@ def _setup_scheduler_impl():
                         )
                     )).scalars().all()
                     if not target_users:
-                        ipo.hype_6h_notified_at = _dt.now(_tz.utc)
-                        await db.commit()
                         continue
 
                     company = (ipo.ticker or ipo.company_name or "Halka Arz")[:30]
@@ -4649,8 +4654,6 @@ def _setup_scheduler_impl():
                             failed += 1
                             logger.debug("hype 6h push hata user=%s: %s", u.id, _u_err)
 
-                    ipo.hype_6h_notified_at = _dt.now(_tz.utc)
-                    await db.commit()
                     logger.info(
                         "[HYPE-6H] %s: %d kullaniciya push gonderildi, %d basarisiz",
                         company, sent, failed,
