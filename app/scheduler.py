@@ -5877,26 +5877,9 @@ async def kurum_oneri_daily_tweet_job():
             header = f"📊 {len(tweet_lines)} Kurum Önerisi — {tr_date}"
             footer = "Detaylar için uygulamamız: borsacebimde.app"
 
-            # X (Twitter) limit ~280 chr ama uzun thread genelde tek tweet'e sigar (premium 4000).
-            # Lines'i 4000'e kadar siralarsak hepsi sigar — fazla olursa kalan satirlari kes.
+            # Premium hesap — kirpma yok, tum oneriler tek tweet'te (X premium limit ~25000 chr).
             body = "\n".join(tweet_lines)
             tweet_text = f"{header}\n\n{body}\n\n{footer}".strip()
-
-            # Cok uzunsa son satirlari kirp ve "+N öneri daha" not ekle
-            MAX_LEN = 3900
-            if len(tweet_text) > MAX_LEN:
-                kept = []
-                so_far_len = len(header) + 4 + len(footer) + 20
-                more = 0
-                for line in tweet_lines:
-                    if so_far_len + len(line) + 1 < MAX_LEN:
-                        kept.append(line)
-                        so_far_len += len(line) + 1
-                    else:
-                        more += 1
-                body = "\n".join(kept)
-                extra = f"\n+{more} öneri daha" if more else ""
-                tweet_text = f"{header}\n\n{body}{extra}\n\n{footer}".strip()
 
             # Gemini kapak resmi (mevcut yardimci fonksiyon, ilk 5 oneriyle)
             cover = None
