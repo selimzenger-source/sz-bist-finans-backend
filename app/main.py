@@ -136,9 +136,26 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_onboarding_completed BOOLEAN DEFAULT FALSE"
             ))
+            # stock_markets tablosu — KAP haber pazar filtreleme icin
+            await db.execute(sa_text("""
+                CREATE TABLE IF NOT EXISTS stock_markets (
+                    id SERIAL PRIMARY KEY,
+                    ticker VARCHAR(10) NOT NULL UNIQUE,
+                    company_name VARCHAR(255),
+                    market_segment VARCHAR(32) NOT NULL DEFAULT 'diger',
+                    indexes VARCHAR(500),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """))
+            await db.execute(sa_text(
+                "CREATE INDEX IF NOT EXISTS idx_stock_market_segment ON stock_markets(market_segment)"
+            ))
+            await db.execute(sa_text(
+                "CREATE INDEX IF NOT EXISTS idx_stock_market_ticker ON stock_markets(ticker)"
+            ))
             await db.commit()
     except Exception as e:
-        logger.warning("kap_min_score/notify_filter migration atlandi: %s", e)
+        logger.warning("kap_min_score/notify_filter/stock_markets migration atlandi: %s", e)
 
     # BIST lisans uyumu: temel_analiz tablosundan piyasa kaynakli alanlari DROP et
     # (dolasim_lot, piyasa_degeri, fk — fiyat/piyasa kaynakli, lisans gerektiriyor)
