@@ -126,9 +126,19 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS kap_min_score FLOAT DEFAULT 6.0"
             ))
+            # Bildirim tercihleri — market + seans + onboarding flag
+            await db.execute(sa_text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_market_filter VARCHAR(16) DEFAULT 'all'"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_seans_filter VARCHAR(16) DEFAULT 'all'"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS notif_onboarding_completed BOOLEAN DEFAULT FALSE"
+            ))
             await db.commit()
     except Exception as e:
-        logger.warning("kap_min_score migration atlandi: %s", e)
+        logger.warning("kap_min_score/notify_filter migration atlandi: %s", e)
 
     # BIST lisans uyumu: temel_analiz tablosundan piyasa kaynakli alanlari DROP et
     # (dolasim_lot, piyasa_degeri, fk — fiyat/piyasa kaynakli, lisans gerektiriyor)
@@ -4833,6 +4843,23 @@ async def admin_cleanup_non_csv_cautious(
         "deleted_total": sum(deleted_by_source.values()),
         "by_source": deleted_by_source,
     }
+
+
+@app.post("/api/v1/admin/sync-bist-markets-now")
+@limiter.limit("3/minute")
+async def admin_sync_bist_markets_now(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: BIST hisse pazar segmenti CSV'sini SIMDI senkronize et.
+    Kaynak: https://borsaistanbul.com/datum/hisse_endeks_ds.csv
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.scrapers.bist_market_segment_scraper import sync_bist_markets
+    stats = await sync_bist_markets(db)
+    return {"status": "ok", "stats": stats}
 
 
 @app.post("/api/v1/admin/sync-bist-tedbir-now")

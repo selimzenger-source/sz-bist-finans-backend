@@ -4349,6 +4349,31 @@ def _setup_scheduler_impl():
     )
     logger.info("BIST resmi tedbirli CSV scheduler: her 30dk aktif")
 
+    # 7f-tris. BIST hisse pazar segmenti CSV sync — gunde 1x, gece 02:00 TR
+    # Kaynak: https://borsaistanbul.com/datum/hisse_endeks_ds.csv
+    # Hangi hisse hangi pazarda (Ana / Yildiz / Alt). KAP bildirim filtrelemesi
+    # icin gerekli — kullanici 'sadece Ana Pazar' secerse o pazardakileri alir.
+    async def _bist_market_csv_sync():
+        try:
+            from app.scrapers.bist_market_segment_scraper import sync_bist_markets
+            async with async_session() as db:
+                stats = await sync_bist_markets(db)
+                logger.info("BIST market segment sync: %s", stats)
+        except Exception as e:
+            logger.error("BIST market segment sync hatasi: %s", e)
+
+    scheduler.add_job(
+        _bist_market_csv_sync,
+        CronTrigger(hour=23, minute=0),  # 23:00 UTC = 02:00 TR (gece)
+        id="bist_market_segment_sync",
+        name="BIST hisse pazar segmenti CSV sync — gunde 1x",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("BIST pazar segmenti scheduler: gunde 1x (02:00 TR) aktif")
+
     # 7h. IPO POLL BILDIRIM SISTEMI — 07:00 katilim, 17:00 tavan anketi (TR)
     # ────────────────────────────────────────────────────────────
     # 07:00 TR (04:00 UTC): SPK onaylandiktan sonraki ilk sabah katilim anketi push

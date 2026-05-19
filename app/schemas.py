@@ -368,6 +368,11 @@ class UserUpdate(BaseModel):
     notify_first_trading_day: Optional[bool] = None
     notify_kap_bist30: Optional[bool] = None
     notify_kap_all: Optional[bool] = None
+    # KAP haber filtreleri (KAP PRO onboarding)
+    notify_market_filter: Optional[str] = None  # 'all' | 'ana' | 'yildiz' | 'ana_yildiz'
+    notify_seans_filter: Optional[str] = None   # 'all' | 'seans_ici' | 'seans_disi'
+    notif_onboarding_completed: Optional[bool] = None
+    kap_min_score: Optional[float] = None
     # Halka Arz ucretli bildirim tercihleri
     notify_taban_break: Optional[bool] = None
     notify_daily_open_close: Optional[bool] = None
@@ -427,6 +432,11 @@ class UserOut(BaseModel):
     notify_edo_paid: bool = True
     deleted: bool = False
     subscription_package: Optional[str] = None
+    # KAP haber filtreleri
+    notify_market_filter: str = "all"
+    notify_seans_filter: str = "all"
+    notif_onboarding_completed: bool = False
+    kap_min_score: float = 6.0
 
     model_config = ConfigDict(from_attributes=True)
 

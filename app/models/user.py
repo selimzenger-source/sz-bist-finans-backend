@@ -40,6 +40,26 @@ class User(Base):
     # 8.0 = sadece Cok Olumlu+, 9.0 = sadece Guclu Olumlu.
     kap_min_score: Mapped[float] = mapped_column(Float, default=6.0, comment="Push icin minimum AI puani (6.0/7.0/8.0/9.0)")
 
+    # KAP bildirimi market segment filtresi — sadece KAP haberleri icin gecerli
+    # 'all' (varsayilan) | 'ana' | 'yildiz' | 'ana_yildiz'
+    notify_market_filter: Mapped[str] = mapped_column(
+        String(16), default="all",
+        comment="KAP bildirimi pazar filtresi: all | ana | yildiz | ana_yildiz"
+    )
+
+    # KAP bildirimi seans filtresi
+    # 'all' (varsayilan) | 'seans_ici' | 'seans_disi'
+    notify_seans_filter: Mapped[str] = mapped_column(
+        String(16), default="all",
+        comment="KAP bildirimi seans filtresi: all | seans_ici | seans_disi"
+    )
+
+    # Onboarding tamamlandi mi? — KAP PRO abone olduktan sonra ilk kez gosterilir.
+    notif_onboarding_completed: Mapped[bool] = mapped_column(
+        Boolean, default=False,
+        comment="Bildirim tercihi onboarding tamamlandi mi?"
+    )
+
     # Halka Arz ucretli bildirim tercihleri
     notify_taban_break: Mapped[bool] = mapped_column(Boolean, default=True, comment="Taban acilinca bildirimi")
     notify_daily_open_close: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunluk acilis kapanis bildirimi")

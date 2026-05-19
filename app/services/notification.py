@@ -1155,9 +1155,26 @@ class NotificationService:
         except (ValueError, TypeError):
             push_score = 0.0
 
+        # ─── Market & Seans Filtresi icin: ticker'in pazari ne? ───
+        # Bir kere lookup et, sonra her user icin tekrar tekrar query yapma.
+        ticker_market = None
+        try:
+            from app.models.stock_market import StockMarket
+            tk = (ticker or "").upper().strip()
+            if tk:
+                _sm = (await self.db.execute(
+                    select(StockMarket).where(StockMarket.ticker == tk).limit(1)
+                )).scalar_one_or_none()
+                if _sm:
+                    ticker_market = _sm.market_segment  # 'ana_pazar', 'yildiz_pazar', 'alt_pazar', vs.
+        except Exception as _sm_err:
+            logger.debug("ticker market lookup hata (%s): %s", ticker, _sm_err)
+
         sent_count = 0
         failed_count = 0
         filtered_by_score = 0
+        filtered_by_market = 0
+        filtered_by_seans = 0
         for user in kap_users:
             # ─── AI Skor Filtresi (kullanicinin secimi) ───
             # kap_min_score: 6.0=tum pozitifler | 7.0=Olumlu+ | 8.0=Cok+ | 9.0=Guclu+
@@ -1165,6 +1182,34 @@ class NotificationService:
             if push_score > 0 and push_score < user_min:
                 filtered_by_score += 1
                 continue  # Bu kullanici daha yuksek skor istiyor, atla
+
+            # ─── Market Filtresi (kullanicinin secimi) ───
+            # notify_market_filter: all (default) | ana | yildiz | ana_yildiz
+            _user_market = (getattr(user, "notify_market_filter", "all") or "all").lower()
+            if _user_market != "all" and ticker_market:
+                _accept = False
+                if _user_market == "ana" and ticker_market == "ana_pazar":
+                    _accept = True
+                elif _user_market == "yildiz" and ticker_market == "yildiz_pazar":
+                    _accept = True
+                elif _user_market == "ana_yildiz" and ticker_market in ("ana_pazar", "yildiz_pazar"):
+                    _accept = True
+                if not _accept:
+                    filtered_by_market += 1
+                    continue
+
+            # ─── Seans Filtresi (kullanicinin secimi) ───
+            # notify_seans_filter: all (default) | seans_ici | seans_disi
+            _user_seans = (getattr(user, "notify_seans_filter", "all") or "all").lower()
+            if _user_seans != "all":
+                # news_type: 'seans_ici' / 'seans_disi' / 'seans_disi_acilis'
+                _is_seans_ici = (news_type == "seans_ici")
+                if _user_seans == "seans_ici" and not _is_seans_ici:
+                    filtered_by_seans += 1
+                    continue
+                if _user_seans == "seans_disi" and _is_seans_ici:
+                    filtered_by_seans += 1
+                    continue
 
             try:
                 success = await self._send_to_user(
@@ -1188,22 +1233,29 @@ class NotificationService:
                 logger.warning("Ucretli KAP bildirim hatasi (user=%s): %s", user.id, e)
 
         logger.info(
-            "Ucretli KAP bildirim: %s — %d kullaniciya gonderildi (kap_abone=%d, skor_filtresiyle_atlanan=%d)",
+            "Ucretli KAP bildirim: %s — %d gonderildi (abone=%d, skor=%d, market=%d, seans=%d, ticker_market=%s)",
             ticker, sent_count, len(kap_users), filtered_by_score,
+            filtered_by_market, filtered_by_seans, ticker_market,
         )
 
         # Telegram admin raporu
         try:
             from app.services.admin_telegram import notify_push_sent
+            _detail_parts = [f"KAP abone: {len(kap_users)}"]
+            if filtered_by_score > 0:
+                _detail_parts.append(f"Skor filtresi: {filtered_by_score}")
+            if filtered_by_market > 0:
+                _detail_parts.append(f"Pazar filtresi: {filtered_by_market}")
+            if filtered_by_seans > 0:
+                _detail_parts.append(f"Seans filtresi: {filtered_by_seans}")
+            if ticker_market:
+                _detail_parts.append(f"Pazar: {ticker_market}")
             await notify_push_sent(
                 notification_type=f"KAP Ucretli: {ticker}",
                 title=title,
                 sent_count=sent_count,
                 failed_count=failed_count,
-                detail=(
-                    f"KAP abone: {len(kap_users)}"
-                    + (f" | Skor filtresine takilan: {filtered_by_score}" if filtered_by_score > 0 else "")
-                ),
+                detail=" | ".join(_detail_parts),
             )
         except Exception:
             pass
