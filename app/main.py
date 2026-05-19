@@ -4857,9 +4857,18 @@ async def admin_sync_bist_markets_now(
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
-    from app.scrapers.bist_market_segment_scraper import sync_bist_markets
-    stats = await sync_bist_markets(db)
-    return {"status": "ok", "stats": stats}
+    try:
+        from app.scrapers.bist_market_segment_scraper import sync_bist_markets
+        stats = await sync_bist_markets(db)
+        return {"status": "ok", "stats": stats}
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e)[:500],
+            "type": type(e).__name__,
+            "traceback": traceback.format_exc()[:2000],
+        }
 
 
 @app.post("/api/v1/admin/sync-bist-tedbir-now")
