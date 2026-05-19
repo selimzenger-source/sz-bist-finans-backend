@@ -7933,8 +7933,29 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
             except (TypeError, ValueError):
                 price_tl_val = None
 
-        # Sadece anlamlı event'lerde gönder (spam engeli)
-        if event_type in (
+        # Sadece anlamli event'lerde gonder (spam engeli)
+        # Google Play test purchase'da aylik abonelik 5 dk'da bir yeniliyor — Telegram spam'i engelle.
+        # Ayni user icin son 1 saat icinde RENEWAL geldiyse (test ortami) bildirim atma.
+        _SKIP_RENEWAL = False
+        if event_type == "RENEWAL":
+            try:
+                if not hasattr(app.state, "_renewal_dedup"):
+                    app.state._renewal_dedup = {}  # type: ignore
+                cache = app.state._renewal_dedup  # type: ignore
+                now_ts = datetime.utcnow().timestamp()
+                key = f"{user.id}:{product_id}"
+                last_ts = cache.get(key, 0)
+                if now_ts - last_ts < 3600:  # 1 saat icinde tekrar geldiyse test = sessiz
+                    _SKIP_RENEWAL = True
+                cache[key] = now_ts
+                # 256 entry'den fazlaysa eski olanlari at (memory cap)
+                if len(cache) > 256:
+                    for k, v in sorted(cache.items(), key=lambda x: x[1])[:64]:
+                        cache.pop(k, None)
+            except Exception:
+                pass
+
+        if not _SKIP_RENEWAL and event_type in (
             "INITIAL_PURCHASE",
             "RENEWAL",
             "NON_RENEWING_PURCHASE",
