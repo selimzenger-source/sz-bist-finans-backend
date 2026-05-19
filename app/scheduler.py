@@ -4542,7 +4542,144 @@ def _setup_scheduler_impl():
         coalesce=True,
         misfire_grace_time=600,
     )
-    logger.info("IPO poll bildirim scheduler: aktif (07:00 + 17:00 TR)")
+
+    # ────────────────────────────────────────────────────────────────────
+    # 6 SAAT KALA HATIRLATMA — anket bitimine son 6 saatte oy vermemis
+    # kullanicilara kisisel push gonderir. Tikladiklarinda IPO detay sayfasi
+    # acilir ve poll bolumune scroll olur.
+    # ────────────────────────────────────────────────────────────────────
+    async def _ipo_hype_6h_reminder():
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date, time as _time
+        from sqlalchemy import select as _sel, and_, not_, distinct
+        try:
+            from app.models.ipo import IPO
+            from app.models.ipo_poll_vote import IPOPollVote
+            from app.models.user import User
+            from app.services.notification import NotificationService
+
+            today = _date.today()
+            now_tr = _dt.now(_tz(_td(hours=3)))
+            async with async_session() as db:
+                # Bugun veya yarin kapanan, henuz 6h hatirlatmasi gitmemis IPO'lar
+                stmt = _sel(IPO).where(
+                    and_(
+                        IPO.hype_6h_notified_at.is_(None),
+                        IPO.subscription_end >= today,
+                        IPO.subscription_end <= today + _td(days=1),
+                        IPO.status.in_(("newly_approved", "in_distribution")),
+                    )
+                )
+                ipos = (await db.execute(stmt)).scalars().all()
+                if not ipos:
+                    return
+
+                for ipo in ipos:
+                    # Kapanis saatini parse et (default 17:00)
+                    close_h, close_m = 17, 0
+                    sh = (ipo.subscription_hours or "").strip()
+                    if sh and "-" in sh:
+                        try:
+                            cp = sh.split("-")[1].strip()
+                            if ":" in cp:
+                                _h, _m = cp.split(":", 1)
+                                close_h = int(_h.strip())
+                                close_m = int(_m.strip()[:2])
+                        except (ValueError, IndexError):
+                            pass
+                    # close_dt = subscription_end gunu + close saati (TR)
+                    end_d = ipo.subscription_end
+                    close_dt_tr = _dt.combine(end_d, _time(close_h, close_m), tzinfo=_tz(_td(hours=3)))
+                    hours_left = (close_dt_tr - now_tr).total_seconds() / 3600
+                    # 6 saat veya altinda kalmis VE henuz gecmemis ise tetikle
+                    if hours_left <= 0 or hours_left > 6.5:
+                        continue
+                    logger.info(
+                        "[HYPE-6H] %s: kapanisa %.1fsa kaldi, oy vermemis kullanicilara push",
+                        ipo.ticker or ipo.company_name, hours_left,
+                    )
+
+                    # Oy vermemis kullanicilari bul (device_id ile join)
+                    voted_subq = _sel(distinct(IPOPollVote.device_id)).where(
+                        and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype"),
+                    )
+                    target_users = (await db.execute(
+                        _sel(User).where(
+                            and_(
+                                User.notifications_enabled == True,  # noqa: E712
+                                User.deleted == False,  # noqa: E712
+                                User.device_id.notin_(voted_subq),
+                            )
+                        )
+                    )).scalars().all()
+                    if not target_users:
+                        ipo.hype_6h_notified_at = _dt.now(_tz.utc)
+                        await db.commit()
+                        continue
+
+                    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:30]
+                    h = int(max(1, round(hours_left)))
+                    title = f"⏰ Anket Bitimine {h} Saat Kaldı — {company}"
+                    body = (
+                        f"{company} halka arzı için anket bitiyor. "
+                        "Sizin oyunuz da BorsaCebimde topluluğunun sesi olsun!"
+                    )
+                    notif = NotificationService(db)
+                    sent = 0
+                    failed = 0
+                    for u in target_users[:1000]:  # max 1000 kullanici tek pass
+                        try:
+                            ok = await notif._send_to_user(
+                                user=u, title=title, body=body,
+                                data={
+                                    "type": "ipo_poll_reminder",
+                                    "screen": "halka-arz-detay",
+                                    "ipo_id": str(ipo.id),
+                                    "scroll_to": "poll",
+                                    "poll_phase": "hype",
+                                },
+                                channel_id="default_v2",
+                                category="other",
+                            )
+                            if ok:
+                                sent += 1
+                            else:
+                                failed += 1
+                            await _asyncio.sleep(0.5)  # rate-limit koruma
+                        except Exception as _u_err:
+                            failed += 1
+                            logger.debug("hype 6h push hata user=%s: %s", u.id, _u_err)
+
+                    ipo.hype_6h_notified_at = _dt.now(_tz.utc)
+                    await db.commit()
+                    logger.info(
+                        "[HYPE-6H] %s: %d kullaniciya push gonderildi, %d basarisiz",
+                        company, sent, failed,
+                    )
+                    try:
+                        from app.services.admin_telegram import notify_push_sent
+                        await notify_push_sent(
+                            notification_type=f"IPO 6h Hatirlatma: {company}",
+                            title=title, sent_count=sent, failed_count=failed,
+                            detail=f"Toplam hedef: {len(target_users)} | {hours_left:.1f}sa kalmis",
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.error("[HYPE-6H] hata: %s", e, exc_info=True)
+
+    import asyncio as _asyncio
+    scheduler.add_job(
+        _ipo_hype_6h_reminder,
+        IntervalTrigger(minutes=15),
+        id="ipo_hype_6h_reminder",
+        name="IPO Anket Bitimi 6 Saat Kala Hatirlatma",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+
+    logger.info("IPO poll bildirim scheduler: aktif (07:00 + 17:00 + 6h hatirlatma)")
 
     # 7g. KAP Processor Backfill — günde 1 kez (gece 03:30 UTC = TR 06:30)
     # Geçmiş 3 günü tarar, eksik kalan business_deal tutarlarını ve

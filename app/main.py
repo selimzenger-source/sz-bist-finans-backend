@@ -162,6 +162,9 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ceiling_poll_notified_at TIMESTAMPTZ"
             ))
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS hype_6h_notified_at TIMESTAMPTZ"
+            ))
             await db.commit()
     except Exception as e:
         logger.warning("ipo poll notif migration atlandi: %s", e)
@@ -3150,6 +3153,105 @@ async def admin_set_ipo_status(
         "ticker": ipo.ticker,
         "old_status": old_status,
         "new_status": new_status,
+    }
+
+
+@app.post("/api/v1/admin/trigger-ipo-hype-6h-reminder")
+@limiter.limit("5/minute")
+async def admin_trigger_ipo_hype_6h(
+    request: Request,
+    ipo_id: int = Query(..., description="Hangi IPO icin push"),
+    force: bool = Query(False, description="hype_6h_notified_at dolu olsa bile zorla"),
+    db: AsyncSession = Depends(get_db),
+):
+    """IPO icin anket bitimine 6 saat kala hatirlatma push'unu manuel tetikle.
+    Oy vermemis tum kullanicilara kisisel push.
+    """
+    from app.models.ipo import IPO
+    from app.models.ipo_poll_vote import IPOPollVote
+    from app.models.user import User
+    from app.services.notification import NotificationService
+    from sqlalchemy import select as _sel, and_, distinct
+    import asyncio as _aio
+
+    ipo = (await db.execute(_sel(IPO).where(IPO.id == ipo_id))).scalar_one_or_none()
+    if not ipo:
+        raise HTTPException(status_code=404, detail="IPO bulunamadi")
+    if ipo.hype_6h_notified_at and not force:
+        return {"status": "skipped", "reason": "zaten gonderilmis (force=true ile zorla)"}
+    if force:
+        ipo.hype_6h_notified_at = None
+        await db.commit()
+
+    voted_subq = _sel(distinct(IPOPollVote.device_id)).where(
+        and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype"),
+    )
+    target_users = (await db.execute(
+        _sel(User).where(
+            and_(
+                User.notifications_enabled == True,  # noqa: E712
+                User.deleted == False,  # noqa: E712
+                User.device_id.notin_(voted_subq),
+            )
+        )
+    )).scalars().all()
+
+    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:30]
+    title = f"⏰ Anket Bitimine Son Saatler — {company}"
+    body = (
+        f"{company} halka arzı için anket bitiyor. "
+        "Sizin oyunuz da BorsaCebimde topluluğunun sesi olsun!"
+    )
+
+    async def _run():
+        async with async_session() as bg_db:
+            notif = NotificationService(bg_db)
+            sent, failed = 0, 0
+            for u in target_users[:5000]:
+                try:
+                    ok = await notif._send_to_user(
+                        user=u, title=title, body=body,
+                        data={
+                            "type": "ipo_poll_reminder",
+                            "screen": "halka-arz-detay",
+                            "ipo_id": str(ipo.id),
+                            "scroll_to": "poll",
+                            "poll_phase": "hype",
+                        },
+                        channel_id="default_v2",
+                        category="other",
+                    )
+                    if ok: sent += 1
+                    else: failed += 1
+                    await _aio.sleep(0.5)
+                except Exception:
+                    failed += 1
+            ipo_row = (await bg_db.execute(_sel(IPO).where(IPO.id == ipo_id))).scalar_one_or_none()
+            if ipo_row:
+                ipo_row.hype_6h_notified_at = datetime.now(timezone.utc)
+                await bg_db.commit()
+            try:
+                from app.services.admin_telegram import notify_push_sent
+                await notify_push_sent(
+                    notification_type=f"IPO 6h Hatirlatma (manuel): {company}",
+                    title=title, sent_count=sent, failed_count=failed,
+                    detail=f"Toplam hedef: {len(target_users)}",
+                )
+            except Exception:
+                pass
+
+    from app.database import async_session
+    _bg_task = _aio.create_task(_run())
+    _bg_set = globals().setdefault("_admin_bg_tasks", set())
+    _bg_set.add(_bg_task)
+    _bg_task.add_done_callback(_bg_set.discard)
+
+    return {
+        "status": "sent_async",
+        "ipo_id": ipo.id,
+        "company": company,
+        "target_count": len(target_users),
+        "message": "Push arka planda gonderiliyor",
     }
 
 

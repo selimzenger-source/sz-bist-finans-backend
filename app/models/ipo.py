@@ -199,6 +199,10 @@ class IPO(Base):
         DateTime(timezone=True), nullable=True,
         comment="17:00 tavan anketi push gonderildi mi? (dagitim bitiminde, sonuc ozeti ile)"
     )
+    hype_6h_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+        comment="Anket bitimine 6 saat kala oy vermemis kullanicilara hatirlatma push gonderildi mi?"
+    )
 
     # --- Iliskiler ---
     brokers: Mapped[list["IPOBroker"]] = relationship(back_populates="ipo", cascade="all, delete-orphan")
