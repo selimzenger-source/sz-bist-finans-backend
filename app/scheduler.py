@@ -5346,7 +5346,7 @@ def _setup_scheduler_impl():
     # scheduler.add_job(news_scanner_breaking_job, IntervalTrigger(minutes=5), id="news_scanner_breaking", name="Haber Tarama BREAKING (5dk)", replace_existing=True, max_instances=1, coalesce=True)
     # scheduler.add_job(news_scanner_main_job, IntervalTrigger(minutes=10), id="news_scanner", name="Haber Tarama MAIN (10dk)", replace_existing=True, max_instances=1, coalesce=True)
 
-    # ─── Kurum Onerileri Scraper — saatte bir ───
+    # ─── Kurum Onerileri Scraper — saatte bir (sadece DB + bildirim) ───
     scheduler.add_job(
         scrape_kurum_onerileri,
         IntervalTrigger(hours=1),
@@ -5356,6 +5356,18 @@ def _setup_scheduler_impl():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,
+    )
+
+    # ─── Kurum Onerileri GUNLUK TWEET — her gun 17:00 TR (UTC 14:00) ───
+    scheduler.add_job(
+        kurum_oneri_daily_tweet_job,
+        CronTrigger(hour=14, minute=0),  # UTC 14:00 = TR 17:00
+        id="kurum_oneri_daily_tweet",
+        name="Kurum Onerileri Gunluk Tweet (17:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
     )
 
     # ─── Haber State Temizligi — her gun 03:00 TR (UTC 00:00) ───
@@ -5742,48 +5754,7 @@ async def scrape_kurum_onerileri():
                     except Exception as e:
                         logger.debug("Kurum oneri bildirim hatasi: %s", e)
 
-                    # ── TEK TWEET + Gemini kapak resmi ──
-                    try:
-                        from app.services.twitter_service import _safe_tweet, _safe_tweet_with_media
-                        unsent_tweets = [i for i in unsent_items if i.tweet_sent_at is None]
-                        if unsent_tweets:
-                            # Detayli tweet: her oneriyi satirda goster (max 5)
-                            tweet_lines = []
-                            for i in unsent_tweets[:5]:
-                                _rec_lo = (i.recommendation or "").strip().lower()
-                                if _rec_lo in ("al", "buy", "endeks üstü getiri", "outperform"):
-                                    _emoji = "🟢"
-                                elif _rec_lo in ("tut", "hold", "neutral", "nötr", "nötür", "endekse paralel getiri"):
-                                    _emoji = "🟡"
-                                elif _rec_lo in ("sat", "sell", "endeks altı getiri", "underperform"):
-                                    _emoji = "🔴"
-                                else:
-                                    _emoji = "⚪"  # bilinmeyen / tavsiye yok
-                                line = f"{_emoji} "
-                                line += _format_oneri(i)
-                                tweet_lines.append(line)
-                            tweet_detail = "\n".join(tweet_lines)
-                            if len(unsent_tweets) > 5:
-                                tweet_detail += f"\n+{len(unsent_tweets) - 5} öneri daha"
-                            # Ticker hashtag'leri metnin icinde (#FROTO #TOASO satir basinda)
-                            # — alt hashtag satiri kaldirildi.
-                            tweet_text = (
-                                f"📊 {len(unsent_tweets)} Yeni Kurum Önerisi\n\n"
-                                f"{tweet_detail}\n\n"
-                                f"Detaylı bilgiler için uygulamamızı indirebilirsiniz."
-                            ).strip()
-
-                            # Gemini kapak resmi
-                            cover = await _generate_kurum_oneri_cover(unsent_tweets[:5])
-                            if cover:
-                                tweet_ok = _safe_tweet_with_media(tweet_text, cover, source="kurum_oneri")
-                            else:
-                                tweet_ok = _safe_tweet(tweet_text, source="kurum_oneri")
-                            if tweet_ok:
-                                for item in unsent_tweets:
-                                    item.tweet_sent_at = _dt.now(_tz.utc)
-                    except Exception as e:
-                        logger.debug("Kurum oneri tweet hatasi: %s", e)
+                    # ── TWEET KALDIRILDI — günde 1 kez 17:00 TR'de kurum_oneri_daily_tweet_job atar ──
 
                     await db.commit()
 
@@ -5804,6 +5775,151 @@ async def scrape_kurum_onerileri():
             await notify_scraper_error("Kurum Önerileri", str(e))
         except Exception:
             pass
+
+
+async def kurum_oneri_daily_tweet_job():
+    """Gunluk 17:00 TR kurum oneri ozet tweet'i — o gun tespit edilen TUM yeni onerileri
+    tek bir tweet'te yayinlar. Her hisse #TICKER seklinde hashtag'li yazilir.
+    O gun yeni oneri yoksa hicbir sey atilmaz (bos tweet engellenir).
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from app.services.twitter_service import _safe_tweet, _safe_tweet_with_media
+        from app.models.kurum_oneri import KurumOneri
+
+        # Bugun 00:00 TR (UTC-3'ten 21:00 onceki gun) — TR gunluk pencere
+        now_utc = _dt.now(_tz.utc)
+        # TR saati: UTC+3
+        tr_now = now_utc + _td(hours=3)
+        tr_day_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_day_start = tr_day_start - _td(hours=3)
+
+        async with async_session() as db:
+            # Bugun olusturulmus VE henuz tweet'e girmemis oneriler
+            result = await db.execute(
+                select(KurumOneri).where(
+                    and_(
+                        KurumOneri.created_at >= utc_day_start,
+                        KurumOneri.tweet_sent_at.is_(None),
+                    )
+                ).order_by(KurumOneri.created_at.asc())
+            )
+            items = list(result.scalars().all())
+
+            if not items:
+                logger.info("Kurum oneri daily tweet: bugun yeni oneri yok, atlama.")
+                return
+
+            # Tweet metni olustur — tum hisseler hashtag'li
+            tweet_lines = []
+            for i in items:
+                _rec_lo = (i.recommendation or "").strip().lower()
+                if _rec_lo in ("al", "buy", "endeks üstü getiri", "outperform"):
+                    _emoji = "🟢"
+                elif _rec_lo in ("tut", "hold", "neutral", "nötr", "nötür", "endekse paralel getiri"):
+                    _emoji = "🟡"
+                elif _rec_lo in ("sat", "sell", "endeks altı getiri", "underperform"):
+                    _emoji = "🔴"
+                else:
+                    _emoji = "⚪"
+
+                _tk = (i.ticker or "").strip().upper()
+                if not _tk:
+                    continue
+
+                _inst = ""
+                if i.institution_name:
+                    _inst = i.institution_name.replace(" Menkul", "").replace(" Yatırım Menkul Değerler", " Yatırım")
+
+                _rec_pretty_map = {
+                    "endeks üstü getiri": "AL", "endeks altı getiri": "SAT",
+                    "endekse paralel getiri": "TUT", "outperform": "AL",
+                    "underperform": "SAT", "neutral": "NÖTR", "nötr": "NÖTR",
+                    "nötür": "NÖTR", "al": "AL", "sat": "SAT", "tut": "TUT",
+                    "buy": "AL", "hold": "TUT", "sell": "SAT",
+                }
+                _rec_p = _rec_pretty_map.get(_rec_lo) or ((i.recommendation or "").strip().upper() or "ÖNERİ")
+
+                _target = ""
+                if i.target_price:
+                    try:
+                        _tp = f"{float(i.target_price):,.2f}".replace(",", ".")
+                        _target = f"{_tp} TL"
+                    except (TypeError, ValueError):
+                        pass
+
+                _pot = ""
+                pot = getattr(i, "potential_return", None)
+                if pot is not None:
+                    try:
+                        pv = float(pot)
+                        sign = "+" if pv > 0 else ""
+                        _pot = f"({sign}%{pv:.1f})"
+                    except (TypeError, ValueError):
+                        pass
+
+                # "🟢 #FROTO Ata Yatirim hedef 71.50 TL (+%12.3) AL"
+                parts = [_emoji, f"#{_tk}"]
+                if _inst:
+                    parts.append(_inst)
+                if _target:
+                    parts.append(f"hedef {_target}")
+                if _pot:
+                    parts.append(_pot)
+                parts.append(_rec_p)
+                tweet_lines.append(" ".join(parts))
+
+            if not tweet_lines:
+                logger.info("Kurum oneri daily tweet: gecerli ticker'li oneri yok, atlama.")
+                return
+
+            tr_date = tr_now.strftime("%d.%m.%Y")
+            header = f"📊 {len(tweet_lines)} Kurum Önerisi — {tr_date}"
+            footer = "Detaylar için uygulamamız: borsacebimde.app"
+
+            # X (Twitter) limit ~280 chr ama uzun thread genelde tek tweet'e sigar (premium 4000).
+            # Lines'i 4000'e kadar siralarsak hepsi sigar — fazla olursa kalan satirlari kes.
+            body = "\n".join(tweet_lines)
+            tweet_text = f"{header}\n\n{body}\n\n{footer}".strip()
+
+            # Cok uzunsa son satirlari kirp ve "+N öneri daha" not ekle
+            MAX_LEN = 3900
+            if len(tweet_text) > MAX_LEN:
+                kept = []
+                so_far_len = len(header) + 4 + len(footer) + 20
+                more = 0
+                for line in tweet_lines:
+                    if so_far_len + len(line) + 1 < MAX_LEN:
+                        kept.append(line)
+                        so_far_len += len(line) + 1
+                    else:
+                        more += 1
+                body = "\n".join(kept)
+                extra = f"\n+{more} öneri daha" if more else ""
+                tweet_text = f"{header}\n\n{body}{extra}\n\n{footer}".strip()
+
+            # Gemini kapak resmi (mevcut yardimci fonksiyon, ilk 5 oneriyle)
+            cover = None
+            try:
+                cover = await _generate_kurum_oneri_cover(items[:5])
+            except Exception as cov_err:
+                logger.debug("Kurum oneri kapak resmi hatasi (daily): %s", cov_err)
+
+            if cover:
+                ok = _safe_tweet_with_media(tweet_text, cover, source="kurum_oneri_daily")
+            else:
+                ok = _safe_tweet(tweet_text, source="kurum_oneri_daily")
+
+            if ok:
+                for item in items:
+                    item.tweet_sent_at = _dt.now(_tz.utc)
+                await db.commit()
+                logger.info("Kurum oneri daily tweet: %d oneri ile gonderildi.", len(items))
+            else:
+                logger.warning("Kurum oneri daily tweet GONDERILEMEDI (%d oneri sirada kaldi).", len(items))
+
+    except Exception as e:
+        logger.error("Kurum oneri daily tweet hata: %s", e)
 
 
 async def news_cleanup_job():
