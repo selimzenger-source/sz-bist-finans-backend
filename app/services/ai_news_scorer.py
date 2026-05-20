@@ -437,6 +437,14 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
 # Pattern eslesirse score=5.0, ai_pending=False, ai_atlandi=True olarak isaretlenir.
 
 _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
+    # --- FON / NET AKTIF DEGER (rutin raporlama, fiyat etkisi yok) ---
+    (
+        r"net\s*aktif\s*deger|pay\s*basina\s*net\s*aktif",
+        "Net Aktif Deger Aciklama",
+        "Yatırım fonu/ortaklığı pay başına net aktif değer açıklaması — günlük/haftalık rutin değerleme raporudur. Fiyata yeni bilgi katmaz; sadece portföy değerinin güncel tespitidir.",
+        ["netaktifdeger"],
+    ),
+
     # --- BORSA / MKK MEKANIZMALARI (fiyat hareketi ile alakali ama temel etki yok) ---
     (
         r"devre\s*kesici|tek\s*fiyat\s*emir\s*toplama|pay\s*bazinda\s*devre\s*kesici",
