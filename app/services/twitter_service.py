@@ -1986,15 +1986,12 @@ def tweet_kap_news(
     Blue Tick hesap — 4000 karakter limiti.
     """
     try:
-        # Görsel yolu — sentiment'e + skora gore secilir:
+        # Görsel yolu — sentiment'e gore TEK FORMAT:
         # - negative: kap_bildirim_negatif.png (kirmizi banner)
-        # - positive & skor >= 9.0: flash_gelismeler_banner.png (sadece MEGA pozitif)
-        # - diger pozitiflerde: kap_bildirim.png (yesil/standart)
-        # NOT: Flash esigi 8.0'dan 9.0'a yukseltildi — sadece gercek mega haber alir.
+        # - positive: kap_bildirim.png (yesil/standart "POZITIF KAP BILDIRIMI")
+        # Flash banner KALDIRILDI — kullanici tek tutarli format istiyor.
         if sentiment == "negative":
             img_path = os.path.join(_IMG_DIR, "kap_bildirim_negatif.png")
-        elif ai_score is not None and ai_score >= 9.0:
-            img_path = os.path.join(_IMG_DIR, "flash_gelismeler_banner.png")
         else:
             img_path = os.path.join(_IMG_DIR, "kap_bildirim.png")
         if not os.path.exists(img_path):
