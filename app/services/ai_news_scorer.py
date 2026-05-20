@@ -1951,7 +1951,34 @@ NOTLAR:
         # bedelsiz icin de ayni.
         if score is not None and score >= 6.0 and content:
             try:
-                is_followup, prior_topic = await _check_followup_notification(ticker, content)
+                # FRESH KARAR BYPASS — yeni GK/YK karari + buyuk oran (%X) varsa
+                # bu prosedurel takip degil, gercek pozitif karardir.
+                # Ornek: AKFIS "GK ile %500 bedelsiz" => takip-damper'a takilmamali.
+                _content_low = content.lower()
+                _is_fresh_karar = False
+                if (
+                    ("genel kurul" in _content_low and "karar" in _content_low) or
+                    ("yonetim kurulu" in _content_low and "karar" in _content_low) or
+                    ("yönetim kurulu" in _content_low and "karar" in _content_low)
+                ):
+                    # %X oran var mi? (yuzde 50+ buyuk oranli artirimlar fresh karar)
+                    import re as _re
+                    _pct_match = _re.search(r"%\s*(\d{2,3}(?:[.,]\d+)?)", content)
+                    if _pct_match:
+                        try:
+                            _pct = float(_pct_match.group(1).replace(",", "."))
+                            if _pct >= 25.0:  # %25+ artirim/karar = fresh, prosedurel degil
+                                _is_fresh_karar = True
+                        except (ValueError, TypeError):
+                            pass
+
+                is_followup, prior_topic = await _check_followup_notification(ticker, content) if not _is_fresh_karar else (False, None)
+                if _is_fresh_karar:
+                    logger.info(
+                        "AI News Scorer [FRESH-KARAR-BYPASS] %s: skor %.1f korundu "
+                        "(GK/YK karar + %%X tespit edildi, takip-damper atlandi)",
+                        ticker, score,
+                    )
                 if is_followup:
                     original_score = score
                     score = 5.0  # TAM NOTR — 5.5 degil, kullanici "pozitif gozukmesin" istiyor
@@ -2053,7 +2080,10 @@ _FOLLOWUP_TOPICS = {
     ],
     "spk_onay": ["spk onay", "sermaye piyasası kurulu onay", "spk kabul"],
     "spk_başvuru": ["spk başvuru", "spk basvuru", "kurul'a başvuru"],
-    "halka_arz": ["halka arz", "halka acilma", "halka açılma", "ihraç belgesi"],
+    # NOT: "ihrac belgesi" KALDIRILDI — sermaye artirimi disclosure'larinin
+    # body'sinde dogal olarak gecer ve yanlislikla halka_arz takip-bildirimi
+    # zannedip mega-pozitif kararlari (orn. GK ile %500 bedelsiz) Notr'a cekiyordu.
+    "halka_arz": ["halka arz", "halka acilma", "halka açılma"],
     "sözleşme": ["sözleşme imzaland", "sozlesme imzaland", "anlaşma imzaland", "ihale kazan", "ihale alın"],
     "satın_alma": ["satın al", "satin al", "iktisap", "devralın", "devralin"],
     "yeni_iş_ilişkisi": ["yeni iş ilişkisi", "yeni is iliskisi", "yeni müşteri", "yeni musteri"],
