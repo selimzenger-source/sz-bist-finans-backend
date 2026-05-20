@@ -14324,7 +14324,7 @@ async def admin_kap_refetch_reanalyze(request: Request, payload: dict = Body(...
                     row.ai_sentiment = ai.get("sentiment")
                     row.ai_impact_score = ai.get("impact_score")
                     from datetime import datetime as _dtnow, timezone as _tzutc
-                    row.ai_analyzed_at = _dtnow(_tzutc.utc)
+                    row.ai_analyzed_at = _dtnow.now(_tzutc.utc)
                     item["status"] = "ok"
                     item["score"] = ai.get("impact_score")
                     item["summary_preview"] = (ai.get("summary") or "")[:120]
