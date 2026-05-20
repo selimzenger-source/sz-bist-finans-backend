@@ -14251,7 +14251,7 @@ async def admin_kap_force_reanalyze(request: Request, payload: dict = Body(...))
                 ai = await analyze_disclosure(
                     company_code=row.company_code or "",
                     title=row.title or "",
-                    body=row.body_text or row.title or "",
+                    body=row.body or row.title or "",
                 )
                 if ai:
                     row.ai_summary = ai.get("summary")
@@ -14312,7 +14312,7 @@ async def admin_kap_refetch_reanalyze(request: Request, payload: dict = Body(...
                     item["status"] = "kap_fetch_bos"
                     results.append(item)
                     continue
-                row.body_text = fresh_body
+                row.body = fresh_body
                 # AI yeniden analiz
                 ai = await analyze_disclosure(
                     company_code=row.company_code or "",
