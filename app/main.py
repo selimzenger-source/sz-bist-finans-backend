@@ -15810,12 +15810,9 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
     if not price_row and not financials and not dividend:
         raise HTTPException(status_code=404, detail=f"Şirket bulunamadı: {ticker}")
 
-    # Fiyat — close_price BIST lisansi nedeniyle kaldirildi, her zaman Yahoo'dan cek
+    # Fiyat — BIST lisans uyumu: close_price ve canli fiyat cekilmiyor.
+    # close=None doner; frontend bu durumu ele alir (fiyat yerine — gosterir).
     fallback_price: float | None = None
-    try:
-        fallback_price = await _fetch_yahoo_v8(t)
-    except Exception:
-        fallback_price = None
 
     latest_fin = financials[0] if financials else None
     prev_fin = financials[1] if len(financials) > 1 else None
