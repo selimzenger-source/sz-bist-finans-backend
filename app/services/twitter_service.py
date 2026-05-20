@@ -2084,19 +2084,19 @@ def tweet_kap_news(
         import random as _rnd
         if _is_neg:
             _openings = [
-                f"{emoji} #{ticker} cephesinden dikkat ceken bir gelisme:",
-                f"{emoji} #{ticker} icin yeni KAP bildirimi:",
-                f"{emoji} #{ticker} hisseleri icin onemli not:",
-                f"{emoji} #{ticker} hisse senedinde gozden kacirilmamasi gereken bir aciklama:",
-                f"{emoji} #{ticker} icin yatirimcilarin takip etmesi gereken haber:",
+                f"{emoji} #{ticker} cephesinden dikkat çeken bir gelişme:",
+                f"{emoji} #{ticker} için yeni KAP bildirimi:",
+                f"{emoji} #{ticker} hisseleri için önemli not:",
+                f"{emoji} #{ticker} hisse senedinde gözden kaçırılmaması gereken bir açıklama:",
+                f"{emoji} #{ticker} için yatırımcıların takip etmesi gereken haber:",
             ]
         else:
             _openings = [
-                f"{emoji} #{ticker} icin yeni bir KAP bildirimi:",
-                f"{emoji} #{ticker} cephesinden olumlu bir gelisme:",
-                f"{emoji} #{ticker} hisseleri icin dikkat ceken aciklama:",
-                f"{emoji} #{ticker} yatirimcilari icin not:",
-                f"{emoji} #{ticker} hissesinde yeni KAP aciklamasi:",
+                f"{emoji} #{ticker} için yeni bir KAP bildirimi:",
+                f"{emoji} #{ticker} cephesinden olumlu bir gelişme:",
+                f"{emoji} #{ticker} hisseleri için dikkat çeken açıklama:",
+                f"{emoji} #{ticker} yatırımcıları için not:",
+                f"{emoji} #{ticker} hissesinde yeni KAP açıklaması:",
             ]
         _opening = _rnd.choice(_openings)
 
