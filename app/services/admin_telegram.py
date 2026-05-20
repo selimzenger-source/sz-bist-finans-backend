@@ -532,6 +532,70 @@ async def notify_subscription_purchase(
     await send_admin_message(text, silent=(event_type in ("RENEWAL",)))
 
 
+async def notify_ad_milestone(
+    user_id: int,
+    device_id: str,
+    daily_count: int,
+    balance: float,
+):
+    """Reklam izleme kilometre tasi bildirimi (1, 10, 25, 50)."""
+    if daily_count == 1:
+        emoji = "📺"
+        label = "Gunun ilk reklami"
+        silent = True
+    elif daily_count == 10:
+        emoji = "🔟"
+        label = "10. reklam"
+        silent = True
+    elif daily_count == 25:
+        emoji = "🎯"
+        label = "25. reklam (yari yol)"
+        silent = False
+    elif daily_count == 50:
+        emoji = "🏆"
+        label = "50. reklam (gunluk limit)"
+        silent = False
+    else:
+        return  # Diger sayilarda bildirim yok
+
+    text = (
+        f"{emoji} Reklam Milestone\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"{label}\n"
+        f"User ID: {user_id}\n"
+        f"Cihaz: {device_id[:18]}…\n"
+        f"Bugun: {daily_count} reklam · Bakiye: {balance:.0f} puan"
+    )
+    await send_admin_message(text, silent=silent)
+
+
+async def notify_daily_metrics(
+    new_users_yesterday: int,
+    ads_watched_yesterday: int,
+    purchases_yesterday: int,
+    renewals_yesterday: int,
+    cancellations_yesterday: int,
+    total_active_users: int,
+    total_paid_subscribers: int,
+):
+    """Her sabah 09:00 TR — dunku rakamlar + toplam metrikler."""
+    text = (
+        f"📊 Gunluk Metrik Raporu\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"Dunku faaliyet:\n"
+        f"  🆕 Yeni kullanici: {new_users_yesterday}\n"
+        f"  📺 Reklam izlendi: {ads_watched_yesterday}\n"
+        f"  💰 Yeni abonelik: {purchases_yesterday}\n"
+        f"  🔁 Yenileme: {renewals_yesterday}\n"
+        f"  ❌ Iptal: {cancellations_yesterday}\n"
+        f"\n"
+        f"Toplam:\n"
+        f"  👥 Aktif kullanici: {total_active_users}\n"
+        f"  💎 Ucretli abone: {total_paid_subscribers}"
+    )
+    await send_admin_message(text, silent=False)
+
+
 async def notify_new_install(
     user_id: int,
     device_id: str,

@@ -5472,6 +5472,19 @@ async def wallet_earn(
     db.add(tx)
     await db.flush()
 
+    # Milestone bildirimi (1, 10, 25, 50)
+    try:
+        if user.daily_ads_watched in (1, 10, 25, 50):
+            from app.services.admin_telegram import notify_ad_milestone
+            await notify_ad_milestone(
+                user_id=user.id,
+                device_id=user.device_id or "?",
+                daily_count=user.daily_ads_watched,
+                balance=user.wallet_balance or 0.0,
+            )
+    except Exception as _e:
+        logger.warning("Reklam milestone bildirim hatasi: %s", _e)
+
     return WalletBalanceOut(
         balance=user.wallet_balance,
         daily_ads_watched=user.daily_ads_watched,

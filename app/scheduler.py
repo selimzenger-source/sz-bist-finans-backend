@@ -5370,6 +5370,18 @@ def _setup_scheduler_impl():
         misfire_grace_time=1800,
     )
 
+    # ─── Gunluk metrik raporu — her sabah 09:00 TR (UTC 06:00) ───
+    scheduler.add_job(
+        daily_metric_report_job,
+        CronTrigger(hour=6, minute=0),  # UTC 06:00 = TR 09:00
+        id="daily_metric_report",
+        name="Gunluk Metrik Raporu (09:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # ─── Haber State Temizligi — her gun 03:00 TR (UTC 00:00) ───
     scheduler.add_job(
         news_cleanup_job,
@@ -5775,6 +5787,88 @@ async def scrape_kurum_onerileri():
             await notify_scraper_error("Kurum Önerileri", str(e))
         except Exception:
             pass
+
+
+async def daily_metric_report_job():
+    """Her sabah 09:00 TR (UTC 06:00) — dunku metrikleri Telegram admine yolla."""
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from app.models.user import User
+        from app.models.user_subscription import UserSubscription
+        from app.models.wallet_transaction import WalletTransaction
+        from app.services.admin_telegram import notify_daily_metrics
+        from sqlalchemy import func as _func
+
+        now_utc = _dt.now(_tz.utc)
+        tr_now = now_utc + _td(hours=3)
+        # Dun TR 00:00 -> bugun TR 00:00
+        tr_today_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        tr_yesterday_start = tr_today_start - _td(days=1)
+        utc_y_start = tr_yesterday_start - _td(hours=3)
+        utc_y_end = tr_today_start - _td(hours=3)
+
+        async with async_session() as db:
+            # Dunku yeni kullanici
+            new_users_q = await db.execute(
+                select(_func.count(User.id)).where(
+                    and_(User.created_at >= utc_y_start, User.created_at < utc_y_end)
+                )
+            )
+            new_users = int(new_users_q.scalar() or 0)
+
+            # Dunku reklam izleme
+            ads_q = await db.execute(
+                select(_func.count(WalletTransaction.id)).where(
+                    and_(
+                        WalletTransaction.tx_type == "ad_reward",
+                        WalletTransaction.created_at >= utc_y_start,
+                        WalletTransaction.created_at < utc_y_end,
+                    )
+                )
+            )
+            ads_count = int(ads_q.scalar() or 0)
+
+            # Dunku yeni abonelik (started_at icinde olanlar)
+            purchases_q = await db.execute(
+                select(_func.count(UserSubscription.id)).where(
+                    and_(
+                        UserSubscription.is_active == True,  # noqa: E712
+                        UserSubscription.updated_at >= utc_y_start,
+                        UserSubscription.updated_at < utc_y_end,
+                    )
+                )
+            )
+            purchases = int(purchases_q.scalar() or 0)
+
+            # Toplam aktif kullanici (son 30 gunde acan)
+            active_cutoff = now_utc - _td(days=30)
+            active_q = await db.execute(
+                select(_func.count(User.id)).where(User.updated_at >= active_cutoff)
+            )
+            active_users = int(active_q.scalar() or 0)
+
+            # Toplam ucretli abone
+            paid_q = await db.execute(
+                select(_func.count(UserSubscription.id)).where(
+                    and_(
+                        UserSubscription.is_active == True,  # noqa: E712
+                        UserSubscription.package != "free",
+                    )
+                )
+            )
+            paid = int(paid_q.scalar() or 0)
+
+            await notify_daily_metrics(
+                new_users_yesterday=new_users,
+                ads_watched_yesterday=ads_count,
+                purchases_yesterday=purchases,
+                renewals_yesterday=0,  # RC webhook'lardan ayri sayilmiyor — TODO
+                cancellations_yesterday=0,
+                total_active_users=active_users,
+                total_paid_subscribers=paid,
+            )
+    except Exception as e:
+        logger.error("Gunluk metrik raporu hata: %s", e)
 
 
 async def kurum_oneri_daily_tweet_job():
