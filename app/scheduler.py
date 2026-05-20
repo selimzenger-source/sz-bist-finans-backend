@@ -5820,17 +5820,19 @@ async def daily_kap_highlight_tweet_job():
         from app.services.twitter_service import _safe_tweet_with_media, _safe_tweet, _safe_reply_tweet
         from sqlalchemy import select as _sel, desc as _desc, and_ as _and
 
+        # Pencere: son 24 saat (dun 13:00 TR -> bugun 13:00 TR)
+        # Scheduler 13:00 TR'de calistirildigi icin, simdiden 24 saat geriye giderek
+        # dun 13:00'a kadar olan tum bildirimleri kapsamis oluruz.
         now_utc = _dt.now(_tz.utc)
         tr_now = now_utc + _td(hours=3)
-        tr_today_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
-        utc_today_start = tr_today_start - _td(hours=3)
+        cutoff_utc = now_utc - _td(hours=24)
 
         async with async_session() as db:
             # En pozitif (skor >= 7.0)
             pos_q = await db.execute(
                 _sel(KapAllDisclosure)
                 .where(_and(
-                    KapAllDisclosure.published_at >= utc_today_start,
+                    KapAllDisclosure.published_at >= cutoff_utc,
                     KapAllDisclosure.ai_impact_score >= 7.0,
                 ))
                 .order_by(_desc(KapAllDisclosure.ai_impact_score))
@@ -5842,7 +5844,7 @@ async def daily_kap_highlight_tweet_job():
             neg_q = await db.execute(
                 _sel(KapAllDisclosure)
                 .where(_and(
-                    KapAllDisclosure.published_at >= utc_today_start,
+                    KapAllDisclosure.published_at >= cutoff_utc,
                     KapAllDisclosure.ai_impact_score <= 3.0,
                     KapAllDisclosure.ai_impact_score >= 0.0,
                 ))
@@ -5888,12 +5890,14 @@ async def daily_kap_highlight_tweet_job():
                 _hashtag = "#OlumsuzHaber"
                 _hint = "Yatirimcilar icin onemli risk sinyali."
 
-            _date_str = tr_now.strftime("%d.%m.%Y")
+            # Pencere: dun 13:00 - bugun 13:00
+            _yesterday = tr_now - _td(days=1)
+            _date_str = f"{_yesterday.strftime('%d.%m')} - {tr_now.strftime('%d.%m.%Y')}"
             _summary_short = summary[:600] if summary else title
 
             tweet_text = (
                 f"{_emoji} {_label} — {_date_str}\n\n"
-                f"#{ticker} hissesinde gunun en carpici KAP aciklamasi:\n\n"
+                f"#{ticker} hissesinde son 24 saatin en carpici KAP aciklamasi:\n\n"
                 f"💬 {_summary_short}\n\n"
                 f"📊 AI Puani: {score:.1f}/10\n"
                 f"💡 {_hint}\n\n"
