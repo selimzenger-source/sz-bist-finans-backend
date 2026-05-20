@@ -2022,7 +2022,7 @@ def tweet_kap_news(
         else:
             score_emoji = ""
 
-        # AI bolumu (varsa)
+        # AI bolumu — ozeti 2 paragrafa bol (ilk cumle/paragrafdan sonra cift satir bos)
         # Blue Tick = 4000 karakter — overhead ~350 char, AI ozeti icin ~3400 char kullanilabilir
         ai_section = ""
         if ai_score is not None:
@@ -2031,7 +2031,14 @@ def tweet_kap_news(
             summary_text = ai_summary[:3000]
             if len(ai_summary) > 3000:
                 summary_text += "..."
-            ai_section += f"\n💬 {summary_text}\n"
+            # Ozeti 2 paragrafa bol: ilk 1-2 cumleyi opening yap, geri kalanini ikinci paragraf
+            _sentences = [s.strip() for s in summary_text.replace("!", ".").split(".") if s.strip()]
+            if len(_sentences) >= 3:
+                _para1 = ". ".join(_sentences[:2]) + "."
+                _para2 = ". ".join(_sentences[2:]) + ("." if not summary_text.rstrip().endswith(("…", "...")) else "")
+                ai_section += f"\n💬 {_para1}\n\n{_para2}\n"
+            else:
+                ai_section += f"\n💬 {summary_text}\n"
 
         # KAP link KALDIRILDI — X algoritmasi link iceren tweet'leri throttle ediyor.
         # KAP link'i bu fonksiyonun sonunda REPLY olarak ayri tweet'te paylasilir.
@@ -2066,11 +2073,35 @@ def tweet_kap_news(
                 f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             )
 
+        # ─── Acilis cumlesi — robotik degil, varyant rotasyonlu ───
+        # is_negative bool, sentiment string'den turetilir
+        _is_neg = (sentiment == "negative")
+        import random as _rnd
+        if _is_neg:
+            _openings = [
+                f"{emoji} #{ticker} cephesinden dikkat ceken bir gelisme:",
+                f"{emoji} #{ticker} icin yeni KAP bildirimi:",
+                f"{emoji} #{ticker} hisseleri icin onemli not:",
+                f"{emoji} #{ticker} hisse senedinde gozden kacirilmamasi gereken bir aciklama:",
+                f"{emoji} #{ticker} icin yatirimcilarin takip etmesi gereken haber:",
+            ]
+        else:
+            _openings = [
+                f"{emoji} #{ticker} icin yeni bir KAP bildirimi:",
+                f"{emoji} #{ticker} cephesinden olumlu bir gelisme:",
+                f"{emoji} #{ticker} hisseleri icin dikkat ceken aciklama:",
+                f"{emoji} #{ticker} yatirimcilari icin not:",
+                f"{emoji} #{ticker} hissesinde yeni KAP aciklamasi:",
+            ]
+        _opening = _rnd.choice(_openings)
+
+        # Kategori kelimesini opening'in altinda kucuk paranfez ile ver — robotik 'İlişkili Kelime :' yerine
+        _category_line = f"_({clean_kw})_" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
+
         text = (
-            f"{emoji} #{ticker} — Haber Bildirimi\n\n"
-            f"Anlık Haber Yakalandı {now_str}\n\n"
-            f"İlişkili Kelime : {clean_kw}\n"
-            f"{ai_section}"
+            f"{_opening}\n"
+            + (f"{_category_line}\n" if _category_line else "")
+            + f"{ai_section}"
             f"{kap_section}\n"
             f"{cta_text}\n"
             f"\n"
@@ -2087,10 +2118,9 @@ def tweet_kap_news(
                 short_sum = ai_summary[:250] + ("..." if len(ai_summary) > 250 else "")
                 ai_section_mid += f"\n💬 {short_sum}\n"
             text = (
-                f"{emoji} #{ticker} — Haber Bildirimi\n\n"
-                f"Anlık Haber Yakalandı {now_str}\n\n"
-                f"İlişkili Kelime : {clean_kw}\n"
-                f"{ai_section_mid}"
+                f"{_opening}\n"
+                + (f"{_category_line}\n" if _category_line else "")
+                + f"{ai_section_mid}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
@@ -2103,10 +2133,9 @@ def tweet_kap_news(
             if ai_score is not None:
                 ai_section_short = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
             text = (
-                f"{emoji} #{ticker} — Haber Bildirimi\n\n"
-                f"Anlık Haber Yakalandı {now_str}\n\n"
-                f"İlişkili Kelime : {clean_kw}\n"
-                f"{ai_section_short}"
+                f"{_opening}\n"
+                + (f"{_category_line}\n" if _category_line else "")
+                + f"{ai_section_short}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
