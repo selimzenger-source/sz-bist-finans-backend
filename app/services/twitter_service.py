@@ -2093,35 +2093,14 @@ def tweet_kap_news(
                 f"{emoji} #{ticker} için olumsuz sinyaller:",
             ]
         else:
-            # Pozitif: skora gore agirlik
-            # Guclu Olumlu (8.0+): guclu dil
-            # Olumlu (7.0-8.0): orta dil
-            # Hafif Olumlu (<7.0): nötr/olculu dil
-            if _score_val >= 8.0:
-                _openings = [
-                    f"{emoji} #{ticker} hissesinde güçlü KAP bildirimi:",
-                    f"{emoji} #{ticker} cephesinden çarpıcı olumlu gelişme:",
-                    f"{emoji} #{ticker} yatırımcıları için önemli iyi haber:",
-                    f"{emoji} #{ticker} hissesinde dikkat çeken olumlu açıklama:",
-                    f"{emoji} #{ticker} için kayda değer bir duyuru:",
-                ]
-            elif _score_val >= 7.0:
-                _openings = [
-                    f"{emoji} #{ticker} yatırımcıları için olumlu haber:",
-                    f"{emoji} #{ticker} cephesinden iyi bir gelişme:",
-                    f"{emoji} #{ticker} hissesinde öne çıkan açıklama:",
-                    f"{emoji} #{ticker} için yeni KAP bildirimi:",
-                    f"{emoji} #{ticker} hissesinde olumlu duyuru:",
-                ]
-            else:
-                # Hafif Olumlu (6.0-7.0) — nötr/sakin acilis
-                _openings = [
-                    f"{emoji} #{ticker} için yeni KAP bildirimi:",
-                    f"{emoji} #{ticker} hissesinde yeni açıklama:",
-                    f"{emoji} #{ticker} cephesinden bir gelişme:",
-                    f"{emoji} #{ticker} yatırımcıları için not:",
-                    f"{emoji} #{ticker} hissesinde KAP duyurusu:",
-                ]
+            # Pozitif: tek havuz — etiket zaten tonu anlatir
+            _openings = [
+                f"{emoji} #{ticker} için yeni KAP bildirimi:",
+                f"{emoji} #{ticker} yatırımcıları için not:",
+                f"{emoji} #{ticker} cephesinden yeni bir gelişme:",
+                f"{emoji} #{ticker} hissesinde öne çıkan açıklama:",
+                f"{emoji} #{ticker} hissesinde KAP duyurusu:",
+            ]
         _opening = _rnd.choice(_openings)
 
         # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
