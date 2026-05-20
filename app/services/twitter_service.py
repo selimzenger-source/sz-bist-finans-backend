@@ -2075,7 +2075,7 @@ def tweet_kap_news(
                 _ratio_text = "Her 4 olumlu haberden 1'i gönderilmektedir."
             cta_text = (
                 f"{_ratio_text}\n"
-                f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
+                f"\nDaha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
             )
 
         # ─── Acilis cumlesi — robotik degil, varyant rotasyonlu ───
