@@ -15802,26 +15802,20 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
     )
     temel = temel_result.scalar_one_or_none()
 
-    # 7. Fiyat geçmişi (son 6 ay kapanış)
-    from datetime import timedelta
-    six_months_ago = date.today() - timedelta(days=180)
-    price_hist_result = await db.execute(
-        select(DailyStockMarketStat)
-        .where(DailyStockMarketStat.ticker == t, DailyStockMarketStat.date >= six_months_ago)
-        .order_by(DailyStockMarketStat.date)
-    )
-    price_history = [float(r.close_price) for r in price_hist_result.scalars().all()]
+    # 7. Fiyat geçmişi — BIST lisans uyumu nedeniyle DailyStockMarketStat'tan
+    # close_price kaldirildi. Bos liste donuyoruz; ileride alternatif kaynak
+    # (Yahoo gecmis vs.) eklenebilir.
+    price_history: list[float] = []
 
     if not price_row and not financials and not dividend:
         raise HTTPException(status_code=404, detail=f"Şirket bulunamadı: {ticker}")
 
-    # Fiyat fallback — DB'de yoksa Yahoo'dan canlı çek (küçük hisseler için)
+    # Fiyat — close_price BIST lisansi nedeniyle kaldirildi, her zaman Yahoo'dan cek
     fallback_price: float | None = None
-    if not price_row:
-        try:
-            fallback_price = await _fetch_yahoo_v8(t)
-        except Exception:
-            fallback_price = None
+    try:
+        fallback_price = await _fetch_yahoo_v8(t)
+    except Exception:
+        fallback_price = None
 
     latest_fin = financials[0] if financials else None
     prev_fin = financials[1] if len(financials) > 1 else None
@@ -15834,7 +15828,8 @@ async def get_sirket_karti(ticker: str, db: AsyncSession = Depends(get_db)):
     return {
         "ticker": t,
         "price": {
-            "close": float(price_row.close_price) if price_row else fallback_price,
+            # close_price BIST lisansi nedeniyle kaldirildi — Yahoo fallback kullan
+            "close": fallback_price,
             "change_pct": float(price_row.percent_change) if price_row else None,
             "date": str(price_row.date) if price_row else (date.today().isoformat() if fallback_price else None),
             "is_ceiling": price_row.is_ceiling if price_row else False,
