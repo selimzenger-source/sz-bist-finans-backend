@@ -5382,6 +5382,20 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,
     )
 
+    # ─── Gunluk KAP highlight tweet — her gun 13:00 TR (UTC 10:00) ───
+    # Gunun en carpici KAP haberi (en yuksek pozitif veya en dusuk negatif)
+    # Gemini kapak resmi + AI ozeti + tweet
+    scheduler.add_job(
+        daily_kap_highlight_tweet_job,
+        CronTrigger(hour=10, minute=0),  # UTC 10:00 = TR 13:00
+        id="daily_kap_highlight_tweet",
+        name="Gunluk KAP Highlight Tweet (13:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+
     # ─── Haber State Temizligi — her gun 03:00 TR (UTC 00:00) ───
     scheduler.add_job(
         news_cleanup_job,
@@ -5787,6 +5801,146 @@ async def scrape_kurum_onerileri():
             await notify_scraper_error("Kurum Önerileri", str(e))
         except Exception:
             pass
+
+
+async def daily_kap_highlight_tweet_job():
+    """Her gun 13:00 TR — gunun en carpici KAP haberini tweet'le.
+
+    Mantik:
+      1. Bugun (TR gun) atilan tum kap_all_disclosures'tan ai_impact_score'a bak.
+      2. En yuksek pozitif (>=7.0) ve en dusuk negatif (<=3.0) skoru bul.
+      3. Daha "carpici" olani sec (skor'un 5.0'dan sapmasi buyuk olan kazanir).
+      4. Gemini API ile haber temasina ozel kapak resmi uret.
+      5. AI ozeti + ticker + skoru iceren TEK tweet at, KAP linki reply'da.
+      6. Gun icinde 1 kez calisir, ayni gun ayni hisse tekrar gelmez.
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from app.models.kap_all_disclosure import KapAllDisclosure
+        from app.services.twitter_service import _safe_tweet_with_media, _safe_tweet, _safe_reply_tweet
+        from sqlalchemy import select as _sel, desc as _desc, and_ as _and
+
+        now_utc = _dt.now(_tz.utc)
+        tr_now = now_utc + _td(hours=3)
+        tr_today_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_today_start = tr_today_start - _td(hours=3)
+
+        async with async_session() as db:
+            # En pozitif (skor >= 7.0)
+            pos_q = await db.execute(
+                _sel(KapAllDisclosure)
+                .where(_and(
+                    KapAllDisclosure.published_at >= utc_today_start,
+                    KapAllDisclosure.ai_impact_score >= 7.0,
+                ))
+                .order_by(_desc(KapAllDisclosure.ai_impact_score))
+                .limit(1)
+            )
+            best_pos = pos_q.scalar_one_or_none()
+
+            # En negatif (skor <= 3.0)
+            neg_q = await db.execute(
+                _sel(KapAllDisclosure)
+                .where(_and(
+                    KapAllDisclosure.published_at >= utc_today_start,
+                    KapAllDisclosure.ai_impact_score <= 3.0,
+                    KapAllDisclosure.ai_impact_score >= 0.0,
+                ))
+                .order_by(KapAllDisclosure.ai_impact_score.asc())
+                .limit(1)
+            )
+            best_neg = neg_q.scalar_one_or_none()
+
+            # Carpiciligi sec: 5.0'dan sapma buyuk olan kazanir
+            chosen = None
+            chosen_kind = None  # 'positive' | 'negative'
+            if best_pos and best_neg:
+                pos_dev = abs((best_pos.ai_impact_score or 5.0) - 5.0)
+                neg_dev = abs((best_neg.ai_impact_score or 5.0) - 5.0)
+                if pos_dev >= neg_dev:
+                    chosen, chosen_kind = best_pos, "positive"
+                else:
+                    chosen, chosen_kind = best_neg, "negative"
+            elif best_pos:
+                chosen, chosen_kind = best_pos, "positive"
+            elif best_neg:
+                chosen, chosen_kind = best_neg, "negative"
+
+            if not chosen:
+                logger.info("Daily KAP highlight: bugun carpici haber yok (>=7.0 veya <=3.0), atlama.")
+                return
+
+            ticker = (chosen.company_code or "").upper()
+            score = float(chosen.ai_impact_score or 0)
+            title = (chosen.title or "").strip()
+            summary = (chosen.ai_summary or "").strip()
+            kap_url = chosen.disclosure_url or ""
+
+            # Tweet metni — daha samimi ve carpici
+            if chosen_kind == "positive":
+                _emoji = "🟢"
+                _label = "GUNUN POZITIF HABERI"
+                _hashtag = "#OlumluHaber"
+                _hint = "Yatirimcilar icin dikkat cekici bir aciklama."
+            else:
+                _emoji = "🔴"
+                _label = "GUNUN OLUMSUZ HABERI"
+                _hashtag = "#OlumsuzHaber"
+                _hint = "Yatirimcilar icin onemli risk sinyali."
+
+            _date_str = tr_now.strftime("%d.%m.%Y")
+            _summary_short = summary[:600] if summary else title
+
+            tweet_text = (
+                f"{_emoji} {_label} — {_date_str}\n\n"
+                f"#{ticker} hissesinde gunun en carpici KAP aciklamasi:\n\n"
+                f"💬 {_summary_short}\n\n"
+                f"📊 AI Puani: {score:.1f}/10\n"
+                f"💡 {_hint}\n\n"
+                f"Detayli analiz icin BorsaCebimde uygulamasini profilimizden ucretsiz indirebilirsiniz.\n\n"
+                f"#{ticker} #KAP #BorsaIstanbul {_hashtag}"
+            ).strip()
+
+            # Gemini kapak resmi uret (haber temali)
+            cover_path = None
+            try:
+                # Kurum oneri cover fonksiyonunu yeniden kullan
+                # _items olarak chosen disclosure'i sarmala
+                class _StubItem:
+                    pass
+                stub = _StubItem()
+                stub.ticker = ticker
+                stub.institution_name = "KAP"
+                stub.recommendation = _label
+                stub.target_price = None
+                stub.potential_return = None
+                cover_path = await _generate_kurum_oneri_cover([stub])  # type: ignore
+            except Exception as _cov:
+                logger.debug("Daily KAP highlight cover gen hata: %s", _cov)
+
+            # Ana tweet at
+            if cover_path:
+                ok = _safe_tweet_with_media(tweet_text, cover_path, source="daily_kap_highlight")
+            else:
+                ok = _safe_tweet(tweet_text, source="daily_kap_highlight")
+
+            # Basariliysa KAP link'i reply olarak at
+            if ok and kap_url:
+                try:
+                    from app.services import twitter_service as _ts
+                    last_id = getattr(_ts, "_last_tweet_id", None)
+                    if last_id:
+                        _safe_reply_tweet(f"📎 KAP Bildirim:\n{kap_url}", str(last_id))
+                except Exception as _r:
+                    logger.debug("Daily KAP highlight reply hata: %s", _r)
+
+            logger.info(
+                "Daily KAP highlight tweet: %s %s skor=%.1f — gonderildi=%s",
+                ticker, chosen_kind, score, ok,
+            )
+
+    except Exception as e:
+        logger.error("Daily KAP highlight tweet hata: %s", e)
 
 
 async def daily_metric_report_job():
