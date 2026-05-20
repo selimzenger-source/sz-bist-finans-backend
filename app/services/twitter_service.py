@@ -2084,25 +2084,14 @@ def tweet_kap_news(
         import random as _rnd
         _score_val = ai_score if ai_score is not None else 5.0
         if _is_neg:
-            # Negatif: skora gore agirlik
-            # Cok/Guclu Olumsuz (<3.1): carpici dil
-            # Hafif Olumsuz (3.1-4.0): daha olculu dil
-            if _score_val < 3.1:
-                _openings = [
-                    f"{emoji} #{ticker} hissesinde kritik KAP bildirimi:",
-                    f"{emoji} #{ticker} yatırımcıları dikkat — önemli açıklama:",
-                    f"{emoji} #{ticker} cephesinde çarpıcı bir gelişme:",
-                    f"{emoji} #{ticker} hissesinde beklenmedik duyuru:",
-                    f"{emoji} #{ticker} için olumsuz sinyaller:",
-                ]
-            else:
-                _openings = [
-                    f"{emoji} #{ticker} için yeni KAP bildirimi:",
-                    f"{emoji} #{ticker} hissesinde dikkat edilmesi gereken açıklama:",
-                    f"{emoji} #{ticker} cephesinden yeni bir gelişme:",
-                    f"{emoji} #{ticker} yatırımcıları için not:",
-                    f"{emoji} #{ticker} hissesinde KAP duyurusu:",
-                ]
+            # Negatif: tek havuz — emoji + oran metni + etiket zaten tonu anlatir
+            _openings = [
+                f"{emoji} #{ticker} hissesinde kritik KAP bildirimi:",
+                f"{emoji} #{ticker} yatırımcıları dikkat — önemli açıklama:",
+                f"{emoji} #{ticker} cephesinde çarpıcı bir gelişme:",
+                f"{emoji} #{ticker} hissesinde beklenmedik duyuru:",
+                f"{emoji} #{ticker} için olumsuz sinyaller:",
+            ]
         else:
             # Pozitif: skora gore agirlik
             # Guclu Olumlu (8.0+): guclu dil
