@@ -2083,24 +2083,14 @@ def tweet_kap_news(
         _is_neg = (sentiment == "negative")
         import random as _rnd
         _score_val = ai_score if ai_score is not None else 5.0
-        if _is_neg:
-            # Negatif: tek havuz — emoji + oran metni + etiket zaten tonu anlatir
-            _openings = [
-                f"{emoji} #{ticker} hissesinde kritik KAP bildirimi:",
-                f"{emoji} #{ticker} yatırımcıları dikkat — önemli açıklama:",
-                f"{emoji} #{ticker} cephesinde çarpıcı bir gelişme:",
-                f"{emoji} #{ticker} hissesinde beklenmedik duyuru:",
-                f"{emoji} #{ticker} için olumsuz sinyaller:",
-            ]
-        else:
-            # Pozitif: tek havuz — etiket zaten tonu anlatir
-            _openings = [
-                f"{emoji} #{ticker} için yeni KAP bildirimi:",
-                f"{emoji} #{ticker} yatırımcıları için not:",
-                f"{emoji} #{ticker} cephesinden yeni bir gelişme:",
-                f"{emoji} #{ticker} hissesinde öne çıkan açıklama:",
-                f"{emoji} #{ticker} hissesinde KAP duyurusu:",
-            ]
+        # Tek havuz — negatif/pozitif fark etmez, emoji + etiket zaten tonu anlatir
+        _openings = [
+            f"{emoji} #{ticker} için yeni KAP bildirimi:",
+            f"{emoji} #{ticker} yatırımcıları için not:",
+            f"{emoji} #{ticker} cephesinden yeni bir gelişme:",
+            f"{emoji} #{ticker} hissesinde öne çıkan açıklama:",
+            f"{emoji} #{ticker} hissesinde KAP duyurusu:",
+        ]
         _opening = _rnd.choice(_openings)
 
         # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
