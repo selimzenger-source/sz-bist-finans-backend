@@ -14266,6 +14266,79 @@ async def admin_kap_force_reanalyze(request: Request, payload: dict = Body(...))
     return {"results": results}
 
 
+@app.post("/api/v1/admin/kap-refetch-reanalyze")
+@limiter.limit("5/minute")
+async def admin_kap_refetch_reanalyze(request: Request, payload: dict = Body(...)):
+    """Admin: Belirli ticker(lar) icin son N saatin KAP kayitlarini
+    KAP.org.tr'den SIFIRDAN cekilip AI ile yeniden analiz eder.
+
+    Body: { "admin_password": "...", "tickers": ["UCAYM","ERSU"], "hours": 3 }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    tickers = [t.upper().strip() for t in (payload.get("tickers") or [])]
+    hours = int(payload.get("hours", 3))
+    if not tickers:
+        return {"error": "tickers gerekli"}
+
+    from sqlalchemy import select as _sel
+    from app.database import async_session as _as
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content
+    from app.services.kap_all_analyzer import analyze_disclosure
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    cutoff = _dt.now(_tz.utc) - _td(hours=hours)
+    results = []
+
+    async with _as() as db:
+        stmt = _sel(KapAllDisclosure).where(
+            KapAllDisclosure.company_code.in_(tickers),
+            KapAllDisclosure.published_at >= cutoff,
+        ).order_by(KapAllDisclosure.published_at.desc()).limit(20)
+        rows = (await db.execute(stmt)).scalars().all()
+
+        for row in rows:
+            item = {"id": row.id, "ticker": row.company_code, "title": row.title, "kap_url": row.kap_url}
+            if not row.kap_url:
+                item["status"] = "kap_url_yok"
+                results.append(item)
+                continue
+            try:
+                # KAP.org.tr'den taze icerik cek
+                fresh_body = await fetch_kap_page_content(row.kap_url)
+                if not fresh_body or len(fresh_body) < 50:
+                    item["status"] = "kap_fetch_bos"
+                    results.append(item)
+                    continue
+                row.body_text = fresh_body
+                # AI yeniden analiz
+                ai = await analyze_disclosure(
+                    company_code=row.company_code or "",
+                    title=row.title or "",
+                    body=fresh_body,
+                )
+                if ai:
+                    row.ai_summary = ai.get("summary")
+                    row.ai_sentiment = ai.get("sentiment")
+                    row.ai_impact_score = ai.get("impact_score")
+                    from datetime import datetime as _dtnow, timezone as _tzutc
+                    row.ai_analyzed_at = _dtnow(_tzutc.utc)
+                    item["status"] = "ok"
+                    item["score"] = ai.get("impact_score")
+                    item["summary_preview"] = (ai.get("summary") or "")[:120]
+                else:
+                    item["status"] = "ai_failed"
+            except Exception as e:
+                item["status"] = f"hata: {str(e)[:150]}"
+            results.append(item)
+
+        await db.commit()
+
+    return {"total": len(rows), "results": results}
+
+
 @app.post("/api/v1/admin/kap-reanalyze")
 @limiter.limit("3/minute")
 async def admin_kap_reanalyze(request: Request, payload: dict = Body(...)):
