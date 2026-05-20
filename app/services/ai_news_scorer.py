@@ -2500,49 +2500,53 @@ async def analyze_news(
     except Exception as _bb_err:
         logger.warning("Buyback bypass hata (%s): %s — normal akisa donulu yor", ticker, _bb_err)
 
-    # ── Oncelik 1: TradingView'dan icerik cek (Matriks ID varsa) ──
+    # ── Oncelik 1: TradingView'dan KAP URL'yi cikart, icerik varsa kullan ──
     if matriks_id:
-        # Fallback olarak TradingView linki (gercek KAP linki bulunursa degisir)
         kap_url = f"https://tr.tradingview.com/news/matriks:{matriks_id}:0/"
-
         try:
             tv_result = await fetch_tradingview_content(matriks_id)
-            if tv_result and tv_result.get("full_text"):
-                tv_content = tv_result["full_text"]
-                # Gercek KAP bildirim linkini kullan (TradingView'dan cikarildi)
+            if tv_result:
+                # KAP URL her zaman al (paywall olsa bile link HTML'de bulunur)
                 if tv_result.get("real_kap_url"):
                     kap_url = tv_result["real_kap_url"]
+                    logger.info("KAP linki TV'den alindi: %s → %s", ticker, kap_url)
+                # Icerik sadece paywall degil ve doluysa kullan
+                if tv_result.get("full_text"):
+                    tv_content = tv_result["full_text"]
                     logger.info(
-                        "Gercek KAP linki kullaniliyor: %s → %s",
-                        ticker, kap_url,
+                        "TradingView icerik basarili: %s → matriks:%s (%d karakter)",
+                        ticker, matriks_id, len(tv_content),
                     )
-                logger.info(
-                    "TradingView eslestirme basarili: %s → matriks:%s (%d karakter)",
-                    ticker, matriks_id, len(tv_content),
-                )
         except Exception as e:
             logger.warning("TradingView hatasi (%s): %s", ticker, e)
 
-    # ── Oncelik 2: KAP.org.tr direkt erisim (TradingView basarisizsa) ──
+    # ── Oncelik 2: KAP.org.tr direkt URL ile icerik cek (TV paywall veya basarisizsa) ──
+    # TV'den real_kap_url alindiysa DIREKT o URL'e git — ticker bazli degil, spesifik bildirim
+    if not tv_content and kap_url and "kap.org.tr" in kap_url:
+        try:
+            from app.scrapers.kap_all_scraper import fetch_kap_page_content as _fkpc
+            kap_direct_text = await _fkpc(kap_url)
+            if kap_direct_text and len(kap_direct_text) > 50:
+                tv_content = kap_direct_text
+                logger.info(
+                    "KAP.org.tr direkt URL basarili: %s → %s (%d karakter)",
+                    ticker, kap_url, len(tv_content),
+                )
+        except Exception as e:
+            logger.warning("KAP URL direkt hatasi (%s): %s", ticker, e)
+
+    # ── Oncelik 3: KAP.org.tr ticker bazli (spesifik URL de basarisizsa) ──
     if not tv_content and ticker:
         try:
             kap_result = await fetch_kap_direct_content(ticker)
             if kap_result:
-                # KAP URL'yi her zaman al (icerik bos olsa bile link dogru)
-                if kap_result.get("kap_url"):
+                if kap_result.get("kap_url") and "kap.org.tr" not in (kap_url or ""):
                     kap_url = kap_result["kap_url"]
-
-                # Icerik yeterli mi?
                 if kap_result.get("full_text") and len(kap_result["full_text"]) > 30:
                     tv_content = kap_result["full_text"]
                     logger.info(
-                        "KAP direkt fallback basarili: %s → %s (%d karakter)",
-                        ticker, kap_url, len(tv_content),
-                    )
-                else:
-                    logger.info(
-                        "KAP direkt: %s — URL bulundu (%s) ama icerik yetersiz, Telegram ile devam",
-                        ticker, kap_url,
+                        "KAP ticker-bazli fallback basarili: %s (%d karakter)",
+                        ticker, len(tv_content),
                     )
         except Exception as e:
             logger.warning("KAP direkt hatasi (%s): %s", ticker, e)
