@@ -2032,11 +2032,16 @@ def tweet_kap_news(
             if len(ai_summary) > 3000:
                 summary_text += "..."
             # Ozeti 2 paragrafa bol: ilk 1-2 cumleyi opening yap, geri kalanini ikinci paragraf
-            _sentences = [s.strip() for s in summary_text.replace("!", ".").split(".") if s.strip()]
+            # NOT: Sadece gercek cumle sonlari (. veya ? veya ! sonrasi bosluk + buyuk harf)
+            # kullanarak bol — "1.006.231" gibi sayi icindeki noktalarda BÖLME.
+            import re as _re_sent
+            _sentences = [s.strip() for s in _re_sent.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9\-])', summary_text) if s.strip()]
             if len(_sentences) >= 3:
-                _para1 = ". ".join(_sentences[:2]) + "."
-                _para2 = ". ".join(_sentences[2:]) + ("." if not summary_text.rstrip().endswith(("…", "...")) else "")
+                _para1 = " ".join(_sentences[:2])
+                _para2 = " ".join(_sentences[2:])
                 ai_section += f"\n💬 {_para1}\n\n{_para2}\n"
+            elif len(_sentences) == 2:
+                ai_section += f"\n💬 {_sentences[0]}\n\n{_sentences[1]}\n"
             else:
                 ai_section += f"\n💬 {summary_text}\n"
 
