@@ -5803,16 +5803,183 @@ async def scrape_kurum_onerileri():
             pass
 
 
-async def daily_kap_highlight_tweet_job():
-    """Her gun 13:00 TR — gunun en carpici KAP haberini tweet'le.
+async def _ai_generate_kap_highlight_thread(
+    ticker: str,
+    sentiment: str,
+    chosen_disclosure,
+    recent_disclosures: list,
+    tr_now,
+) -> str | None:
+    """Claude ile derinlemesine 'dosya formati' tweet uretir — KONTR ornegi gibi.
 
-    Mantik:
-      1. Bugun (TR gun) atilan tum kap_all_disclosures'tan ai_impact_score'a bak.
-      2. En yuksek pozitif (>=7.0) ve en dusuk negatif (<=3.0) skoru bul.
-      3. Daha "carpici" olani sec (skor'un 5.0'dan sapmasi buyuk olan kazanir).
-      4. Gemini API ile haber temasina ozel kapak resmi uret.
-      5. AI ozeti + ticker + skoru iceren TEK tweet at, KAP linki reply'da.
-      6. Gun icinde 1 kez calisir, ayni gun ayni hisse tekrar gelmez.
+    Format:
+      - Title block (━━━ ile cevrili)
+      - Hook headline
+      - KAP Kronolojisi (son 7 gun)
+      - 6 numarali thread bolumu (1/6 - 6/6)
+      - Sektor analizi + ne izlenmeli
+    """
+    import os as _os
+    api_key = _os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key:
+        logger.warning("ANTHROPIC_API_KEY yok — daily KAP highlight thread uretilemiyor")
+        return None
+
+    # KAP kronolojisi metni
+    kronoloji_lines = []
+    for d in recent_disclosures[:8]:  # Max 8 bildirim
+        try:
+            pub_dt = d.published_at
+            if hasattr(pub_dt, "strftime"):
+                date_str = pub_dt.strftime("%d %b").replace("Jan", "Oca").replace("Feb", "Şub").replace("Mar", "Mar").replace("Apr", "Nis").replace("May", "May").replace("Jun", "Haz").replace("Jul", "Tem").replace("Aug", "Ağu").replace("Sep", "Eyl").replace("Oct", "Eki").replace("Nov", "Kas").replace("Dec", "Ara")
+            else:
+                date_str = "?"
+            score = d.ai_impact_score
+            score_str = f"{score:.1f}" if score is not None else "-"
+            title = (d.title or "")[:80]
+            summary_brief = (d.ai_summary or "")[:200]
+            kronoloji_lines.append(f"- {date_str} (AI: {score_str}): {title}\n  Özet: {summary_brief}")
+        except Exception:
+            continue
+    kronoloji_text = "\n".join(kronoloji_lines) if kronoloji_lines else "(başka KAP yok)"
+
+    tone = "olumsuz / risk / dikkat" if sentiment == "negative" else "olumlu / fırsat / dikkat çekici"
+    hook_style = "RİSK / KRİZ / UYARI" if sentiment == "negative" else "FIRSAT / GELİŞME / DİKKAT"
+
+    prompt = f"""Sen profesyonel bir BIST piyasa analistisin. AŞAĞIDAKİ TAM FORMATTA, eksiksiz bir Twitter "doküman tweet" üret. Sadece formatı doldur, başka açıklama YAZMA.
+
+ÖRNEK FORMAT (KONTR ornegi — bunu SADECE format icin kullan, içerik kendi olsun):
+
+━━━━━━━━━━━━
+{ticker} - {tr_now.strftime('%d %b %Y').replace('May', 'Mayıs')}
+━━━━━━━━━━━━
+
+🧵 {ticker} | [BAŞLIK — 1-2 satir carpici soru veya iddia]
+
+[BAĞLAM cumlesi — kisa]
+
+───────────────────────────────────────
+
+📌 SON 7 GÜN NE OLDU? (KAP KRONOLOJİSİ)
+
+[Tarih] — [Bildirim baslik]
+• [Detay 1]
+• [Detay 2]
+
+[Tarih] — [Bildirim 2]
+• ...
+
+───────────────────────────────────────
+
+📌 ANALİZ
+
+[İlk paragraf — durum tespiti]
+
+[İkinci paragraf — neden onemli]
+
+───────────────────────────────────────
+
+(1/6) 📉/🟢 [BAŞLIK]
+
+[2-3 satir aciklama]
+
+───────────────────────────────────────
+
+(2/6) 📊 RAKAMLAR
+
+[Sayisal veriler — KAP'tan cikar]
+
+───────────────────────────────────────
+
+(3/6) 🏭/🔍 [STRATEJİK HAMLE veya ÖNEMLİ DETAY]
+
+[Sirket aksiyonu, planlari, vs.]
+
+───────────────────────────────────────
+
+(4/6) 🔗 SEKTÖR / RAKİP BAĞLANTISI
+
+[Sektorun durumu, rakip hisseler, ekosistem]
+
+───────────────────────────────────────
+
+(5/6) 🟢/🔴 KİM KAZANIR? / KİM KAYBEDİYOR?
+
+[Carpraz hisse analizi]
+
+───────────────────────────────────────
+
+(6/6) ⏳ BUNDAN SONRA NE İZLENMELİ?
+
+✓ [Izlenmesi gereken 1]
+✓ [Izlenmesi gereken 2]
+✓ [Izlenmesi gereken 3]
+✓ [Izlenmesi gereken 4]
+
+[Sonuc cumlesi]
+
+#{ticker} #KAP #BIST #BorsaIstanbul
+
+KURALLAR:
+1. Tüm bölümleri SIRAYLA ve EKSIKSIZ doldur.
+2. Üst başlık satırlarındaki ━ karakterlerini ve ─── ayıraçlarını AYNEN kullan.
+3. Türkçe karakterler kullan (ç,ş,ğ,ı,ö,ü) — ASCII'ye çevirme.
+4. SAYISAL VERİLER YAZ — KAP özetlerinden cikar. "X milyon TL", "%Y düşüş" gibi.
+5. SENTIMENT: {tone} — bu yönde TON tut.
+6. BAŞLIK HOOK: {hook_style} hissi versin.
+7. Yatırım tavsiyesi yazma. "Yatirimcilar kendi degerlendirmelerini yapmalidir" bile yazma — tarafsiz aktar.
+8. Hashtag satırı SADECE en sonda olsun.
+9. Max 3500 karakter (Blue Tick limiti 4000, marj birak).
+10. Diger ticker'lardan bahsediyorsan, KAP özetlerinde geçenleri kullan — uydurma.
+
+VERİLER:
+
+TICKER: {ticker}
+SENTIMENT: {sentiment} (skor: {chosen_disclosure.ai_impact_score})
+TARİH: {tr_now.strftime('%d %B %Y').replace('January','Ocak').replace('February','Şubat').replace('March','Mart').replace('April','Nisan').replace('May','Mayıs').replace('June','Haziran').replace('July','Temmuz').replace('August','Ağustos').replace('September','Eylül').replace('October','Ekim').replace('November','Kasım').replace('December','Aralık')}
+
+ANA BİLDİRİM:
+Başlık: {chosen_disclosure.title or '(başlık yok)'}
+AI Özet: {chosen_disclosure.ai_summary or '(özet yok)'}
+
+SON 7 GÜN KAP KRONOLOJİSİ ({ticker}):
+{kronoloji_text}
+
+ŞİMDİ YUKARIDAKİ FORMATTA TAMAMINI YAZ:"""
+
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 4000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning("Claude HTTP %s: %s", resp.status_code, resp.text[:300])
+                return None
+            data = resp.json()
+            text = data.get("content", [{}])[0].get("text", "").strip()
+            text = text.strip('"\' \n`')
+            return text or None
+    except Exception as e:
+        logger.error("Claude daily KAP highlight thread hata: %s", e)
+        return None
+
+
+async def daily_kap_highlight_tweet_job():
+    """Her gun 13:00 TR — son 24 saatin en carpici KAP haberini DOKUMAN tweet'le.
+
+    Format: KONTR-stili derinlemesine analiz (━━━ baslik + 6 bolumlu thread).
+    Cok carpici negatif varsa pozitiften ONCELIKLI olarak secilir.
     """
     try:
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
@@ -5820,15 +5987,13 @@ async def daily_kap_highlight_tweet_job():
         from app.services.twitter_service import _safe_tweet_with_media, _safe_tweet, _safe_reply_tweet
         from sqlalchemy import select as _sel, desc as _desc, and_ as _and
 
-        # Pencere: son 24 saat (dun 13:00 TR -> bugun 13:00 TR)
-        # Scheduler 13:00 TR'de calistirildigi icin, simdiden 24 saat geriye giderek
-        # dun 13:00'a kadar olan tum bildirimleri kapsamis oluruz.
         now_utc = _dt.now(_tz.utc)
         tr_now = now_utc + _td(hours=3)
         cutoff_utc = now_utc - _td(hours=24)
+        kronoloji_cutoff_utc = now_utc - _td(days=7)  # Kronoloji icin 7 gun
 
         async with async_session() as db:
-            # En pozitif (skor >= 7.0)
+            # En pozitif (skor >= 7.0) - son 24 saat
             pos_q = await db.execute(
                 _sel(KapAllDisclosure)
                 .where(_and(
@@ -5840,7 +6005,7 @@ async def daily_kap_highlight_tweet_job():
             )
             best_pos = pos_q.scalar_one_or_none()
 
-            # En negatif (skor <= 3.0)
+            # En negatif (skor <= 3.0) - son 24 saat
             neg_q = await db.execute(
                 _sel(KapAllDisclosure)
                 .where(_and(
@@ -5853,10 +6018,12 @@ async def daily_kap_highlight_tweet_job():
             )
             best_neg = neg_q.scalar_one_or_none()
 
-            # Carpiciligi sec: 5.0'dan sapma buyuk olan kazanir
+            # Negatif ONCELIKLI: cok negatif (<=2.5) varsa kazanir
             chosen = None
-            chosen_kind = None  # 'positive' | 'negative'
-            if best_pos and best_neg:
+            chosen_kind = None
+            if best_neg and (best_neg.ai_impact_score or 5.0) <= 2.5:
+                chosen, chosen_kind = best_neg, "negative"
+            elif best_pos and best_neg:
                 pos_dev = abs((best_pos.ai_impact_score or 5.0) - 5.0)
                 neg_dev = abs((best_neg.ai_impact_score or 5.0) - 5.0)
                 if pos_dev >= neg_dev:
@@ -5869,53 +6036,55 @@ async def daily_kap_highlight_tweet_job():
                 chosen, chosen_kind = best_neg, "negative"
 
             if not chosen:
-                logger.info("Daily KAP highlight: bugun carpici haber yok (>=7.0 veya <=3.0), atlama.")
+                logger.info("Daily KAP highlight: son 24 saatte carpici haber yok, atlama.")
                 return
 
             ticker = (chosen.company_code or "").upper()
+            if not ticker:
+                logger.warning("Daily KAP highlight: chosen ticker bos, atlama.")
+                return
+
             score = float(chosen.ai_impact_score or 0)
-            title = (chosen.title or "").strip()
-            summary = (chosen.ai_summary or "").strip()
+
+            # Son 7 gun KAP kronolojisini cek (sirket bazli)
+            kronoloji_q = await db.execute(
+                _sel(KapAllDisclosure)
+                .where(_and(
+                    KapAllDisclosure.company_code == ticker,
+                    KapAllDisclosure.published_at >= kronoloji_cutoff_utc,
+                ))
+                .order_by(_desc(KapAllDisclosure.published_at))
+                .limit(10)
+            )
+            kronoloji = list(kronoloji_q.scalars().all())
+
             kap_url = chosen.disclosure_url or ""
 
-            # Tweet metni — daha samimi ve carpici
-            if chosen_kind == "positive":
-                _emoji = "🟢"
-                _label = "GUNUN POZITIF HABERI"
-                _hashtag = "#OlumluHaber"
-                _hint = "Yatirimcilar icin dikkat cekici bir aciklama."
-            else:
-                _emoji = "🔴"
-                _label = "GUNUN OLUMSUZ HABERI"
-                _hashtag = "#OlumsuzHaber"
-                _hint = "Yatirimcilar icin onemli risk sinyali."
+            # Claude AI ile dokuman tweet uret
+            logger.info(
+                "Daily KAP highlight: %s sec (kind=%s, skor=%.1f, kronoloji=%d disclosure)",
+                ticker, chosen_kind, score, len(kronoloji),
+            )
+            tweet_text = await _ai_generate_kap_highlight_thread(
+                ticker, chosen_kind, chosen, kronoloji, tr_now,
+            )
+            if not tweet_text:
+                logger.warning("Daily KAP highlight: AI tweet uretilemedi, atlama.")
+                return
 
-            # Pencere: dun 13:00 - bugun 13:00
-            _yesterday = tr_now - _td(days=1)
-            _date_str = f"{_yesterday.strftime('%d.%m')} - {tr_now.strftime('%d.%m.%Y')}"
-            _summary_short = summary[:600] if summary else title
+            # X limit 4000 char — guvenli kirpma
+            if len(tweet_text) > 3950:
+                tweet_text = tweet_text[:3920] + "\n[...]"
 
-            tweet_text = (
-                f"{_emoji} {_label} — {_date_str}\n\n"
-                f"#{ticker} hissesinde son 24 saatin en carpici KAP aciklamasi:\n\n"
-                f"💬 {_summary_short}\n\n"
-                f"📊 AI Puani: {score:.1f}/10\n"
-                f"💡 {_hint}\n\n"
-                f"Detayli analiz icin BorsaCebimde uygulamasini profilimizden ucretsiz indirebilirsiniz.\n\n"
-                f"#{ticker} #KAP #BorsaIstanbul {_hashtag}"
-            ).strip()
-
-            # Gemini kapak resmi uret (haber temali)
+            # Gemini kapak resmi
             cover_path = None
             try:
-                # Kurum oneri cover fonksiyonunu yeniden kullan
-                # _items olarak chosen disclosure'i sarmala
                 class _StubItem:
                     pass
                 stub = _StubItem()
                 stub.ticker = ticker
                 stub.institution_name = "KAP"
-                stub.recommendation = _label
+                stub.recommendation = ("KRIZ ANALIZI" if chosen_kind == "negative" else "FIRSAT ANALIZI")
                 stub.target_price = None
                 stub.potential_return = None
                 cover_path = await _generate_kurum_oneri_cover([stub])  # type: ignore
@@ -5928,7 +6097,7 @@ async def daily_kap_highlight_tweet_job():
             else:
                 ok = _safe_tweet(tweet_text, source="daily_kap_highlight")
 
-            # Basariliysa KAP link'i reply olarak at
+            # KAP link reply
             if ok and kap_url:
                 try:
                     from app.services import twitter_service as _ts
@@ -5939,12 +6108,12 @@ async def daily_kap_highlight_tweet_job():
                     logger.debug("Daily KAP highlight reply hata: %s", _r)
 
             logger.info(
-                "Daily KAP highlight tweet: %s %s skor=%.1f — gonderildi=%s",
-                ticker, chosen_kind, score, ok,
+                "Daily KAP highlight tweet: %s %s skor=%.1f, char=%d, gonderildi=%s",
+                ticker, chosen_kind, score, len(tweet_text), ok,
             )
 
     except Exception as e:
-        logger.error("Daily KAP highlight tweet hata: %s", e)
+        logger.error("Daily KAP highlight tweet hata: %s", e, exc_info=True)
 
 
 async def daily_metric_report_job():

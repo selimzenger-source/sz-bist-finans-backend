@@ -2095,8 +2095,9 @@ def tweet_kap_news(
             ]
         _opening = _rnd.choice(_openings)
 
-        # Kategori kelimesini opening'in altinda kucuk paranfez ile ver — robotik 'İlişkili Kelime :' yerine
-        _category_line = f"_({clean_kw})_" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
+        # Kategori kelimesini opening'in altinda goster — Twitter markdown desteklemez,
+        # bu yuzden italik (_..._) yerine duz yazi + emoji ile temiz format
+        _category_line = f"📁 {clean_kw}" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
 
         text = (
             f"{_opening}\n"
