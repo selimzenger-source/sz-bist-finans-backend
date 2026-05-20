@@ -1306,8 +1306,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # NEGATIF HABER TWEET — 2 ayri akis:
             #   - Guclu Olumsuz (0-1) + Cok Olumsuz (1.1-2.0): HER birini tweet
             #     (atlanmaz, sayac yok). Skor < 2.1
-            #   - Olumsuz (2.1-3.0): her 2 haberden 1 tweet
-            #   - Hafif Olumsuz (3.1-4.0): atlanir
+            #   - Olumsuz (2.1-3.0) + Hafif Olumsuz (3.1-4.0): her 2 haberden 1 tweet
             # Push atilmaz, sadece Twitter'da kirmizi banner.
             # ----------------------------------------------------------------
             _should_negative_tweet = False
@@ -1322,8 +1321,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # Guclu Olumsuz + Cok Olumsuz -> HER birini tweet
                     _should_negative_tweet = True
                     _negative_category = "guclu/cok_olumsuz"
-                elif ai_score < 3.1:
-                    # Olumsuz -> sayac 2'de 1
+                elif ai_score < 4.1:
+                    # Olumsuz + Hafif Olumsuz -> sayac 2'de 1
                     try:
                         from app.services.twitter_service import _kap_negative_tweet_counter
                         # Restart sonrasi sayaci DB'den yukle
@@ -1348,7 +1347,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         _neg_counter_val = _kap_negative_tweet_counter["total"]
                         if _neg_counter_val % 2 == 1:
                             _should_negative_tweet = True
-                            _negative_category = f"olumsuz (sayac={_neg_counter_val})"
+                            _category_label = "hafif_olumsuz" if ai_score >= 3.1 else "olumsuz"
+                            _negative_category = f"{_category_label} (sayac={_neg_counter_val})"
                         else:
                             logger.info(
                                 "[TWEET-FLOW-NEG] Olumsuz sayac %d, tweet atlandi (her 2'de 1): %s",

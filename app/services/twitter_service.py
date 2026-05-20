@@ -2033,13 +2033,9 @@ def tweet_kap_news(
                 summary_text += "..."
             ai_section += f"\n💬 {summary_text}\n"
 
-        # KAP link bolumu (varsa)
+        # KAP link KALDIRILDI — X algoritmasi link iceren tweet'leri throttle ediyor.
+        # KAP link'i bu fonksiyonun sonunda REPLY olarak ayri tweet'te paylasilir.
         kap_section = ""
-        if kap_url:
-            if "kap.org.tr" in kap_url:
-                kap_section = f"\n📎 KAP: {kap_url}\n"
-            else:
-                kap_section = f"\n📎 Kaynak: {kap_url}\n"
 
         # AI tarafindan uretilen icerik hashtag'leri (sektor, konu vb.)
         extra_hashtags = ""
@@ -2124,9 +2120,28 @@ def tweet_kap_news(
             ticker, len(text), bool(img_path), ai_score,
         )
         if img_path:
-            return _safe_tweet_with_media(text, img_path, source="tweet_kap_news", force_send=True)
+            _ok = _safe_tweet_with_media(text, img_path, source="tweet_kap_news", force_send=True)
         else:
-            return _safe_tweet(text, source="tweet_kap_news", force_send=True)
+            _ok = _safe_tweet(text, source="tweet_kap_news", force_send=True)
+
+        # Tweet basarili oldu → KAP link'i REPLY olarak at (algoritma boost icin)
+        if _ok and kap_url:
+            try:
+                global _last_tweet_id
+                if _last_tweet_id:
+                    if "kap.org.tr" in kap_url:
+                        _reply_text = f"📎 KAP Bildirim Detayi:\n{kap_url}"
+                    else:
+                        _reply_text = f"📎 Kaynak:\n{kap_url}"
+                    _reply_ok = _safe_reply_tweet(_reply_text, str(_last_tweet_id))
+                    logger.info(
+                        "[KAP-TWEET-REPLY] %s reply (ana_tweet=%s): %s",
+                        ticker, _last_tweet_id, "OK" if _reply_ok else "FAIL",
+                    )
+            except Exception as _rep_err:
+                logger.warning("KAP link reply hata: %s", _rep_err)
+
+        return _ok
     except Exception as e:
         logger.error(f"tweet_kap_news hatasi: {e}")
         return False
