@@ -180,8 +180,29 @@ async def fetch_tradingview_content(matriks_id: str) -> dict | None:
                 logger.warning("TradingView icerik cok kisa (%s): %d karakter", matriks_id, len(full_text or ""))
                 return None
 
+            # TradingView uyelik duvari tespiti — icerik AI'a gitmemeli
+            _PAYWALL_SIGNALS = [
+                "sadece üyeler içindir",
+                "sadece üyeler icin",
+                "giriş yapın veya ücretsiz",
+                "giris yapin veya ucretsiz",
+                "ücretsiz bir hesap oluşturun",
+                "ucretsiz bir hesap olusturun",
+                "members only",
+                "sign in to read",
+                "create a free account",
+            ]
+            _ft_lower = full_text.lower()
+            if any(sig in _ft_lower for sig in _PAYWALL_SIGNALS):
+                logger.warning(
+                    "TradingView paywall tespit edildi (matriks:%s) — icerik AI'a gonderilmiyor",
+                    matriks_id,
+                )
+                full_text = ""  # KAP URL arayisini sürdur ama icerik bosalt
+
             # 5000 karakterle sinirla
-            full_text = full_text[:5000]
+            if full_text:
+                full_text = full_text[:5000]
 
             # --- Gercek KAP bildirim linkini cikart (cok katmanli arama) ---
             import re as _re
