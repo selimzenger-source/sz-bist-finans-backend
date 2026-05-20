@@ -2194,6 +2194,22 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
     """
     content_lower = content.lower()
 
+    # ─── KURUMSAL YONETIM DERECELENDIRME — HARD CAP (max 6.5) ──────
+    # Bu notlar (SAHA, JCR-Eurasia vs.) sirketin yatirimci iliskileri/raporlama
+    # kalitesini olcer — fiyat etkisi minimaldir. AI bunlara 7.0+ verirse fazla
+    # yuksek olur. Maximum Hafif Olumlu (6.4) seviyesine cek.
+    is_governance_rating = (
+        ("kurumsal yonetim" in content_lower or "kurumsal yönetim" in content_lower)
+        and ("derecelendirme" in content_lower or "rating" in content_lower or "not" in content_lower)
+    )
+    if is_governance_rating and score > 6.4:
+        logger.info(
+            "AI News Scorer [GOVERNANCE-CAP] %s: %.1f -> 6.4 "
+            "(kurumsal yonetim derecelendirme max Hafif Olumlu)",
+            ticker, score,
+        )
+        score = 6.4
+
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
     # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
     is_yeni_is = any(kw in content_lower for kw in [

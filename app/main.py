@@ -555,6 +555,26 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 async def global_exception_handler(request: Request, exc: Exception):
     """Beklenmedik hatalarda stack trace yerine genel hata mesaji don."""
     logger.error("Beklenmedik hata [%s %s]: %s", request.method, request.url.path, exc, exc_info=True)
+
+    # Telegram admin bildirimi — 1 saat dedup ile (spam koruma servis icinde)
+    try:
+        from app.services.admin_telegram import notify_backend_error
+        # device_id query/header'dan cikar
+        _did = None
+        try:
+            _did = request.query_params.get("device_id") or request.headers.get("X-Device-Id")
+        except Exception:
+            pass
+        await notify_backend_error(
+            method=request.method,
+            path=str(request.url.path),
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            user_device_id=_did,
+        )
+    except Exception:
+        pass  # Bildirim hatasi response'u bozmasin
+
     from fastapi.responses import JSONResponse
     if settings.is_production:
         return JSONResponse(

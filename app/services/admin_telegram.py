@@ -532,6 +532,44 @@ async def notify_subscription_purchase(
     await send_admin_message(text, silent=(event_type in ("RENEWAL",)))
 
 
+async def notify_backend_error(
+    method: str,
+    path: str,
+    error_type: str,
+    error_message: str,
+    user_device_id: str | None = None,
+):
+    """Beklenmedik backend hatasi — 500 Internal Server Error vb.
+    1 saat icinde ayni hata path'inde tekrar gelirse atilmaz (spam koruma).
+    """
+    import time as _time
+    if not hasattr(notify_backend_error, "_dedup"):
+        notify_backend_error._dedup = {}  # type: ignore
+    cache = notify_backend_error._dedup  # type: ignore
+    key = f"{method}:{path}:{error_type}"
+    now_ts = _time.time()
+    last = cache.get(key, 0)
+    if now_ts - last < 3600:  # 1 saat dedup
+        return
+    cache[key] = now_ts
+    # Cache cap
+    if len(cache) > 128:
+        for k, v in sorted(cache.items(), key=lambda x: x[1])[:32]:
+            cache.pop(k, None)
+
+    text = (
+        f"🚨 Backend Hatasi\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"Endpoint: {method} {path}\n"
+        f"Hata: {error_type}\n"
+        f"Mesaj: {error_message[:300]}"
+    )
+    if user_device_id:
+        text += f"\nCihaz: {user_device_id[:18]}…"
+
+    await send_admin_message(text, silent=False)
+
+
 async def notify_ad_milestone(
     user_id: int,
     device_id: str,
