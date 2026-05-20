@@ -2084,29 +2084,28 @@ def tweet_kap_news(
         import random as _rnd
         if _is_neg:
             _openings = [
-                f"{emoji} #{ticker} cephesinden dikkat çeken bir gelişme:",
-                f"{emoji} #{ticker} için yeni KAP bildirimi:",
-                f"{emoji} #{ticker} hisseleri için önemli not:",
-                f"{emoji} #{ticker} hisse senedinde gözden kaçırılmaması gereken bir açıklama:",
-                f"{emoji} #{ticker} için yatırımcıların takip etmesi gereken haber:",
+                f"{emoji} #{ticker} hissesinde kritik KAP bildirimi:",
+                f"{emoji} #{ticker} yatırımcıları dikkat — önemli açıklama:",
+                f"{emoji} #{ticker} cephesinde çarpıcı bir gelişme:",
+                f"{emoji} #{ticker} hissesinde beklenmedik duyuru:",
+                f"{emoji} #{ticker} için olumsuz sinyaller:",
             ]
         else:
             _openings = [
-                f"{emoji} #{ticker} için yeni bir KAP bildirimi:",
-                f"{emoji} #{ticker} cephesinden olumlu bir gelişme:",
-                f"{emoji} #{ticker} hisseleri için dikkat çeken açıklama:",
-                f"{emoji} #{ticker} yatırımcıları için not:",
-                f"{emoji} #{ticker} hissesinde yeni KAP açıklaması:",
+                f"{emoji} #{ticker} hissesinde güçlü KAP bildirimi:",
+                f"{emoji} #{ticker} yatırımcıları için iyi haber:",
+                f"{emoji} #{ticker} cephesinden dikkat çeken açıklama:",
+                f"{emoji} #{ticker} hissesinde öne çıkan gelişme:",
+                f"{emoji} #{ticker} için olumlu haber geldi:",
             ]
         _opening = _rnd.choice(_openings)
 
-        # Kategori kelimesini opening'in altinda goster — Twitter markdown desteklemez,
-        # bu yuzden italik (_..._) yerine duz yazi + emoji ile temiz format
+        # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
         _category_line = f"📁 {clean_kw}" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
 
         text = (
             f"{_opening}\n"
-            + (f"{_category_line}\n" if _category_line else "")
+            + (f"\n{_category_line}\n" if _category_line else "")
             + f"{ai_section}"
             f"{kap_section}\n"
             f"{cta_text}\n"
@@ -2125,7 +2124,7 @@ def tweet_kap_news(
                 ai_section_mid += f"\n💬 {short_sum}\n"
             text = (
                 f"{_opening}\n"
-                + (f"{_category_line}\n" if _category_line else "")
+                + (f"\n{_category_line}\n" if _category_line else "")
                 + f"{ai_section_mid}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
@@ -2140,7 +2139,7 @@ def tweet_kap_news(
                 ai_section_short = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
             text = (
                 f"{_opening}\n"
-                + (f"{_category_line}\n" if _category_line else "")
+                + (f"\n{_category_line}\n" if _category_line else "")
                 + f"{ai_section_short}"
                 f"{kap_section}\n"
                 f"{cta_text}\n"
