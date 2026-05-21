@@ -2034,8 +2034,17 @@ def tweet_kap_news(
             # Ozeti 2 paragrafa bol: ilk 1-2 cumleyi opening yap, geri kalanini ikinci paragraf
             # NOT: Sadece gercek cumle sonlari (. veya ? veya ! sonrasi bosluk + buyuk harf)
             # kullanarak bol — "1.006.231" gibi sayi icindeki noktalarda BÖLME.
+            # UYARI: "Danistay 13. Dairesi" gibi sira sayisi + devam cumlesi yanlis bolunmemeli:
+            # onceki parcasi rakam+nokta ile bitiyorsa (orn "13.") devami birlestir.
             import re as _re_sent
-            _sentences = [s.strip() for s in _re_sent.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9\-])', summary_text) if s.strip()]
+            _sentences_raw = [s.strip() for s in _re_sent.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9\-])', summary_text) if s.strip()]
+            _sentences = []
+            for _s in _sentences_raw:
+                if _sentences and _re_sent.search(r'\d+\.$', _sentences[-1]):
+                    # Onceki parcasi "13." gibi sira sayisiyla bitiyor — devam cumlesi, birlestir
+                    _sentences[-1] = _sentences[-1] + " " + _s
+                else:
+                    _sentences.append(_s)
             if len(_sentences) >= 3:
                 _para1 = " ".join(_sentences[:2])
                 _para2 = " ".join(_sentences[2:])
