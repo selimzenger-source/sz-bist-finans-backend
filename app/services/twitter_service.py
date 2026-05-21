@@ -2059,10 +2059,18 @@ def tweet_kap_news(
         kap_section = ""
 
         # AI tarafindan uretilen icerik hashtag'leri (sektor, konu vb.)
+        # Sanitize: sadece harf/rakam/Turkce karakter — &, -, /, bosluk vs. icerenleri temizle
         extra_hashtags = ""
         if ai_hashtags:
-            tags = " ".join(f"#{t}" for t in ai_hashtags[:5])  # max 5 hashtag
-            extra_hashtags = f" {tags}"
+            import re as _re_ht
+            _clean_tags = []
+            for _ht in ai_hashtags[:5]:
+                # Ozel karakterleri (& / - . bosluk vs.) at, sadece alfanumerik + Turkce harf
+                _ht_clean = _re_ht.sub(r'[^a-zA-Z0-9çşğüöıÇŞĞÜÖİ]', '', str(_ht))
+                if _ht_clean:  # bos kalmasin
+                    _clean_tags.append(f"#{_ht_clean}")
+            if _clean_tags:
+                extra_hashtags = f" {' '.join(_clean_tags)}"
 
         # CTA: uygulama indirme yonlendirmesi
         # is_manual=True (admin panelden manuel tweet) ise "X haberden 1" satiri YAZILMAZ.
