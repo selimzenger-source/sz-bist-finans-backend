@@ -9683,6 +9683,274 @@ async def list_kap_all_disclosures(
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Günlük Haber Bülteni — PRO Haber abonelerine özel
+# Her sabah 07:55 TR'de kesim alır. Hafta sonu/tatilde push atılmaz.
+# Pazartesi özeti: önceki Cuma 07:55 → Pazartesi 07:55 aralığını kapsar.
+# Tatil sonrası ilk iş gününde de aynı mantık (en son iş günü 07:55'ten).
+# ═══════════════════════════════════════════════════════════════════
+
+# Positive/negative ai_sentiment etiketleri
+_POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
+_NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
+
+# SPK Bülteni bölümünde gösterilecek KAP kategorileri / title pattern'leri
+# (sermaye artırımı, halka arz, ceza, pay geri alım, vb.)
+_SPK_CATEGORIES = (
+    "Sermaye Artırımı",
+    "Halka Arz",
+    "Bedelli Pay",
+    "Bedelsiz Pay",
+    "Pay Geri Alım",
+    "Kar Payı Dağıtımı",
+    "Temettü",
+)
+# Title'da geçerse SPK bölümüne dahil edilecek anahtar kelimeler
+_SPK_TITLE_PATTERNS = (
+    "spk", "ceza", "idari para", "bedelli", "bedelsiz", "halka arz",
+    "sermaye artır", "pay geri al",
+)
+
+
+def _shrink_summary(text: str | None, max_words: int = 9) -> str:
+    """ai_summary'yi tek cümleye + ~7-8 kelimeye indirger.
+
+    - İlk cümleyi alır (nokta/!/?  öncesi).
+    - Çok uzunsa ilk N kelimeye düşürüp '...' koyar.
+    """
+    if not text:
+        return ""
+    s = text.strip()
+    # İlk cümle
+    for terminator in (". ", "! ", "? ", "\n"):
+        idx = s.find(terminator)
+        if 0 < idx < 120:
+            s = s[: idx + 1].strip()
+            break
+    # Sondaki nokta
+    s = s.rstrip(". ")
+    # Kelime sınırı
+    words = s.split()
+    if len(words) > max_words:
+        s = " ".join(words[:max_words]).rstrip(",;:") + "…"
+    return s
+
+
+@app.get("/api/v1/news/daily-summary")
+@limiter.limit("30/minute")
+async def get_daily_news_summary(
+    request: Request,
+    days: int = Query(30, ge=1, le=60),
+    device_id: Optional[str] = Query(None, description="Cihaz ID — PRO Haber doğrulaması için"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Günlük haber bülteni — son N günün özetleri.
+
+    Cutoff: 07:55 TR. Bir haberin ait olduğu özet günü:
+      - 07:55'ten ÖNCE yayınlandıysa → o gün
+      - 07:55'ten SONRA yayınlandıysa → ertesi gün
+      - Eğer atanmış gün tatil/hafta sonu ise → sonraki ilk işlem gününe kaydır
+
+    Yani Pazartesi özeti = önceki Cuma 07:55 → Pazartesi 07:55 aralığı.
+
+    3 bölüm: positive, negative (ai_sentiment != Notr), spk_bulten
+    (sermaye artırımı / halka arz / ceza / temettü / pay geri alım).
+
+    PRO değilse preview modu (son 2 iş günü + max 3 satır).
+    """
+    from zoneinfo import ZoneInfo as _ZoneInfo
+    from datetime import time as _time
+    from sqlalchemy import or_ as _or, and_ as _and
+    from app.utils.bist_holidays import is_trading_day, previous_trading_day, next_trading_day
+    tr_tz = _ZoneInfo("Europe/Istanbul")
+
+    # PRO Haber doğrulaması — device_id verildiyse abonelik var mı bak
+    is_pro = False
+    if device_id:
+        try:
+            ures = await db.execute(select(User).where(User.device_id == device_id))
+            user = ures.scalar_one_or_none()
+            if user:
+                subq = await db.execute(
+                    select(UserSubscription).where(
+                        and_(
+                            UserSubscription.user_id == user.id,
+                            UserSubscription.is_active == True,  # noqa: E712
+                        )
+                    )
+                )
+                sub = subq.scalar_one_or_none()
+                if sub:
+                    tier = (getattr(sub, "tier_id", "") or "").lower()
+                    if tier in ("yildiz", "ana_yildiz", "haber_ai", "haber") or "haber" in tier or "yildiz" in tier:
+                        is_pro = True
+        except Exception as e:
+            logger.warning("daily-summary pro check failed: %s", e)
+
+    # Window — son N takvim gününü kapsayan published_at aralığı
+    now_tr = datetime.now(tr_tz)
+    earliest_tr = now_tr - timedelta(days=days + 1)  # +1 gün overlap (07:55 cutoff için)
+    earliest_utc = earliest_tr.astimezone(timezone.utc)
+
+    cutoff_time = _time(7, 55)
+
+    def _assign_summary_date(pub_tr: datetime) -> date:
+        """Bir haberin ait olduğu özet gününü belirler (tatil-aware)."""
+        # 07:55 öncesi → o gün, sonrası → sonraki gün
+        if pub_tr.time() < cutoff_time:
+            candidate = pub_tr.date()
+        else:
+            candidate = pub_tr.date() + timedelta(days=1)
+        # Tatil/hafta sonu ise sonraki iş gününe kaydır
+        if not is_trading_day(candidate):
+            candidate = next_trading_day(candidate)
+        return candidate
+
+    # SPK kategori/title kontrolü
+    def _is_spk_item(category: str | None, title: str | None) -> bool:
+        if category and category in _SPK_CATEGORIES:
+            return True
+        if title:
+            tl = title.lower()
+            for pat in _SPK_TITLE_PATTERNS:
+                if pat in tl:
+                    return True
+        return False
+
+    # Tüm pozitif/negatif/spk-kategori KAP haberlerini çek
+    q = (
+        select(
+            KapAllDisclosure.id,
+            KapAllDisclosure.company_code,
+            KapAllDisclosure.title,
+            KapAllDisclosure.category,
+            KapAllDisclosure.ai_sentiment,
+            KapAllDisclosure.ai_impact_score,
+            KapAllDisclosure.ai_summary,
+            KapAllDisclosure.kap_url,
+            KapAllDisclosure.published_at,
+        )
+        .where(KapAllDisclosure.published_at.isnot(None))
+        .where(KapAllDisclosure.published_at >= earliest_utc)
+        .where(KapAllDisclosure.company_code.isnot(None))
+        .where(KapAllDisclosure.company_code != "")
+        .order_by(desc(KapAllDisclosure.ai_impact_score), desc(KapAllDisclosure.published_at))
+    )
+    res = await db.execute(q)
+    rows = res.all()
+
+    grouped: dict[str, dict] = {}
+    seen_ids_per_day: dict[str, set] = {}
+
+    for r in rows:
+        # Sentiment ve SPK kategorileri kontrolü
+        is_pos = r.ai_sentiment in _POSITIVE_SENTIMENTS
+        is_neg = r.ai_sentiment in _NEGATIVE_SENTIMENTS
+        is_spk = _is_spk_item(r.category, r.title)
+        if not (is_pos or is_neg or is_spk):
+            continue
+
+        pub_tr = r.published_at.astimezone(tr_tz)
+        try:
+            sd_date = _assign_summary_date(pub_tr)
+        except Exception:
+            continue
+        sd = sd_date.isoformat()
+
+        if sd not in grouped:
+            grouped[sd] = {"summary_date": sd, "positive": [], "negative": [], "spk_bulten": []}
+            seen_ids_per_day[sd] = set()
+
+        if r.id in seen_ids_per_day[sd]:
+            continue
+        seen_ids_per_day[sd].add(r.id)
+
+        item = {
+            "id": r.id,
+            "ticker": r.company_code,
+            "summary": _shrink_summary(r.ai_summary or r.title, max_words=9),
+            "sentiment": r.ai_sentiment,
+            "impact": float(r.ai_impact_score) if r.ai_impact_score else 0.0,
+            "category": r.category,
+            "kap_url": r.kap_url,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+        }
+
+        # Öncelik sırası: SPK > Positive > Negative
+        # (SPK haberi pozitif/negatifte tekrar gözükmesin)
+        if is_spk:
+            grouped[sd]["spk_bulten"].append(item)
+        elif is_pos:
+            grouped[sd]["positive"].append(item)
+        else:
+            grouped[sd]["negative"].append(item)
+
+    # Son N işlem günü ile sınırla (takvim günü değil, iş günü)
+    days_list = sorted(grouped.values(), key=lambda x: x["summary_date"], reverse=True)
+
+    # Bölüm bazlı limit
+    MAX_PER_SECTION = 25
+    for g in days_list:
+        g["positive"] = g["positive"][:MAX_PER_SECTION]
+        g["negative"] = g["negative"][:MAX_PER_SECTION]
+        g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
+        g["total"] = len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
+
+    # Sadece son N iş gününü göster (days=30 → max 30 iş günü)
+    days_list = [g for g in days_list if g["total"] > 0][:days]
+
+    # PRO değilse preview modu
+    if not is_pro:
+        days_list = days_list[:2]
+        for g in days_list:
+            g["positive"] = g["positive"][:3]
+            g["negative"] = g["negative"][:3]
+            g["spk_bulten"] = g["spk_bulten"][:3]
+            g["preview"] = True
+
+    # Son yayinlanma zamani (frontend banner icin)
+    last_published_at: str | None = None
+    try:
+        from sqlalchemy import text as _txt
+        rres = await db.execute(_txt(
+            "SELECT value FROM app_settings WHERE key = 'daily_news_summary_published_at' LIMIT 1"
+        ))
+        row = rres.first()
+        if row and row[0]:
+            last_published_at = row[0]
+    except Exception:
+        pass
+
+    return {
+        "is_pro": is_pro,
+        "cutoff_hour": "07:55",
+        "last_published_at": last_published_at,
+        "days": days_list,
+    }
+
+
+# Lightweight endpoint — sadece "yayinlandi mi" bilgisi (banner icin polling)
+@app.get("/api/v1/news/daily-summary/status")
+@limiter.limit("60/minute")
+async def get_daily_summary_status(request: Request, db: AsyncSession = Depends(get_db)):
+    """Banner için hafif endpoint: son yayınlanma zamanı + bugün özet var mı.
+
+    Frontend 2 saat kontrolünü bu endpoint'ten yapar.
+    """
+    from sqlalchemy import text as _txt
+    last_published_at = None
+    try:
+        rres = await db.execute(_txt(
+            "SELECT value FROM app_settings WHERE key = 'daily_news_summary_published_at' LIMIT 1"
+        ))
+        row = rres.first()
+        if row and row[0]:
+            last_published_at = row[0]
+    except Exception:
+        pass
+    return {"last_published_at": last_published_at}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Sermaye Artirimi Takvimi — public, herkese acik (free)
 # ═══════════════════════════════════════════════════════════════════
 

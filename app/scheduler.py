@@ -5125,6 +5125,71 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
+    # ─── Gunluk Haber Bulteni Push — 07:55 TR (sadece islem gunlerinde) ───
+    # PRO Haber abonelerine push: "Gunluk haber bulteniniz hazir"
+    # Deep link: /haber-ozeti
+    # Hafta sonu ve resmi tatillerde calismaz.
+    # Pazartesi pushu Cuma-Cumartesi-Pazar haberlerini de kapsar (endpoint
+    # tarafindan otomatik handle edilir).
+    async def _send_daily_news_summary_push():
+        try:
+            from app.services.broadcast import broadcast_background_task
+            from app.utils.bist_holidays import is_trading_day
+            from app.database import async_session
+            from sqlalchemy import text as _sa_text
+
+            now_tr = datetime.now(_TR_TZ)
+            today_tr = now_tr.date()
+
+            # Borsa kapali (hafta sonu / tatil) — push atma
+            if not is_trading_day(today_tr):
+                logger.info("Gunluk haber bulteni push atlandi (tatil/hafta sonu): %s", today_tr)
+                return
+
+            # Tarih stringi (TR)
+            ay_isimleri = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                           "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+            tarih_str = f"{today_tr.day} {ay_isimleri[today_tr.month - 1]}"
+
+            # Banner için 'son_yayin' zamanını DB'ye yaz (app_settings tablosu)
+            try:
+                async with async_session() as _s:
+                    await _s.execute(_sa_text("""
+                        INSERT INTO app_settings (key, value, updated_at)
+                        VALUES ('daily_news_summary_published_at', :v, NOW())
+                        ON CONFLICT (key) DO UPDATE
+                          SET value = EXCLUDED.value, updated_at = NOW()
+                    """), {"v": now_tr.isoformat()})
+                    await _s.commit()
+            except Exception as _e:
+                logger.warning("daily_news_summary_published_at yazilamadi: %s", _e)
+
+            await broadcast_background_task(
+                title="📰 Günlük Haber Bülteniniz Hazır",
+                body=f"{tarih_str} — Dün şirketlerden ve SPK bülteninden öne çıkan pozitif/negatif haberlerin özeti. Detaylar için tıklayın.",
+                audience="paid",
+                deep_link_target="haber-ozeti",
+                extra_data={
+                    "screen": "haber-ozeti",
+                    "type": "daily_news_summary",
+                    "summary_date": today_tr.isoformat(),
+                },
+            )
+            logger.info("Gunluk haber bulteni push'u gonderildi: %s", today_tr)
+        except Exception as e:
+            logger.error("Gunluk haber bulteni push hatasi: %s", e)
+
+    scheduler.add_job(
+        _send_daily_news_summary_push,
+        CronTrigger(hour=4, minute=55),  # UTC 04:55 = TR 07:55
+        id="daily_news_summary_push",
+        name="Gunluk Haber Bulteni Push (07:55 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,  # 1 saat grace
+    )
+
     # ─── KAP Uzmanpara Hizli Tarama — her 50 sn ───
     scheduler.add_job(
         kap_uzmanpara_quick_job,

@@ -1255,16 +1255,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Tweet politikasi:
-                    #   - Yuksek skor (>= 7.0 = "Olumlu" / "Cok Olumlu" / "Guclu Olumlu"):
-                    #     SAYAC YOK, HER birini tweet at (onemli haberler kacmasin).
-                    #   - Dusuk skor (6.0-6.9 = "Hafif Olumlu"):
-                    #     Sayac 4'te 1 (spam koruma).
+                    # Tweet politikasi: TUM olumlu haberler 4'te 1 atilir (spam koruma).
+                    # Yuksek skorda istisna YOK — kullanici karari.
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
-                    _high_impact = ai_score is not None and ai_score >= 7.0
 
-                    if _high_impact or _counter_val % 4 == 1:
+                    if _counter_val % 4 == 1:
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
@@ -1317,12 +1313,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 and ai_score is not None
                 and ticker
             ):
-                if ai_score < 2.1:
-                    # Guclu Olumsuz + Cok Olumsuz -> HER birini tweet
-                    _should_negative_tweet = True
-                    _negative_category = "guclu/cok_olumsuz"
-                elif ai_score < 4.1:
-                    # Olumsuz + Hafif Olumsuz -> sayac 2'de 1
+                if ai_score < 4.1:
+                    # Tum olumsuz haberler (Guclu/Cok/Olumsuz/Hafif) -> sayac 2'de 1
+                    # Kullanici karari: yuksek skor istisnasi YOK.
                     try:
                         from app.services.twitter_service import _kap_negative_tweet_counter
                         # Restart sonrasi sayaci DB'den yukle
@@ -1347,7 +1340,14 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         _neg_counter_val = _kap_negative_tweet_counter["total"]
                         if _neg_counter_val % 2 == 1:
                             _should_negative_tweet = True
-                            _category_label = "hafif_olumsuz" if ai_score >= 3.1 else "olumsuz"
+                            if ai_score < 1.1:
+                                _category_label = "guclu_olumsuz"
+                            elif ai_score < 2.1:
+                                _category_label = "cok_olumsuz"
+                            elif ai_score < 3.1:
+                                _category_label = "olumsuz"
+                            else:
+                                _category_label = "hafif_olumsuz"
                             _negative_category = f"{_category_label} (sayac={_neg_counter_val})"
                         else:
                             logger.info(
