@@ -15028,6 +15028,62 @@ async def admin_trigger_kurum_scrape(request: Request, payload: dict = Body(...)
         return {"status": "error", "message": str(e)[:500]}
 
 
+@app.post("/api/v1/admin/trigger-kurum-oneri-tweet")
+@limiter.limit("5/minute")
+async def admin_trigger_kurum_oneri_tweet(request: Request, payload: dict = Body(...)):
+    """Admin: Kurum oneri gunluk tweet'ini manuel tetikle + durum raporu dondur."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    from app.models.kurum_oneri import KurumOneri
+    from sqlalchemy import select as _sel, and_
+
+    # Durum raporu: bugun kac oneri var?
+    now_utc = _dt.now(_tz.utc)
+    tr_now = now_utc + _td(hours=3)
+    tr_day_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    utc_day_start = tr_day_start - _td(hours=3)
+
+    async with async_session() as db:
+        # Tweet gonderilmemis
+        r1 = await db.execute(
+            _sel(KurumOneri).where(
+                KurumOneri.created_at >= utc_day_start,
+                KurumOneri.tweet_sent_at.is_(None),
+            ).order_by(KurumOneri.created_at.desc())
+        )
+        pending = list(r1.scalars().all())
+
+        # Tweet gonderilmis
+        r2 = await db.execute(
+            _sel(KurumOneri).where(
+                KurumOneri.created_at >= utc_day_start,
+                KurumOneri.tweet_sent_at.isnot(None),
+            )
+        )
+        sent = list(r2.scalars().all())
+
+    report = {
+        "utc_day_start": utc_day_start.isoformat(),
+        "pending_count": len(pending),
+        "sent_count": len(sent),
+        "pending_items": [{"ticker": i.ticker, "inst": i.institution_name, "rec": i.recommendation, "created": str(i.created_at)} for i in pending[:10]],
+    }
+
+    if not payload.get("dry_run", False):
+        try:
+            from app.scheduler import kurum_oneri_daily_tweet_job
+            await kurum_oneri_daily_tweet_job()
+            report["tweet_triggered"] = True
+        except Exception as e:
+            report["tweet_error"] = str(e)[:300]
+    else:
+        report["tweet_triggered"] = False
+        report["note"] = "dry_run=true, tweet atilmadi"
+
+    return report
+
+
 # ═══════════════════════════════════════════════════════════════════
 # v3.0.0 — BILANCO / TEMETTU / SIRKET KARTI / IPO ANKETI / TAKVIM
 # ═══════════════════════════════════════════════════════════════════
