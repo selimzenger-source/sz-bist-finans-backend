@@ -6198,19 +6198,106 @@ async def daily_metric_report_job():
         logger.error("Gunluk metrik raporu hata: %s", e)
 
 
+async def _kurum_oneri_ai_comments(oneri_list: list) -> dict:
+    """Claude Haiku ile her kurum önerisi için tek cümlelik Türkçe yorum üretir.
+
+    Args:
+        oneri_list: [(ticker, rec_pretty, inst, target_str, pot_str), ...]
+
+    Returns:
+        dict: {idx: yorum_str} — başarısızsa boş dict
+    """
+    import os as _os
+    api_key = _os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if not api_key or not oneri_list:
+        return {}
+
+    lines = []
+    for idx, (tk, rec, inst, tgt, pot) in enumerate(oneri_list, 1):
+        parts = [f"{idx}. {tk} — {rec}"]
+        if inst:
+            parts[0] += f" ({inst})"
+        if tgt:
+            parts[0] += f" — Hedef: {tgt}"
+            if pot:
+                parts[0] += f" {pot}"
+        lines.append(parts[0])
+
+    prompt = (
+        "Aşağıdaki BIST kurum önerileri listesi var. Her biri için SADECE tek bir cümlelik kısa ve net Türkçe yorum yaz.\n"
+        "Yorum: neden bu önerinin verilmiş olabileceğine dair tarafsız bir değerlendirme.\n"
+        "Yatırım tavsiyesi VERME. Türkçe karakterleri doğru kullan (ş,ç,ğ,ı,ö,ü).\n"
+        "Cevap formatı — SADECE bu satırlar, başka açıklama yok:\n"
+        "1. [yorum cümlesi]\n2. [yorum cümlesi]\n...\n\n"
+        "ÖNERİLER:\n" + "\n".join(lines)
+    )
+
+    try:
+        import httpx as _httpx
+        async with _httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-haiku-4-5-20251001",
+                    "max_tokens": 1000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+            )
+            if resp.status_code != 200:
+                logger.warning("Kurum oneri AI yorum HTTP %s", resp.status_code)
+                return {}
+            data = resp.json()
+            raw = data.get("content", [{}])[0].get("text", "").strip()
+            # Parse "1. yorum\n2. yorum\n..." satırlarını dict'e çevir
+            result = {}
+            for line in raw.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                dot_pos = line.find(". ")
+                if dot_pos > 0 and line[:dot_pos].isdigit():
+                    idx = int(line[:dot_pos])
+                    yorum = line[dot_pos + 2:].strip()
+                    if yorum:
+                        result[idx] = yorum
+            return result
+    except Exception as e:
+        logger.error("Kurum oneri AI yorum hatasi: %s", e)
+        return {}
+
+
 async def kurum_oneri_daily_tweet_job():
     """Gunluk 17:00 TR kurum oneri ozet tweet'i — o gun tespit edilen TUM yeni onerileri
-    tek bir tweet'te yayinlar. Her hisse #TICKER seklinde hashtag'li yazilir.
+    guzel cok satirli formatta, AI yorumuyla birlikte tek tweet'te yayinlar.
     O gun yeni oneri yoksa hicbir sey atilmaz (bos tweet engellenir).
+
+    Format:
+      📊 Günlük Kurum Önerileri — 21.05.2026
+
+      ──────────────────
+      🟢 #KOTON — AL
+      🏦 KuveytTürk Yatırım
+      🎯 Hedef: 21,00 TL (+%45,0)
+      💬 [AI yorum cümlesi]
+
+      ──────────────────
+      ...
+
+      📲 Detaylar için BorsaCebimde
+      #KOTON #LKMNH #KurumÖnerisi
     """
     try:
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         from app.services.twitter_service import _safe_tweet, _safe_tweet_with_media
         from app.models.kurum_oneri import KurumOneri
 
-        # Bugun 00:00 TR (UTC-3'ten 21:00 onceki gun) — TR gunluk pencere
+        # Bugun 00:00 TR (UTC+3) — TR gunluk pencere
         now_utc = _dt.now(_tz.utc)
-        # TR saati: UTC+3
         tr_now = now_utc + _td(hours=3)
         tr_day_start = tr_now.replace(hour=0, minute=0, second=0, microsecond=0)
         utc_day_start = tr_day_start - _td(hours=3)
@@ -6231,9 +6318,21 @@ async def kurum_oneri_daily_tweet_job():
                 logger.info("Kurum oneri daily tweet: bugun yeni oneri yok, atlama.")
                 return
 
-            # Tweet metni olustur — tum hisseler hashtag'li
-            tweet_lines = []
+            # ── Oneri verilerini parse et ──
+            _rec_pretty_map = {
+                "endeks üstü getiri": "AL", "endeks altı getiri": "SAT",
+                "endekse paralel getiri": "TUT", "outperform": "AL",
+                "underperform": "SAT", "neutral": "NÖTR", "nötr": "NÖTR",
+                "nötür": "NÖTR", "al": "AL", "sat": "SAT", "tut": "TUT",
+                "buy": "AL", "hold": "TUT", "sell": "SAT",
+            }
+
+            parsed = []  # (item, ticker, emoji, rec_pretty, inst, target_str, pot_str)
             for i in items:
+                _tk = (i.ticker or "").strip().upper()
+                if not _tk:
+                    continue
+
                 _rec_lo = (i.recommendation or "").strip().lower()
                 if _rec_lo in ("al", "buy", "endeks üstü getiri", "outperform"):
                     _emoji = "🟢"
@@ -6244,27 +6343,22 @@ async def kurum_oneri_daily_tweet_job():
                 else:
                     _emoji = "⚪"
 
-                _tk = (i.ticker or "").strip().upper()
-                if not _tk:
-                    continue
+                _rec_p = _rec_pretty_map.get(_rec_lo) or ((i.recommendation or "").strip().upper() or "ÖNERİ")
 
                 _inst = ""
                 if i.institution_name:
-                    _inst = i.institution_name.replace(" Menkul", "").replace(" Yatırım Menkul Değerler", " Yatırım")
-
-                _rec_pretty_map = {
-                    "endeks üstü getiri": "AL", "endeks altı getiri": "SAT",
-                    "endekse paralel getiri": "TUT", "outperform": "AL",
-                    "underperform": "SAT", "neutral": "NÖTR", "nötr": "NÖTR",
-                    "nötür": "NÖTR", "al": "AL", "sat": "SAT", "tut": "TUT",
-                    "buy": "AL", "hold": "TUT", "sell": "SAT",
-                }
-                _rec_p = _rec_pretty_map.get(_rec_lo) or ((i.recommendation or "").strip().upper() or "ÖNERİ")
+                    _inst = (
+                        i.institution_name
+                        .replace(" Menkul Değerler", "")
+                        .replace(" Menkul", "")
+                        .replace(" Yatırım Menkul", " Yatırım")
+                        .strip()
+                    )
 
                 _target = ""
                 if i.target_price:
                     try:
-                        _tp = f"{float(i.target_price):,.2f}".replace(",", ".")
+                        _tp = f"{float(i.target_price):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                         _target = f"{_tp} TL"
                     except (TypeError, ValueError):
                         pass
@@ -6279,33 +6373,54 @@ async def kurum_oneri_daily_tweet_job():
                     except (TypeError, ValueError):
                         pass
 
-                # "🟢 #FROTO Ata Yatirim hedef 71.50 TL (+%12.3) AL"
-                parts = [_emoji, f"#{_tk}"]
-                if _inst:
-                    parts.append(_inst)
-                if _target:
-                    parts.append(f"hedef {_target}")
-                if _pot:
-                    parts.append(_pot)
-                parts.append(_rec_p)
-                tweet_lines.append(" ".join(parts))
+                parsed.append((i, _tk, _emoji, _rec_p, _inst, _target, _pot))
 
-            if not tweet_lines:
+            if not parsed:
                 logger.info("Kurum oneri daily tweet: gecerli ticker'li oneri yok, atlama.")
                 return
 
+            # ── AI yorumları tek seferde çek ──
+            ai_input = [(tk, rec, inst, tgt, pot) for (_, tk, _, rec, inst, tgt, pot) in parsed]
+            ai_comments = {}
+            try:
+                ai_comments = await _kurum_oneri_ai_comments(ai_input)
+            except Exception as ai_err:
+                logger.warning("Kurum oneri AI yorum alinamadi: %s", ai_err)
+
+            # ── Tweet metnini oluştur ──
+            SEP = "──────────────────"
             tr_date = tr_now.strftime("%d.%m.%Y")
-            header = f"📊 {len(tweet_lines)} Kurum Önerisi — {tr_date}"
-            footer = "Detaylar için uygulamamız: borsacebimde.app"
+            header = f"📊 Günlük Kurum Önerileri — {tr_date}"
 
-            # Premium hesap — kirpma yok, tum oneriler tek tweet'te (X premium limit ~25000 chr).
-            body = "\n".join(tweet_lines)
-            tweet_text = f"{header}\n\n{body}\n\n{footer}".strip()
+            blocks = []
+            tickers_for_hashtag = []
+            for idx, (i, tk, emoji, rec_p, inst, target, pot) in enumerate(parsed, 1):
+                tickers_for_hashtag.append(f"#{tk}")
+                block_lines = [
+                    SEP,
+                    f"{emoji} #{tk} — {rec_p}",
+                ]
+                if inst:
+                    block_lines.append(f"🏦 {inst}")
+                if target:
+                    target_pot = f"🎯 Hedef: {target}"
+                    if pot:
+                        target_pot += f" {pot}"
+                    block_lines.append(target_pot)
+                yorum = ai_comments.get(idx, "")
+                if yorum:
+                    block_lines.append(f"💬 {yorum}")
+                blocks.append("\n".join(block_lines))
 
-            # Gemini kapak resmi (mevcut yardimci fonksiyon, ilk 5 oneriyle)
+            hashtags = " ".join(tickers_for_hashtag) + " #KurumÖnerisi"
+            footer = f"📲 Detaylar için BorsaCebimde\n{hashtags}"
+
+            tweet_text = header + "\n\n" + "\n\n".join(blocks) + "\n\n" + footer
+
+            # ── Kapak resmi (opsiyonel, Gemini) ──
             cover = None
             try:
-                cover = await _generate_kurum_oneri_cover(items[:5])
+                cover = await _generate_kurum_oneri_cover([p[0] for p in parsed[:5]])
             except Exception as cov_err:
                 logger.debug("Kurum oneri kapak resmi hatasi (daily): %s", cov_err)
 
@@ -6315,12 +6430,12 @@ async def kurum_oneri_daily_tweet_job():
                 ok = _safe_tweet(tweet_text, source="kurum_oneri_daily")
 
             if ok:
-                for item in items:
-                    item.tweet_sent_at = _dt.now(_tz.utc)
+                for p in parsed:
+                    p[0].tweet_sent_at = _dt.now(_tz.utc)
                 await db.commit()
-                logger.info("Kurum oneri daily tweet: %d oneri ile gonderildi.", len(items))
+                logger.info("Kurum oneri daily tweet: %d oneri ile gonderildi.", len(parsed))
             else:
-                logger.warning("Kurum oneri daily tweet GONDERILEMEDI (%d oneri sirada kaldi).", len(items))
+                logger.warning("Kurum oneri daily tweet GONDERILEMEDI (%d oneri sirada kaldi).", len(parsed))
 
     except Exception as e:
         logger.error("Kurum oneri daily tweet hata: %s", e)
