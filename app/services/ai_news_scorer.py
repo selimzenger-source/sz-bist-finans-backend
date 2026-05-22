@@ -2284,47 +2284,64 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
         and not is_governance_rating  # zaten cap'lendi
     )
     if is_credit_rating:
-        # Çok büyük not değişikliği — sadece 3+ kademe veya kategori değişimi
-        big_upgrade = any(kw in content_lower for kw in [
-            "yatırım yapılabilir", "yatirim yapilabilir",
-            "yatırım yapılabilir kategori", "investment grade",
-            "üç kademe", "uc kademe", "dört kademe", "dort kademe",
-            "üç basamak", "uc basamak",
-            "3 kademe yükselt", "3 kademe yukselt",
-            "4 kademe yükselt", "4 kademe yukselt",
+        # Önce teyit/stabil indikatörleri — varsa ZORLA NOTR
+        # (Mevcut notun teyidi = fiyat etkisi yok, push/tweet anlamsız)
+        is_confirmation = any(kw in content_lower for kw in [
+            "teyit edildi", "teyit etti", "teyit ediyor",
+            "teyid edildi", "teyid etti",
+            "korundu", "korunmuş", "korunması", "korumakta",
+            "sürdür", "sürdürdüğ", "surdur", "surdurdug",
+            "değişiklik yok", "degisiklik yok",
+            "stabil", "durağan", "duragan",
+            "aynı seviye", "ayni seviye",
+            "aynı not", "ayni not",
         ])
-        big_downgrade = any(kw in content_lower for kw in [
-            "yatırım dışı", "spekülatif kategori",
-            "junk", "default", "temerrüt", "temerrut",
-            "üç kademe düşür", "uc kademe dusur",
-            "3 kademe düşür", "3 kademe dusur",
-            "dört kademe düşür", "dort kademe dusur",
-        ])
-        if not big_upgrade and not big_downgrade:
-            # Küçük değişiklik / teyit / stabil → NOTR'a çek
-            if score > 5.4 or score < 4.6:
+        if is_confirmation:
+            # TEYİT/STABIL → ZORLA NOTR (5.0)
+            if not (4.6 <= score <= 5.4):
                 old_score = score
                 score = 5.0
                 logger.info(
-                    "AI News Scorer [CREDIT-RATING-NEUTRAL] %s: %.1f -> 5.0 "
-                    "(kredi derecelendirme + büyük değişiklik yok = Notr)",
+                    "AI News Scorer [CREDIT-CONFIRMATION→NOTR] %s: %.1f -> 5.0 "
+                    "(kredi notu teyit/stabil — fiyat etkisi yok)",
                     ticker, old_score,
                 )
-        elif big_upgrade:
-            # Büyük artırım → max 7.5 (Olumlu)
-            if score > 7.5:
-                logger.info(
-                    "AI News Scorer [CREDIT-UPGRADE-CAP] %s: %.1f -> 7.5",
-                    ticker, score,
-                )
+        else:
+            # Teyit değil — gerçek değişiklik var mı? 3+ kademe / kategori değişimi
+            big_upgrade = any(kw in content_lower for kw in [
+                "yatırım yapılabilir kategoriye yüksel",
+                "yatırım yapılabilir kategoriye terfi",
+                "yatırım yapılabilir kategoriye geç",
+                "investment grade'e yüksel",
+                "üç kademe yüksel", "uc kademe yuksel",
+                "dört kademe yüksel", "dort kademe yuksel",
+                "3 kademe yükselt", "3 kademe yukselt",
+                "4 kademe yükselt", "4 kademe yukselt",
+                "görünüm pozitife", "gorunum pozitife",
+            ])
+            big_downgrade = any(kw in content_lower for kw in [
+                "yatırım dışı kategoriye", "spekülatif kategoriye düşür",
+                "junk seviye", "default", "temerrüt", "temerrut",
+                "üç kademe düşür", "uc kademe dusur",
+                "3 kademe düşür", "3 kademe dusur",
+                "dört kademe düşür", "dort kademe dusur",
+                "görünüm negatife", "gorunum negatife",
+            ])
+            if not big_upgrade and not big_downgrade:
+                # Küçük değişiklik → NOTR
+                if score > 5.4 or score < 4.6:
+                    old_score = score
+                    score = 5.0
+                    logger.info(
+                        "AI News Scorer [CREDIT-RATING-NEUTRAL] %s: %.1f -> 5.0 "
+                        "(kredi derecelendirme — büyük değişiklik yok = Notr)",
+                        ticker, old_score,
+                    )
+            elif big_upgrade and score > 7.5:
+                logger.info("AI News Scorer [CREDIT-UPGRADE-CAP] %s: %.1f -> 7.5", ticker, score)
                 score = 7.5
-        elif big_downgrade:
-            # Büyük düşürme → min 3.0 (Olumsuz)
-            if score > 3.5:
-                logger.info(
-                    "AI News Scorer [CREDIT-DOWNGRADE-FLOOR] %s: %.1f -> 3.0",
-                    ticker, score,
-                )
+            elif big_downgrade and score > 3.5:
+                logger.info("AI News Scorer [CREDIT-DOWNGRADE-FLOOR] %s: %.1f -> 3.0", ticker, score)
                 score = 3.0
 
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
