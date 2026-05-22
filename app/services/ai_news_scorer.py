@@ -2284,20 +2284,21 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
         and not is_governance_rating  # zaten cap'lendi
     )
     if is_credit_rating:
-        # Çok büyük not değişikliği indikatörleri
+        # Çok büyük not değişikliği — sadece 3+ kademe veya kategori değişimi
         big_upgrade = any(kw in content_lower for kw in [
             "yatırım yapılabilir", "yatirim yapilabilir",
             "yatırım yapılabilir kategori", "investment grade",
-            "iki kademe", "üç kademe", "uc kademe",
-            "iki basamak", "üç basamak", "uc basamak",
-            "2 kademe yükselt", "3 kademe yükselt",
-            "görünüm pozitif", "görünüm pozitife",
+            "üç kademe", "uc kademe", "dört kademe", "dort kademe",
+            "üç basamak", "uc basamak",
+            "3 kademe yükselt", "3 kademe yukselt",
+            "4 kademe yükselt", "4 kademe yukselt",
         ])
         big_downgrade = any(kw in content_lower for kw in [
             "yatırım dışı", "spekülatif kategori",
             "junk", "default", "temerrüt", "temerrut",
-            "görünüm negatif", "görünüm negatife",
-            "iki kademe düşür", "iki kademe düşür",
+            "üç kademe düşür", "uc kademe dusur",
+            "3 kademe düşür", "3 kademe dusur",
+            "dört kademe düşür", "dort kademe dusur",
         ])
         if not big_upgrade and not big_downgrade:
             # Küçük değişiklik / teyit / stabil → NOTR'a çek
