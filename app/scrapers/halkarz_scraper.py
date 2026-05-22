@@ -1009,10 +1009,30 @@ async def scrape_halkarz():
                 _CRITICAL_FIELDS = {"subscription_start", "subscription_end", "subscription_hours",
                                     "trading_start", "ipo_price", "total_lots"}
 
+                # Sadece halka arz sürecinde dolu olan alanlar — trading başladıktan sonra
+                # halkarz.com sayfası değişir, bu alanlar yanlış scrape edilebilir.
+                # Örnek: katilim_endeksi trading sonrası sayfada kaldırılır; scraper başka
+                # bir context'ten "uygun" yakalayarak "uygun_degil" üstüne yazar.
+                _IPO_ONLY_FIELDS = {
+                    "katilim_endeksi",      # Halka arz sayfasından, işlem sonrası silinir
+                    "market_segment",       # Zaten işlem başladıktan sonra sabit kalır
+                    "public_float_pct",     # Halka arz oranı sabit, değiştirilmemeli
+                    "discount_pct",         # İskonto halka arz dönemine ait
+                    "price_stability_days", # Sadece halka arz döneminde geçerli
+                    "lock_up_period_days",  # Sadece halka arz döneminde geçerli
+                }
+                _is_trading = ipo.status == "trading"
+
                 for scrape_key, db_field in field_mapping.items():
                     if scrape_key in safe_data and safe_data[scrape_key] is not None:
                         if db_field is None:
                             continue
+
+                        # Trading durumunda halka arz dönemine ait alanları güncelleme —
+                        # sayfanın yapısı değişiyor, yanlış veri yazılabilir.
+                        if _is_trading and db_field in _IPO_ONLY_FIELDS:
+                            continue
+
                         current_val = getattr(ipo, db_field, None)
                         new_val = safe_data[scrape_key]
 
