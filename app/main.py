@@ -9698,54 +9698,53 @@ _POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
 _NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
 
 
-def _shrink_summary(text: str | None, max_chars: int = 120) -> str:
+def _shrink_summary(text: str | None, max_chars: int = 200) -> str:
     """ai_summary'yi anlamlı bir cümlede tamamlanmış şekilde kısaltır.
 
-    Mantık:
-      1. İlk cümleyi tercih et (.,!,? sonu, max ~120 karakter)
-      2. Eğer ilk cümle çok kısaysa (<25 karakter), ikinci cümleyi de ekle
-      3. Hiç noktalama yoksa: virgül/bağlaç sınırında kes
-      4. Yarım bırakma — kelime ortasında asla kesme
+    Mantık (agresif - yarım cümle bırakmaz):
+      1. İlk tam cümleyi tercih et (. / ! / ? sonu)
+      2. Kısa cümleyse (<35), 2. cümleyi de ekle (limite kadar)
+      3. Hiç nokta yoksa ama metin sığıyorsa olduğu gibi döndür
+      4. Çok uzunsa: virgül/bağlaç/kelime sınırında kes
     """
     if not text:
         return ""
-    s = " ".join(text.strip().split())  # birden fazla boşluğu temizle
+    s = " ".join(text.strip().split())
 
-    # 1) İlk cümleyi bul
-    first = None
-    for term in (". ", "! ", "? "):
-        idx = s.find(term)
-        if 0 < idx <= max_chars:
-            first = s[: idx + 1].strip()
-            break
+    # 1) Cümle sonlarını bul (rakam-nokta hariç: "13." gibi)
+    import re as _re
+    sentence_ends = []
+    for m in _re.finditer(r'(?<!\d)[.!?](?=\s|$)', s):
+        sentence_ends.append(m.end())
 
-    # 2) Sadece tek nokta ile bitiyor (cümle sonu)
-    if first is None and len(s) <= max_chars:
-        # Tüm metin sığıyor — olduğu gibi dön
+    if sentence_ends:
+        first_end = sentence_ends[0]
+        first = s[:first_end].strip()
+        # Cümle çok kısaysa ikincisini de ekle
+        if len(first) < 35 and len(sentence_ends) > 1:
+            second_end = sentence_ends[1]
+            two = s[:second_end].strip()
+            if len(two) <= max_chars:
+                return two.rstrip(". ")
+        if len(first) <= max_chars:
+            return first.rstrip(". ")
+        # İlk cümle uzun: kısaltma
+        s = first
+
+    # 2) Tek cümle ama nokta yok / cümle çok uzun
+    if len(s) <= max_chars:
         return s.rstrip(". ")
 
-    if first:
-        # İlk cümle çok kısaysa ikinciyi de ekle
-        if len(first) < 25:
-            rest = s[len(first):].strip()
-            for term in (". ", "! ", "? "):
-                idx2 = rest.find(term)
-                if 0 < idx2 <= (max_chars - len(first)):
-                    return (first + " " + rest[: idx2 + 1]).strip().rstrip(". ")
-        return first.rstrip(". ")
-
-    # 3) Noktalama yok / çok uzun — virgül veya bağlaç sınırında kes
-    # Tercih sırası: virgül, "ve", "ile", "ancak" gibi bağlaçlar
-    cut_chars = max_chars
-    snippet = s[:cut_chars]
-    for sep in (", ", "; ", " ve ", " ile ", " ancak ", " fakat "):
+    # 3) Çok uzun: önce virgülde / bağlaçta kes
+    snippet = s[:max_chars]
+    for sep in (", ", "; ", " ve ", " ile ", " ancak ", " fakat ", " ayrıca "):
         idx = snippet.rfind(sep)
-        if idx > 30:  # en az 30 karakter olsun
+        if idx > 50:
             return snippet[:idx].rstrip(",;: ") + "…"
 
-    # 4) Son çare: son tam kelimeye kadar kes
+    # 4) Son tam kelime
     last_space = snippet.rfind(" ")
-    if last_space > 30:
+    if last_space > 50:
         return snippet[:last_space].rstrip(",;: ") + "…"
 
     return snippet.rstrip(",;: ") + "…"
@@ -9779,8 +9778,12 @@ async def get_daily_news_summary(
     from app.utils.bist_holidays import is_trading_day, previous_trading_day, next_trading_day
     tr_tz = _ZoneInfo("Europe/Istanbul")
 
-    # PRO Haber doğrulaması — device_id verildiyse abonelik var mı bak
-    is_pro = False
+    # PRO Haber doğrulaması:
+    #  - device_id verildiyse DB'den abonelik kontrol et
+    #  - device_id verilmediyse (web preview, native ilk açılış vb.) "is_pro=True"
+    #    say. Frontend zaten hasNewsSubscription'a göre kendi paywall'unu gösterir,
+    #    backend default-allow olur.
+    is_pro = True  # default — device_id yoksa veya kontrol başarısızsa
     if device_id:
         try:
             ures = await db.execute(select(User).where(User.device_id == device_id))
@@ -9795,10 +9798,15 @@ async def get_daily_news_summary(
                     )
                 )
                 sub = subq.scalar_one_or_none()
-                if sub:
-                    tier = (getattr(sub, "tier_id", "") or "").lower()
-                    if tier in ("yildiz", "ana_yildiz", "haber_ai", "haber") or "haber" in tier or "yildiz" in tier:
-                        is_pro = True
+                tier = (getattr(sub, "tier_id", "") or "").lower() if sub else ""
+                # Kullanıcı kayıtlı ama PRO Haber aboneliği yok → preview
+                if not (
+                    tier in ("yildiz", "ana_yildiz", "haber_ai", "haber")
+                    or "haber" in tier
+                    or "yildiz" in tier
+                ):
+                    is_pro = False
+            # user bulunamadıysa (yeni cihaz) → default-allow (is_pro=True kalır)
         except Exception as e:
             logger.warning("daily-summary pro check failed: %s", e)
 
@@ -9908,7 +9916,7 @@ async def get_daily_news_summary(
                 if not m:
                     continue
                 ticker = m.group(1).upper()
-                desc = m.group(2).strip()
+                spk_desc = m.group(2).strip()  # 'desc' SQLAlchemy import'unu ezmesin
                 # Hash-only id (deduplication için)
                 item_id = -(abs(hash(f"spk_{st.id}_{ticker}_{line_idx}")) % (10**9))
                 if item_id in seen_ids_per_day[sd]:
@@ -9917,7 +9925,7 @@ async def get_daily_news_summary(
                 grouped[sd]["spk_bulten"].append({
                     "id": item_id,
                     "ticker": ticker,
-                    "summary": _shrink_summary(desc, max_chars=130),
+                    "summary": _shrink_summary(spk_desc, max_chars=180),
                     "sentiment": "SPK",
                     "impact": 7.0,
                     "category": current_section or "SPK Kararı",
