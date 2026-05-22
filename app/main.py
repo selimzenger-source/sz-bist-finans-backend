@@ -9711,28 +9711,57 @@ _SPK_TITLE_PATTERNS = (
 )
 
 
-def _shrink_summary(text: str | None, max_words: int = 9) -> str:
-    """ai_summary'yi tek cümleye + ~7-8 kelimeye indirger.
+def _shrink_summary(text: str | None, max_chars: int = 120) -> str:
+    """ai_summary'yi anlamlı bir cümlede tamamlanmış şekilde kısaltır.
 
-    - İlk cümleyi alır (nokta/!/?  öncesi).
-    - Çok uzunsa ilk N kelimeye düşürüp '...' koyar.
+    Mantık:
+      1. İlk cümleyi tercih et (.,!,? sonu, max ~120 karakter)
+      2. Eğer ilk cümle çok kısaysa (<25 karakter), ikinci cümleyi de ekle
+      3. Hiç noktalama yoksa: virgül/bağlaç sınırında kes
+      4. Yarım bırakma — kelime ortasında asla kesme
     """
     if not text:
         return ""
-    s = text.strip()
-    # İlk cümle
-    for terminator in (". ", "! ", "? ", "\n"):
-        idx = s.find(terminator)
-        if 0 < idx < 120:
-            s = s[: idx + 1].strip()
+    s = " ".join(text.strip().split())  # birden fazla boşluğu temizle
+
+    # 1) İlk cümleyi bul
+    first = None
+    for term in (". ", "! ", "? "):
+        idx = s.find(term)
+        if 0 < idx <= max_chars:
+            first = s[: idx + 1].strip()
             break
-    # Sondaki nokta
-    s = s.rstrip(". ")
-    # Kelime sınırı
-    words = s.split()
-    if len(words) > max_words:
-        s = " ".join(words[:max_words]).rstrip(",;:") + "…"
-    return s
+
+    # 2) Sadece tek nokta ile bitiyor (cümle sonu)
+    if first is None and len(s) <= max_chars:
+        # Tüm metin sığıyor — olduğu gibi dön
+        return s.rstrip(". ")
+
+    if first:
+        # İlk cümle çok kısaysa ikinciyi de ekle
+        if len(first) < 25:
+            rest = s[len(first):].strip()
+            for term in (". ", "! ", "? "):
+                idx2 = rest.find(term)
+                if 0 < idx2 <= (max_chars - len(first)):
+                    return (first + " " + rest[: idx2 + 1]).strip().rstrip(". ")
+        return first.rstrip(". ")
+
+    # 3) Noktalama yok / çok uzun — virgül veya bağlaç sınırında kes
+    # Tercih sırası: virgül, "ve", "ile", "ancak" gibi bağlaçlar
+    cut_chars = max_chars
+    snippet = s[:cut_chars]
+    for sep in (", ", "; ", " ve ", " ile ", " ancak ", " fakat "):
+        idx = snippet.rfind(sep)
+        if idx > 30:  # en az 30 karakter olsun
+            return snippet[:idx].rstrip(",;: ") + "…"
+
+    # 4) Son çare: son tam kelimeye kadar kes
+    last_space = snippet.rfind(" ")
+    if last_space > 30:
+        return snippet[:last_space].rstrip(",;: ") + "…"
+
+    return snippet.rstrip(",;: ") + "…"
 
 
 @app.get("/api/v1/news/daily-summary")
@@ -9864,15 +9893,18 @@ async def get_daily_news_summary(
             continue
         seen_ids_per_day[sd].add(r.id)
 
+        # Saat:dakika (TR) — UI'da göstermek için
+        published_hhmm = pub_tr.strftime("%H:%M")
         item = {
             "id": r.id,
             "ticker": r.company_code,
-            "summary": _shrink_summary(r.ai_summary or r.title, max_words=9),
+            "summary": _shrink_summary(r.ai_summary or r.title, max_chars=130),
             "sentiment": r.ai_sentiment,
             "impact": float(r.ai_impact_score) if r.ai_impact_score else 0.0,
             "category": r.category,
             "kap_url": r.kap_url,
             "published_at": r.published_at.isoformat() if r.published_at else None,
+            "time": published_hhmm,
         }
 
         # Öncelik sırası: SPK > Positive > Negative
@@ -9895,8 +9927,18 @@ async def get_daily_news_summary(
         g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
         g["total"] = len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
 
-    # Sadece son N iş gününü göster (days=30 → max 30 iş günü)
-    days_list = [g for g in days_list if g["total"] > 0][:days]
+    # HENÜZ YAYINLANMAMIŞ ÖZETLERİ ÇIKAR:
+    # Bir özet yayınlanmış sayılır = o günün 07:55 TR'i geçilmiş olmalı.
+    # Örnek: Şu an Cuma 17:00 → Pazartesi (25 May) özeti henüz yayınlanmadı,
+    # listede gösterilmez. Pazartesi 07:55'te yayınlanınca görünür.
+    today_cutoff = now_tr.replace(hour=7, minute=55, second=0, microsecond=0)
+    latest_published_date = (
+        today_cutoff.date() if now_tr >= today_cutoff else today_cutoff.date() - timedelta(days=1)
+    )
+    days_list = [
+        g for g in days_list
+        if g["total"] > 0 and date.fromisoformat(g["summary_date"]) <= latest_published_date
+    ][:days]
 
     # PRO değilse preview modu
     if not is_pro:
