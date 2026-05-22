@@ -9846,6 +9846,88 @@ async def get_daily_news_summary(
     grouped: dict[str, dict] = {}
     seen_ids_per_day: dict[str, set] = {}
 
+    # ── SPK Bülten verisini PendingTweet'ten çek ve ekle ──
+    # Her bülten tweet'i: "• TICKER - karar açıklaması" satırlarını içerir.
+    # Bültenin yayın tarihi (sent_at) → cutoff mantığıyla ait olduğu özet günü.
+    try:
+        from app.models.pending_tweet import PendingTweet
+        spk_q = (
+            select(PendingTweet.id, PendingTweet.text, PendingTweet.sent_at)
+            .where(PendingTweet.status == "sent")
+            .where(PendingTweet.source.in_([
+                "tweet_spk_bulletin_analysis",
+                "tweet_spk_pending_visual",
+            ]))
+            .where(PendingTweet.sent_at.isnot(None))
+            .where(PendingTweet.sent_at >= earliest_utc)
+            .order_by(desc(PendingTweet.sent_at))
+        )
+        spk_res = await db.execute(spk_q)
+        spk_tweets = spk_res.all()
+
+        import re as _re
+        # Section başlıkları (büyük harfle başlayan satırlar)
+        SECTION_PATTERNS = (
+            "Sermaye Artırım", "Sermaye Azaltım",
+            "Halka Arz", "İdari Para Ceza", "İdari Yaptırım",
+            "Diğer Önemli", "Diğer Gelişme",
+            "Pay Geri Alım", "Temettü", "Kar Payı",
+            "Esas Sözleşme", "Yetki Belge",
+        )
+        # "• TICKER - açıklama" veya "TICKER - açıklama" satırı
+        BULLET_RE = _re.compile(r"^\s*[•▪▫◦·*\-]?\s*([A-ZÇŞĞÜÖİ]{3,6})\s*[-–—]\s*(.+)$")
+
+        for st in spk_tweets:
+            if not st.text:
+                continue
+            # Tweet'in yayın saatine göre özet günü
+            try:
+                tw_tr = st.sent_at.astimezone(tr_tz)
+                sd_date = _assign_summary_date(tw_tr)
+            except Exception:
+                continue
+            sd = sd_date.isoformat()
+            if sd not in grouped:
+                grouped[sd] = {"summary_date": sd, "positive": [], "negative": [], "spk_bulten": []}
+                seen_ids_per_day[sd] = set()
+
+            current_section = None
+            tweet_hhmm = tw_tr.strftime("%H:%M")
+            # Satır satır parse
+            for line_idx, raw_line in enumerate(st.text.split("\n")):
+                line = raw_line.strip()
+                if not line:
+                    continue
+                # Section başlığı tespit (kısa, hisse içermeyen)
+                for sec in SECTION_PATTERNS:
+                    if sec.lower() in line.lower() and len(line) < 60 and "•" not in line and "-" not in line[:10]:
+                        current_section = line.rstrip(":")
+                        break
+                # Bullet satırı?
+                m = BULLET_RE.match(line)
+                if not m:
+                    continue
+                ticker = m.group(1).upper()
+                desc = m.group(2).strip()
+                # Hash-only id (deduplication için)
+                item_id = -(abs(hash(f"spk_{st.id}_{ticker}_{line_idx}")) % (10**9))
+                if item_id in seen_ids_per_day[sd]:
+                    continue
+                seen_ids_per_day[sd].add(item_id)
+                grouped[sd]["spk_bulten"].append({
+                    "id": item_id,
+                    "ticker": ticker,
+                    "summary": _shrink_summary(desc, max_chars=130),
+                    "sentiment": "SPK",
+                    "impact": 7.0,
+                    "category": current_section or "SPK Kararı",
+                    "kap_url": None,
+                    "published_at": st.sent_at.isoformat() if st.sent_at else None,
+                    "time": tweet_hhmm,
+                })
+    except Exception as _spk_err:
+        logger.warning("SPK bülten parse hatası: %s", _spk_err)
+
     for r in rows:
         is_pos = r.ai_sentiment in _POSITIVE_SENTIMENTS
         is_neg = r.ai_sentiment in _NEGATIVE_SENTIMENTS
@@ -9894,8 +9976,8 @@ async def get_daily_news_summary(
     for g in days_list:
         g["positive"] = g["positive"][:MAX_PER_SECTION]
         g["negative"] = g["negative"][:MAX_PER_SECTION]
-        g["spk_bulten"] = []  # SPK bölümü kaldırıldı, frontend uyumluluğu için boş tut
-        g["total"] = len(g["positive"]) + len(g["negative"])
+        g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
+        g["total"] = len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
 
     # HENÜZ YAYINLANMAMIŞ ÖZETLERİ ÇIKAR:
     # Bir özet yayınlanmış sayılır = o günün 07:00 TR'i geçilmiş olmalı.
@@ -9916,7 +9998,7 @@ async def get_daily_news_summary(
         for g in days_list:
             g["positive"] = g["positive"][:3]
             g["negative"] = g["negative"][:3]
-            g["spk_bulten"] = g["spk_bulten"][:3]
+            g["spk_bulten"] = (g.get("spk_bulten") or [])[:3]
             g["preview"] = True
 
     # Son yayinlanma zamani (frontend banner icin)
