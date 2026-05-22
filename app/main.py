@@ -9698,20 +9698,22 @@ _POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
 _NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
 
 
-def _shrink_summary(text: str | None, max_chars: int = 200) -> str:
-    """ai_summary'yi anlamlı bir cümlede tamamlanmış şekilde kısaltır.
+def _shrink_summary(text: str | None, max_chars: int = 350) -> str:
+    """ai_summary'yi tek tam cümleye indirir — YARIM BIRAKMAZ.
 
-    Mantık (agresif - yarım cümle bırakmaz):
-      1. İlk tam cümleyi tercih et (. / ! / ? sonu)
-      2. Kısa cümleyse (<35), 2. cümleyi de ekle (limite kadar)
-      3. Hiç nokta yoksa ama metin sığıyorsa olduğu gibi döndür
-      4. Çok uzunsa: virgül/bağlaç/kelime sınırında kes
+    Mantık:
+      1. İlk tam cümleyi bul (. / ! / ? sonu, rakam-noktası hariç).
+         Bu cümle ne kadar uzun olursa olsun (max_chars'a kadar) olduğu gibi dön.
+         Yarım kelimede asla kesilmez.
+      2. Cümle çok kısa ise (<35 char) 2. cümleyi de ekle.
+      3. Hiç nokta yoksa ve metin max_chars'tan kısaysa olduğu gibi dön.
+      4. Hiç nokta yok + çok uzun → virgül/bağlaç sınırında kes.
     """
     if not text:
         return ""
     s = " ".join(text.strip().split())
 
-    # 1) Cümle sonlarını bul (rakam-nokta hariç: "13." gibi)
+    # 1) Tüm cümle sonlarını bul (rakam-noktası "13." HARİÇ)
     import re as _re
     sentence_ends = []
     for m in _re.finditer(r'(?<!\d)[.!?](?=\s|$)', s):
@@ -9720,33 +9722,39 @@ def _shrink_summary(text: str | None, max_chars: int = 200) -> str:
     if sentence_ends:
         first_end = sentence_ends[0]
         first = s[:first_end].strip()
-        # Cümle çok kısaysa ikincisini de ekle
+        # İlk cümle çok kısaysa (35 char altı), 2. cümleyi de ekle
         if len(first) < 35 and len(sentence_ends) > 1:
             second_end = sentence_ends[1]
             two = s[:second_end].strip()
             if len(two) <= max_chars:
                 return two.rstrip(". ")
+        # İlk cümle uzun da olsa max_chars'a kadar olduğu gibi dön
         if len(first) <= max_chars:
             return first.rstrip(". ")
-        # İlk cümle uzun: kısaltma
-        s = first
+        # Aşırı uzun (>max_chars) cümle → virgül sınırında kes
+        snippet = first[:max_chars]
+        for sep in (", ", "; ", " ve ", " ile ", " ancak ", " fakat "):
+            idx = snippet.rfind(sep)
+            if idx > 100:
+                return snippet[:idx].rstrip(",;: ") + "…"
+        last_space = snippet.rfind(" ")
+        if last_space > 100:
+            return snippet[:last_space].rstrip(",;: ") + "…"
+        return snippet.rstrip(",;: ") + "…"
 
-    # 2) Tek cümle ama nokta yok / cümle çok uzun
+    # 2) Hiç nokta yok ama metin sığıyor
     if len(s) <= max_chars:
         return s.rstrip(". ")
 
-    # 3) Çok uzun: önce virgülde / bağlaçta kes
+    # 3) Hiç nokta yok + uzun → virgül sınırında
     snippet = s[:max_chars]
     for sep in (", ", "; ", " ve ", " ile ", " ancak ", " fakat ", " ayrıca "):
         idx = snippet.rfind(sep)
-        if idx > 50:
+        if idx > 100:
             return snippet[:idx].rstrip(",;: ") + "…"
-
-    # 4) Son tam kelime
     last_space = snippet.rfind(" ")
-    if last_space > 50:
+    if last_space > 100:
         return snippet[:last_space].rstrip(",;: ") + "…"
-
     return snippet.rstrip(",;: ") + "…"
 
 
@@ -9962,7 +9970,7 @@ async def get_daily_news_summary(
         item = {
             "id": r.id,
             "ticker": r.company_code,
-            "summary": _shrink_summary(r.ai_summary or r.title, max_chars=130),
+            "summary": _shrink_summary(r.ai_summary or r.title, max_chars=350),
             "sentiment": r.ai_sentiment,
             "impact": float(r.ai_impact_score) if r.ai_impact_score else 0.0,
             "category": r.category,
