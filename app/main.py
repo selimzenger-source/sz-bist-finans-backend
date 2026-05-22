@@ -3197,7 +3197,8 @@ async def admin_patch_ipo_fields(
     ipo_id = payload.get("ipo_id")
     fields = payload.get("fields") or {}
     ALLOWED = {"close_price", "percent_change", "ceiling_broken",
-               "trading_day_count", "archived", "status", "distribution_completed"}
+               "trading_day_count", "archived", "status", "distribution_completed",
+               "katilim_endeksi", "market_segment", "public_float_pct"}
 
     result = await db.execute(select(IPO).where(IPO.id == ipo_id))
     ipo = result.scalar_one_or_none()
