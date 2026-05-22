@@ -473,8 +473,24 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         "Borsa İstanbul, hissede yaşanan ani ve yüksek fiyat hareketi nedeniyle Pay Bazında Devre Kesici uygulamasının devreye girdiğini bildirmiştir. Bu bildirim şirketin temel faaliyetleriyle ilgili bir gelişme olmayıp, hisse senedinde anlık yüksek volatiliteyi kontrol altına almayı amaçlayan standart bir borsa mekanizmasıdır. Yatırımcı açısından doğrudan pozitif veya negatif etkisi bulunmaz.",
         ["devrekesici"],
     ),
+    # --- YENİ HALKA ARZ / İLK İŞLEM GÜNÜ (BISTECH teknik bildirimi + Baz Fiyat) ---
+    # "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu" + "Baz Fiyat: XX TL" → IPO ilk gün mekanik bildirimi
+    # NOT: "piyasas" yazıyoruz — "piyasası" (ı) veya "piyasası" her iki biçimi yakalar.
     (
-        r"bistech.*pay\s*piyasasi|merkezi\s*kayit\s*kurulusu\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
+        r"bistech.*piyasa.*al[ıi]m\s*sat[ıi]m|baz\s*fiyat.*maksimum\s*emir|maksimum\s*emir.*baz\s*fiyat"
+        r"|islem\s*gormeye\s*baslayacak|i[sş]lem\s*g[oö]rmeye\s*ba[sş]layacak",
+        "Yeni Halka Arz İlk İşlem Günü",
+        "Bu bildirim, hissenin Borsa İstanbul'da ilk kez işlem görmeye başladığına dair teknik bir BISTECH sistemi duyurusudur. Baz fiyat ve maksimum emir değeri belirlenerek işleme açılır; hisse için analiz edilecek yeni bir temel gelişme içermez.",
+        ["halkaarz", "bistech", "borsaistanbul"],
+    ),
+    # --- ENDEKSLERİNDE DEĞİŞİKLİK — Yeni listelenme (IPO günü index dahil) ---
+    # Not: Mevcut hisse index'e giriyorsa gerçek pozitif haberdir (filtre etme).
+    # Yalnızca "BISTECH Pay Piyasası" ile aynı gün gelen index değişikliğini yakalamak
+    # için bağımsız bir filter eklemek yerine bu kategoriyi DÜŞÜK SKOR (4.0) ile bırakıyoruz.
+    # AI bu durumu zaten DÜŞÜK SKORLASIN diye system prompt'a kural ekledik (aşağıda).
+    # --- BISTECH / MKK / TAKASBANK — Rutin teknik bildirimler (ex-div, tescil vb.) ---
+    (
+        r"bistech.*pay\s*piyasa|merkezi\s*kayit\s*kurulu[sş]u\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
         "BISTECH/MKK/Takasbank Duyurusu",
         "Bu duyuru Borsa İstanbul/MKK'nin teknik bir bildirimi olup, temettü/bedelsiz/bölünme miktarı zaten önceden ilan edilmiştir. Sadece ex-div günü veya kayıt tescili niteliğinde olup hisse fiyatına ek pozitif etki beklenmez.",
         ["bistech"],
@@ -996,6 +1012,22 @@ NASIL TANIRSIN PROSEDUR/TAKIP BILDIRIMINI?
   - Baslikta "tescil", "tamamlandi", "kullanim", "odeme tarihi", "ihraç belgesi",
     "gerceklesti", "tescil edildi" gecmesi guclu prosedur sinyalidir.
   - Yeni bir oran/tutar VAR mi? Yoksa zaten bilinen miktarin uygulamasi mi?
+
+═══ YENİ LISTELENME / IPO ILK GUN KURALI (KRİTİK) ═══
+
+Bir hisse BUGUN Borsa Istanbul'da ILK KEZ islem gormeye basladiysa:
+  - "BISTECH Pay Piyasasi Alim Satim Sistemi Duyurusu" + "Baz Fiyat" → NOTR 5.0
+    (Bu bildirim tamamen mekanik: baz fiyat ve maksimum emir degerini borsa sistemi atar.
+    Sirketle ilgili yeni bilgi icermez. AI ANALIZI YAPMA, SKOR 5.0 VER.)
+
+  - "Endeks Sirketlerinde Degisiklik" → IPO gunu eklenme → NOTR 5.0
+    (Yeni listelenen her hisse otomatik olarak BIST Tum, BIST Halka Arz vb. endekslere girer.
+    Bu zorunlu/otomatik bir prosedurdu, yatirimci icin yeni bilgi degildir.)
+
+    ANCAK: Mevcut ve uzun suredir islem goren bir hisse BIST100 veya BIST30 gibi
+    onemli bir endekse yeni giriyorsa → POZITIF 6.5-7.5 (gercek fonksiyon alimi tetikler).
+    Hissenin yeni mi listenlendigi yoksa eski mi oldugunu icerikteki "Baz Fiyat" /
+    "ilk kez islem" ifadelerinden veya bildirim tarihinden anlarsın.
 
 ═══ DUAL PERSPECTIVE — MANDATORY (HER VAKADA UYGULA) ═══
 HER bildirim icin iki acidan dusun:
