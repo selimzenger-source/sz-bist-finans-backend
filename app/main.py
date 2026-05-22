@@ -9890,8 +9890,9 @@ async def get_daily_news_summary(
             "Pay Geri Alım", "Temettü", "Kar Payı",
             "Esas Sözleşme", "Yetki Belge",
         )
-        # "• TICKER - açıklama" veya "TICKER - açıklama" satırı
-        BULLET_RE = _re.compile(r"^\s*[•▪▫◦·*\-]?\s*([A-ZÇŞĞÜÖİ]{3,6})\s*[-–—]\s*(.+)$")
+        # "• #TICKER - açıklama" / "• TICKER - açıklama" / "TICKER - açıklama"
+        # # karakteri opsiyonel, satır başında bullet ve/veya boşluk olabilir
+        BULLET_RE = _re.compile(r"^\s*[•▪▫◦·*\-]?\s*#?([A-ZÇŞĞÜÖİ]{3,6})\s*[-–—]\s*(.+)$")
 
         for st in spk_tweets:
             if not st.text:
@@ -9944,6 +9945,31 @@ async def get_daily_news_summary(
     except Exception as _spk_err:
         logger.warning("SPK bülten parse hatası: %s", _spk_err)
 
+    # Anlamsız/çok kısa özetleri filtrele — sadece şirket adı içeren,
+    # tam cümle olmayan kayıtlar atılır.
+    def _is_meaningful(summary: str) -> bool:
+        if not summary or len(summary) < 30:
+            return False
+        s = summary.strip().rstrip('…').rstrip()
+        # Cümle sonu işareti var mı?
+        has_sentence = any(s.endswith(p) for p in ('.', '!', '?'))
+        # Şirket türü ekleri ile bitenler (Ş, AŞ, Ltd vb) — cümle değil
+        ends_with_company = (
+            s.endswith('A.Ş') or s.endswith('A.Ş.') or s.endswith('AŞ')
+            or s.endswith('Ltd') or s.endswith('Ltd.') or s.endswith('Şti')
+            or s.endswith('Şti.') or s.endswith('Holding') or s.endswith('Yatırımlar')
+        )
+        # En az 5 kelime + nokta ile bitsin VEYA virgüllü uzun açıklama
+        word_count = len(s.split())
+        if ends_with_company and word_count < 8:
+            return False
+        if word_count < 5:
+            return False
+        # Cümle değil ve uzun da değilse atla
+        if not has_sentence and len(s) < 60:
+            return False
+        return True
+
     for r in rows:
         is_pos = r.ai_sentiment in _POSITIVE_SENTIMENTS
         is_neg = r.ai_sentiment in _NEGATIVE_SENTIMENTS
@@ -9963,6 +9989,11 @@ async def get_daily_news_summary(
 
         if r.id in seen_ids_per_day[sd]:
             continue
+
+        summary_text = _shrink_summary(r.ai_summary or r.title, max_chars=350)
+        if not _is_meaningful(summary_text):
+            continue
+
         seen_ids_per_day[sd].add(r.id)
 
         # Saat:dakika (TR) — UI'da göstermek için
@@ -9970,7 +10001,7 @@ async def get_daily_news_summary(
         item = {
             "id": r.id,
             "ticker": r.company_code,
-            "summary": _shrink_summary(r.ai_summary or r.title, max_chars=350),
+            "summary": summary_text,
             "sentiment": r.ai_sentiment,
             "impact": float(r.ai_impact_score) if r.ai_impact_score else 0.0,
             "category": r.category,
