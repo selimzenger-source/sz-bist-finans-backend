@@ -9684,31 +9684,18 @@ async def list_kap_all_disclosures(
 
 # ═══════════════════════════════════════════════════════════════════
 # Günlük Haber Bülteni — PRO Haber abonelerine özel
-# Her sabah 07:55 TR'de kesim alır. Hafta sonu/tatilde push atılmaz.
-# Pazartesi özeti: önceki Cuma 07:55 → Pazartesi 07:55 aralığını kapsar.
-# Tatil sonrası ilk iş gününde de aynı mantık (en son iş günü 07:55'ten).
+# Her sabah 07:00 TR'de kesim alır. Hafta sonu/tatilde push atılmaz.
+# Pazartesi özeti: önceki Cuma 07:00 → Pazartesi 07:00 aralığını kapsar.
+# Tatil sonrası ilk iş gününde de aynı mantık (en son iş günü 07:00'ten).
+#
+# SPK bölümü kaldırıldı: Önceki versiyon KAP kategorilerini kullanıyordu,
+# bu yanıltıcıydı (şirket KAP açıklaması ≠ SPK bülten kararı).
+# Gerçek SPK bülten verisi için /spk-bulten-analiz ayrı sayfası var.
 # ═══════════════════════════════════════════════════════════════════
 
 # Positive/negative ai_sentiment etiketleri
 _POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
 _NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
-
-# SPK Bülteni bölümünde gösterilecek KAP kategorileri / title pattern'leri
-# (sermaye artırımı, halka arz, ceza, pay geri alım, vb.)
-_SPK_CATEGORIES = (
-    "Sermaye Artırımı",
-    "Halka Arz",
-    "Bedelli Pay",
-    "Bedelsiz Pay",
-    "Pay Geri Alım",
-    "Kar Payı Dağıtımı",
-    "Temettü",
-)
-# Title'da geçerse SPK bölümüne dahil edilecek anahtar kelimeler
-_SPK_TITLE_PATTERNS = (
-    "spk", "ceza", "idari para", "bedelli", "bedelsiz", "halka arz",
-    "sermaye artır", "pay geri al",
-)
 
 
 def _shrink_summary(text: str | None, max_chars: int = 120) -> str:
@@ -9774,15 +9761,15 @@ async def get_daily_news_summary(
 ):
     """Günlük haber bülteni — son N günün özetleri.
 
-    Cutoff: 07:55 TR. Bir haberin ait olduğu özet günü:
-      - 07:55'ten ÖNCE yayınlandıysa → o gün
-      - 07:55'ten SONRA yayınlandıysa → ertesi gün
+    Cutoff: 07:00 TR. Bir haberin ait olduğu özet günü:
+      - 07:00'ten ÖNCE yayınlandıysa → o gün
+      - 07:00'ten SONRA yayınlandıysa → ertesi gün
       - Eğer atanmış gün tatil/hafta sonu ise → sonraki ilk işlem gününe kaydır
 
-    Yani Pazartesi özeti = önceki Cuma 07:55 → Pazartesi 07:55 aralığı.
+    Yani Pazartesi özeti = önceki Cuma 07:00 → Pazartesi 07:00 aralığı.
 
-    3 bölüm: positive, negative (ai_sentiment != Notr), spk_bulten
-    (sermaye artırımı / halka arz / ceza / temettü / pay geri alım).
+    2 bölüm: positive, negative (ai_sentiment != Notr).
+    SPK Bülteni AYRI sayfada (/spk-bulten-analiz).
 
     PRO değilse preview modu (son 2 iş günü + max 3 satır).
     """
@@ -9820,7 +9807,7 @@ async def get_daily_news_summary(
     earliest_tr = now_tr - timedelta(days=days + 1)  # +1 gün overlap (07:55 cutoff için)
     earliest_utc = earliest_tr.astimezone(timezone.utc)
 
-    cutoff_time = _time(7, 55)
+    cutoff_time = _time(7, 0)
 
     def _assign_summary_date(pub_tr: datetime) -> date:
         """Bir haberin ait olduğu özet gününü belirler (tatil-aware)."""
@@ -9834,18 +9821,7 @@ async def get_daily_news_summary(
             candidate = next_trading_day(candidate)
         return candidate
 
-    # SPK kategori/title kontrolü
-    def _is_spk_item(category: str | None, title: str | None) -> bool:
-        if category and category in _SPK_CATEGORIES:
-            return True
-        if title:
-            tl = title.lower()
-            for pat in _SPK_TITLE_PATTERNS:
-                if pat in tl:
-                    return True
-        return False
-
-    # Tüm pozitif/negatif/spk-kategori KAP haberlerini çek
+    # Tüm pozitif/negatif KAP haberlerini çek
     q = (
         select(
             KapAllDisclosure.id,
@@ -9871,11 +9847,9 @@ async def get_daily_news_summary(
     seen_ids_per_day: dict[str, set] = {}
 
     for r in rows:
-        # Sentiment ve SPK kategorileri kontrolü
         is_pos = r.ai_sentiment in _POSITIVE_SENTIMENTS
         is_neg = r.ai_sentiment in _NEGATIVE_SENTIMENTS
-        is_spk = _is_spk_item(r.category, r.title)
-        if not (is_pos or is_neg or is_spk):
+        if not (is_pos or is_neg):
             continue
 
         pub_tr = r.published_at.astimezone(tr_tz)
@@ -9907,11 +9881,7 @@ async def get_daily_news_summary(
             "time": published_hhmm,
         }
 
-        # Öncelik sırası: SPK > Positive > Negative
-        # (SPK haberi pozitif/negatifte tekrar gözükmesin)
-        if is_spk:
-            grouped[sd]["spk_bulten"].append(item)
-        elif is_pos:
+        if is_pos:
             grouped[sd]["positive"].append(item)
         else:
             grouped[sd]["negative"].append(item)
@@ -9924,14 +9894,14 @@ async def get_daily_news_summary(
     for g in days_list:
         g["positive"] = g["positive"][:MAX_PER_SECTION]
         g["negative"] = g["negative"][:MAX_PER_SECTION]
-        g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
-        g["total"] = len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
+        g["spk_bulten"] = []  # SPK bölümü kaldırıldı, frontend uyumluluğu için boş tut
+        g["total"] = len(g["positive"]) + len(g["negative"])
 
     # HENÜZ YAYINLANMAMIŞ ÖZETLERİ ÇIKAR:
-    # Bir özet yayınlanmış sayılır = o günün 07:55 TR'i geçilmiş olmalı.
+    # Bir özet yayınlanmış sayılır = o günün 07:00 TR'i geçilmiş olmalı.
     # Örnek: Şu an Cuma 17:00 → Pazartesi (25 May) özeti henüz yayınlanmadı,
-    # listede gösterilmez. Pazartesi 07:55'te yayınlanınca görünür.
-    today_cutoff = now_tr.replace(hour=7, minute=55, second=0, microsecond=0)
+    # listede gösterilmez. Pazartesi 07:00'da yayınlanınca görünür.
+    today_cutoff = now_tr.replace(hour=7, minute=0, second=0, microsecond=0)
     latest_published_date = (
         today_cutoff.date() if now_tr >= today_cutoff else today_cutoff.date() - timedelta(days=1)
     )
@@ -9964,7 +9934,7 @@ async def get_daily_news_summary(
 
     return {
         "is_pro": is_pro,
-        "cutoff_hour": "07:55",
+        "cutoff_hour": "07:00",
         "last_published_at": last_published_at,
         "days": days_list,
     }

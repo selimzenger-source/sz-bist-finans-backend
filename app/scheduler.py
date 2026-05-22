@@ -5125,7 +5125,7 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Gunluk Haber Bulteni Push — 07:55 TR (sadece islem gunlerinde) ───
+    # ─── Gunluk Haber Bulteni Push — 07:00 TR (sadece islem gunlerinde) ───
     # PRO Haber abonelerine push: "Gunluk haber bulteniniz hazir"
     # Deep link: /haber-ozeti
     # Hafta sonu ve resmi tatillerde calismaz.
@@ -5181,9 +5181,9 @@ def _setup_scheduler_impl():
 
     scheduler.add_job(
         _send_daily_news_summary_push,
-        CronTrigger(hour=4, minute=55),  # UTC 04:55 = TR 07:55
+        CronTrigger(hour=4, minute=0),  # UTC 04:00 = TR 07:00
         id="daily_news_summary_push",
-        name="Gunluk Haber Bulteni Push (07:55 TR)",
+        name="Gunluk Haber Bulteni Push (07:00 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
