@@ -2271,6 +2271,61 @@ def _validate_score_against_content(score: float, content: str, ticker: str) -> 
         )
         score = 6.4
 
+    # ─── KREDI DERECELENDIRME — NOTR'a CEK (çok büyük artırım yoksa) ──────
+    # Fitch, Moody's, S&P, JCR gibi kuruluşların kredi notu açıklamaları
+    # genelde önceden beklenmektedir, fiyat etkisi sınırlı. Kullanıcı isteği:
+    # çok büyük not değişikliği yoksa → NOTR (5.0).
+    rating_agencies = (
+        "fitch", "moody", "s&p", "standard & poor", "standard&poor",
+        "jcr", "saha", "scope", "kredi notu", "credit rating",
+    )
+    is_credit_rating = (
+        any(ag in content_lower for ag in rating_agencies)
+        and not is_governance_rating  # zaten cap'lendi
+    )
+    if is_credit_rating:
+        # Çok büyük not değişikliği indikatörleri
+        big_upgrade = any(kw in content_lower for kw in [
+            "yatırım yapılabilir", "yatirim yapilabilir",
+            "yatırım yapılabilir kategori", "investment grade",
+            "iki kademe", "üç kademe", "uc kademe",
+            "iki basamak", "üç basamak", "uc basamak",
+            "2 kademe yükselt", "3 kademe yükselt",
+            "görünüm pozitif", "görünüm pozitife",
+        ])
+        big_downgrade = any(kw in content_lower for kw in [
+            "yatırım dışı", "spekülatif kategori",
+            "junk", "default", "temerrüt", "temerrut",
+            "görünüm negatif", "görünüm negatife",
+            "iki kademe düşür", "iki kademe düşür",
+        ])
+        if not big_upgrade and not big_downgrade:
+            # Küçük değişiklik / teyit / stabil → NOTR'a çek
+            if score > 5.4 or score < 4.6:
+                old_score = score
+                score = 5.0
+                logger.info(
+                    "AI News Scorer [CREDIT-RATING-NEUTRAL] %s: %.1f -> 5.0 "
+                    "(kredi derecelendirme + büyük değişiklik yok = Notr)",
+                    ticker, old_score,
+                )
+        elif big_upgrade:
+            # Büyük artırım → max 7.5 (Olumlu)
+            if score > 7.5:
+                logger.info(
+                    "AI News Scorer [CREDIT-UPGRADE-CAP] %s: %.1f -> 7.5",
+                    ticker, score,
+                )
+                score = 7.5
+        elif big_downgrade:
+            # Büyük düşürme → min 3.0 (Olumsuz)
+            if score > 3.5:
+                logger.info(
+                    "AI News Scorer [CREDIT-DOWNGRADE-FLOOR] %s: %.1f -> 3.0",
+                    ticker, score,
+                )
+                score = 3.0
+
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
     # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
     is_yeni_is = any(kw in content_lower for kw in [
