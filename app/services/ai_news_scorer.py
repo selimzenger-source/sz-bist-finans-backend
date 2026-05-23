@@ -2000,7 +2000,7 @@ NOTLAR:
 
         # ─── Post-processing: bildirim tipi bazli skor dogrulama ───
         if score is not None and content:
-            score = _validate_score_against_content(score, content, ticker)
+            score = _validate_score_against_content(score, content, ticker, ai_summary=summary)
 
         # ─── TEKRAR EDEN BILDIRIM DAMPER (STRICT) ───
         # Ayni ticker icin son 30 gunde ayni konuda yuksek skor verilmisse,
@@ -2246,14 +2246,67 @@ def _extract_dividend_yield_pct(content: str) -> float | None:
     return None
 
 
-def _validate_score_against_content(score: float, content: str, ticker: str) -> float:
+def _validate_score_against_content(score: float, content: str, ticker: str, ai_summary: str = "") -> float:
     """Icerik patirnlerine gore skoru dogrular ve gerekirse duzeltir.
 
     Kritik negatif haberler icin skoru tavan sinirlar,
     guclu pozitif haberler icin taban garantisi uygular.
     Notr bildirimler (devre kesici vb.) icin 5.0'a ceker.
+
+    ai_summary verildiyse: AI ozetinde pozitif/negatif framing kontrol edilir,
+    skor-yorum tutarsizligi duzeltilir (orn: ozet 'stratejik adim' diyor
+    ama skor 5.0 — yorumla tutarli olmasi icin min 6.2'ye cikar).
     """
     content_lower = content.lower()
+    summary_lower = (ai_summary or "").lower()
+
+    # ─── AI ÖZET FRAMING TUTARLILIK KONTROLÜ ─────────────────────────
+    # AI bazen yorumu pozitif yazıp puanı 5.0 nötr veriyor (PASEU, LMKDC örnekleri).
+    # Özet pozitif framing içeriyorsa skor en az 6.2 (Hafif Olumlu), negatif framing
+    # içeriyorsa en fazla 3.8 (Olumsuz) olmalı.
+    if summary_lower:
+        pos_framing = [
+            "stratejik adım", "stratejik karar", "stratejik bir adım", "stratejik bir karar",
+            "ana işine odaklan", "ana faaliyete odaklan", "ana iş alanına",
+            "verimlilik artış", "verimlilik artıracak", "verimlilik artırma",
+            "büyüme potansiyel", "büyüme potansiyeli açısından",
+            "güçlü sinyal", "güçlü bir sinyal", "olumlu sinyal", "pozitif sinyal",
+            "uzun vadeli gelir", "uzun vadeli büyüme",
+            "rekabet gücü artac", "rekabet avantaj",
+            "operasyonel kapasite", "kapasite genişlet",
+            "değer yaratacak", "katma değer sağla",
+            "olumlu bir gelişme", "pozitif bir gelişme", "olumlu bir adım", "pozitif bir adım",
+            "stratejik yatırım", "stratejik ortaklık",
+            "yatırımcı için olumlu", "yatırımcılar için olumlu", "yatırımcılar açısından olumlu",
+        ]
+        neg_framing = [
+            "olumsuz etki", "olumsuz sinyal", "negatif sinyal",
+            "risk taşıy", "risk artır", "risk yarat",
+            "baskı altında", "baskı yaratabilir", "baskı altına alabilir",
+            "değer kaybı", "değer kaybedebilir", "değer kaybına",
+            "yatırımcı için olumsuz", "yatırımcılar için olumsuz",
+            "olumsuz bir gelişme", "olumsuz bir adım",
+            "endişe yaratabilir", "endişe verici",
+        ]
+        has_pos_framing = any(kw in summary_lower for kw in pos_framing)
+        has_neg_framing = any(kw in summary_lower for kw in neg_framing)
+        # Çelişkili framing varsa (hem pozitif hem negatif kelime) düzeltme yapma
+        if has_pos_framing and not has_neg_framing and score < 6.2:
+            old = score
+            score = 6.2
+            logger.info(
+                "AI News Scorer [POS-FRAMING-LIFT] %s: %.1f -> 6.2 "
+                "(ozet pozitif framing icermesine ragmen skor dusuktu)",
+                ticker, old,
+            )
+        elif has_neg_framing and not has_pos_framing and score > 3.8:
+            old = score
+            score = 3.8
+            logger.info(
+                "AI News Scorer [NEG-FRAMING-DROP] %s: %.1f -> 3.8 "
+                "(ozet negatif framing icermesine ragmen skor yuksekti)",
+                ticker, old,
+            )
 
     # ─── KURUMSAL YONETIM DERECELENDIRME — HARD CAP (max 6.5) ──────
     # Bu notlar (SAHA, JCR-Eurasia vs.) sirketin yatirimci iliskileri/raporlama
