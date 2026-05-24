@@ -9981,29 +9981,56 @@ async def get_daily_news_summary(
         # İÇERİKSİZ / BOŞ MESAJ FİLTRESİ — somut bilgi içermeyen cümleler.
         # AI bazen "X şirketinde önemli bir gelişme yaşandı" gibi içi boş
         # cümle üretiyor → bunlar yatırımcı için faydasız.
+        import re as _re_check
+        has_number = bool(_re_check.search(r'\d', s))
         empty_patterns = (
-            "önemli bir gelişme yaşandı",
-            "önemli bir gelişme oldu",
-            "önemli bir gelişme yaşan",
-            "bir gelişme yaşandı",
-            "açıklama yapıldı",
+            # "gelişme" varyantları
+            "önemli bir gelişme yaşandı", "önemli bir gelişme oldu",
+            "önemli bir gelişme yaşan", "önemli gelişme yaşandı",
+            "bir gelişme yaşandı", "gelişmeler yaşandı", "gelişme yaşandı",
+            "gelişmeler oldu", "gelişme oldu", "gelişme gerçekleşti",
+            "yeni bir gelişme",
+            # "değişiklik" varyantları
+            "değişiklikler yaşandı", "değişiklik yaşandı",
+            "değişiklikler oldu", "değişiklik oldu",
+            "değişiklikler gerçekleşti", "değişiklik gerçekleşti",
+            "yapısı değişikliği yaşandı", "yapısında değişiklik",
+            "yapısı değişti",
+            # "açıklama / duyuru / bildirim" varyantları
+            "açıklama yapıldı", "açıklamada bulundu", "aciklamada bulundu",
             "bildirim yayınlandı", "bildirim yayinlandi",
-            "bildirim yapıldı", "bildirim yapildi",
-            "duyuru yapıldı", "duyuru yapildi",
-            "duyuru yayınlandı",
-            "bilgi paylaşıldı", "bilgi paylasildi",
-            "açıklamada bulundu", "aciklamada bulundu",
+            "bildirim yapıldı", "bildirim yapildi", "bildirimde bulundu",
+            "duyuru yapıldı", "duyuru yapildi", "duyuru yayınlandı",
+            "duyuruda bulundu",
+            "bilgi paylaşıldı", "bilgi paylasildi", "bilgi verdi",
+            # "değerlendirme" varyantları
             "değerlendirme yapıldı", "degerlendirme yapildi",
-            "kararı aldı",  # tek başına bilgi yok
+            # tek başına anlamsız fiiller
+            "kararı aldı", "karar verildi", "karar alındı",
             "yayınlandı.", "yayinlandi.",
-            "rutin/idari bildirim",
+            # rutin
+            "rutin/idari bildirim", "rutin bildirim",
+            "teknik bildirim", "idari bildirim",
         )
+        # Pattern eşleşirse ve cümlede SAYI yoksa → içeriksiz, at
         for pat in empty_patterns:
-            if pat in sl:
-                # Eğer cümlede SAYI/RAKAM/PARA varsa (somut bilgi) → izin ver
-                import re as _re_check
-                if not _re_check.search(r'\d', s):
-                    return False
+            if pat in sl and not has_number:
+                return False
+        # Ekstra kural: özet < 180 char + nokta ile bitiyor + RAKAM yok
+        # → büyük ihtimalle yarım/içeriksiz cümle. At.
+        if len(s) < 180 and has_sentence and not has_number:
+            # Cümlede ANCAK iş anlamı taşıyan eylem fiili VARSA izin ver
+            # (kazandı, imzaladı, satın aldı, açıkladı + somut nesne, vb.)
+            meaningful_actions = (
+                "kazandı", "imzaladı", "satın aldı", "satti", "sattı",
+                "devraldı", "devretti", "tamamladı", "başlattı", "açtı",
+                "kurdu", "duyurdu", "kararlaştırdı", "onayladı",
+                "yatırım", "ihale", "sözleşme", "anlaşma", "kontrat",
+                "yangın", "kaza", "ihraç", "tahvil", "kupon",
+                "dava", "ceza", "iflas", "tasfiye",
+            )
+            if not any(act in sl for act in meaningful_actions):
+                return False
         return True
 
     for r in rows:
