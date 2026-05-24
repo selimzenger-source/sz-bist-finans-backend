@@ -9961,6 +9961,7 @@ async def get_daily_news_summary(
         if not summary or len(summary) < 30:
             return False
         s = summary.strip().rstrip('…').rstrip()
+        sl = s.lower()
         # Cümle sonu işareti var mı?
         has_sentence = any(s.endswith(p) for p in ('.', '!', '?'))
         # Şirket türü ekleri ile bitenler (Ş, AŞ, Ltd vb) — cümle değil
@@ -9969,15 +9970,39 @@ async def get_daily_news_summary(
             or s.endswith('Ltd') or s.endswith('Ltd.') or s.endswith('Şti')
             or s.endswith('Şti.') or s.endswith('Holding') or s.endswith('Yatırımlar')
         )
-        # En az 5 kelime + nokta ile bitsin VEYA virgüllü uzun açıklama
         word_count = len(s.split())
         if ends_with_company and word_count < 8:
             return False
         if word_count < 5:
             return False
-        # Cümle değil ve uzun da değilse atla
         if not has_sentence and len(s) < 60:
             return False
+        # İÇERİKSİZ / BOŞ MESAJ FİLTRESİ — somut bilgi içermeyen cümleler.
+        # AI bazen "X şirketinde önemli bir gelişme yaşandı" gibi içi boş
+        # cümle üretiyor → bunlar yatırımcı için faydasız.
+        empty_patterns = (
+            "önemli bir gelişme yaşandı",
+            "önemli bir gelişme oldu",
+            "önemli bir gelişme yaşan",
+            "bir gelişme yaşandı",
+            "açıklama yapıldı",
+            "bildirim yayınlandı", "bildirim yayinlandi",
+            "bildirim yapıldı", "bildirim yapildi",
+            "duyuru yapıldı", "duyuru yapildi",
+            "duyuru yayınlandı",
+            "bilgi paylaşıldı", "bilgi paylasildi",
+            "açıklamada bulundu", "aciklamada bulundu",
+            "değerlendirme yapıldı", "degerlendirme yapildi",
+            "kararı aldı",  # tek başına bilgi yok
+            "yayınlandı.", "yayinlandi.",
+            "rutin/idari bildirim",
+        )
+        for pat in empty_patterns:
+            if pat in sl:
+                # Eğer cümlede SAYI/RAKAM/PARA varsa (somut bilgi) → izin ver
+                import re as _re_check
+                if not _re_check.search(r'\d', s):
+                    return False
         return True
 
     for r in rows:
