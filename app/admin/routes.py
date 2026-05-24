@@ -4155,6 +4155,14 @@ async def resend_blog_notification(
     if not blog:
         return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
 
+    # GÜVENLİK: Yayında olmayan blog için bildirim göndermek 404'e yönlendirir.
+    # Önce yayınla, sonra bildirim gönder.
+    if not blog.is_published:
+        return RedirectResponse(
+            url="/admin/blog?error=Once+blogu+yayinlayin+(Yayinla+butonu),+sonra+bildirim+gonderin",
+            status_code=303,
+        )
+
     try:
         import asyncio
         from app.services.broadcast import broadcast_background_task
