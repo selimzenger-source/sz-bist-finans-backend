@@ -7745,10 +7745,19 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
     else:
         logger.warning("RevenueCat webhook: REVENUECAT_WEBHOOK_SECRET ayarlanmamis — development'ta dogrulama atlaniyor")
 
-    event = payload.get("event", {})
-    event_type = event.get("type", "")
-    app_user_id = event.get("app_user_id", "")
-    product_id = event.get("product_id", "")
+    # Payload sometimes contains {"event": null} (test ping veya bozuk gönderim)
+    # `.get("event", {})` key yoksa default döner ama key VAR + value None ise None döner.
+    event = payload.get("event") or {}
+    if not isinstance(event, dict):
+        logger.warning("RevenueCat webhook: 'event' dict degil — atlandi (type=%s)", type(event).__name__)
+        return {"status": "skipped", "reason": "invalid_event"}
+    event_type = event.get("type") or ""
+    app_user_id = event.get("app_user_id") or ""
+    product_id = event.get("product_id") or ""
+
+    if not app_user_id:
+        logger.warning("RevenueCat webhook: app_user_id bos — atlandi")
+        return {"status": "skipped", "reason": "missing_app_user_id"}
 
     logger.info(f"RevenueCat webhook: {event_type} -- {app_user_id} -- {product_id}")
 
