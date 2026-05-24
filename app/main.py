@@ -9723,11 +9723,35 @@ def _shrink_summary(text: str | None, max_chars: int = 350) -> str:
         return ""
     s = " ".join(text.strip().split())
 
-    # 1) Tüm cümle sonlarını bul (rakam-noktası "13." HARİÇ)
+    # 1) Tüm cümle sonlarını bul — kısaltmaları (A.Ş., Ltd., Şti., Tic.) ve
+    #    rakam-noktasını ("13.") cümle sonu sayma.
     import re as _re
+    # Yaygın Türkçe/İngilizce şirket+akademik kısaltmalar
+    _ABBREVS = (
+        " A.Ş", " A.Ş.", " a.ş", " a.ş.",
+        " AŞ", " Aş",
+        " A.O", " A.O.", " A.o.",
+        " Ltd", " Ltd.", " ltd", " ltd.",
+        " Şti", " Şti.", " şti", " şti.",
+        " Tic", " Tic.", " tic", " tic.",
+        " San", " San.", " san", " san.",
+        " Sti", " Sti.",
+        " Inc", " Inc.", " Co", " Co.",
+        " Dr", " Dr.", " Prof", " Prof.",
+        " Av", " Av.",
+        " GYO", " G.Y.O", " GMYO", " GSYO",
+        " bkz", " bkz.", " vb", " vb.", " vs", " vs.",
+        " no", " no.", " No", " No.",
+        " Sn", " Sn.",
+    )
     sentence_ends = []
     for m in _re.finditer(r'(?<!\d)[.!?](?=\s|$)', s):
-        sentence_ends.append(m.end())
+        end = m.end()
+        # Noktadan önceki ~10 karaktere bak: kısaltma ile mi bitiyor?
+        look_back = s[max(0, end - 10):end]
+        is_abbrev = any(look_back.endswith(ab) or look_back.endswith(ab + '.') for ab in _ABBREVS)
+        if not is_abbrev:
+            sentence_ends.append(end)
 
     if sentence_ends:
         first_end = sentence_ends[0]
