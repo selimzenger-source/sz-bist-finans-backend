@@ -41,9 +41,11 @@ logger = logging.getLogger(__name__)
 # Abacus AI RouteLLM endpoint — birincil (OpenAI uyumlu)
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
-# Anthropic Claude Sonnet 4 — 2. yedek (direkt API)
+# Anthropic Claude — Haiku 4.5 (KAP haber için yeterli, Sonnet'in 3x ucuzu)
+# Gemini Flash primary, bu fallback olduğu için Sonnet yerine Haiku kullanıyoruz.
+# KAP haber puanlama: 1-10 skor + 3-7 cümle özet — Haiku için uygun task.
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
 # Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
