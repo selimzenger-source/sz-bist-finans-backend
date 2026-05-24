@@ -9816,12 +9816,13 @@ async def get_daily_news_summary(
                     )
                 )
                 sub = subq.scalar_one_or_none()
-                tier = (getattr(sub, "tier_id", "") or "").lower() if sub else ""
-                # Kullanıcı kayıtlı ama PRO Haber aboneliği yok → preview
+                # UserSubscription.package field'ı: 'ana_yildiz' | 'yildiz_pazar' | 'free'
+                # PRO Haber = ana_yildiz veya yildiz_pazar paketi
+                pkg = (getattr(sub, "package", "") or "").lower() if sub else ""
                 if not (
-                    tier in ("yildiz", "ana_yildiz", "haber_ai", "haber")
-                    or "haber" in tier
-                    or "yildiz" in tier
+                    pkg in ("ana_yildiz", "yildiz_pazar", "yildiz", "haber_ai", "haber")
+                    or "yildiz" in pkg
+                    or "haber" in pkg
                 ):
                     is_pro = False
             # user bulunamadıysa (yeni cihaz) → default-allow (is_pro=True kalır)
