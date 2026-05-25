@@ -2040,6 +2040,32 @@ NOTLAR:
                         except (ValueError, TypeError):
                             pass
 
+                # M&A MILESTONE BYPASS — sirket alim/satim/birlesme onaylari + SPK
+                # onayi + Rekabet Kurulu izni = duplicate degil, gercek milestone.
+                # Onceki haber 'karar alindi'ydi, bu 'onay alindi' = fiyat etkili.
+                _ma_milestone_keywords = (
+                    "rekabet kurulu izni", "rekabet kurulu onay",
+                    "yurt dışı rekabet", "yurtdisi rekabet",
+                    "spk onayı", "spk onaylan", "spk tarafından onayl",
+                    "spk tarafindan onayl",
+                    "şirket alım", "sirket alim", "şirket satın al", "sirket satin al",
+                    "şirket devral", "sirket devral", "şirket satış", "sirket satis",
+                    "birleşme onay", "birlesme onay",
+                    "kapanış koşul", "kapanis kosul",
+                    "iştirak edinim", "istirak edinim",
+                    "pay devri tamamlan", "hisse devri tamamlan",
+                    "satış işleminin tamamlan", "satis isleminin tamamlan",
+                    "kapanış gerçekleşti", "kapanis gerceklesti",
+                )
+                _combined = _content_low + " " + (summary or "").lower()
+                if any(kw in _combined for kw in _ma_milestone_keywords):
+                    _is_fresh_karar = True
+                    logger.info(
+                        "AI News Scorer [MA-MILESTONE-FRESH] %s: takip-damper bypass "
+                        "(rekabet kurulu/SPK/M&A onayi = gercek milestone)",
+                        ticker,
+                    )
+
                 is_followup, prior_topic = await _check_followup_notification(ticker, content) if not _is_fresh_karar else (False, None)
                 if _is_fresh_karar:
                     logger.info(
@@ -2321,6 +2347,50 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             logger.info(
                 "AI News Scorer [POS-FRAMING-LIFT] %s: %.1f -> 6.2 "
                 "(ozet pozitif framing icermesine ragmen skor dusuktu)",
+                ticker, old,
+            )
+
+        # ─── M&A / ŞİRKET ALIMI / BİRLEŞME / SPK ONAYI — HARD FLOOR 6.8 ───
+        # Bu haberler şirketin değer açısından büyük milestone'lardır.
+        # AI bazen "süreç devam ediyor" diye Nötr veriyor — yanlış. Eşleşirse
+        # minimum 6.8 (Olumlu) garantilenir.
+        # Kontrol: content (KAP metni) + summary (AI özeti) birlikte.
+        combined_text = (content_lower + " " + summary_lower)
+        ma_keywords = (
+            # Şirket alım/satış/devir
+            "şirket alım", "şirket alımı", "şirket satın al", "şirket devral",
+            "şirket satış", "şirket satışı",
+            # Birleşme/devir
+            "birleşme", "birleşmesi", "birleşme kararı",
+            "devralma", "devralma yoluyla", "kolaylaştırılmış usul",
+            # Pay/hisse devir (anlamlı oranlarda)
+            "pay devri", "hisse devri", "iştirak alımı", "iştirak satışı",
+            "iştirak edinim", "iştirak elden çıkarma",
+            # Onay süreçleri (closing milestone)
+            "rekabet kurulu izni", "rekabet kurulu onayı", "rekabet kurulu izninin",
+            "yurt dışı rekabet kurulu", "yurtdışı rekabet kurulu",
+            "spk onayı", "spk onaylandı", "spk tarafından onayl",
+            "kapanış koşulları", "closing conditions",
+            # Stratejik ortaklık / yatırım
+            "stratejik ortaklık kuruld", "stratejik ortaklık imzaland",
+            "ortak girişim kuruld",
+            # Halka arz (yeni şirket için, mevcut değil)
+            "halka arz onayı", "halka arzın onaylan",
+        )
+        # Olumsuz indikatörler — varsa M&A floor uygulanmaz
+        ma_negative = (
+            "iptal edildi", "iptal etti", "vazgeçil", "vazgeçti",
+            "feshedil", "feshetti", "reddedil", "reddetti",
+            "onaylanmadı", "onay verilme",
+        )
+        is_ma_milestone = any(kw in combined_text for kw in ma_keywords)
+        is_ma_cancelled = any(kw in combined_text for kw in ma_negative)
+        if is_ma_milestone and not is_ma_cancelled and score < 6.8:
+            old = score
+            score = 6.8
+            logger.info(
+                "AI News Scorer [MA-MILESTONE-FLOOR] %s: %.1f -> 6.8 "
+                "(şirket alım/birleşme/SPK onayı = Olumlu)",
                 ticker, old,
             )
         elif has_neg_framing and not has_pos_framing and score > 3.8:
