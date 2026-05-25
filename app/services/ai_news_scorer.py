@@ -2310,6 +2310,37 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 ticker, old,
             )
 
+        # ─── NÖTR FRAMING TESPİTİ — fiyat etkisi yok denilen haberleri NOTR'a çek ─
+        # AI bazen 6+ skor veriyor ama özet "etkisi beklenmemektedir, rutin
+        # bilgilendirmedir, yeni stratejik karar değil" diyor. Push spam'i için.
+        neutral_framing = (
+            "etki beklenmemektedir", "etkisi beklenmemektedir",
+            "etkisi yoktur", "etkisi yok",
+            "etkisi olmayacak", "bir etkisi olmayacak",
+            "rutin bir bilgilendir", "rutin/idari bildir", "rutin bildir",
+            "yeni bir stratejik karar veya finansal gelişme içermediği",
+            "yeni stratejik karar veya finansal gelişme içermiyor",
+            "yeni bilgi içermemekt", "yeni bilgi içermez",
+            "doğrudan bir etkisi beklenmemek",
+            "doğrudan yeni bir etki beklenmemek",
+            "fiyat hareketine sebep olmaz",
+            "fiyatlamaya doğrudan etkisi bulunmamakt",
+            "yatirimci icin yeni bilgi degil",
+            "yatırımcı için yeni bilgi değil",
+            "fiyat etkisi yaratmayan", "fiyat etkisi sınırlı",
+            "teknik nitelikli bildirim",
+            "operasyonel bildirim", "operasyonel kayıt",
+        )
+        has_neutral_framing = any(kw in summary_lower for kw in neutral_framing)
+        if has_neutral_framing and not (4.6 <= score <= 5.4):
+            old = score
+            score = 5.0
+            logger.info(
+                "AI News Scorer [NEUTRAL-FRAMING-CAP] %s: %.1f -> 5.0 "
+                "(ozet 'etki yok / rutin / fiyat etkisi sinirli' dediği halde skor != Notr)",
+                ticker, old,
+            )
+
     # ─── KURUMSAL YONETIM DERECELENDIRME — HARD CAP (max 6.5) ──────
     # Bu notlar (SAHA, JCR-Eurasia vs.) sirketin yatirimci iliskileri/raporlama
     # kalitesini olcer — fiyat etkisi minimaldir. AI bunlara 7.0+ verirse fazla
