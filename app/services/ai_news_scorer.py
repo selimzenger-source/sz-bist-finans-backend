@@ -589,9 +589,14 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["sermayetavani"],
     ),
     (
-        r"sermaye\s*piyasasi\s*araci\s*notu|izahname\s*onayi(?!\s*halka\s*arz)",
-        "Sermaye Piyasasi Araci Notu",
-        "Sermaye piyasası aracı notu/izahname onayı bildirimi. Standart prosedür olup bağımsız ek bilgi katmadan sadece hukuki formaliteyi belgeler.",
+        # İzahname/sermaye piyasası aracı notu: SPK onaylanan/onayına sunulan/
+        # özet-tanıtım. HALKA ARZ izahnamesi HARİÇ — onlar yeni şirket için
+        # gerçek pozitif haberdir. Sermaye artırımı için izahname → prosedurel.
+        r"sermaye\s*piyasasi\s*araci\s*notu|"
+        r"i?zahname.*(onayl|onayi|onayina|onaylı|onayı|onayına|tarafindan\s*onayl|tarafından\s*onayl)(?!.*halka\s*arz)|"
+        r"i?zahname\s*\(.*onayl",
+        "Sermaye Piyasasi Araci Notu / Izahname",
+        "Sermaye piyasası aracı notu veya izahname bildirimi. Sermaye artırımının SPK onayı sonrası standart hukuki formalitedir; karar zaten önceden alınmıştı, bu yalnızca izahnamenin paylaşılmasıdır. Yatırımcı için yeni bilgi katmaz.",
         ["bilgilendirme"],
     ),
 
