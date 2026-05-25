@@ -60,71 +60,26 @@
   {% endif %}
 </div>
 
-<!-- POZITIF HABERLER -->
-<div class="mb-10">
-  <h2 class="text-xl font-semibold mb-3 text-green-400">
-    🟢 Pozitif Haberler ({{ positives|length }})
-  </h2>
-  {% if positives %}
-    <div class="space-y-3">
-      {% for row in positives %}
-      <div class="news-card bg-gray-800 border border-green-700/40 rounded-lg p-4 shadow">
-        <div class="summary-row flex items-start justify-between gap-3">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1 flex-wrap">
-              <span class="font-mono font-bold text-green-300">#{{ row.company_code }}</span>
-              <span class="text-xs bg-green-700/50 text-green-100 px-2 py-0.5 rounded">
-                AI: {{ "%.1f"|format(row.ai_impact_score) }}/10
-              </span>
-              {% if row.ai_sentiment %}
-              <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
-                {{ row.ai_sentiment }}
-              </span>
-              {% endif %}
-              <span class="text-xs text-gray-500">
-                {{ (row.published_at or row.created_at).strftime("%H:%M") }}
-              </span>
-            </div>
-            <p class="text-sm text-gray-100 font-medium mb-1">{{ row.title }}</p>
-            {% if row.ai_summary %}
-            <p class="text-xs text-gray-400 line-clamp-3">{{ row.ai_summary[:300] }}{% if row.ai_summary|length > 300 %}...{% endif %}</p>
-            {% endif %}
-            {% if row.kap_url %}
-            <a href="{{ row.kap_url }}" target="_blank" class="text-xs text-blue-400 hover:underline mt-1 inline-block">
-              🔗 KAP linki
-            </a>
-            {% endif %}
-          </div>
-          <form method="post" action="/admin/news-pool/{{ row.id }}/tweet" class="shrink-0"
-                onsubmit="return confirm('Bu haberi tweetlemek istedigine emin misin?\n\n#{{ row.company_code }} — {{ row.title[:80] }}');">
-            <button type="submit"
-                    class="tweet-btn bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded transition">
-              🐦 Tweetle
-            </button>
-          </form>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="text-gray-500 text-sm italic">Son {{ cutoff_hours }} saatte pozitif haber yok.</p>
-  {% endif %}
-</div>
-
-<!-- NEGATIF HABERLER -->
+<!-- TÜM HABERLER — kart rengi sentiment'a göre (yeşil/kırmızı) -->
 <div>
-  <h2 class="text-xl font-semibold mb-3 text-red-400">
-    🔴 Negatif Haberler ({{ negatives|length }})
-  </h2>
-  {% if negatives %}
+  <p class="text-xs text-gray-500 mb-3">
+    Toplam <span class="text-white font-semibold">{{ all_items|length }}</span> haber · Son 12 saatte
+    <span class="text-blue-400 font-semibold">{{ tweeted_count }}</span> ticker tweetlendi
+  </p>
+
+  {% if all_items %}
     <div class="space-y-3">
-      {% for row in negatives %}
-      <div class="news-card bg-gray-800 border border-red-700/40 rounded-lg p-4 shadow">
+      {% for row in all_items %}
+      {% set is_pos = row.ai_impact_score and row.ai_impact_score >= 6.0 %}
+      {% set border_color = 'border-green-700/40' if is_pos else 'border-red-700/40' %}
+      {% set ticker_color = 'text-green-300' if is_pos else 'text-red-300' %}
+      {% set badge_bg = 'bg-green-700/50 text-green-100' if is_pos else 'bg-red-700/50 text-red-100' %}
+      <div class="news-card bg-gray-800 border {{ border_color }} rounded-lg p-4 shadow">
         <div class="summary-row flex items-start justify-between gap-3">
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1 flex-wrap">
-              <span class="font-mono font-bold text-red-300">#{{ row.company_code }}</span>
-              <span class="text-xs bg-red-700/50 text-red-100 px-2 py-0.5 rounded">
+            <div class="news-meta flex items-center gap-2 mb-1 flex-wrap">
+              <span class="font-mono font-bold {{ ticker_color }}">#{{ row.company_code }}</span>
+              <span class="text-xs {{ badge_bg }} px-2 py-0.5 rounded">
                 AI: {{ "%.1f"|format(row.ai_impact_score) }}/10
               </span>
               {% if row.ai_sentiment %}
@@ -135,10 +90,15 @@
               <span class="text-xs text-gray-500">
                 {{ (row.published_at or row.created_at).strftime("%H:%M") }}
               </span>
+              {% if row.already_tweeted %}
+              <span class="text-xs bg-blue-900/50 text-blue-200 px-2 py-0.5 rounded">
+                🐦 Tweetlendi
+              </span>
+              {% endif %}
             </div>
-            <p class="text-sm text-gray-100 font-medium mb-1">{{ row.title }}</p>
+            <p class="news-summary text-sm text-gray-100 font-medium mb-1">{{ row.title }}</p>
             {% if row.ai_summary %}
-            <p class="text-xs text-gray-400 line-clamp-3">{{ row.ai_summary[:300] }}{% if row.ai_summary|length > 300 %}...{% endif %}</p>
+            <p class="news-summary text-xs text-gray-400">{{ row.ai_summary[:300] }}{% if row.ai_summary|length > 300 %}...{% endif %}</p>
             {% endif %}
             {% if row.kap_url %}
             <a href="{{ row.kap_url }}" target="_blank" class="text-xs text-blue-400 hover:underline mt-1 inline-block">
@@ -146,19 +106,26 @@
             </a>
             {% endif %}
           </div>
-          <form method="post" action="/admin/news-pool/{{ row.id }}/tweet" class="shrink-0"
-                onsubmit="return confirm('Bu NEGATIF haberi tweetlemek istedigine emin misin?\n\n#{{ row.company_code }} — {{ row.title[:80] }}');">
-            <button type="submit"
-                    class="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded transition">
-              🐦 Tweetle
+          {% if row.already_tweeted %}
+            <button type="button" disabled
+                    class="tweet-btn shrink-0 bg-gray-700 text-gray-400 text-sm font-medium px-4 py-2 rounded cursor-not-allowed">
+              ✓ Atıldı
             </button>
-          </form>
+          {% else %}
+            <form method="post" action="/admin/news-pool/{{ row.id }}/tweet" class="shrink-0"
+                  onsubmit="return confirm('Bu haberi tweetlemek istedigine emin misin?\n\n#{{ row.company_code }} — {{ row.title[:80] }}');">
+              <button type="submit"
+                      class="tweet-btn {% if is_pos %}bg-blue-600 hover:bg-blue-500 active:bg-blue-700{% else %}bg-red-600 hover:bg-red-500 active:bg-red-700{% endif %} text-white text-sm font-medium px-4 py-2 rounded transition">
+                🐦 Tweetle
+              </button>
+            </form>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
     </div>
   {% else %}
-    <p class="text-gray-500 text-sm italic">Son {{ cutoff_hours }} saatte negatif haber yok.</p>
+    <p class="text-gray-500 text-sm italic">Son {{ cutoff_hours }} saatte gösterilecek haber yok.</p>
   {% endif %}
 </div>
 

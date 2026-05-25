@@ -4389,16 +4389,42 @@ async def news_pool(
     result = await db.execute(q)
     items = list(result.scalars().all())
 
-    # Pozitif/negatif ayir
-    positives = [x for x in items if x.ai_impact_score and x.ai_impact_score >= 6.0]
-    negatives = [x for x in items if x.ai_impact_score and x.ai_impact_score <= 4.0]
+    # Son 12 saat icinde tweetlenmis ticker'lari topla (otomatik veya manuel)
+    # PendingTweet.text icinde #TICKER araniyor (kap_haber kaynaklari)
+    from app.models.pending_tweet import PendingTweet
+    tweet_q = (
+        select(PendingTweet.text)
+        .where(PendingTweet.status == "sent")
+        .where(PendingTweet.source.in_(["kap_haber", "kap_haber_negatif", "tweet_kap_news"]))
+        .where(PendingTweet.sent_at >= cutoff)
+    )
+    tweet_rows = (await db.execute(tweet_q)).all()
+    import re as _re_tk
+    tweeted_tickers: set[str] = set()
+    for (text,) in tweet_rows:
+        if not text:
+            continue
+        # #TICKER pattern — 3-5 buyuk harf
+        for m in _re_tk.finditer(r'#([A-ZÇŞĞÜÖİ]{3,6})\b', text):
+            tweeted_tickers.add(m.group(1).upper())
+
+    # Tek liste — kart rengi sentiment'a gore (yesil >=6.0, kirmizi <=4.0)
+    all_items = sorted(
+        items,
+        key=lambda x: (x.published_at or x.created_at) if (x.published_at or x.created_at) else datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    # tweeted bilgisi attach et (ticker ile eslesirse True)
+    for it in all_items:
+        it.already_tweeted = (it.company_code or "").upper() in tweeted_tickers
 
     return templates.TemplateResponse("admin/news_pool.html", {
         "request": request,
-        "positives": positives,
-        "negatives": negatives,
+        "all_items": all_items,
         "status": status,
         "cutoff_hours": 12,
+        "tweeted_count": len(tweeted_tickers),
     })
 
 
