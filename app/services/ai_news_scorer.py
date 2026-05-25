@@ -2282,9 +2282,26 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "rekabet gücü artac", "rekabet avantaj",
             "operasyonel kapasite", "kapasite genişlet",
             "değer yaratacak", "katma değer sağla",
-            "olumlu bir gelişme", "pozitif bir gelişme", "olumlu bir adım", "pozitif bir adım",
+            "olumlu bir gelişme", "pozitif bir gelişme",
+            "olumlu bir adım", "pozitif bir adım",
+            "olumlu adım", "pozitif adım",
+            "olumlu olarak değer", "pozitif olarak değer",
+            "olumlu yönde", "pozitif yönde",
             "stratejik yatırım", "stratejik ortaklık",
             "yatırımcı için olumlu", "yatırımcılar için olumlu", "yatırımcılar açısından olumlu",
+            # ECZYT örneği — closing milestone / koşul tamamlanması
+            "önemli bir koşulun yerine getir",
+            "tamamlanması için önemli",
+            "satış işleminin tamamlan",
+            "anlaşmanın tamamlan",
+            "güçlendirme potansiyel",
+            "finansal yapısını güçlendir",
+            "belirsizliği azaltan",
+            "belirsizliği gideren",
+            # Diğer geniş pos sinyaller
+            "kazanım", "fırsat yaratacak", "fırsat sunacak",
+            "büyümeye katkı", "kâra katkı", "gelire katkı",
+            "verimlilik sağla", "tasarruf sağla",
         ]
         neg_framing = [
             "olumsuz etki", "olumsuz sinyal", "negatif sinyal",
@@ -2337,7 +2354,10 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "operasyonel bildirim", "operasyonel kayıt",
         )
         has_neutral_framing = any(kw in summary_lower for kw in neutral_framing)
-        if has_neutral_framing and not (4.6 <= score <= 5.4):
+        # Pos framing pos_framing'i tetiklediyse neutral cap'i devreye sokma
+        # (ECZYT örneği: "olumlu bir adım" var ama "etki" gibi kelimeler de geçince
+        # yanlış neutral'a çekilmesin)
+        if has_neutral_framing and not has_pos_framing and not (4.6 <= score <= 5.4):
             old = score
             score = 5.0
             logger.info(
