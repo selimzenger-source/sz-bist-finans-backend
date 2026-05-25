@@ -1246,8 +1246,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _db_count = _db_count_result.scalar() or 0
                             if _db_count > 0:
                                 # DB'de bugun kac KAP tweet atilmis → sayaci oradan devam ettir
-                                # Her tweet = 4 haber (1., 5., 9. ...) → toplam haber ≈ tweet * 4
-                                _kap_tweet_counter["total"] = _db_count * 4
+                                # Her tweet = 5 haber (1., 6., 11. ...) → toplam haber ≈ tweet * 5
+                                _kap_tweet_counter["total"] = _db_count * 5
                                 logger.info(
                                     "[TWEET-FLOW] Sayac DB'den yuklendi: bugun %d KAP tweet atilmis → sayac=%d",
                                     _db_count, _kap_tweet_counter["total"],
@@ -1255,12 +1255,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Tweet politikasi: TUM olumlu haberler 4'te 1 atilir (spam koruma).
-                    # Yuksek skorda istisna YOK — kullanici karari.
+                    # Tweet politikasi: TUM olumlu haberler 5'te 1 atilir (spam koruma).
+                    # Onemli haberleri admin /news-pool sayfasindan manuel tweetler.
                     _kap_tweet_counter["total"] += 1
                     _counter_val = _kap_tweet_counter["total"]
 
-                    if _counter_val % 4 == 1:
+                    if _counter_val % 5 == 1:
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
@@ -1291,7 +1291,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         )
                     else:
                         logger.info(
-                            "[TWEET-FLOW] Sayac %d (Hafif Olumlu skor=%.1f), tweet atlandi (her 4'te 1): %s",
+                            "[TWEET-FLOW] Sayac %d (skor=%.1f), tweet atlandi (her 5'te 1): %s",
                             _counter_val, ai_score or 0, ticker,
                         )
 
@@ -1333,12 +1333,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 )
                                 _db_neg_count = _db_neg_count_result.scalar() or 0
                                 if _db_neg_count > 0:
-                                    _kap_negative_tweet_counter["total"] = _db_neg_count * 2
+                                    _kap_negative_tweet_counter["total"] = _db_neg_count * 3
                             except Exception:
                                 pass
                         _kap_negative_tweet_counter["total"] += 1
                         _neg_counter_val = _kap_negative_tweet_counter["total"]
-                        if _neg_counter_val % 2 == 1:
+                        if _neg_counter_val % 3 == 1:
                             _should_negative_tweet = True
                             if ai_score < 1.1:
                                 _category_label = "guclu_olumsuz"
@@ -1351,7 +1351,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _negative_category = f"{_category_label} (sayac={_neg_counter_val})"
                         else:
                             logger.info(
-                                "[TWEET-FLOW-NEG] Olumsuz sayac %d, tweet atlandi (her 2'de 1): %s",
+                                "[TWEET-FLOW-NEG] Olumsuz sayac %d, tweet atlandi (her 3'te 1): %s",
                                 _neg_counter_val, ticker,
                             )
                     except Exception as _cnt_e:
