@@ -1204,13 +1204,11 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"Yapay zeka modelimizin derlediği analizler görsellerde! 🚀👇\n\n"
                         f"📌 {tickers_str}\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 else:
                     tweet_text = (
                         f"📈 Bugün TAVAN yapan hisse yok!\n\n"
                         f"En çok yükselen hisseler görselde! 📊👇\n\n"
-                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=tavan_images,
@@ -1257,14 +1255,12 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         f"Yapay zeka modelimizin derlediği analizler görsellerde! 📊👇\n\n"
                         f"📌 {tickers_str}\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 else:
                     tweet_text = (
                         f"📉 Bugün TABAN yapan hisse yok!\n\n"
                         f"En çok düşen hisseler görselde! 📊👇\n\n"
                         f"⚠️ Günsonu analizidir.\n"
-                        f"Daha detaylı veriler için BorsaCebimde uygulamasını profilimizdeki linkten ücretsiz indirebilirsiniz."
                     )
                 _tw_svc._safe_tweet_with_multi_media(
                     text=tweet_text, image_paths=taban_images,

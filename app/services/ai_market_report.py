@@ -1018,7 +1018,6 @@ KURALLARI:
 
 ⚠️ Yatirim tavsiyesi degildir.
 
-Daha detaylı veriler için profilimizdeki linkten BorsaCebimde uygulamasını ücretsiz indirebilirsiniz.
 
 #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
@@ -1152,7 +1151,6 @@ FORMAT:
 
 ⚠️ Yatirim tavsiyesi degildir.
 
-Daha detaylı veriler için profilimizdeki linkten BorsaCebimde uygulamasını ücretsiz indirebilirsiniz.
 
 #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
 
