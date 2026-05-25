@@ -467,6 +467,19 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         "Yatırım fonu/ortaklığı pay başına net aktif değer açıklaması — günlük/haftalık rutin değerleme raporudur. Fiyata yeni bilgi katmaz; sadece portföy değerinin güncel tespitidir.",
         ["netaktifdeger"],
     ),
+    # --- YATIRIM ORTAKLIGI HAFTALIK RAPOR / PORTFOY DEGER TABLOSU ---
+    # ATLAS, ISYAT gibi yatirim ortakliklarinin her hafta yayinladigi rutin
+    # portfoy bildirimi. Yeni bilgi katmaz, fiyat etkisi yok.
+    (
+        r"haftalik\s*rapor|haftalık\s*rapor|"
+        r"ortaklik\s*portfoy\s*degeri\s*tablosu|ortaklık\s*portföy\s*değeri\s*tablosu|"
+        r"portfoy\s*degeri\s*tablosu|portföy\s*değeri\s*tablosu|"
+        r"portfoy\s*deger\s*tablosu|portföy\s*değer\s*tablosu|"
+        r"yatirim\s*ortakligi.*haftalik|yatırım\s*ortaklığı.*haftalık",
+        "Haftalik Portfoy Raporu",
+        "Yatırım ortaklığının periyodik haftalık portföy değer tablosu. Şirketin yatırım dağılımını gösteren rutin şeffaflık raporu olup yeni bir stratejik karar veya finansal gelişme içermez. Fiyat üzerinde doğrudan etki beklenmez.",
+        ["portfoy", "haftalikrapor"],
+    ),
 
     # --- BORSA / MKK MEKANIZMALARI (fiyat hareketi ile alakali ama temel etki yok) ---
     (
