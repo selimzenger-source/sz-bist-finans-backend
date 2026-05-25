@@ -4416,8 +4416,12 @@ async def news_pool(
     )
 
     # tweeted bilgisi attach et (ticker ile eslesirse True)
+    fresh_cutoff = now_utc - _td(minutes=5)
     for it in all_items:
         it.already_tweeted = (it.company_code or "").upper() in tweeted_tickers
+        # Son 5 dakika icinde mi geldi? (cok belirgin gosterim icin)
+        _ts = it.published_at or it.created_at
+        it.is_fresh = bool(_ts and _ts >= fresh_cutoff)
 
     return templates.TemplateResponse("admin/news_pool.html", {
         "request": request,
