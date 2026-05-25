@@ -2406,22 +2406,47 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         # AI bazen 6+ skor veriyor ama özet "etkisi beklenmemektedir, rutin
         # bilgilendirmedir, yeni stratejik karar değil" diyor. Push spam'i için.
         neutral_framing = (
+            # "etki" fiilinin tüm zaman/varyantları
             "etki beklenmemektedir", "etkisi beklenmemektedir",
+            "etki beklenmez", "etkisi beklenmez",  # ATLAS örneği — geniş zaman
             "etkisi yoktur", "etkisi yok",
             "etkisi olmayacak", "bir etkisi olmayacak",
+            "etkisi olmaz", "bir etkisi olmaz",
+            "etkisi bulunma", "etki bulunma",
+            "etkisi sınırlı", "etki sınırlı",
+            "etkisi minimal", "etki minimal",
+            # Rutin/prosedurel ifadeler
             "rutin bir bilgilendir", "rutin/idari bildir", "rutin bildir",
+            "rutin bir şeffaflık", "rutin şeffaflık", "rutin şeffaflik",
+            "rutin bir raporlama", "rutin raporlama",
+            "rutin bir açıklama", "rutin açıklama",
+            "rutin/idari", "idari/rutin",
+            "periyodik olarak yayımlan", "periyodik olarak yayinlan",
+            "periyodik bir bildirim", "periyodik bildirim",
+            # Yeni bilgi yok
             "yeni bir stratejik karar veya finansal gelişme içermediği",
             "yeni stratejik karar veya finansal gelişme içermiyor",
-            "yeni bilgi içermemekt", "yeni bilgi içermez",
+            "yeni bir finansal gelişme veya stratejik karar içermediği",  # ATLAS
+            "yeni bir finansal gelişme",
+            "yeni bilgi içermemekt", "yeni bilgi içermez", "yeni bilgi içermiyor",
+            "stratejik karar içermediği", "stratejik karar içermiyor",
+            # "doğrudan etki" varyantları
             "doğrudan bir etkisi beklenmemek",
+            "doğrudan bir etkisi beklenmez",  # ATLAS örneği
             "doğrudan yeni bir etki beklenmemek",
+            "doğrudan etkisi beklenmez",
+            # Fiyat hareketi yok
             "fiyat hareketine sebep olmaz",
             "fiyatlamaya doğrudan etkisi bulunmamakt",
+            "fiyat etkisi yaratmayan", "fiyat etkisi sınırlı",
+            "fiyat etkisi minimal", "fiyat etkisi bulunma",
+            # Yatırımcı için yeni bilgi yok
             "yatirimci icin yeni bilgi degil",
             "yatırımcı için yeni bilgi değil",
-            "fiyat etkisi yaratmayan", "fiyat etkisi sınırlı",
+            # Teknik / operasyonel
             "teknik nitelikli bildirim",
-            "operasyonel bildirim", "operasyonel kayıt",
+            "operasyonel bildirim", "operasyonel kayıt", "operasyonel niteliği",
+            "şeffaflık raporu", "şeffaflik raporu",  # ATLAS — portföy şeffaflık
         )
         has_neutral_framing = any(kw in summary_lower for kw in neutral_framing)
         # Pos framing pos_framing'i tetiklediyse neutral cap'i devreye sokma
