@@ -1098,7 +1098,7 @@ class NotificationService:
         ticker_upper = ticker.upper()
 
         # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
-        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper, ai_score=ai_score)
+        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper, ai_score=ai_score, news_type=news_type)
 
         # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         # Ucretsiz kullanicilara AI puani GOSTERILMEZ — premium ozellik
@@ -1119,6 +1119,7 @@ class NotificationService:
         data: dict,
         ticker: str,
         ai_score: float | None = None,
+        news_type: str = "seans_disi",
     ) -> int:
         """Ucretli abonelere KAP haber bildirimi gonder.
 

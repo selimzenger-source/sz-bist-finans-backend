@@ -1185,6 +1185,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ticker,
                 )
             else:
+                # Default ata — try block icinde hata olsa bile NameError olmasin
+                news_type = "seans_disi"
                 try:
                     from app.services.notification import NotificationService
                     notif = NotificationService(db=session)
