@@ -4348,10 +4348,10 @@ async def news_pool(
     db: AsyncSession = Depends(get_db),
     status: Optional[str] = None,
 ):
-    """Son 4 saatteki olumlu + olumsuz KAP haberleri — manuel tweet havuzu.
+    """Son 12 saatteki olumlu + olumsuz KAP haberleri — manuel tweet havuzu.
 
     Filtreleme:
-      - Son 4 saat (published_at veya created_at son 4 saatte)
+      - Son 12 saat (published_at veya created_at son 12 saatte)
       - ai_sentiment 'Notr' ve 'Hafif*' iceren satirlar DISARIDA
       - Yalnizca skoru bilinen ve >= 6.0 (pozitif) veya <= 4.0 (negatif) olanlar
     """
@@ -4362,7 +4362,7 @@ async def news_pool(
     from datetime import timedelta as _td, timezone as _tz
 
     now_utc = datetime.now(_tz.utc)
-    cutoff = now_utc - _td(hours=4)
+    cutoff = now_utc - _td(hours=12)
 
     q = (
         select(KapAllDisclosure)
@@ -4398,7 +4398,7 @@ async def news_pool(
         "positives": positives,
         "negatives": negatives,
         "status": status,
-        "cutoff_hours": 4,
+        "cutoff_hours": 12,
     })
 
 
