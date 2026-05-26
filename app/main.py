@@ -1717,6 +1717,13 @@ def _determine_poll_phase(ipo: IPO) -> str | None:
     """
     status = (ipo.status or "").strip()
 
+    # ISLEM BASLADI veya ARSIVLENDI -> anket KAPALI (her durumda).
+    # ceiling_poll_notified_at set olsa bile artik gercek sonuc gorulmeye
+    # basladigi icin tahmin anketi anlamsiz. (Onceki bug: trading basladiktan
+    # sonra bile poll acik gorunuyordu — EKDMR ornegi.)
+    if status in ("trading", "archived"):
+        return None
+
     # GUVENLI YOL: ceiling_poll_notified_at set edildiyse (17:00 push atildi)
     # zaten tavan fazina gecmis demektir. Bu en kesin sinyal.
     if getattr(ipo, "ceiling_poll_notified_at", None):
