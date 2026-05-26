@@ -207,6 +207,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("SPK company_description migration atlandi: %s", e)
 
+    # ★ KRITIK: dividend_calendar payment_type kolonlari (BORSK bug fix)
+    # Bu kolonlar olmadiginda KAP haber routerı transaction'i abort ediyor
+    # ve kap_all_disclosures kaydı KAYBOLUYOR. database.py'deki migration
+    # bloğu çalışmazsa burada force eklenir.
+    try:
+        async with async_session() as db:
+            await db.execute(sa_text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS payment_type VARCHAR(20)"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS stock_ratio_text VARCHAR(80)"
+            ))
+            await db.execute(sa_text(
+                "ALTER TABLE dividend_calendar ADD COLUMN IF NOT EXISTS source_title VARCHAR(255)"
+            ))
+            await db.commit()
+            logger.info("dividend_calendar payment_type/stock_ratio_text/source_title kolonlari kontrol edildi (force)")
+    except Exception as e:
+        logger.warning("dividend_calendar force migration atlandi: %s", e)
+
     # Kurum Onerileri — bildirim/tweet cift gonderim korumasi kolonlari
     try:
         async with async_session() as db:
