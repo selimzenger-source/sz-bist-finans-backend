@@ -469,7 +469,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     ),
     # --- YATIRIM ORTAKLIGI HAFTALIK RAPOR / PORTFOY DEGER TABLOSU ---
     # ATLAS, ISYAT, OYAYO gibi yatirim ortakliklarinin periyodik bildirimleri.
-    # SPK tebligi geregi NAV (Net Aktif Deger) 2 katini astiginda gunluk
+    # SPK tebligi geregi NAV (Net Aktif Deger) 2/3/N katini astiginda gunluk
     # portfoy yayinlama zorunlulugu var — yatirimci icin yeni bilgi degil.
     (
         r"haftalik\s*rapor|haftalık\s*rapor|"
@@ -479,12 +479,21 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"yatirim\s*ortakligi.*haftalik|yatırım\s*ortaklığı.*haftalık|"
         # NAV (Net Aktif Deger) bazli SPK zorunlu yayinlamasi
         r"pay\s*basina\s*net\s*aktif\s*deger|pay\s*başına\s*net\s*aktif\s*değer|"
-        r"net\s*aktif\s*deger.*katini\s*as|net\s*aktif\s*değer.*katını\s*aş|"
+        # 'X katı' varyantları (aş/oldu/ulaş/çık)
+        r"net\s*aktif\s*deger.*kat[ıi]n[ıi]\s*as|net\s*aktif\s*değer.*katını\s*aş|"
+        r"net\s*aktif\s*deger.*kat[ıi]n[ıi]\s*c[iı]k|net\s*aktif\s*değer.*katına\s*çık|"
+        r"net\s*aktif\s*deger.*kat[ıi]\s*old|net\s*aktif\s*değer.*katı\s*old|"
+        r"net\s*aktif\s*deger.*kat[ıi]n[aıe]\s*ulas|net\s*aktif\s*değer.*katına\s*ulaş|"
+        # NAV bagimsiz '2/3 katini astigi/cikti/oldu/ulasti' (SPK tebligi)
+        r"deger[iı]n[ıi]n\s*[2-9]\s*kat[ıi]|değerinin\s*[2-9]\s*katı|"
+        r"deger[iı]n[ıi]n\s*[2-9]\s*kat[ıi]n[ıaıe]|değerinin\s*[2-9]\s*katın[aıe]|"
+        # SPK tebligi + KAP yayimlama zorunlulugu
         r"spk\s*tebligi\s*gereg.*gunluk|spk\s*tebliği\s*gereği.*günlük|"
+        r"spk\s*tebligi\s*gereg.*yayimla|spk\s*tebliği\s*gereği.*yayımla|"
         r"gunluk\s*olarak\s*kap.*yayimlama|günlük\s*olarak\s*kap.*yayımlama|"
         r"net\s*aktif\s*deger\s*tablosu|net\s*aktif\s*değer\s*tablosu",
         "Yatirim Ortakligi Portfoy/NAV Bildirimi",
-        "Yatırım ortaklığının periyodik portföy veya NAV (Net Aktif Değer) bildirimi. SPK tebliği gereği yapılan rutin yayımlama olup yatırımcı için yeni bir bilgi içermez. Fiyat üzerinde doğrudan etki beklenmez.",
+        "Yatırım ortaklığının periyodik portföy veya NAV (Net Aktif Değer) bildirimi. Hisse fiyatının NAV'ın 2-3 katı veya üzerine çıkması SPK tebliği gereği günlük yayımlama zorunluluğu doğurur — rutin bir bildirim olup yatırımcı için yeni bilgi içermez, fiyat etkisi beklenmez.",
         ["portfoy", "nav"],
     ),
 
@@ -2473,8 +2482,20 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "günlük olarak kap'ta yayımla", "gunluk olarak kap'ta yayimla",
             "net aktif değer tablosunu günlük", "net aktif deger tablosunu gunluk",
             "pay başına net aktif", "pay basina net aktif",
-            "nav'ının 2 katını", "nav'inin 2 katini",
+            # 'X katı' tüm varyantları (2/3/4/N kat + aş/çık/ol/ulaş)
+            "katını aşmıştır", "katini asmistir",
+            "katını aşmaktadır", "katini asmaktadir",
+            "katını aşmış", "katini asmis",
+            "katına çıkmıştır", "katina cikmistir",
+            "katına çıkmıştır", "katina cikmis",
+            "katına ulaşmış", "katina ulasmis",
+            "katı olmuştur", "kati olmustur",
+            "katı seviyesine", "kati seviyesine",
+            "değerinin 2 katı", "değerinin 3 katı", "değerinin 4 katı",
+            "degerinin 2 kati", "degerinin 3 kati", "degerinin 4 kati",
             "2 katını aştığı sürece", "2 katini astigi surece",
+            "3 katını aştığı sürece", "3 katini astigi surece",
+            "nav'ının", "nav'inin",
             "yayımlama zorunluluğu", "yayimlama zorunlulugu",
             "tebliği gereği yapılan", "tebligi geregi yapilan",
             "zorunlu kılmaktadır",
