@@ -4491,6 +4491,70 @@ async def news_pool_tweet(
     return RedirectResponse(url=f"/admin/news-pool?status={status_msg}", status_code=303)
 
 
+@router.post("/news-pool/{disclosure_id}/push")
+async def news_pool_push(
+    disclosure_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bir KAP haberi icin TUM PRO Haber abonelerine manuel push tetikle.
+
+    NameError gibi bug'lardan otoride push gitmediyse veya admin tekrar
+    push gondermek isterse kullanilir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.notification import NotificationService
+
+    row = (await db.execute(
+        select(KapAllDisclosure).where(KapAllDisclosure.id == disclosure_id)
+    )).scalar_one_or_none()
+
+    if not row:
+        return RedirectResponse(url="/admin/news-pool?status=notfound", status_code=303)
+
+    if not row.ai_impact_score or row.ai_impact_score < 6.0:
+        return RedirectResponse(url="/admin/news-pool?status=push_skor_dusuk", status_code=303)
+
+    try:
+        notif = NotificationService(db=db)
+        # Gece geldiyse seans_disi, gunduz geldiyse seans_ici
+        from datetime import time as _time
+        try:
+            _pub_tr = (row.published_at or row.created_at)
+            if _pub_tr.tzinfo is None:
+                from zoneinfo import ZoneInfo as _Z
+                _pub_tr = _pub_tr.replace(tzinfo=_Z("UTC"))
+            from zoneinfo import ZoneInfo as _Z
+            _pub_tr = _pub_tr.astimezone(_Z("Europe/Istanbul"))
+            _is_seans = _time(9, 55) <= _pub_tr.time() < _time(18, 0) and _pub_tr.weekday() < 5
+            news_type = "seans_ici" if _is_seans else "seans_disi"
+        except Exception:
+            news_type = "seans_disi"
+
+        await notif.notify_kap_news(
+            ticker=row.company_code or "",
+            price=None,
+            kap_id=str(row.id),
+            matched_keyword=(row.title or "KAP Bildirimi")[:80],
+            sentiment="positive",
+            news_type=news_type,
+            pct_change=None,
+            gap_pct=None,
+            ai_score=row.ai_impact_score,
+            ai_summary=row.ai_summary,
+            prev_close=None,
+            theoretical_open=None,
+        )
+        logger.info(f"Manuel KAP push gonderildi: {row.company_code} (id={disclosure_id})")
+        return RedirectResponse(url="/admin/news-pool?status=push_basarili", status_code=303)
+    except Exception as e:
+        logger.error(f"Manuel KAP push hatasi (disclosure_id={disclosure_id}): {e}")
+        return RedirectResponse(url=f"/admin/news-pool?status=push_hatasi", status_code=303)
+
+
 @router.post("/toggle-kap-source")
 async def toggle_kap_source(request: Request, redirect: Optional[str] = None):
     """Tek tikla KAP kaynagi toggle: telegram <-> uzmanpara.
