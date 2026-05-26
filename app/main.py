@@ -14745,6 +14745,76 @@ async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(..
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
+@app.post("/api/v1/admin/dividend-backfill")
+@limiter.limit("3/minute")
+async def admin_dividend_backfill(request: Request, payload: dict = Body(...)):
+    """Admin: kap_all_disclosures'tan Kar Payi/Temettu haberlerini tarayip
+    dividend_calendar'a tekrar isle (backfill).
+
+    BORSK bug fix sonrasi 2 haftalik kayip temettu kayitlarini geri getirmek icin.
+
+    Body: { "admin_password": "...", "days": 14 (default) }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.services.dividend_calendar_processor import (
+        is_dividend, process_kap_disclosure as div_process,
+    )
+    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    days = int(payload.get("days", 14))
+    cutoff = _dt.now(_tz.utc) - _td(days=days)
+    processed = 0
+    routed = 0
+    errors = []
+
+    async with async_session() as db:
+        stmt = select(KapAllDisclosure).where(
+            KapAllDisclosure.published_at >= cutoff,
+        ).order_by(KapAllDisclosure.published_at.asc())
+        rows = (await db.execute(stmt)).scalars().all()
+
+        for row in rows:
+            title = row.title or ""
+            body = row.ai_summary or row.body or ""
+            if not is_dividend(title, body):
+                continue
+            processed += 1
+            try:
+                # Body kısa olabilir → KAP'tan tam içerik çek
+                body_for_div = body
+                if (not body_for_div or len(body_for_div) < 200) and row.kap_url:
+                    try:
+                        disc = await fetch_kap_disclosure(row.kap_url)
+                        if disc and disc.get("full_text"):
+                            body_for_div = disc["full_text"]
+                    except Exception:
+                        pass
+                async with db.begin_nested():
+                    await div_process(
+                        db, disclosure_id=row.id, ticker=row.company_code,
+                        company_name=None, title=title, body=body_for_div,
+                        kap_url=row.kap_url, published_at=row.published_at,
+                    )
+                routed += 1
+            except Exception as e:
+                errors.append(f"{row.company_code}: {str(e)[:100]}")
+        try:
+            await db.commit()
+        except Exception as e:
+            errors.append(f"commit: {str(e)[:100]}")
+
+    return {
+        "status": "ok",
+        "scanned": len(rows),
+        "dividend_candidates": processed,
+        "successfully_routed": routed,
+        "errors": errors[:20],
+    }
+
+
 @app.post("/api/v1/admin/kap-manual-insert")
 @limiter.limit("10/minute")
 async def admin_kap_manual_insert(request: Request, payload: dict = Body(...)):
