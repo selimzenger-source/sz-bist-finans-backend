@@ -468,17 +468,24 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["netaktifdeger"],
     ),
     # --- YATIRIM ORTAKLIGI HAFTALIK RAPOR / PORTFOY DEGER TABLOSU ---
-    # ATLAS, ISYAT gibi yatirim ortakliklarinin her hafta yayinladigi rutin
-    # portfoy bildirimi. Yeni bilgi katmaz, fiyat etkisi yok.
+    # ATLAS, ISYAT, OYAYO gibi yatirim ortakliklarinin periyodik bildirimleri.
+    # SPK tebligi geregi NAV (Net Aktif Deger) 2 katini astiginda gunluk
+    # portfoy yayinlama zorunlulugu var — yatirimci icin yeni bilgi degil.
     (
         r"haftalik\s*rapor|haftalık\s*rapor|"
         r"ortaklik\s*portfoy\s*degeri\s*tablosu|ortaklık\s*portföy\s*değeri\s*tablosu|"
         r"portfoy\s*degeri\s*tablosu|portföy\s*değeri\s*tablosu|"
         r"portfoy\s*deger\s*tablosu|portföy\s*değer\s*tablosu|"
-        r"yatirim\s*ortakligi.*haftalik|yatırım\s*ortaklığı.*haftalık",
-        "Haftalik Portfoy Raporu",
-        "Yatırım ortaklığının periyodik haftalık portföy değer tablosu. Şirketin yatırım dağılımını gösteren rutin şeffaflık raporu olup yeni bir stratejik karar veya finansal gelişme içermez. Fiyat üzerinde doğrudan etki beklenmez.",
-        ["portfoy", "haftalikrapor"],
+        r"yatirim\s*ortakligi.*haftalik|yatırım\s*ortaklığı.*haftalık|"
+        # NAV (Net Aktif Deger) bazli SPK zorunlu yayinlamasi
+        r"pay\s*basina\s*net\s*aktif\s*deger|pay\s*başına\s*net\s*aktif\s*değer|"
+        r"net\s*aktif\s*deger.*katini\s*as|net\s*aktif\s*değer.*katını\s*aş|"
+        r"spk\s*tebligi\s*gereg.*gunluk|spk\s*tebliği\s*gereği.*günlük|"
+        r"gunluk\s*olarak\s*kap.*yayimlama|günlük\s*olarak\s*kap.*yayımlama|"
+        r"net\s*aktif\s*deger\s*tablosu|net\s*aktif\s*değer\s*tablosu",
+        "Yatirim Ortakligi Portfoy/NAV Bildirimi",
+        "Yatırım ortaklığının periyodik portföy veya NAV (Net Aktif Değer) bildirimi. SPK tebliği gereği yapılan rutin yayımlama olup yatırımcı için yeni bir bilgi içermez. Fiyat üzerinde doğrudan etki beklenmez.",
+        ["portfoy", "nav"],
     ),
 
     # --- BORSA / MKK MEKANIZMALARI (fiyat hareketi ile alakali ama temel etki yok) ---
@@ -2459,7 +2466,18 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             # Teknik / operasyonel
             "teknik nitelikli bildirim",
             "operasyonel bildirim", "operasyonel kayıt", "operasyonel niteliği",
-            "şeffaflık raporu", "şeffaflik raporu",  # ATLAS — portföy şeffaflık
+            "şeffaflık raporu", "şeffaflik raporu",
+            # OYAYO örneği — NAV bazlı SPK zorunlu yayımlama
+            "spk tebliği gereği", "spk tebligi geregi",
+            "kap'ta yayımlamasını zorunlu", "kap'ta yayimlamasini zorunlu",
+            "günlük olarak kap'ta yayımla", "gunluk olarak kap'ta yayimla",
+            "net aktif değer tablosunu günlük", "net aktif deger tablosunu gunluk",
+            "pay başına net aktif", "pay basina net aktif",
+            "nav'ının 2 katını", "nav'inin 2 katini",
+            "2 katını aştığı sürece", "2 katini astigi surece",
+            "yayımlama zorunluluğu", "yayimlama zorunlulugu",
+            "tebliği gereği yapılan", "tebligi geregi yapilan",
+            "zorunlu kılmaktadır",
         )
         has_neutral_framing = any(kw in summary_lower for kw in neutral_framing)
         # Pos framing pos_framing'i tetiklediyse neutral cap'i devreye sokma
