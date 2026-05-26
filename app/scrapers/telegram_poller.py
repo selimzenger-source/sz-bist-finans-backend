@@ -386,12 +386,14 @@ async def _route_to_calendars(
     # Capital increase — yeni 3-pct schema processor (state machine)
     if _ci_detect_stage(title or "", body or ""):
         try:
-            res = await cap_process_new(
-                session, ticker=ticker or "", kap_url=kap_url or "",
-                title=title or "", body=body or "",
-            )
-            if res:
-                logger.info("Router→cap_inc %s: %s", ticker, res)
+            # SAVEPOINT: capital_increase hatasi outer transaction'i bozmasin
+            async with session.begin_nested():
+                res = await cap_process_new(
+                    session, ticker=ticker or "", kap_url=kap_url or "",
+                    title=title or "", body=body or "",
+                )
+                if res:
+                    logger.info("Router→cap_inc %s: %s", ticker, res)
         except Exception as e:
             logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
 
@@ -428,11 +430,13 @@ async def _route_to_calendars(
 
     if is_business_deal(title):
         try:
-            await deal_process(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
-                kap_url=kap_url, published_at=published_at,
-            )
+            # SAVEPOINT: business_deal hatasi outer transaction'i bozmasin
+            async with session.begin_nested():
+                await deal_process(
+                    session, disclosure_id=disclosure_id, ticker=ticker,
+                    company_name=company_name, title=title, body=body,
+                    kap_url=kap_url, published_at=published_at,
+                )
         except Exception as e:
             logger.warning("Router→business_deal hata (%s): %s", ticker, e)
 
@@ -520,21 +524,25 @@ async def _route_to_calendars(
                 ticker, kap_fetch_error or "unknown",
             )
             try:
-                await shtx_process(
-                    session, disclosure_id=disclosure_id, ticker=ticker,
-                    company_name=company_name, title=title, body=body,
-                    kap_url=kap_url, published_at=published_at,
-                )
+                # SAVEPOINT: share_transaction hatasi outer transaction'i bozmasin
+                async with session.begin_nested():
+                    await shtx_process(
+                        session, disclosure_id=disclosure_id, ticker=ticker,
+                        company_name=company_name, title=title, body=body,
+                        kap_url=kap_url, published_at=published_at,
+                    )
             except Exception as e:
                 logger.exception("Router→share_transaction AI fallback hata (%s): %s", ticker, e)
 
     if is_type_conversion(title):
         try:
-            await process_type_conversion(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
-                kap_url=kap_url, published_at=published_at,
-            )
+            # SAVEPOINT: type_conversion hatasi outer transaction'i bozmasin
+            async with session.begin_nested():
+                await process_type_conversion(
+                    session, disclosure_id=disclosure_id, ticker=ticker,
+                    company_name=company_name, title=title, body=body,
+                    kap_url=kap_url, published_at=published_at,
+                )
         except Exception as e:
             logger.warning("Router→type_conversion hata (%s): %s", ticker, e)
 
@@ -550,11 +558,13 @@ async def _route_to_calendars(
                         body_for_cs = disc["full_text"]
                 except Exception:
                     pass
-            await process_cautious(
-                session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body_for_cs,
-                kap_url=kap_url, published_at=published_at,
-            )
+            # SAVEPOINT: cautious hatasi outer transaction'i bozmasin
+            async with session.begin_nested():
+                await process_cautious(
+                    session, disclosure_id=disclosure_id, ticker=ticker,
+                    company_name=company_name, title=title, body=body_for_cs,
+                    kap_url=kap_url, published_at=published_at,
+                )
         except Exception as e:
             logger.warning("Router→cautious hata (%s): %s", ticker, e)
 
@@ -568,10 +578,12 @@ async def _route_to_calendars(
             if disc and disc.get("full_text"):
                 body_for_vbts = disc["full_text"]
         if is_bistech_vbts(title, body_for_vbts):
-            await process_cautious_bistech_multi(
-                session, disclosure_id=disclosure_id, title=title,
-                body=body_for_vbts, kap_url=kap_url, published_at=published_at,
-            )
+            # SAVEPOINT: BISTECH VBTS hatasi outer transaction'i bozmasin
+            async with session.begin_nested():
+                await process_cautious_bistech_multi(
+                    session, disclosure_id=disclosure_id, title=title,
+                    body=body_for_vbts, kap_url=kap_url, published_at=published_at,
+                )
     except Exception as e:
         logger.warning("Router→BISTECH VBTS hata: %s", e)
 
