@@ -2457,9 +2457,16 @@ async def market_snapshot_tweet():
     Veri henuz gelmemisse (bugunun trade_date'i yoksa) 60sn bekleyip
     2 kez daha dener (toplam 3 deneme, maks ~2dk bekleme).
 
+    Tatil/hafta sonu gunlerinde calismaz.
+
     Returns dict with "message" or "error" key for debug.
     """
     import asyncio
+
+    from app.utils.bist_holidays import is_trading_day
+    if not is_trading_day(_today_tr()):
+        logger.info("Gun ortasi snapshot tweet atlandi (tatil/hafta sonu): %s", _today_tr())
+        return {"message": "Tatil/hafta sonu — tweet atlandi"}
 
     max_retries = 3
     for attempt in range(max_retries):
@@ -2641,9 +2648,16 @@ async def opening_summary_tweet():
     Borsa 09:55'te acilir, excel_sync ~1 dk icinde acilis verisini yazar.
     09:58'de baslar, veri yoksa 90sn arayla 4 kez dener.
 
+    Tatil/hafta sonu gunlerinde calismaz.
+
     Returns dict with "message" or "error" key for debug.
     """
     import asyncio
+
+    from app.utils.bist_holidays import is_trading_day
+    if not is_trading_day(_today_tr()):
+        logger.info("T16 Acilis bilgileri tweet atlandi (tatil/hafta sonu): %s", _today_tr())
+        return {"message": "Tatil/hafta sonu — tweet atlandi"}
 
     max_retries = 4
     for attempt in range(max_retries):
@@ -2671,9 +2685,17 @@ async def daily_ceiling_update():
     Excel sync ile ipo_ceiling_tracks tablosuna yazilmis veriyi okuyarak
     gunluk takip ve 25 gun performans tweetlerini atar.
     Yahoo Finance KULLANILMAZ — veri kaynagi yerel DB (Matriks Excel sync).
+
+    Tatil/hafta sonu gunlerinde calismaz — retry de bypass edilir.
     """
     global _ceiling_retry_pending
     try:
+        from app.utils.bist_holidays import is_trading_day
+        if not is_trading_day(_today_tr()):
+            logger.info("Tavan takip gun sonu atlandi (tatil/hafta sonu): %s", _today_tr())
+            _ceiling_retry_pending = False
+            return
+
         from sqlalchemy import select, and_
         from app.models.ipo import IPO, IPOCeilingTrack
 
@@ -2942,6 +2964,12 @@ async def ceiling_update_retry():
     if not _ceiling_retry_pending:
         return
 
+    from app.utils.bist_holidays import is_trading_day
+    if not is_trading_day(_today_tr()):
+        logger.info("Tavan takip RETRY atlandi (tatil/hafta sonu): %s", _today_tr())
+        _ceiling_retry_pending = False
+        return
+
     logger.info("Tavan takip RETRY calisiyor...")
     try:
         from app.services.admin_telegram import send_admin_message
@@ -3089,8 +3117,15 @@ async def tweet_opening_price_job():
     Sadece bugun trading_start olan IPO'lar icin calisir.
     IPOCeilingTrack tablosundan (excel_sync) acilis fiyatini okur.
     Yahoo Finance'a bagli degildir — local DB verisi kullanir.
+
+    Tatil/hafta sonu gunlerinde calismaz.
     """
     try:
+        from app.utils.bist_holidays import is_trading_day
+        if not is_trading_day(_today_tr()):
+            logger.info("T7 Acilis fiyati tweet atlandi (tatil/hafta sonu): %s", _today_tr())
+            return
+
         from sqlalchemy import select, and_
         from app.models.ipo import IPO, IPOCeilingTrack
 

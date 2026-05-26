@@ -2111,9 +2111,41 @@ NOTLAR:
                         ticker, original_score, prior_topic,
                     )
                     if summary:
+                        # ── POZITIF YORUM CUMLELERINI STRIPLE ──────────────
+                        # AI ozet "olumlu sinyal, destek saglayacaktir" gibi
+                        # cumleler iceriyorsa, bunlari ATLA — sadece olgusal
+                        # cumleyi tut (ilk cumle genelde "X sirketi Y lot aldi").
+                        # Skor 5.0 (Notr) iken metin "olumlu" demesi kullanıcıyı
+                        # kafa karıştırıyor.
+                        import re as _re_strip
+                        # Cumleleri ayır
+                        _sentences = _re_strip.split(r'(?<=[.!?])\s+', summary)
+                        _pos_eval_kws = (
+                            "olumlu", "olumsuz", "pozitif sinyal", "negatif sinyal",
+                            "destek sağla", "destek saglayacak", "destek olur",
+                            "güven sinyal", "kararlılığını göster",
+                            "değerlendirilebilir", "değerlendirilir",
+                            "olumlu olarak", "pozitif olarak",
+                            "olumlu bir sinyal", "olumlu sinyal",
+                            "yorumlanabilir",
+                        )
+                        _factual_sentences = []
+                        for _sent in _sentences:
+                            _s_low = _sent.lower()
+                            # Pozitif/negatif evaluasyon iceren cumleyi at
+                            if any(_kw in _s_low for _kw in _pos_eval_kws):
+                                continue
+                            _factual_sentences.append(_sent.strip())
+                            # Max 2 olgusal cumle yeter
+                            if len(_factual_sentences) >= 2:
+                                break
+                        _stripped_summary = " ".join(_factual_sentences).strip()
+                        # Hicbir cumle kalmazsa orijinalin ilk cumlesini al
+                        if not _stripped_summary and _sentences:
+                            _stripped_summary = _sentences[0].strip()
                         summary = (
                             f"[Onceden duyurulmus {prior_topic} kararinin takip/prosedur bildirimi — "
-                            f"ilk karar fiyatlandi, ek pozitif etki beklenmez] {summary}"
+                            f"ilk karar fiyatlandi, ek pozitif etki beklenmez] {_stripped_summary}"
                         )
             except Exception as _follow_err:
                 logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
@@ -2366,9 +2398,56 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "yatırımcı için olumsuz", "yatırımcılar için olumsuz",
             "olumsuz bir gelişme", "olumsuz bir adım",
             "endişe yaratabilir", "endişe verici",
+            # ── FLAP / EGEPO çelişkili skor fix (varyantlar) ──
+            "olumsuz bir sinyal", "olumsuz sinyal olarak",
+            "hafif olumsuz", "hafif negatif",
+            "olumsuz bir algı", "olumsuz algı",
+            "olumsuz olarak değer", "olumsuz olarak algılan",
+            "negatif olarak değer", "negatif olarak algılan",
+            "olumsuz yönde", "negatif yönde",
+            "güven kayb", "güven kaybı sinyal", "güven sars",
+            "içeriden gelen", "içeriden bir satış",
+            "satış baskı", "satış baskısı yarat",
+            "değer kaybetme", "değer kaybetmes",
+            "olumsuz değerlendir", "olumsuz olarak görül",
+            "olumsuz etki yaratabil", "olumsuz etkilen",
+            "yatırımcı nezdinde olumsuz", "yatırımcılar nezdinde olumsuz",
+            "olumsuz algı yaratma", "olumsuz bir algı yarat",
+            "endişe sinyali", "kötü sinyal",
+            "düşürmesi", "azaltması nedeniyle olumsuz",
+            "temettü beklentisi olan yatırımcılar için",  # EGEPO için
+            "dağıtılmaması", "dağıtım yapılmaması",
         ]
         has_pos_framing = any(kw in summary_lower for kw in pos_framing)
         has_neg_framing = any(kw in summary_lower for kw in neg_framing)
+
+        # ── STRONG NEG: özet net şekilde olumsuz diyorsa pos varsa BİLE override ──
+        # AI bazen aynı özet içinde "finansal yapı güçleniyor" (pos) yazsa da
+        # ana sonuç "olumsuz sinyal" diyebiliyor (EGEPO örneği). Bu durumda
+        # ana sonucu baz al — pos framing'i bypass et.
+        strong_neg_signals = (
+            "hafif olumsuz", "hafif negatif",
+            "olumsuz bir sinyal", "olumsuz sinyal olarak",
+            "olumsuz bir algı", "olumsuz algı yarat",
+            "güven kayb", "güven sars",
+            "içeriden gelen bir güven", "içeriden bir satış",
+            "yatırımcı nezdinde olumsuz", "yatırımcılar nezdinde olumsuz",
+            "endişe yarat", "endişe verici",
+            "değer kaybı", "değer kaybedebil",
+            "risk artır", "risk yarat",
+            "olumsuz olarak değerlendir", "olumsuz olarak algılan",
+        )
+        has_strong_neg = any(kw in summary_lower for kw in strong_neg_signals)
+
+        # STRONG NEG varsa pos framing'i devre dışı bırak (override hak kazanır)
+        if has_strong_neg:
+            if has_pos_framing:
+                logger.info(
+                    "AI News Scorer [STRONG-NEG-OVERRIDE] %s: pos framing bypass edildi (strong neg sinyal mevcut)",
+                    ticker,
+                )
+            has_pos_framing = False
+
         # Çelişkili framing varsa (hem pozitif hem negatif kelime) düzeltme yapma
         if has_pos_framing and not has_neg_framing and score < 6.2:
             old = score
