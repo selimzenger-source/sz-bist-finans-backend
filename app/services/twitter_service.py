@@ -2136,7 +2136,23 @@ def tweet_kap_news(
             _ok = _safe_tweet(text, source="tweet_kap_news", force_send=True)
 
         # Tweet basarili oldu → KAP link'i REPLY olarak at (algoritma boost icin)
-        if _ok and kap_url:
+        # ★ TEDBIR ISTISNASI: Tedbirli hisseler tweet'lerinde KAP link reply ATILMAZ.
+        # (Kullanici talebi — tedbir bildirimleri rutin olduğu için ek link kafa karıştırır.)
+        _is_tedbir_topic = False
+        try:
+            _check_text = ((ai_summary or "") + " " + (matched_keyword or "")).lower()
+            _tedbir_kws = (
+                "tedbir", "tedbirli", "kredili işlem yasak", "kredili islem yasak",
+                "açığa satış yasak", "aciga satis yasak",
+                "brüt takas", "brut takas", "tek fiyat uygulan",
+                "emir iptali", "volatilite bazlı tedbir", "volatilite bazli tedbir",
+                "vbts kapsam", "piyasa emri yasak", "internet emir yasak",
+            )
+            _is_tedbir_topic = any(kw in _check_text for kw in _tedbir_kws)
+        except Exception:
+            _is_tedbir_topic = False
+
+        if _ok and kap_url and not _is_tedbir_topic:
             try:
                 global _last_tweet_id
                 if _last_tweet_id:
@@ -2151,6 +2167,8 @@ def tweet_kap_news(
                     )
             except Exception as _rep_err:
                 logger.warning("KAP link reply hata: %s", _rep_err)
+        elif _is_tedbir_topic and kap_url:
+            logger.info("[KAP-TWEET-REPLY] %s: tedbir konusu, KAP link reply ATLANDI", ticker)
 
         return _ok
     except Exception as e:

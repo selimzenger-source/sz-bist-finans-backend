@@ -146,8 +146,10 @@ async def fetch_bist_tedbir_csv() -> list[dict]:
         item["tags_set"].add(tag)
         item["raw_codes"].append(tedbir_code)
         item["tedbir_names"].append(tedbir_adi)
-        # En erken start, en gec end (birden fazla tedbir farkli tarihte olabilir)
-        if start_date and (not item["start_date"] or start_date < item["start_date"]):
+        # EN YENI start (BIST'in son tedbir karari) + EN GEC end (tum tedbirler
+        # sona erene kadar). Kullanici en guncel tarihi gormeli — OZATD ornegi:
+        # 30.04 ve 18.05 birden aktifse 18.05 gosterilir.
+        if start_date and (not item["start_date"] or start_date > item["start_date"]):
             item["start_date"] = start_date
         if end_date and (not item["end_date"] or end_date > item["end_date"]):
             item["end_date"] = end_date
