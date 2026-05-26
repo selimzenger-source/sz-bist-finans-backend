@@ -5201,11 +5201,12 @@ def _setup_scheduler_impl():
 
             await broadcast_background_task(
                 title="📰 Günlük Haber Bülteniniz Hazır",
-                body=f"{tarih_str} — Dün şirketlerden ve SPK bülteninden öne çıkan pozitif/negatif haberlerin özeti. Detaylar için tıklayın.",
+                body=f"{tarih_str} — Şirketlerden ve SPK bülteninden öne çıkan pozitif/negatif haberlerin özeti. 👉 Detayları İncele →",
                 audience="paid",
                 deep_link_target="haber-ozeti",
                 extra_data={
                     "screen": "haber-ozeti",
+                    "target": "haber-ozeti",  # frontend fallback (data.screen yoksa data.target)
                     "type": "daily_news_summary",
                     "summary_date": today_tr.isoformat(),
                 },
