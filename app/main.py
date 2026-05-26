@@ -14745,6 +14745,85 @@ async def admin_cleanup_fake_dividends(request: Request, payload: dict = Body(..
       return {"error": str(e)[:500], "trace": traceback.format_exc()[:1500]}
 
 
+@app.post("/api/v1/admin/kap-manual-insert")
+@limiter.limit("10/minute")
+async def admin_kap_manual_insert(request: Request, payload: dict = Body(...)):
+    """Admin: bir KAP URL'sinden tek bir kap_all_disclosures kaydi MANUEL OLUSTUR.
+
+    DB'de kayit yoksa KAP.org.tr'den icerik ceker, AI analiz yapip INSERT eder.
+    BORSK Kar Payi (id=12557 bug fix) gibi kayip kayitlari geri eklemek icin.
+
+    Body: { "admin_password": "...", "kap_url": "...", "ticker": "BORSK",
+            "title": "...", "published_at": "2026-05-26T17:58:36" (opsiyonel) }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.scrapers.kap_all_scraper import fetch_kap_page_content, _infer_category
+    from app.services.kap_all_analyzer import analyze_disclosure
+    from app.database import async_session
+    from datetime import datetime as _dt, timezone as _tz
+
+    kap_url = payload.get("kap_url", "").strip()
+    ticker = (payload.get("ticker") or "").strip().upper()
+    title = payload.get("title") or ""
+    pub_str = payload.get("published_at")
+    if not kap_url or not ticker:
+        return {"error": "kap_url + ticker zorunlu"}
+
+    pub_dt = None
+    if pub_str:
+        try:
+            pub_dt = _dt.fromisoformat(pub_str.replace("Z", "+00:00"))
+        except Exception:
+            pub_dt = _dt.now(_tz.utc)
+    else:
+        pub_dt = _dt.now(_tz.utc)
+
+    async with async_session() as db:
+        # Duplicate check
+        existing = await db.execute(
+            select(KapAllDisclosure).where(
+                KapAllDisclosure.kap_url == kap_url,
+                KapAllDisclosure.company_code == ticker,
+            ).limit(1)
+        )
+        if existing.scalar_one_or_none():
+            return {"status": "already_exists", "kap_url": kap_url, "ticker": ticker}
+
+        body = await fetch_kap_page_content(kap_url)
+        if not body or len(body) < 50:
+            return {"error": "kap fetch bos"}
+
+        ai = await analyze_disclosure(company_code=ticker, title=title, body=body)
+        if not ai:
+            return {"error": "ai analyze fail"}
+
+        category = _infer_category(title)
+        rec = KapAllDisclosure(
+            company_code=ticker,
+            title=title or "Bildirim",
+            body=ai.get("summary"),
+            category=category,
+            is_bilanco=category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu"),
+            kap_url=kap_url,
+            source="manual_insert",
+            published_at=pub_dt,
+            ai_sentiment=ai.get("sentiment"),
+            ai_impact_score=ai.get("impact_score"),
+            ai_summary=ai.get("summary"),
+            ai_analyzed_at=_dt.now(_tz.utc),
+        )
+        db.add(rec)
+        await db.commit()
+        await db.refresh(rec)
+        return {
+            "status": "ok", "id": rec.id, "ticker": ticker,
+            "score": rec.ai_impact_score, "sentiment": rec.ai_sentiment,
+            "summary": (rec.ai_summary or "")[:120],
+        }
+
+
 @app.post("/api/v1/admin/kap-force-reanalyze")
 @limiter.limit("10/minute")
 async def admin_kap_force_reanalyze(request: Request, payload: dict = Body(...)):
