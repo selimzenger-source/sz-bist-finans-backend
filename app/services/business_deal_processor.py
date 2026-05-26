@@ -534,6 +534,49 @@ async def process_kap_disclosure(
             if rate_used:
                 amount_try = amount_original * rate_used
 
+    # ★ SANITY CHECK: 1 milyar TL ustu tutarli dealler nadirdir.
+    # Ozellikle currency=TRY + amount > 1B siklikla parser hatasi olur
+    # (SAYAS 5.84 milyar bug). Body'de EUR/USD geciyor mu kontrol et;
+    # geciyorsa flag at admin telegram'a bildir.
+    if amount_try and amount_try > 1_000_000_000:
+        try:
+            body_check = (body or "")[:5000].upper()
+            has_fx = any(k in body_check for k in ("EUR", "€", "USD", "DOLAR", "GBP", "£"))
+            if currency == "TRY" and has_fx:
+                logger.warning(
+                    "BusinessDeal SHUPHELI: %s amount_try=%.0f TRY ama body'de EUR/USD geciyor — parser hatasi olabilir",
+                    ticker, amount_try,
+                )
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        f"⚠️ <b>BusinessDeal Şüpheli Tutar</b>\n"
+                        f"#{ticker} — {amount_try:,.0f} TL ({currency} {amount_original:,.2f})\n"
+                        f"Body'de EUR/USD geçiyor ama parser TRY okudu. Manuel kontrol et:\n"
+                        f"{kap_url or '-'}",
+                        silent=True,
+                    )
+                except Exception:
+                    pass
+            elif amount_try > 50_000_000_000:  # 50 milyar TL ustu — kesin supheli
+                logger.warning(
+                    "BusinessDeal COK YUKSEK: %s amount_try=%.0f TRY (%s %s) — manuel dogrula",
+                    ticker, amount_try, amount_original, currency,
+                )
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        f"⚠️ <b>BusinessDeal Aşırı Yüksek Tutar</b>\n"
+                        f"#{ticker} — {amount_try:,.0f} TL ({currency} {amount_original:,.2f})\n"
+                        f"50 milyar TL üstü — büyük olasılıkla parser hatası.\n"
+                        f"{kap_url or '-'}",
+                        silent=False,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     # Mevcut kaydi UPDATE et — yeni AI parse sonucuyla
     if existing:
         if amount_original is not None:
