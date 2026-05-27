@@ -272,6 +272,30 @@ def _parse_block_trade_regex(body: str) -> dict:
         if parts:
             out["counterparties"] = " | ".join(parts)[:1000]
 
+    # Borsa disi (tezgah ustu) pay devri pattern'i — KAP formunda ARACI KURUM
+    # alani bos cunku islem borsa disinda. broker'i acikla.
+    if not out.get("broker") and re.search(r"borsa\s*d[ıi]ş[ıi]", b, re.IGNORECASE):
+        out["broker"] = "Borsa Dışı (Tezgah Üstü)"
+        # Tip belirli degilse satis say (pay devri = ortak satti)
+        if not out.get("transaction_type"):
+            out["transaction_type"] = "satis"
+
+    # "Sayın NAME ['ı]n ... pay devri" / "Sayın NAME, borsa disinda" — ortak isimleri
+    # cikar ve counterparties'e doldur (cogu pay devri duyurusunda boyle gecer).
+    if not out.get("counterparties"):
+        sayin_matches = re.findall(
+            r"Say[ıi]n\s+([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-']{4,80}?)(?=['ı’]?n[\s,]|,|\s+borsa|\s+tarafından)",
+            b,
+        )
+        if sayin_matches:
+            unique_names: list[str] = []
+            for nm in sayin_matches:
+                nm_clean = re.sub(r"\s+", " ", nm.strip()).rstrip(",.")
+                if nm_clean and nm_clean not in unique_names and 4 < len(nm_clean) < 100:
+                    unique_names.append(nm_clean)
+            if unique_names:
+                out["counterparties"] = ", ".join(unique_names[:5])[:1000]
+
     # Body'den ek karşı taraf isim arama — sadece counterparties bossa
     if not out.get("counterparties"):
         # SATIS islemi ise body'den ALICI bulmaya odaklan
