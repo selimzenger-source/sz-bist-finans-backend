@@ -8,7 +8,9 @@ services:
     region: frankfurt  # EU — Turkiye'ye en yakin
     # plan: Render dashboard'dan yonetilir — buradan degistirme
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300
+    # alembic upgrade her start'ta calisir (idempotent — head'deyse no-op).
+    # Migration yapilmadan yeni column'lu kod deploy edilirse 500 hatasi olur, bunu onler.
+    startCommand: alembic upgrade head && gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300
     healthCheckPath: /health
     autoDeploy: true
     envVars:

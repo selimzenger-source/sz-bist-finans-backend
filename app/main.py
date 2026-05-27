@@ -18418,3 +18418,48 @@ async def admin_run_bilanco_ai(
         "ai_label": latest.ai_label,
         "summary_preview": (latest.ai_summary or "")[:200],
     }
+
+
+@app.post("/api/v1/admin/run-raw-sql")
+@limiter.limit("3/minute")
+async def admin_run_raw_sql(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """ACIL DURUM: Admin için raw SQL çalıştır.
+
+    Migration kacirilmis vb. durumlarda DB schema'sini elle duzeltmek icin.
+
+    Body: {'admin_password': '...', 'sql': 'ALTER TABLE ... ADD COLUMN ...'}
+
+    UYARI: SELECT * disinda her sey DESTRUCTIVE olabilir. Dikkatli kullan.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    sql = (payload.get("sql") or "").strip()
+    if not sql:
+        raise HTTPException(status_code=400, detail="sql zorunlu")
+    if len(sql) > 4000:
+        raise HTTPException(status_code=400, detail="sql max 4000 char")
+
+    from sqlalchemy import text as _text
+    try:
+        result = await db.execute(_text(sql))
+        rows_affected = result.rowcount if hasattr(result, "rowcount") else -1
+        # SELECT ise sonuc dondur
+        rows = []
+        try:
+            rows = [dict(r._mapping) for r in result.fetchall()]
+        except Exception:
+            pass
+        await db.commit()
+        return {
+            "status": "ok",
+            "rows_affected": rows_affected,
+            "rows": rows[:50] if rows else [],
+            "row_count": len(rows),
+        }
+    except Exception as e:
+        await db.rollback()
+        return {"status": "error", "error": str(e)[:500]}
