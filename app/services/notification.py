@@ -1514,6 +1514,30 @@ class NotificationService:
                 ticker, sent_count,
             )
 
+        # ── Admin özet: watchlist takip / filtre / gönderim breakdown ──
+        total_watching = len(watchlist_rows)
+        if total_watching > 0:
+            try:
+                from app.services.admin_telegram import send_admin_message
+                pref_filtered = total_watching - len(filtered_device_ids) - skipped_spam
+                _sent_emoji = {"Olumlu": "📈", "Olumsuz": "📉"}.get(sentiment, "📋")
+                _lines = [
+                    f"{_sent_emoji} <b>KAP Bildirim Özeti</b> — #{ticker}",
+                    f"Duygu: {sentiment_tag}",
+                    "━━━━━━━━━━━━━━━━━━━━",
+                    f"👥 Watchlist'te: {total_watching} kişi",
+                    f"✅ Gönderildi: {sent_count} kişi",
+                ]
+                if pref_filtered > 0:
+                    _lines.append(f"🔕 Tercih filtresi: {pref_filtered} kişi bu tür bildirim istemedi")
+                if skipped_spam > 0:
+                    _lines.append(f"⏱ Spam koruması: {skipped_spam} kişi (5dk cooldown)")
+                if sent_count == 0 and total_watching > 0:
+                    _lines.append("⚠️ Hiçbirine gönderilmedi")
+                await send_admin_message("\n".join(_lines), parse_mode="HTML", silent=True)
+            except Exception:
+                pass
+
         return sent_count
 
     # -------------------------------------------------------

@@ -4138,6 +4138,70 @@ async def daily_subscription_report():
             pass
 
 
+async def weekly_watchlist_report():
+    """Haftalik favori hisse raporu — Her Pazar 18:00 TR (15:00 UTC).
+
+    Admin Telegram'a gonderir:
+    - Her hisseyi kac kullanicinin takip listesine aldigi (desc siralı)
+    - Toplam izleme listesi kayit ve hisse sayisi
+    """
+    try:
+        from sqlalchemy import select, func
+        from app.models.user_watchlist import UserWatchlist
+        from app.services.admin_telegram import send_admin_message
+
+        now_tr = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(
+                    UserWatchlist.ticker,
+                    func.count(UserWatchlist.device_id).label("cnt"),
+                )
+                .group_by(UserWatchlist.ticker)
+                .order_by(func.count(UserWatchlist.device_id).desc())
+            )
+            rows = list(result.all())
+
+        if not rows:
+            await send_admin_message(
+                "📊 <b>Haftalık Watchlist Raporu</b>\nHiç kayıt bulunamadı.",
+                parse_mode="HTML",
+            )
+            return
+
+        total_entries = sum(c for _, c in rows)
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for i, (ticker, cnt) in enumerate(rows[:25]):
+            pos = medals[i] if i < 3 else f"  {i + 1}."
+            person = "👤" if cnt == 1 else "👥"
+            lines.append(f"  {pos} #{ticker} — {cnt} kişi {person}")
+        if len(rows) > 25:
+            lines.append(f"  ... +{len(rows) - 25} hisse daha")
+
+        msg = (
+            f"📊 <b>Haftalık Favori Hisse Raporu</b>\n"
+            f"📅 {now_tr}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🏆 <b>En Çok Takip Edilen Hisseler</b>\n"
+            + "\n".join(lines)
+            + f"\n\n📈 Toplam: {len(rows)} farklı hisse · {total_entries} kayıt\n"
+            f"━━━━━━━━━━━━━━━━━━━━"
+        )
+
+        await send_admin_message(msg, parse_mode="HTML")
+        logger.info("Haftalik watchlist raporu gonderildi: %d hisse, %d kayit", len(rows), total_entries)
+
+    except Exception as e:
+        logger.error("Haftalik watchlist raporu hatasi: %s", e)
+        try:
+            from app.services.admin_telegram import send_admin_message
+            await send_admin_message(f"❌ Watchlist raporu hatası:\n{str(e)[:300]}")
+        except Exception:
+            pass
+
+
 async def cleanup_notification_logs():
     """Bildirim Merkezi — tum kayitlari sifirla.
 
@@ -5394,12 +5458,23 @@ def _setup_scheduler_impl():
         coalesce=True,
     )
 
-    # ─── Gunluk Abonelik Raporu — 20:00 TR (17:00 UTC) ───
+    # ─── Gunluk Abonelik Raporu — KALDIRILDI (kullanici istegi) ───
+    # scheduler.add_job(
+    #     daily_subscription_report,
+    #     CronTrigger(hour=17, minute=0),  # 17:00 UTC = 20:00 TR
+    #     id="daily_subscription_report",
+    #     name="Gunluk Abonelik Raporu (20:00 TR)",
+    #     replace_existing=True,
+    #     max_instances=1,
+    #     coalesce=True,
+    # )
+
+    # ─── Haftalik Watchlist Raporu — Her Pazar 18:00 TR (15:00 UTC) ───
     scheduler.add_job(
-        daily_subscription_report,
-        CronTrigger(hour=17, minute=0),  # 17:00 UTC = 20:00 TR
-        id="daily_subscription_report",
-        name="Gunluk Abonelik Raporu (20:00 TR)",
+        weekly_watchlist_report,
+        CronTrigger(day_of_week="sun", hour=15, minute=0),  # 15:00 UTC = 18:00 TR
+        id="weekly_watchlist_report",
+        name="Haftalik Favori Hisse Raporu (Pazar 18:00 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
