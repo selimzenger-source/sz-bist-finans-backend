@@ -276,6 +276,46 @@ async def upsert_records(records: list[dict]) -> dict:
 
 # ─── Ana Çalıştırıcı ──────────────────────────────────────────────────────────
 
+async def _mark_missing_as_completed(active_keys: set) -> int:
+    """Halkarz'da artik olmayan 'tarih_belli' kayitlari 'tamamlandi' olarak isaretle.
+
+    active_keys: bu scrape'te halkarz'da bulunan (ticker, type) tuple seti.
+    Halkarz dagitim sonrasi tabloyu temizler — bizdeki kayitlar da bittirilmeli.
+    Sadece source='halkarz' veya halkarz tarafindan dokunulmus olanlar etkilenir.
+    """
+    from app.database import async_session
+    from app.models.capital_increase import CapitalIncrease
+    from datetime import date as _date, timedelta as _td
+    from sqlalchemy import and_ as _and, or_ as _or, update as _upd
+
+    # Sadece distribution_date gectikten 7 gun sonra missing olanlari complete et
+    # (Halkarz bazi kayitlari 1-2 gun once kaldirabilir, hemen bittirmeyelim)
+    today = _date.today()
+    cutoff = today - _td(days=7)
+
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(CapitalIncrease).where(
+                CapitalIncrease.status.in_(["tarih_belli", "spk_onayli", "ykk_alindi"])
+            )
+        )).scalars().all()
+
+        completed = 0
+        for r in rows:
+            key = (r.ticker.upper(), r.type)
+            if key in active_keys:
+                continue  # Halkarz'da hala var, dokunma
+            # Dagitim tarihi gectiyse VE son 7 gunden eskiyse tamamlandi say
+            if r.distribution_date and r.distribution_date < cutoff:
+                r.status = "tamamlandi"
+                r.updated_at = datetime.now(timezone.utc)
+                completed += 1
+        if completed > 0:
+            await db.commit()
+            logger.info("Halkarz: %d eski kayit 'tamamlandi' olarak isaretlendi", completed)
+        return completed
+
+
 async def scrape_halkarz_sermaye() -> dict:
     """Tek seferde scrape + upsert. Scheduler bu fonksiyonu çağırır."""
     html = await fetch_html()
@@ -288,9 +328,13 @@ async def scrape_halkarz_sermaye() -> dict:
 
     try:
         stats = await upsert_records(records)
+        # Halkarz'da artik gorunmeyenleri tamamlandi say (dagitim tarihi gecmis olanlar)
+        active_keys = {(r["ticker"].upper(), r["type"]) for r in records}
+        completed = await _mark_missing_as_completed(active_keys)
+        stats["completed"] = completed
         logger.info(
-            "Halkarz sermaye: %d kayıt parse, %d yeni, %d güncellendi, %d atlandi",
-            stats["total"], stats["inserted"], stats["updated"], stats["skipped"],
+            "Halkarz sermaye: %d kayıt parse, %d yeni, %d güncellendi, %d atlandi, %d tamamlandi",
+            stats["total"], stats["inserted"], stats["updated"], stats["skipped"], completed,
         )
         return {"status": "ok", **stats}
     except Exception as e:
