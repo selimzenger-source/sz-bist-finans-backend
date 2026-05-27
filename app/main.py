@@ -15880,16 +15880,27 @@ async def get_top_bilancos(
         return float(v) if v is not None else None
 
     # 4. Birlestir + ai score sirala
+    # Oncelik: company_financials.ai_score (bilanco-spesifik analiz),
+    # yoksa KapAllDisclosure.ai_impact_score (routine pre-filter — genelde 5.0)
     items = []
     for ticker, fin in finals.items():
         kap = kap_by_ticker.get(ticker)
         ratio = ratio_by_ticker.get(ticker)
-        ai_score = float(kap.ai_impact_score) if kap and kap.ai_impact_score else None
+        cf_ai = getattr(fin, "ai_score", None)
+        cf_summary = getattr(fin, "ai_summary", None)
+        cf_label = getattr(fin, "ai_label", None)
+        if cf_ai is not None:
+            ai_score = float(cf_ai)
+            ai_summary = (cf_summary[:200] if cf_summary else None)
+        else:
+            ai_score = float(kap.ai_impact_score) if kap and kap.ai_impact_score else None
+            ai_summary = (kap.ai_summary[:200] if kap and kap.ai_summary else None)
         items.append({
             "ticker": ticker,
             "period": fin.period,
             "ai_score": ai_score,
-            "ai_summary": kap.ai_summary[:200] if kap and kap.ai_summary else None,
+            "ai_label": cf_label,
+            "ai_summary": ai_summary,
             "ai_sentiment": kap.ai_sentiment if kap else None,
             "published_at": kap.published_at.isoformat() if kap and kap.published_at else None,
             "fk": _f(ratio.fk) if ratio else None,
@@ -18463,3 +18474,81 @@ async def admin_run_raw_sql(
     except Exception as e:
         await db.rollback()
         return {"status": "error", "error": str(e)[:500]}
+
+
+@app.post("/api/v1/admin/batch-bilanco-ai")
+@limiter.limit("2/minute")
+async def admin_batch_bilanco_ai(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Son N bilanço için AI analizini toplu üret.
+
+    Body: {'admin_password': '...', 'period': '2026-Q1', 'limit': 50}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.company_financial import CompanyFinancial
+    from app.services.ai_bilanco_analyzer import analyze_bilanco
+    import asyncio as _asyncio
+
+    period = payload.get("period") or "2026-Q1"
+    limit = min(int(payload.get("limit", 30)), 100)
+
+    # AI score'u henuz olmayan kayitlari al
+    candidates = (await db.execute(
+        select(CompanyFinancial.ticker)
+        .where(CompanyFinancial.period == period)
+        .where(CompanyFinancial.ai_score.is_(None))
+        .where(CompanyFinancial.total_assets.isnot(None))  # bilanço dolu olanlar
+        .limit(limit)
+    )).scalars().all()
+
+    results = {"ok": 0, "fail": 0, "details": []}
+    for ticker in candidates:
+        try:
+            # Son 8 ceyrek
+            recent = (await db.execute(
+                select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
+                .order_by(desc(CompanyFinancial.period)).limit(8)
+            )).scalars().all()
+            if not recent:
+                continue
+            periods_data = [
+                {
+                    "period": p.period,
+                    "revenue": float(p.revenue) if p.revenue else None,
+                    "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+                    "operating_profit": float(p.operating_profit) if p.operating_profit else None,
+                    "net_income": float(p.net_income) if p.net_income else None,
+                    "ebitda": float(p.ebitda) if p.ebitda else None,
+                    "total_assets": float(p.total_assets) if p.total_assets else None,
+                    "total_equity": float(p.total_equity) if p.total_equity else None,
+                    "total_debt": float(p.total_debt) if p.total_debt else None,
+                    "net_debt": float(p.net_debt) if p.net_debt else None,
+                    "net_interest_income": float(p.net_interest_income) if p.net_interest_income else None,
+                    "gross_premiums": float(p.gross_premiums) if p.gross_premiums else None,
+                }
+                for p in recent
+            ]
+            ai_result = await analyze_bilanco(ticker, periods_data)
+            if ai_result:
+                latest = recent[0]
+                latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
+                latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
+                latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+                latest.ai_analyzed_at = datetime.now(timezone.utc)
+                await db.commit()
+                results["ok"] += 1
+                results["details"].append({"ticker": ticker, "score": latest.ai_score, "label": latest.ai_label})
+            else:
+                results["fail"] += 1
+            # Rate-limit dostu: 3sn bekle
+            await _asyncio.sleep(3)
+        except Exception as e:
+            results["fail"] += 1
+            await db.rollback()
+            results["details"].append({"ticker": ticker, "error": str(e)[:100]})
+
+    return {"status": "ok", **results}
