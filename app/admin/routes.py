@@ -4669,3 +4669,133 @@ async def toggle_kap_source(request: Request, redirect: Optional[str] = None):
     sep = "&" if "?" in target else "?"
     msg = f"KAP+kaynagi:+{new_source.upper()}" if ok else "Toggle+hatasi"
     return RedirectResponse(url=f"{target}{sep}success={msg}", status_code=303)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PIPELINE HEALTH — KAP 7 kategori parse durumu + anomali listesi
+# ═══════════════════════════════════════════════════════════════════════
+
+@router.get("/pipeline-health", response_class=HTMLResponse)
+async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
+    """KAP işleme pipeline'inin sağlık durumu — son 24h istatistik + anomali listesi.
+
+    Bilanço, temettü, sermaye artırımı, toptan satış, tipe dönüşüm, iş anlaşması,
+    pay alım/satım kategorileri için: son N kayıt, eksik alan tespiti, Fintables linki.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from datetime import datetime, timedelta, timezone as _tz
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.company_financial import CompanyFinancial
+    from app.models.dividend_calendar import DividendCalendar
+    from app.models.capital_increase import CapitalIncrease
+    from app.models.block_trade import BlockTrade
+    from app.models.share_type_conversion import ShareTypeConversion
+    from app.models.business_deal import BusinessDeal
+
+    now = datetime.now(_tz.utc)
+    cutoff_24h = now - timedelta(hours=24)
+    cutoff_7d = now - timedelta(days=7)
+
+    # ── 24h KAP sayilari kategori bazli ──
+    kap_stats = {}
+    cats_query = await db.execute(
+        select(KapAllDisclosure.category, sa_func.count(KapAllDisclosure.id))
+        .where(KapAllDisclosure.created_at >= cutoff_24h)
+        .group_by(KapAllDisclosure.category)
+    )
+    for cat, cnt in cats_query.all():
+        kap_stats[cat or "Belirsiz"] = cnt
+
+    # ── Son 10 bilanco ──
+    bilanco_rows = (await db.execute(
+        select(CompanyFinancial)
+        .order_by(desc(CompanyFinancial.updated_at))
+        .limit(10)
+    )).scalars().all()
+
+    # ── Bilanco anomalileri (son 7 gun) ──
+    bilanco_issues_q = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.updated_at >= cutoff_7d)
+        .where(
+            (CompanyFinancial.revenue.is_(None)) |
+            (CompanyFinancial.total_assets.is_(None)) |
+            (CompanyFinancial.net_income.is_(None))
+        )
+        .order_by(desc(CompanyFinancial.updated_at))
+        .limit(25)
+    )
+    bilanco_issues = bilanco_issues_q.scalars().all()
+
+    # ── Son 10 temettu ──
+    dividend_rows = (await db.execute(
+        select(DividendCalendar)
+        .order_by(desc(DividendCalendar.updated_at))
+        .limit(10)
+    )).scalars().all()
+
+    # ── Temettu anomalileri (status='tarih_belli' ama payment_date NULL) ──
+    dividend_issues_q = await db.execute(
+        select(DividendCalendar)
+        .where(DividendCalendar.status == "tarih_belli")
+        .where(DividendCalendar.payment_date.is_(None))
+        .order_by(desc(DividendCalendar.updated_at))
+        .limit(25)
+    )
+    dividend_issues = dividend_issues_q.scalars().all()
+
+    # ── Block trade anomalileri (lot_amount NULL son 7 gun) ──
+    bt_issues = (await db.execute(
+        select(BlockTrade)
+        .where(BlockTrade.created_at >= cutoff_7d)
+        .where(BlockTrade.lot_amount.is_(None))
+        .order_by(desc(BlockTrade.created_at))
+        .limit(25)
+    )).scalars().all()
+
+    # ── Tipe donusum anomalileri (converted_lot NULL son 7 gun) ──
+    tc_issues = (await db.execute(
+        select(ShareTypeConversion)
+        .where(ShareTypeConversion.created_at >= cutoff_7d)
+        .where(ShareTypeConversion.converted_lot.is_(None))
+        .order_by(desc(ShareTypeConversion.created_at))
+        .limit(25)
+    )).scalars().all()
+
+    # ── Sermaye artirimi anomalileri (yuzde+tutar bos son 7 gun) ──
+    ci_issues = (await db.execute(
+        select(CapitalIncrease)
+        .where(CapitalIncrease.created_at >= cutoff_7d)
+        .where(
+            (CapitalIncrease.bedelsiz_pct.is_(None)) &
+            (CapitalIncrease.bedelli_pct.is_(None)) &
+            (CapitalIncrease.tahsisli_pct.is_(None))
+        )
+        .order_by(desc(CapitalIncrease.created_at))
+        .limit(25)
+    )).scalars().all()
+
+    # ── Is anlasmasi anomalileri (amount NULL son 7 gun) ──
+    bd_issues = (await db.execute(
+        select(BusinessDeal)
+        .where(BusinessDeal.created_at >= cutoff_7d)
+        .where(BusinessDeal.amount_original.is_(None))
+        .order_by(desc(BusinessDeal.created_at))
+        .limit(25)
+    )).scalars().all()
+
+    return templates.TemplateResponse("admin/pipeline_health.html", {
+        "request": request,
+        "kap_stats": kap_stats,
+        "bilanco_rows": bilanco_rows,
+        "bilanco_issues": bilanco_issues,
+        "dividend_rows": dividend_rows,
+        "dividend_issues": dividend_issues,
+        "bt_issues": bt_issues,
+        "tc_issues": tc_issues,
+        "ci_issues": ci_issues,
+        "bd_issues": bd_issues,
+        "now": now,
+    })
