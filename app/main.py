@@ -16011,20 +16011,11 @@ async def list_latest_bilancos(
         )
         for t in tr.scalars().all():
             temel_map[t.ticker] = t
-    # Son fiyat — DailyStockMarketStat'tan
+    # Son fiyat — Yahoo Finance (close_price DailyStockMarketStat'tan BIST lisans nedeniyle kaldirildi)
     prices_map: dict[str, float] = {}
-    if unique_tickers:
-        pr = await db.execute(
-            select(DailyStockMarketStat)
-            .where(DailyStockMarketStat.ticker.in_(unique_tickers))
-            .order_by(DailyStockMarketStat.ticker, desc(DailyStockMarketStat.date))
-        )
-        for p in pr.scalars().all():
-            if p.ticker not in prices_map and p.close_price:
-                prices_map[p.ticker] = float(p.close_price)
 
-    # Yahoo fallback — DB'de fiyati olmayan ticker'lar icin (paralel, concurrency=20)
-    missing = [t for t in unique_tickers if t not in prices_map]
+    # Yahoo fallback — tum ticker'lar icin (paralel, concurrency=20)
+    missing = list(unique_tickers)
     if missing:
         import asyncio as _asyncio
         sem = _asyncio.Semaphore(20)
