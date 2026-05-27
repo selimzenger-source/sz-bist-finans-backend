@@ -4472,7 +4472,7 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
     kap_items = kap_items[:80]
     tickers = [k.company_code for k in kap_items if k.company_code]
 
-    # Her ticker için en yeni 1 financial + 1 önceki dönem (sayfa kart için)
+    # Her ticker için son 8 dönem (cesiklik chart icin) — period DESC sirayla
     fin_by_ticker: dict[str, list] = {}
     if tickers:
         fin_q = (
@@ -4482,6 +4482,9 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
         )
         for f in (await db.execute(fin_q)).scalars().all():
             fin_by_ticker.setdefault(f.ticker, []).append(f)
+        # Her ticker icin max 8 donem yeterli
+        for tk in list(fin_by_ticker.keys()):
+            fin_by_ticker[tk] = fin_by_ticker[tk][:8]
 
     # Birleştirilmiş list (her item: kap + current + prev)
     merged: list[dict] = []
@@ -4505,6 +4508,36 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
             except Exception:
                 pass
 
+        # Son 5 ceyreklik veri (en eski sondan ilk basa) — bar chart icin
+        recent5 = list(reversed(fins[:5])) if fins else []
+        quarterly_rev = [
+            {"label": f.period or "?", "value": float(f.revenue) if f.revenue else None}
+            for f in recent5
+        ]
+        quarterly_ebitda = [
+            {"label": f.period or "?", "value": float(f.ebitda) if f.ebitda else None}
+            for f in recent5
+        ]
+        quarterly_ni = [
+            {"label": f.period or "?", "value": float(f.net_income) if f.net_income else None}
+            for f in recent5
+        ]
+
+        # ROE = net_income / total_equity * 100 (yillik bazinda olmali ama yaklasik)
+        roe = None
+        if current and current.net_income and current.total_equity and current.total_equity > 0:
+            try:
+                roe = (float(current.net_income) / float(current.total_equity)) * 100
+            except (TypeError, ValueError):
+                pass
+        # Borç / Ozkaynak orani
+        debt_to_equity = None
+        if current and current.total_debt and current.total_equity and current.total_equity > 0:
+            try:
+                debt_to_equity = float(current.total_debt) / float(current.total_equity)
+            except (TypeError, ValueError):
+                pass
+
         merged.append({
             "ticker": ticker,
             "title": kap.title or "",
@@ -4516,6 +4549,11 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
             "current": current,
             "prev_income": prev_income,
             "prev_balance": prev_balance,
+            "quarterly_rev": quarterly_rev,
+            "quarterly_ebitda": quarterly_ebitda,
+            "quarterly_ni": quarterly_ni,
+            "roe": roe,
+            "debt_to_equity": debt_to_equity,
         })
 
     return templates.TemplateResponse("admin/bilanco_havuzu.html", {

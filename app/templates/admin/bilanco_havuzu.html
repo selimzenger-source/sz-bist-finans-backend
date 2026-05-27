@@ -6,6 +6,7 @@
 {# ─── Jinja Helpers ─── #}
 {%- macro fmt_num(n) -%}
 {%- if n is none -%}—
+{%- elif n|float == 0 -%}—
 {%- else -%}
   {%- set v = n|float -%}
   {%- set a = v if v >= 0 else -v -%}
@@ -22,7 +23,7 @@
 <div class="row">
   <span class="label">{{ label }}</span>
   <span class="value" {% if bold %}style="font-weight:700"{% endif %}>{{ fmt_num(curr) }}</span>
-  {%- if curr is not none and prev is not none and prev != 0 -%}
+  {%- if curr is not none and prev is not none and prev != 0 and curr != 0 -%}
     {%- set pct = ((curr|float - prev|float) / (prev|float if prev|float >= 0 else -prev|float)) * 100 -%}
     {%- set is_up = pct > 0 -%}
     {%- if pct == 0 -%}
@@ -32,11 +33,61 @@
     {%- else -%}
       {%- set cls = 'down' -%}
     {%- endif -%}
-    <span class="pct {{ cls }}">{% if pct > 0 %}+{% endif %}{{ "%.0f"|format(pct) }}%</span>
+    {# Asiri yuksek/dusuk yuzdeleri cap'le — gorsel sapmayi onle #}
+    {%- if pct > 999 -%}
+      <span class="pct {{ cls }}">+999%+</span>
+    {%- elif pct < -999 -%}
+      <span class="pct {{ cls }}">-999%+</span>
+    {%- else -%}
+      <span class="pct {{ cls }}">{% if pct > 0 %}+{% endif %}{{ "%.0f"|format(pct) }}%</span>
+    {%- endif -%}
   {%- else -%}
     <span class="pct na">—</span>
   {%- endif -%}
 </div>
+{%- endmacro -%}
+
+{# Period etiketi kompakt: 2025-Q4 -> 25Q4 #}
+{%- macro short_period(p) -%}
+{%- if not p -%}—
+{%- elif '-Q' in p -%}
+  {%- set parts = p.split('-Q') -%}
+  {{ parts[0][2:] }}Q{{ parts[1] }}
+{%- else -%}{{ p }}
+{%- endif -%}
+{%- endmacro -%}
+
+{# Mini SVG bar chart — quarterly veriyi gosterir #}
+{%- macro bar_chart(title, items, color='#42A5F5', neg_color='#FF5252') -%}
+{# items: [{label, value}, ...] — value None ise atla #}
+{%- set valid_vals = items | selectattr('value', 'ne', none) | map(attribute='value') | list -%}
+{%- if valid_vals -%}
+  {%- set max_v = valid_vals | map('abs') | max -%}
+  {%- set bar_count = items | length -%}
+  {%- set chart_w = 200 -%}
+  {%- set chart_h = 80 -%}
+  {%- set bar_gap = 8 -%}
+  {%- set bar_w = ((chart_w - (bar_count - 1) * bar_gap) / bar_count) | round(0, 'floor') | int -%}
+  <div class="mini-chart">
+    <div class="mini-chart-title">{{ title }}</div>
+    <svg viewBox="0 0 {{ chart_w }} {{ chart_h + 22 }}" width="100%" preserveAspectRatio="xMidYMid meet">
+      {%- for it in items -%}
+        {%- set x = loop.index0 * (bar_w + bar_gap) -%}
+        {%- if it.value is not none and max_v > 0 -%}
+          {%- set h = (it.value | abs / max_v) * chart_h -%}
+          {%- set y = chart_h - h -%}
+          {%- set fill = neg_color if it.value < 0 else color -%}
+          <rect x="{{ x }}" y="{{ y | round(0) }}" width="{{ bar_w }}" height="{{ h | round(0) }}"
+                fill="{{ fill }}" opacity="{% if loop.last %}1{% else %}0.65{% endif %}" rx="2"/>
+          <text x="{{ x + (bar_w / 2) | int }}" y="{{ (y | round(0)) - 3 }}"
+                font-size="8" fill="#94A3B8" text-anchor="middle">{# value label disable, kalabalik #}</text>
+        {%- endif -%}
+        <text x="{{ x + (bar_w / 2) | int }}" y="{{ chart_h + 12 }}"
+              font-size="8" fill="#94A3B8" text-anchor="middle">{{ short_period(it.label) }}</text>
+      {%- endfor -%}
+    </svg>
+  </div>
+{%- endif -%}
 {%- endmacro -%}
 
 <style>
@@ -107,6 +158,35 @@
     .havuz-grid { grid-template-columns: 1fr; }
     .bilanco-card .tables { grid-template-columns: 1fr; }
   }
+  /* Cesiklik bar chart blogu (3 mini chart yan yana) */
+  .bilanco-card .charts {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px;
+  }
+  .bilanco-card .mini-chart {
+    background: #0A1424; border: 1px solid #1F2C3D; border-radius: 8px; padding: 8px;
+  }
+  .bilanco-card .mini-chart-title {
+    font-size: 10px; font-weight: 600; color: #94A3B8;
+    text-align: center; margin-bottom: 4px;
+  }
+  /* ROE / Borç bandi */
+  .bilanco-card .ratios {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;
+  }
+  .bilanco-card .ratio-box {
+    background: #0A1424; border: 1px solid #1F2C3D; border-radius: 8px;
+    padding: 8px 10px; text-align: center;
+  }
+  .bilanco-card .ratio-label {
+    font-size: 10px; color: #94A3B8; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .bilanco-card .ratio-value {
+    font-size: 16px; font-weight: 800; color: #fff; margin-top: 2px;
+  }
+  .bilanco-card .ratio-value.up { color: #00E676; }
+  .bilanco-card .ratio-value.down { color: #FF5252; }
+  .bilanco-card .ratio-value.warn { color: #FFB74D; }
 </style>
 
 <div class="mb-6">
@@ -209,6 +289,41 @@
       {% else %}
       <div style="padding:20px; text-align:center; color:#6B7790; font-size:13px;">
         Henüz bilanço verisi yok (KAP açıklandı, parse bekleniyor)
+      </div>
+      {% endif %}
+
+      {# Cesiklik mini bar chart'lar — sanayi/banka/sigorta ortak #}
+      {% if it.quarterly_rev and (it.quarterly_rev | selectattr('value', 'ne', none) | list) %}
+      <div class="charts">
+        {% if sector == 'bank' %}
+          {{ bar_chart('Çey. Net Faiz', it.quarterly_rev, '#1565C0', '#FF5252') }}
+        {% elif sector == 'insurance' %}
+          {{ bar_chart('Çey. Brüt Prim', it.quarterly_rev, '#7B61FF', '#FF5252') }}
+        {% else %}
+          {{ bar_chart('Çey. Satışlar', it.quarterly_rev, '#1565C0', '#FF5252') }}
+        {% endif %}
+        {% if sector != 'insurance' %}
+        {{ bar_chart('Çey. FAVÖK', it.quarterly_ebitda, '#2E7D32', '#FF5252') }}
+        {% endif %}
+        {{ bar_chart('Çey. Net Kâr', it.quarterly_ni, '#2E7D32', '#FF5252') }}
+      </div>
+      {% endif %}
+
+      {# ROE + Borç/Özkaynak oran bandi #}
+      {% if it.roe is not none or it.debt_to_equity is not none %}
+      <div class="ratios">
+        {% if it.roe is not none %}
+        <div class="ratio-box">
+          <div class="ratio-label">ROE</div>
+          <div class="ratio-value {% if it.roe > 0 %}up{% else %}down{% endif %}">{{ "%.1f"|format(it.roe) }}%</div>
+        </div>
+        {% endif %}
+        {% if it.debt_to_equity is not none %}
+        <div class="ratio-box">
+          <div class="ratio-label">Borç / Özkaynak</div>
+          <div class="ratio-value {% if it.debt_to_equity > 2 %}warn{% elif it.debt_to_equity > 3 %}down{% else %}up{% endif %}">{{ "%.2f"|format(it.debt_to_equity) }}x</div>
+        </div>
+        {% endif %}
       </div>
       {% endif %}
 
