@@ -15865,6 +15865,20 @@ async def get_top_bilancos(
         if k.company_code not in kap_by_ticker:
             kap_by_ticker[k.company_code] = k
 
+    # earnings_calendar.announced_date — her ticker icin gercek bilanco aciklama tarihi.
+    # KapAllDisclosure'da is_bilanco=True olmayan eski kayitlar icin de bu tarihten
+    # 'recent' sirasini olusturabiliriz. KLGYO disinda da sirali olsun diye.
+    from app.models.earnings_calendar import EarningsCalendar
+    ec_result = await db.execute(
+        select(EarningsCalendar)
+        .where(EarningsCalendar.ticker.in_(tickers))
+        .where(EarningsCalendar.period == period)
+        .where(EarningsCalendar.announced_date.isnot(None))
+    )
+    announced_by_ticker: dict[str, date] = {}
+    for ec in ec_result.scalars().all():
+        announced_by_ticker[ec.ticker] = ec.announced_date
+
     # 3. Ratio + price ekle
     ratios_result = await db.execute(
         select(FinancialRatio)
@@ -15918,11 +15932,12 @@ async def get_top_bilancos(
             "ai_label": cf_label,
             "ai_summary": ai_summary,
             "ai_sentiment": kap.ai_sentiment if kap else None,
-            # Sirayla: KAP published_at > CompanyFinancial scraped_at > updated_at
+            # Sirayla: KAP published_at > earnings_calendar.announced_date > scraped_at
             "published_at": (
                 kap.published_at.isoformat() if kap and kap.published_at else
-                (fin.scraped_at.isoformat() if getattr(fin, "scraped_at", None) else
-                 (fin.updated_at.isoformat() if getattr(fin, "updated_at", None) else None))
+                (announced_by_ticker[ticker].isoformat() if ticker in announced_by_ticker else
+                 (fin.scraped_at.isoformat() if getattr(fin, "scraped_at", None) else
+                  (fin.updated_at.isoformat() if getattr(fin, "updated_at", None) else None)))
             ),
             "fk": _f(ratio.fk) if ratio else None,
             "pddd": _f(ratio.pddd) if ratio else None,
