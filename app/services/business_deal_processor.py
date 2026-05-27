@@ -155,21 +155,45 @@ def _normalize_currency(raw: str) -> str:
 
 
 def _parse_tr_number(raw: str) -> Optional[float]:
-    """Türkçe sayı (12.100.000,50) → float."""
+    """Türkçe sayı parser.
+
+    Format ayrımı (KRİTİK — eski versiyon "18.8" → 188 bug'i için düzeltildi):
+    - "12.100.000,50" → 12100000.50 (Türkçe full format, virgül = ondalık)
+    - "12.100.000"    → 12100000    (3'lü grup → binlik ayraç)
+    - "18.8"          → 18.8        (3 haneden farklı → ondalık)
+    - "0.95"          → 0.95        (ondalık)
+    - "3,5"           → 3.5         (virgül = ondalık)
+
+    Önceki bug: "18.8" → noktayı binlik sayıp `188.0` döndürüyordu.
+    Sonuç: ASELS 188 milyar TL (gerçek 18.8 milyar), LINK 402 mn (gerçek 40 mn),
+    ONCSM 366 mn (gerçek 36.6 mn) kayıtlarında 10× hata oluştu.
+    """
     if not raw:
         return None
     s = raw.strip().replace(" ", "")
-    # 12.100.000,50 → 12100000.50
+    # 12.100.000,50 → 12100000.50 (Türkçe full)
     if "," in s:
-        # Son virgülden sonrası ondalık
         int_part, dec_part = s.rsplit(",", 1)
         int_part = int_part.replace(".", "")
         try:
             return float(f"{int_part}.{dec_part}")
         except ValueError:
             return None
-    # 12.100.000 (sadece nokta — binlik ayraç)
-    s = s.replace(".", "")
+    # Sadece nokta var
+    if "." in s:
+        parts = s.split(".")
+        # Tüm "nokta sonrası" grupları tam 3 hane ise → binlik ayraç ("12.100.000")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            try:
+                return float(s.replace(".", ""))
+            except ValueError:
+                return None
+        # Aksi takdirde nokta = ondalık ayraç ("18.8", "0.95", "3.14")
+        try:
+            return float(s)
+        except ValueError:
+            return None
+    # Hiç ayraç yok — düz sayı
     try:
         return float(s)
     except ValueError:

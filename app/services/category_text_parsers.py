@@ -29,13 +29,31 @@ _TR_MONTHS = {
 
 
 def _parse_tr_number(s: str) -> Optional[float]:
+    """Türkçe sayı: "12.100.000,50"→12100000.5, "95.000"→95000, "3.5"→3.5
+    KRITIK: tek nokta sonrasi 3 hane ise binlik ayraç, degilse ondalık.
+    Onceki bug: "95.000" -> 95.0 idi (1000x kucuk).
+    """
     if not s:
         return None
     s = s.strip().replace(" ", "")
     if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif s.count(".") > 1:
-        s = s.replace(".", "")
+        int_part, dec_part = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec_part}")
+        except (ValueError, TypeError):
+            return None
+    if "." in s:
+        parts = s.split(".")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            try:
+                return float(s.replace(".", ""))
+            except (ValueError, TypeError):
+                return None
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
     try:
         return float(s)
     except (ValueError, TypeError):

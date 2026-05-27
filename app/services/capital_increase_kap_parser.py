@@ -101,17 +101,32 @@ def detect_stage(title: str, body: str) -> Optional[str]:
 # ═══════════════════════════════════════════════════════════════════
 
 def _parse_tr_number(s: str) -> Optional[float]:
-    """1.845.000.000,00 -> 1845000000.0; 638,33834 -> 638.33834"""
+    """1.845.000.000,00 -> 1845000000.0; 638,33834 -> 638.33834; 95.000 -> 95000
+
+    KRITIK: Tek nokta sonrasi 3 hane ise binlik ayrac say. Onceki versiyon
+    "95.000" -> 95.0 yapiyordu (1000x kucuk).
+    """
     if not s:
         return None
     s = s.strip().replace(" ", "")
-    # Virgul varsa: nokta=binlik, virgul=ondalik
     if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    else:
-        # Sadece nokta varsa: 2+ nokta varsa binlik (1.000.000), tek nokta ondalik (1.5)
-        if s.count(".") > 1:
-            s = s.replace(".", "")
+        int_part, dec_part = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec_part}")
+        except ValueError:
+            return None
+    if "." in s:
+        parts = s.split(".")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            try:
+                return float(s.replace(".", ""))
+            except ValueError:
+                return None
+        try:
+            return float(s)
+        except ValueError:
+            return None
     try:
         return float(s)
     except ValueError:

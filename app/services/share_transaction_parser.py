@@ -46,14 +46,30 @@ _TYPE_RE = re.compile(r"^(Al[ıi]c[ıi]|Sat[ıi]c[ıi])$", re.IGNORECASE)
 
 
 def _parse_tr_number(s: str) -> Optional[float]:
-    """Turkce sayi: 1.978.375 -> 1978375.0, 15,60 -> 15.60"""
+    """Turkce sayi: "1.978.375"→1978375, "15,60"→15.60, "95.000"→95000, "3.5"→3.5
+    Tek nokta sonrasi 3 hane ise binlik, degilse ondalik. ("95.000"→95.0 bug fix)
+    """
     if not s:
         return None
     s = s.strip().replace(" ", "")
     if "," in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif s.count(".") > 1:
-        s = s.replace(".", "")
+        int_part, dec_part = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec_part}")
+        except (ValueError, TypeError):
+            return None
+    if "." in s:
+        parts = s.split(".")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            try:
+                return float(s.replace(".", ""))
+            except (ValueError, TypeError):
+                return None
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
     try:
         return float(s)
     except (ValueError, TypeError):
