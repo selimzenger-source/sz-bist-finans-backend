@@ -16042,32 +16042,42 @@ async def list_latest_bilancos(
     for kap in kap_items:
         ticker = kap.company_code
 
-        # Son 5 dönem (quarterly chart için)
+        # Son 8 dönem (2 yıl) — quarterly chart + iki tip karşılaştırma için
         fin_result = await db.execute(
             select(CompanyFinancial)
             .where(CompanyFinancial.ticker == ticker)
             .order_by(desc(CompanyFinancial.period))
-            .limit(5)
+            .limit(8)
         )
         finals = list(fin_result.scalars().all())
         fin = finals[0] if finals else None
-        prev = finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None)
-        # Yıllık karşılaştırma için aynı çeyrek bir yıl önceki
-        prev_yoy = None
+
+        # ★ İki farklı önceki dönem hesabı (Fintables tarzı):
+        # - Gelir tablosu için: aynı çeyrek bir yıl önce (YoY — büyüme trendi)
+        # - Bilanço için: önceki yıl sonu (Q4) — yıl başına göre değişim
+        prev_income = None  # YoY (gelir tablosu karşılaştırması)
+        prev_balance = None  # Önceki yıl sonu (bilanço karşılaştırması)
         if fin and fin.period:
             try:
                 year, q = fin.period.split('-')
-                prev_year_period = f"{int(year)-1}-{q}"
+                cur_year = int(year)
+                yoy_period = f"{cur_year - 1}-{q}"          # örn 2025-Q1
+                year_end_period = f"{cur_year - 1}-Q4"      # örn 2025-Q4
+
                 for f in finals:
-                    if f.period == prev_year_period:
-                        prev_yoy = f
-                        break
+                    if f.period == yoy_period:
+                        prev_income = f
+                    if f.period == year_end_period:
+                        prev_balance = f
             except Exception:
                 pass
-        prev_to_use = prev_yoy or prev
 
-        # Çeyreklik bars — eskiden yeniye sirala
-        quarterly = list(reversed(finals))
+        # Fallback: prev_income veya prev_balance yoksa son 5. dönemi kullan
+        prev_to_use_income = prev_income or (finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None))
+        prev_to_use_balance = prev_balance or prev_to_use_income
+
+        # Çeyreklik bars — eskiden yeniye sirala (son 5 kayıt yeterli)
+        quarterly = list(reversed(finals[:5]))
 
         ratio = ratios_map.get(ticker)
         temel = temel_map.get(ticker)
@@ -16093,48 +16103,49 @@ async def list_latest_bilancos(
             "ai_sentiment": kap.ai_sentiment,
             "ai_summary": kap.ai_summary[:200] if kap.ai_summary else None,
             "period": fin.period if fin else None,
-            "prev_period": prev_to_use.period if prev_to_use else None,
+            # Gelir prev = YoY (aynı çeyrek bir yıl önce), Bilanço prev = önceki yıl sonu (Q4)
+            "prev_period": prev_to_use_income.period if prev_to_use_income else None,
+            "prev_period_balance": prev_to_use_balance.period if prev_to_use_balance else None,
             # Degerlik (financial_ratios -> temel_analiz fallback)
             "fk": fk_val,
             "pddd": pddd_val,
             "fd_favok": fd_favok_val,
             "piyasa_degeri": piyasa_val,
             "price": price_now,
-            # Mevcut donem
+            # Mevcut donem — gelir tablosu
             "revenue": _f(fin.revenue) if fin else None,
             "gross_profit": _f(fin.gross_profit) if fin else None,
             "operating_profit": _f(fin.operating_profit) if fin else None,
-            # EBITDA fallback: scraper bos cektiyse operating_profit kullan
-            # (FAVOK ≈ faaliyet kari + amortisman; amortisman ozel scrape gerek)
-            "ebitda": (_f(fin.ebitda) if fin and fin.ebitda is not None else (_f(fin.operating_profit) if fin else None)),
+            "ebitda": _f(fin.ebitda) if fin else None,  # parser doğru EBITDA hesapliyor, fallback yok
             "net_income": _f(fin.net_income) if fin else None,
+            # Mevcut donem — bilanço (snapshot)
             "current_assets": _f(fin.current_assets) if fin else None,
             "non_current_assets": _f(fin.non_current_assets) if fin else None,
             "total_assets": _f(fin.total_assets) if fin else None,
             "total_equity": _f(fin.total_equity) if fin else None,
-            "total_debt": _f(fin.total_debt) if fin else None,
+            "total_debt": _f(fin.total_debt) if fin else None,  # artik Financial Debt
             "net_debt": _f(fin.net_debt) if fin else None,
             "cash_and_equivalents": _f(fin.cash_and_equivalents) if fin else None,
             "gross_margin_pct": _f(fin.gross_margin_pct) if fin else None,
             "net_margin_pct": _f(fin.net_margin_pct) if fin else None,
             "roe_pct": _f(fin.roe_pct) if fin else None,
-            # Onceki donem (yyy ya da onceki ceyrek)
-            "revenue_prev": _f(prev_to_use.revenue) if prev_to_use else None,
-            "gross_profit_prev": _f(prev_to_use.gross_profit) if prev_to_use else None,
-            "ebitda_prev": (_f(prev_to_use.ebitda) if prev_to_use and prev_to_use.ebitda is not None else (_f(prev_to_use.operating_profit) if prev_to_use else None)),
-            "net_income_prev": _f(prev_to_use.net_income) if prev_to_use else None,
-            "current_assets_prev": _f(prev_to_use.current_assets) if prev_to_use else None,
-            "non_current_assets_prev": _f(prev_to_use.non_current_assets) if prev_to_use else None,
-            "total_assets_prev": _f(prev_to_use.total_assets) if prev_to_use else None,
-            "total_equity_prev": _f(prev_to_use.total_equity) if prev_to_use else None,
-            "net_debt_prev": _f(prev_to_use.net_debt) if prev_to_use else None,
-            # Ceyreklik bars
+            # Önceki dönem — GELİR TABLOSU (YoY karşılaştırma)
+            "revenue_prev": _f(prev_to_use_income.revenue) if prev_to_use_income else None,
+            "gross_profit_prev": _f(prev_to_use_income.gross_profit) if prev_to_use_income else None,
+            "ebitda_prev": _f(prev_to_use_income.ebitda) if prev_to_use_income else None,
+            "net_income_prev": _f(prev_to_use_income.net_income) if prev_to_use_income else None,
+            # Önceki dönem — BİLANÇO (önceki yıl sonu = Q4 karşılaştırma)
+            "current_assets_prev": _f(prev_to_use_balance.current_assets) if prev_to_use_balance else None,
+            "non_current_assets_prev": _f(prev_to_use_balance.non_current_assets) if prev_to_use_balance else None,
+            "total_assets_prev": _f(prev_to_use_balance.total_assets) if prev_to_use_balance else None,
+            "total_equity_prev": _f(prev_to_use_balance.total_equity) if prev_to_use_balance else None,
+            "net_debt_prev": _f(prev_to_use_balance.net_debt) if prev_to_use_balance else None,
+            # Ceyreklik bars (artık gerçek quarterly veri — parser YTD'den dönüştürdü)
             "quarterly": [
                 {
                     "period": q.period,
                     "revenue": _f(q.revenue),
-                    # EBITDA fallback to operating_profit (FAVOK ≈ faaliyet kari + amortisman)
-                    "ebitda": (_f(q.ebitda) if q.ebitda is not None else _f(q.operating_profit)),
+                    "ebitda": _f(q.ebitda),
                     "net_income": _f(q.net_income),
                 }
                 for q in quarterly
