@@ -4754,13 +4754,35 @@ async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
     )).scalars().all()
 
     # ── Bilanco anomalileri (son 7 gun) ──
+    # SEKTOR-AWARE: Banka/sigorta/faktoring sektorlerinde 'revenue' alani NULL
+    # olabilir cunku farkli alana yazilir (net_interest_income, gross_premiums).
+    # Sadece sanayi (industrial) icin revenue NULL gercek anomalidir.
+    # total_assets ise her sektorde olmali.
+    # Kritik: sadece industrial sektorde revenue+net_income NULL filtresi uygula.
     bilanco_issues_q = await db.execute(
         select(CompanyFinancial)
         .where(CompanyFinancial.updated_at >= cutoff_7d)
         .where(
-            (CompanyFinancial.revenue.is_(None)) |
+            # total_assets her sektorde gerekli
             (CompanyFinancial.total_assets.is_(None)) |
-            (CompanyFinancial.net_income.is_(None))
+            # Sektor=industrial veya null ise revenue ve net_income gerekli
+            (
+                (CompanyFinancial.sector_type.in_(["industrial", None])) &
+                (
+                    (CompanyFinancial.revenue.is_(None)) |
+                    (CompanyFinancial.net_income.is_(None))
+                )
+            ) |
+            # Banka: net_interest_income NULL ise anomali
+            (
+                (CompanyFinancial.sector_type == "bank") &
+                (CompanyFinancial.net_interest_income.is_(None))
+            ) |
+            # Sigorta: gross_premiums NULL ise anomali
+            (
+                (CompanyFinancial.sector_type == "insurance") &
+                (CompanyFinancial.gross_premiums.is_(None))
+            )
         )
         .order_by(desc(CompanyFinancial.updated_at))
         .limit(25)
@@ -4824,6 +4846,16 @@ async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
         .limit(25)
     )).scalars().all()
 
+    # ── Is anlasmasi TUM kayitlar (son 30 gun) — duzenleme icin ──
+    # Kullanici sadece eksik olanlari degil, mevcutlari da duzeltebilmeli.
+    cutoff_30d = now - timedelta(days=30)
+    bd_recent = (await db.execute(
+        select(BusinessDeal)
+        .where(BusinessDeal.created_at >= cutoff_30d)
+        .order_by(desc(BusinessDeal.created_at))
+        .limit(40)
+    )).scalars().all()
+
     return templates.TemplateResponse("admin/pipeline_health.html", {
         "request": request,
         "kap_stats": kap_stats,
@@ -4835,5 +4867,6 @@ async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
         "tc_issues": tc_issues,
         "ci_issues": ci_issues,
         "bd_issues": bd_issues,
+        "bd_recent": bd_recent,
         "now": now,
     })

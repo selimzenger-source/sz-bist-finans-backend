@@ -91,22 +91,38 @@
     <h3 class="text-orange-400 font-semibold mt-6 mb-3">⚠️ Eksik Veri Olan Bilançolar ({{ bilanco_issues|length }})</h3>
     <table class="issue-table">
       <thead>
-        <tr><th>Ticker</th><th>Dönem</th><th>Eksik Alanlar</th><th>Source</th><th>İşlem</th></tr>
+        <tr><th>Ticker</th><th>Sektör</th><th>Dönem</th><th>Eksik Alanlar</th><th>Source</th><th>İşlem</th></tr>
       </thead>
       <tbody>
         {% for r in bilanco_issues %}
+        {% set sec = r.sector_type or 'industrial' %}
         <tr>
           <td class="ticker">{{ r.ticker }}</td>
+          <td><span class="badge-{% if sec == 'industrial' %}ok{% else %}warn{% endif %}">{{ sec }}</span></td>
           <td>{{ r.period }}</td>
           <td>
-            {% if not r.revenue %}<span class="badge-err">revenue</span>{% endif %}
+            {# Sektor-aware eksik field gosterimi #}
+            {% if sec == 'industrial' %}
+              {% if not r.revenue %}<span class="badge-err">revenue</span>{% endif %}
+              {% if not r.net_income %}<span class="badge-err">net_income</span>{% endif %}
+              {% if not r.ebitda %}<span class="badge-warn">ebitda</span>{% endif %}
+            {% elif sec == 'bank' %}
+              {% if not r.net_interest_income %}<span class="badge-err">net_interest_income</span>{% endif %}
+              {% if not r.net_fees_commissions %}<span class="badge-warn">net_fees_commissions</span>{% endif %}
+              {% if not r.loans %}<span class="badge-warn">loans</span>{% endif %}
+              {% if not r.net_income %}<span class="badge-err">net_income</span>{% endif %}
+            {% elif sec == 'insurance' %}
+              {% if not r.gross_premiums %}<span class="badge-err">gross_premiums</span>{% endif %}
+              {% if not r.technical_balance %}<span class="badge-warn">technical_balance</span>{% endif %}
+              {% if not r.net_income %}<span class="badge-err">net_income</span>{% endif %}
+            {% endif %}
             {% if not r.total_assets %}<span class="badge-err">total_assets</span>{% endif %}
-            {% if not r.net_income %}<span class="badge-err">net_income</span>{% endif %}
-            {% if not r.ebitda %}<span class="badge-warn">ebitda</span>{% endif %}
+            {% if not r.total_equity %}<span class="badge-err">total_equity</span>{% endif %}
           </td>
           <td>{{ r.source or '?' }}</td>
           <td>
             <a class="btn-fintables" href="https://fintables.com/sirketler/{{ r.ticker }}/finansal-tablolar" target="_blank">Fintables</a>
+            <a class="btn-link" href="https://www.isyatirim.com.tr/tr-tr/analiz/hisse/Sayfalar/Temel-Degerler-Ve-Oranlar.aspx?hisse={{ r.ticker }}" target="_blank">İş Yatırım</a>
             <a class="btn-fix" href="javascript:void(0)" onclick="fixBilancoField('{{ r.ticker }}', '{{ r.period }}')">Düzelt</a>
           </td>
         </tr>
@@ -239,26 +255,34 @@
   <!-- BUSINESS DEAL -->
   <div class="health-card">
     <div class="section-head">
-      <h2>🤝 İş Anlaşmaları — Eksik Tutar</h2>
-      <span class="count-pill {% if bd_issues %}danger{% endif %}">{{ bd_issues|length }} anomali</span>
+      <h2>🤝 İş Anlaşmaları — Son 30 Gün (Hepsi Düzenlenebilir)</h2>
+      <span class="count-pill {% if bd_issues %}danger{% endif %}">{{ bd_issues|length }} eksik tutar / {{ bd_recent|length }} toplam</span>
     </div>
-    {% if bd_issues %}
+    {% if bd_recent %}
     <table class="issue-table">
-      <thead><tr><th>ID</th><th>Ticker</th><th>Tarih</th><th>Karşı Taraf</th><th>KAP</th><th>İşlem</th></tr></thead>
+      <thead><tr><th>ID</th><th>Ticker</th><th>Tarih</th><th>Tutar (TL)</th><th>Para Br.</th><th>Karşı Taraf</th><th>KAP</th><th>İşlem</th></tr></thead>
       <tbody>
-        {% for r in bd_issues %}
-        <tr>
+        {% for r in bd_recent %}
+        <tr {% if r.amount_original is none %}style="background:rgba(248,113,113,0.06)"{% endif %}>
           <td>{{ r.id }}</td>
           <td class="ticker">{{ r.ticker }}</td>
           <td>{{ r.deal_date.strftime('%d.%m.%Y') if r.deal_date else '—' }}</td>
-          <td>{{ (r.counterparty[:40] + '…') if r.counterparty and r.counterparty|length > 40 else (r.counterparty or '—') }}</td>
+          <td>
+            {% if r.amount_try %}
+              <span class="num-val">{{ "{:,.0f}".format(r.amount_try / 1000000) }} mn</span>
+            {% else %}
+              <span class="num-null">NULL</span>
+            {% endif %}
+          </td>
+          <td>{{ r.currency or '—' }}</td>
+          <td>{{ (r.counterparty[:35] + '…') if r.counterparty and r.counterparty|length > 35 else (r.counterparty or '—') }}</td>
           <td>{% if r.kap_url %}<a class="btn-link" href="{{ r.kap_url }}" target="_blank">KAP →</a>{% endif %}</td>
           <td><a class="btn-fix" href="javascript:void(0)" onclick="fixBusinessDeal({{ r.id }}, '{{ r.ticker }}')">Düzelt</a></td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
-    {% else %}<div class="empty">Eksik tutar yok ✓</div>{% endif %}
+    {% else %}<div class="empty">Son 30 günde iş anlaşması yok</div>{% endif %}
   </div>
 </div>
 
