@@ -4538,13 +4538,21 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
             except (TypeError, ValueError):
                 pass
 
+        # AI puani: oncelik company_financials.ai_score (bilanco-spesifik),
+        # yoksa KapAllDisclosure.ai_impact_score (routine pre-filter default 5.0)
+        cf_ai_score = (current.ai_score if current and getattr(current, "ai_score", None) else None)
+        cf_ai_summary = (current.ai_summary if current and getattr(current, "ai_summary", None) else None)
+        cf_ai_label = (current.ai_label if current and getattr(current, "ai_label", None) else None)
+
         merged.append({
             "ticker": ticker,
             "title": kap.title or "",
             "published_at": kap.published_at,
-            "ai_score": kap.ai_impact_score,
+            "ai_score": cf_ai_score if cf_ai_score is not None else kap.ai_impact_score,
             "ai_sentiment": kap.ai_sentiment,
-            "ai_summary": kap.ai_summary,
+            "ai_summary": cf_ai_summary or kap.ai_summary,
+            "ai_label": cf_ai_label,
+            "ai_source": "bilanco" if cf_ai_score is not None else "routine",
             "kap_url": kap.kap_url,
             "current": current,
             "prev_income": prev_income,

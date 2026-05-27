@@ -18349,3 +18349,72 @@ async def admin_cleanup_is_bilanco_flags(
         "matched": result.rowcount,
         "note": "Sadece 'Finansal Durum Tablosu (Bilanço)' başlıklı KAP'lar is_bilanco=True olarak kaldı",
     }
+
+
+@app.post("/api/v1/admin/run-bilanco-ai")
+@limiter.limit("5/minute")
+async def admin_run_bilanco_ai(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Belirli bir ticker icin AI bilanco analizini elle tetikle.
+
+    Body: {'admin_password': '...', 'ticker': 'TTRAK', 'period': '2026-Q1'}
+    Period belirtilmezse en yeni period kullanilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.company_financial import CompanyFinancial
+    from app.services.ai_bilanco_analyzer import analyze_bilanco
+
+    ticker = (payload.get("ticker") or "").upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker zorunlu")
+
+    # Son 8 ceyrek
+    recent = (await db.execute(
+        select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
+        .order_by(desc(CompanyFinancial.period)).limit(8)
+    )).scalars().all()
+    if not recent:
+        raise HTTPException(status_code=404, detail=f"{ticker} icin bilanco verisi yok")
+
+    periods_data = [
+        {
+            "period": p.period,
+            "revenue": float(p.revenue) if p.revenue else None,
+            "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+            "operating_profit": float(p.operating_profit) if p.operating_profit else None,
+            "net_income": float(p.net_income) if p.net_income else None,
+            "ebitda": float(p.ebitda) if p.ebitda else None,
+            "total_assets": float(p.total_assets) if p.total_assets else None,
+            "total_equity": float(p.total_equity) if p.total_equity else None,
+            "total_debt": float(p.total_debt) if p.total_debt else None,
+            "net_debt": float(p.net_debt) if p.net_debt else None,
+            "net_interest_income": float(p.net_interest_income) if p.net_interest_income else None,
+            "gross_premiums": float(p.gross_premiums) if p.gross_premiums else None,
+        }
+        for p in recent
+    ]
+
+    ai_result = await analyze_bilanco(ticker, periods_data)
+    if not ai_result:
+        raise HTTPException(status_code=502, detail="AI analizi basarisiz")
+
+    # En yeni doneme yaz
+    latest = recent[0]
+    latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
+    latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
+    latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+    latest.ai_analyzed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "ticker": ticker,
+        "period": latest.period,
+        "ai_score": latest.ai_score,
+        "ai_label": latest.ai_label,
+        "summary_preview": (latest.ai_summary or "")[:200],
+    }

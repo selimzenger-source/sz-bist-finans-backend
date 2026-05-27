@@ -306,6 +306,30 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
         # 2. AI analiz — DB'deki son 8 ceyrek karsilastirilarak
         ai_result = await _run_ai_analysis(ticker, bilanco_data["periods"])
 
+        # 3. AI sonucunu DB'ye kaydet (en yeni donem icin)
+        if ai_result and recent_q:
+            try:
+                latest = recent_q[0]
+                from sqlalchemy import update as _upd
+                score = ai_result.get("overall_health_score")
+                label = ai_result.get("overall_health_label")
+                summary = ai_result.get("summary") or ai_result.get("ai_summary")
+                async with async_session() as _db_save:
+                    await _db_save.execute(
+                        _upd(CompanyFinancial)
+                        .where(CompanyFinancial.id == latest.id)
+                        .values(
+                            ai_score=float(score) if score is not None else None,
+                            ai_label=str(label)[:32] if label else None,
+                            ai_summary=str(summary)[:2000] if summary else None,
+                            ai_analyzed_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await _db_save.commit()
+                logger.info("Bilanco AI DB kayit: %s %s score=%s", ticker, latest.period, score)
+            except Exception as _e:
+                logger.warning("Bilanco AI DB kayit hata (%s): %s", ticker, _e)
+
         # 4. Tweet at (opsiyonel — AI sonucu varsa)
         if ai_result:
             await _tweet_bilanco_analysis(ticker, kap_title, ai_result)

@@ -6,7 +6,7 @@ v3.0.0 — Bilanco analizi, finansal oranlar, IPO anket ve AI asistan.
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import (
-    String, Text, Integer, DateTime,
+    String, Text, Integer, DateTime, Float,
     Numeric, Index, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -66,6 +66,20 @@ class CompanyFinancial(Base):
     # Sigorta spesifik alanlar
     gross_premiums: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Brut Yazilan Primler (sigorta)")
     technical_balance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Teknik Bolum Dengesi (sigorta)")
+
+    # AI bilanço analizi — bilanco_pipeline tarafindan doldurulur (otomatik)
+    ai_score: Mapped[float | None] = mapped_column(
+        Float, comment="AI bilanço sağlık puanı (1-10)"
+    )
+    ai_label: Mapped[str | None] = mapped_column(
+        String(32), comment="Çok İyi/İyi/Orta/Zayıf/Kötü"
+    )
+    ai_summary: Mapped[str | None] = mapped_column(
+        Text, comment="AI bilanço özet yorumu (Türkçe)"
+    )
+    ai_analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="AI analiz zamanı"
+    )
 
     # Kaynak & zaman
     source: Mapped[str | None] = mapped_column(String(50), default="isyatirim", comment="Veri kaynagi")
