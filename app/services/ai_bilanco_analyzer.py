@@ -7,6 +7,7 @@ import httpx
 import json
 import logging
 from decimal import Decimal
+from typing import Optional
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -294,12 +295,123 @@ async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
     return result
 
 
+# Gelir tablosu alanlari — YTD verilir, Net Q icin onceki YTD'den cikarma gerekir
+_INCOME_STATEMENT_FIELDS = (
+    "revenue", "gross_profit", "operating_profit", "net_income", "ebitda",
+    # Banka sektoru
+    "net_interest_income", "net_fees_commissions", "operating_revenue",
+    # Sigorta sektoru
+    "gross_premiums", "technical_balance",
+)
+# Bilanco alanlari — anlik (point-in-time), donusum GEREKMEZ
+_BALANCE_SHEET_FIELDS = (
+    "total_assets", "current_assets", "non_current_assets",
+    "total_equity", "total_debt", "net_debt", "cash_and_equivalents",
+    "loans", "deposits",
+)
+
+
+def _prev_period_in_same_year(period: str) -> Optional[str]:
+    """2026-Q2 -> 2026-Q1, 2026-Q3 -> 2026-Q2, 2026-Q4 -> 2026-Q3.
+    Q1 icin None (YTD = Q1, donusum gerekmez)."""
+    try:
+        y, q = period.split("-Q")
+        qi = int(q)
+        if qi <= 1:
+            return None
+        return f"{y}-Q{qi - 1}"
+    except (ValueError, AttributeError):
+        return None
+
+
+async def _convert_ytd_to_net_quarter(
+    db,
+    ticker: str,
+    period: str,
+    parsed: dict,
+) -> dict:
+    """KAP XBRL'inden gelen gelir tablosu RAKAMLARI YTD'dir (yil basindan beri).
+    Net ceyrek icin onceki donemin YTD'sini cikartmak gerekir.
+
+    Q1: 3 aylik YTD = Q1 (donusum yok)
+    Q2: 6 aylik YTD - Q1 = Q2 net
+    Q3: 9 aylik YTD - H1 YTD = Q3 net
+    Q4: 12 aylik YTD - 9M YTD = Q4 net
+
+    DB'de onceki donem yoksa: gelir alanlarini None yap (yanlis YTD yazmaktan iyidir).
+    """
+    if not period or "-Q" not in period:
+        return parsed
+    prev_period = _prev_period_in_same_year(period)
+    if prev_period is None:
+        # Q1 — YTD zaten net Q1, donusum yok
+        return parsed
+
+    from app.models.company_financial import CompanyFinancial
+    from sqlalchemy import select
+
+    # Yil basindan beri kumulatif: Q2'de prev Q1'in NET'i = Q1 YTD
+    # Q3'te prev Q1+Q2 net toplami = H1 YTD lazim
+    # Q4'te Q1+Q2+Q3 net toplami = 9M YTD lazim
+    qi = int(period.split("-Q")[1])
+    year = period.split("-Q")[0]
+    cumulative: dict[str, float] = {f: 0.0 for f in _INCOME_STATEMENT_FIELDS}
+    found_any = False
+    for prev_q in range(1, qi):
+        pp = f"{year}-Q{prev_q}"
+        row = (await db.execute(
+            select(CompanyFinancial).where(
+                CompanyFinancial.ticker == ticker,
+                CompanyFinancial.period == pp,
+            )
+        )).scalar_one_or_none()
+        if row is None:
+            # Onceki donem eksik — kumulatif hesabi yapamayiz, guvenli skip
+            logger.warning(
+                "YTD->Q donusum: %s %s icin onceki donem %s eksik, gelir alanlari atlanacak",
+                ticker, period, pp,
+            )
+            for f in _INCOME_STATEMENT_FIELDS:
+                if parsed.get(f) is not None:
+                    parsed[f] = None  # Yanlis YTD yazmaktansa NULL biraktig
+            return parsed
+        found_any = True
+        for f in _INCOME_STATEMENT_FIELDS:
+            v = getattr(row, f, None)
+            if v is not None:
+                cumulative[f] += float(v)
+
+    if not found_any:
+        # Q2+ ama hicbir prev veri yok — gelir alanlari skip
+        for f in _INCOME_STATEMENT_FIELDS:
+            if parsed.get(f) is not None:
+                parsed[f] = None
+        return parsed
+
+    # Net Q = YTD - kumulatif onceki Q'lar
+    for f in _INCOME_STATEMENT_FIELDS:
+        ytd_val = parsed.get(f)
+        if ytd_val is not None:
+            parsed[f] = float(ytd_val) - cumulative[f]
+
+    logger.info(
+        "YTD->Q donusum: %s %s — gelir alanlari %s onceki Q toplamlardan cikartildi",
+        ticker, period, ", ".join(f for f in _INCOME_STATEMENT_FIELDS if parsed.get(f) is not None),
+    )
+    return parsed
+
+
 async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
     """
     AI ile parse edilen bilanço rakamlarını DB'ye kaydeder.
 
     needs_verification=True ile kaydedilir — IsYatirim'den kesin veri
     geldiğinde üzerine yazılır.
+
+    KRITIK: KAP XBRL gelir tablosunu YTD verir. Q2-Q4 icin onceki dönemler
+    cikartilarak NET CEYREK degerine donusturulur. Aksi halde Q2'de revenue
+    Q1+Q2 toplami görünür ve AI "%200 büyüme" yorumu yapar (kullanicinin
+    "0 fazla" sikayetinin kaynagi).
     """
     try:
         from app.database import async_session
@@ -309,6 +421,10 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
         period = parsed.get("period")
         if not period:
             return False
+
+        # YTD -> Net Ceyrek donusumu (Q2/Q3/Q4 icin)
+        async with async_session() as _conv_db:
+            parsed = await _convert_ytd_to_net_quarter(_conv_db, ticker, period, parsed)
 
         async with async_session() as db:
             # Var mı kontrol et

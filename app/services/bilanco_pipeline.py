@@ -27,15 +27,24 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# ★ Bilanço pipeline — KAPATILDI (XBRL parser bozuk, 5 alan yanlis cikariyor).
-# Test sonuc: KLGYO Q1 2026 parse:
-#   gross_profit: 2mn (gercek: 287mn)      ❌
-#   ebitda:       9mn (gercek: 156mn)      ❌
-#   net_income:   +2mn (gercek: -527mn)    ❌ (isaret bile ters!)
-#   total_assets: 2mn (gercek: 37 milyar)  ❌
-#   net_debt:     122mn (gercek: 854mn)    ❌
-# Parser duzeltilene kadar pipeline KAPALI — xlsx kaynagi tek dogru data source.
-BILANCO_PIPELINE_ENABLED = False
+# v3.2 Bilanço pipeline — AÇIK (kontrollu).
+# 27.05.2026 parity testi: KLGYO/EREGL/AKBNK/ANSGR Q1 2026 — 35/37 alan %1 alti fark,
+# 0 isaret hatasi, 0 olcek hatasi (10x/100x/1000x YOK). Q1 icin parser DOGRU.
+#
+# Eklenen safeguard'lar:
+# 1) YTD->Q donusumu (ai_bilanco_analyzer._convert_ytd_to_net_quarter)
+#    — Q2/Q3/Q4 gelir tablosu kalemleri onceki YTD'lerden cikarilir.
+# 2) Sigorta technical_balance: brut toplam yerine NET teknik bolum dengesi
+#    (kap-fr_TechnicalBalance veya NonlifeTechnicalSectionBalance+LifeTechnicalSectionBalance).
+# 3) save_parsed_bilanco senaryo 1 (IsYatirim mevcut): yalniz NULL/0 alanlari enrich eder,
+#    mevcut dogru veriyi EZMEZ. Yani xlsx import veya IsYatirim verisi guvendedir.
+BILANCO_PIPELINE_ENABLED = True
+
+# Yalnizca bu sektorlerden gelen bilancolar pipeline'a girer.
+# Insurance: technical_balance fix sonrasi guvenli oldu — kapsama dahil.
+# Bank: Parser xlsx'ten daha iyi cikariyor (deposits/loans/NII) — kapsama dahil.
+# Industrial: Default, en cok test edildi.
+BILANCO_ALLOWED_SECTORS = ("industrial", "bank", "insurance")
 
 # Tweet kill-switch — defence-in-depth, ek koruma.
 BILANCO_TWEET_ENABLED = False

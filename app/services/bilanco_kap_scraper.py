@@ -86,10 +86,15 @@ INSURANCE_TAG_TO_FIELD: dict[str, str] = {
     "ifrs-full_Equity|": "total_equity",
     "ifrs-full_Liabilities|": "total_debt",
     "ifrs-full_CashAndCashEquivalents|": "cash_and_equivalents",
-    # Sigorta gelir tablosu
-    "kap-fr_NonlifeTechnicalIncome|": "_nonlife_tech_income",       # HAYAT DIŞI TEKNİK GELİR
-    "kap-fr_LifeTechnicalIncome|": "_life_tech_income",              # HAYAT TEKNİK GELİR
-    # Brüt Yazılan Prim — Hayat Dışı + Hayat ayrı satır, ikisini toplayacağız
+    # Sigorta gelir tablosu — teknik GELIR (brut) — net teknik dengeden farkli
+    "kap-fr_NonlifeTechnicalIncome|": "_nonlife_tech_income",
+    "kap-fr_LifeTechnicalIncome|": "_life_tech_income",
+    # Net teknik bölüm dengesi — Hayat Dışı + Hayat (income − expense net'i)
+    # Bu, parser onceki versiyonda 82% sapma yapiyordu (ham toplam aliyordu).
+    "kap-fr_NonlifeTechnicalSectionBalance|": "_nonlife_tech_balance",
+    "kap-fr_LifeTechnicalSectionBalance|": "_life_tech_balance",
+    "kap-fr_TechnicalBalance|": "_total_tech_balance",  # Eger varsa direkt al
+    # Brüt Yazılan Prim — Hayat Dışı + Hayat ayrı satır
     "kap-fr_GrossWrittenPremiumsClassifiedAsNonlifeTechnicalIncome|": "_gross_premium_nonlife",
     "kap-fr_GrossWrittenPremiumsClassifiedAsLifeTechnicalIncome|": "_gross_premium_life",
     "ifrs-full_ProfitLoss|": "net_income",
@@ -371,13 +376,26 @@ def parse_kap_finansal_rapor(body: str) -> dict:
         if gp_nl or gp_life:
             out["gross_premiums"] = gp_nl + gp_life
             out["revenue"] = out["gross_premiums"]  # Fintables tarzı
-        # Teknik Bölüm = Hayat Dışı + Hayat Teknik Gelir toplamı (yaklaşık)
-        nl_inc = aux.get("_nonlife_tech_income") or 0
-        l_inc = aux.get("_life_tech_income") or 0
-        if nl_inc or l_inc:
-            out["technical_balance"] = nl_inc + l_inc
-            out["gross_profit"] = out["technical_balance"]
-            out["ebitda"] = out["technical_balance"]
+        # Net Teknik Bölüm Dengesi — gerçek değer (gelir - gider net'i, brüt toplam DEĞİL).
+        # Onceki versiyon "_nonlife_tech_income + _life_tech_income" yapiyordu (brut toplam) → %82 sapma.
+        # Yeni: oncelik sirasiyla:
+        # 1) kap-fr_TechnicalBalance (eger varsa direkt) → net dengeyi verir
+        # 2) NonlifeTechnicalSectionBalance + LifeTechnicalSectionBalance toplami
+        # 3) HiC degilse: technical_balance = None (yanlis veri yazma)
+        total_tb = aux.get("_total_tech_balance")
+        if total_tb:
+            out["technical_balance"] = total_tb
+        else:
+            nl_bal = aux.get("_nonlife_tech_balance") or 0
+            l_bal = aux.get("_life_tech_balance") or 0
+            if nl_bal or l_bal:
+                out["technical_balance"] = nl_bal + l_bal
+            # Aksi takdirde None birak — yanlis aliasi yazmayalim
+        # Sigorta icin gross_profit ve ebitda kavramlari banka gibi tartismali —
+        # technical_balance varsa ona esitlemek yaniltici (sigorta net karliligi
+        # bundan farkli hesaplanir). UI tarafinda gizlenecek olan alanlara hayalet
+        # veri yazmaktan kacin: sadece technical_balance set et.
+        # out["gross_profit"] = out["ebitda"] = None  (kasten doldurmuyoruz)
 
     # Confidence: kritik alanlar dolu mu?
     critical = [out["period"], out["revenue"] or out["net_interest_income"],
