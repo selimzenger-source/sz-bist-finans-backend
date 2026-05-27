@@ -15833,12 +15833,31 @@ async def get_top_bilancos(
 
     tickers = list(finals.keys())
 
+    # Her ticker icin son 5 ceyrekligi de getir (chart icin)
+    quarterly_q = await db.execute(
+        select(CompanyFinancial)
+        .where(CompanyFinancial.ticker.in_(tickers))
+        .order_by(CompanyFinancial.ticker, desc(CompanyFinancial.period))
+    )
+    quarterly_by_ticker: dict[str, list] = {}
+    for row in quarterly_q.scalars().all():
+        quarterly_by_ticker.setdefault(row.ticker, []).append(row)
+    # Her ticker icin max 5 ceyrek (en yeni → en eski)
+    for tk in list(quarterly_by_ticker.keys()):
+        quarterly_by_ticker[tk] = quarterly_by_ticker[tk][:5]
+
     # 2. Her ticker icin en son KAP Finansal Rapor + ai_impact_score
     kap_result = await db.execute(
         select(KapAllDisclosure)
-        .where(KapAllDisclosure.is_bilanco == True)
-        .where(KapAllDisclosure.title.ilike('%Finansal Rapor%'))
         .where(KapAllDisclosure.company_code.in_(tickers))
+        .where(
+            # Eski 'Finansal Rapor' VEYA yeni 'Finansal Durum Tablosu (Bilanço)' baslikli olanlar
+            or_(
+                KapAllDisclosure.title.ilike('%Finansal Rapor%'),
+                KapAllDisclosure.title.ilike('%Finansal Durum Tablosu%'),
+                KapAllDisclosure.is_bilanco == True,
+            )
+        )
         .order_by(KapAllDisclosure.company_code, desc(KapAllDisclosure.published_at))
     )
     kap_by_ticker: dict[str, KapAllDisclosure] = {}
@@ -15899,7 +15918,12 @@ async def get_top_bilancos(
             "ai_label": cf_label,
             "ai_summary": ai_summary,
             "ai_sentiment": kap.ai_sentiment if kap else None,
-            "published_at": kap.published_at.isoformat() if kap and kap.published_at else None,
+            # Sirayla: KAP published_at > CompanyFinancial scraped_at > updated_at
+            "published_at": (
+                kap.published_at.isoformat() if kap and kap.published_at else
+                (fin.scraped_at.isoformat() if getattr(fin, "scraped_at", None) else
+                 (fin.updated_at.isoformat() if getattr(fin, "updated_at", None) else None))
+            ),
             "fk": _f(ratio.fk) if ratio else None,
             "pddd": _f(ratio.pddd) if ratio else None,
             "fd_favok": _f(ratio.fd_favok) if ratio else None,
@@ -15908,6 +15932,20 @@ async def get_top_bilancos(
             "revenue": _f(fin.revenue),
             "net_income": _f(fin.net_income),
             "ebitda": _f(fin.ebitda) if fin.ebitda is not None else _f(fin.operating_profit),
+            # Ceyreklik veri (son 5 ceyrek, en eski->en yeni)
+            "quarterly": [
+                {
+                    "period": q.period,
+                    "revenue": _f(q.revenue),
+                    "ebitda": _f(q.ebitda) if q.ebitda is not None else _f(q.operating_profit),
+                    "net_income": _f(q.net_income),
+                }
+                for q in reversed(quarterly_by_ticker.get(ticker, []))
+            ],
+            "total_assets": _f(fin.total_assets),
+            "total_equity": _f(fin.total_equity),
+            "net_debt": _f(fin.net_debt),
+            "sector_type": fin.sector_type,
         })
 
     # Sort: 'recent' (varsayilan) — yayinlanma tarihine gore DESC (Fintables feed gibi)
