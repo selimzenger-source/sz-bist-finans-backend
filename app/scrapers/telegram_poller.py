@@ -644,13 +644,16 @@ async def _route_to_calendars(
         except Exception as e:
             logger.warning("Router→MKK Realization hata: %s", e)
 
-    # v3 — Bilanco/Finansal Rapor: KAP geldiginde aninda IsYatirim queue'ya at
-    # AI ile body'den anlik rakam parse + IsYatirim'den detayli veri (1-2 dk gecikme)
-    title_lower = (title or "").lower()
-    is_bilanco_kap = any(k in title_lower for k in [
-        "finansal rapor", "bilanço", "bilanco", "finansal tablo",
-        "sorumluluk beyanı", "mali tablo", "ara dönem finansal"
-    ])
+    # v3.1 — Bilanco pipeline TETIKLEME SADECE "Finansal Durum Tablosu (Bilanço)" basliginda.
+    # 11 ek mali tablo basligi (Kar veya Zarar Tablosu, Nakit Akis, Sorumluluk Beyani, Faaliyet
+    # Raporu, Ozkaynaklar Degisim, vb.) RUTINDIR ve "Tum KAP" akisina notr olarak basilir,
+    # bilanco pipeline tetiklemez. Sadece "Finansal Durum Tablosu (Bilanço)" ana bilanco
+    # kalemidir — bu geldiginde XBRL parse + bilanco analizi + frontend "Yakinda" yonlendirme.
+    title_lower = (title or "").lower().strip()
+    is_bilanco_kap = (
+        "finansal durum tablosu" in title_lower
+        and "bilan" in title_lower  # "(Bilanço)" suffix kontrolu — extra emniyet
+    )
     if is_bilanco_kap:
         # ANINDA direkt parse — kap_url'den XBRL cek, period+rakamlar dogru kaydet.
         # Queue/kap_all_disclosures'a is_bilanco=True flag bagimliligi yok.
@@ -1011,7 +1014,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # Kategori + is_bilanco — frontend "Bilanco AI Analizi - COK YAKINDA"
                     # badge'ini bu flag'e gore gosterir. KAP scraper ile ayni mantik.
                     ka_category = _infer_category(ka_title)
-                    ka_is_bilanco = ka_category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
+                    # v3.1: is_bilanco SADECE "Finansal Durum Tablosu (Bilanço)" icin True
+                    # Diger mali tablo bildirimleri RUTIN -> "Mali Tablo Eki" kategorisinde, notr.
+                    ka_is_bilanco = ka_category == "Bilanço/Finansal Rapor"
 
                     # ── DUPLICATE KONTROLU: (kap_url + company_code) uzerinden ──
                     # Cok-sembollu bildirimlerde ayni kap_url N farkli ticker icin

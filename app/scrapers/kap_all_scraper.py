@@ -164,7 +164,9 @@ async def _uzmanpara_fetch_legacy_disabled() -> list[dict[str, Any]]:
 
             # Kategori cikar
             category = _infer_category(title)
-            is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
+            # v3.1: is_bilanco artik SADECE ana "Finansal Durum Tablosu (Bilanço)" icin.
+            # Faaliyet Raporu / Mali Tablo Eki gibi yardimci dokumantasyon RUTIN -> False.
+            is_bilanco = category == "Bilanço/Finansal Rapor"
 
             item = {
                 "title": title,
@@ -279,7 +281,9 @@ async def _mynet_fetch_legacy_disabled() -> list[dict[str, Any]]:
             seen_keys.add(dedup_key)
 
             category = _infer_category(title)
-            is_bilanco = category in ("Bilanço/Finansal Rapor", "Faaliyet Raporu")
+            # v3.1: is_bilanco artik SADECE ana "Finansal Durum Tablosu (Bilanço)" icin.
+            # Faaliyet Raporu / Mali Tablo Eki gibi yardimci dokumantasyon RUTIN -> False.
+            is_bilanco = category == "Bilanço/Finansal Rapor"
 
             item = {
                 "title": title,
@@ -548,8 +552,18 @@ def _infer_category(title: str) -> str:
     if any(k in t for k in ["pay alım satım bildirimi", "pay alim satim bildirimi", "pay alım satım", "pay alımı", "pay satışı", "geri alım"]):
         return "Pay Alım Satım"
     # ─── Standart kategoriler ───
-    if any(k in t for k in ["finansal rapor", "bilanço", "finansal tablo", "sorumluluk beyanı", "mali tablo"]):
+    # ANA bilanco: sadece "Finansal Durum Tablosu (Bilanço)" — pipeline'i bu tetikler
+    if "finansal durum tablosu" in t:
         return "Bilanço/Finansal Rapor"
+    # Diger mali tablo bildirimleri RUTIN — notr, sadece Tum KAP'a basilir
+    if any(k in t for k in [
+        "kar veya zarar tablosu", "kar veya zarar ve diger kapsaml",
+        "nakit akış tablosu", "nakit akis tablosu", "ozkaynaklar değişim",
+        "özkaynaklar degisim", "diger kapsaml gelir tablosu",
+        "sorumluluk beyanı", "sorumluluk beyani",
+        "finansal tablo ve/veya dipnot", "ara dönem finansal",
+    ]):
+        return "Mali Tablo Eki"
     if any(k in t for k in ["temettü", "kar payı", "kâr payı"]):
         return "Temettü"
     if "genel kurul" in t:
