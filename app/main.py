@@ -9647,7 +9647,7 @@ async def list_kap_all_disclosures(
     min_score: Optional[float] = Query(None, ge=0, le=10, description="Minimum AI etki skoru (pozitif filtre icin 6.0)"),
     max_score: Optional[float] = Query(None, ge=0, le=10, description="Maksimum AI etki skoru (negatif filtre icin 5.0)"),
     category: Optional[str] = Query(None, description="Kategori filtresi (orn: 'Toptan Alım Satım', 'Tip Dönüşüm', 'Pay Alım Satım'). CSV ile birden fazla kategori: 'a,b,c'"),
-    limit: int = Query(50, ge=1, le=200),
+    limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
