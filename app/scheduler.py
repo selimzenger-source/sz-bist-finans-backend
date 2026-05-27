@@ -4139,20 +4139,30 @@ async def daily_subscription_report():
 
 
 async def weekly_watchlist_report():
-    """Haftalik favori hisse raporu — Her Pazar 18:00 TR (15:00 UTC).
+    """Favori hisse raporu — Pzt/Car/Cum 20:00 TR (17:00 UTC).
 
     Admin Telegram'a gonderir:
-    - Her hisseyi kac kullanicinin takip listesine aldigi (desc siralı)
-    - Toplam izleme listesi kayit ve hisse sayisi
+    - Top 50 hisse + kac kisi takip ediyor
+    - Onceki rapora gore siralama degisimi (ok + basamak sayisi)
+    - Yeni giren hisseler NEW etiketi ile
+    - Toplam hisse / kayit sayisi
     """
+    import json
+
     try:
         from sqlalchemy import select, func
         from app.models.user_watchlist import UserWatchlist
+        from app.models.app_setting import AppSetting
         from app.services.admin_telegram import send_admin_message
 
-        now_tr = datetime.now(_TR_TZ).strftime("%d.%m.%Y %H:%M")
+        _SNAPSHOT_KEY = "watchlist_ranking_snapshot"
+        now_tr = datetime.now(_TR_TZ)
+        day_names = {0: "Pzt", 1: "Sal", 2: "Çar", 3: "Per", 4: "Cum", 5: "Cmt", 6: "Paz"}
+        day_label = day_names.get(now_tr.weekday(), "")
+        date_str = now_tr.strftime(f"%d.%m.%Y {day_label} %H:%M")
 
         async with async_session() as db:
+            # ── Mevcut sıralama ──
             result = await db.execute(
                 select(
                     UserWatchlist.ticker,
@@ -4161,11 +4171,32 @@ async def weekly_watchlist_report():
                 .group_by(UserWatchlist.ticker)
                 .order_by(func.count(UserWatchlist.device_id).desc())
             )
-            rows = list(result.all())
+            rows = list(result.all())  # [(ticker, cnt), ...]
+
+            # ── Önceki snapshot'ı DB'den yükle ──
+            snap_row = (await db.execute(
+                select(AppSetting).where(AppSetting.key == _SNAPSHOT_KEY)
+            )).scalar_one_or_none()
+
+            prev_ranks: dict[str, int] = {}  # ticker -> rank (1-based)
+            if snap_row and snap_row.value:
+                try:
+                    prev_ranks = {t: r for t, r in json.loads(snap_row.value).items()}
+                except Exception:
+                    prev_ranks = {}
+
+            # ── Mevcut snapshot'ı kaydet (top 50 + ötesi tümü) ──
+            curr_ranks = {ticker: i + 1 for i, (ticker, _) in enumerate(rows)}
+            snap_json = json.dumps(curr_ranks)
+            if snap_row:
+                snap_row.value = snap_json
+            else:
+                db.add(AppSetting(key=_SNAPSHOT_KEY, value=snap_json))
+            await db.commit()
 
         if not rows:
             await send_admin_message(
-                "📊 <b>Haftalık Watchlist Raporu</b>\nHiç kayıt bulunamadı.",
+                "📊 <b>Watchlist Raporu</b>\nHiç kayıt bulunamadı.",
                 parse_mode="HTML",
             )
             return
@@ -4173,28 +4204,58 @@ async def weekly_watchlist_report():
         total_entries = sum(c for _, c in rows)
         medals = ["🥇", "🥈", "🥉"]
         lines = []
+
         for i, (ticker, cnt) in enumerate(rows[:50]):
-            pos = medals[i] if i < 3 else f"  {i + 1}."
+            rank_now = i + 1
+
+            # Pozisyon etiketi
+            if i < 3:
+                pos_label = medals[i]
+            else:
+                pos_label = f"{rank_now:>2}."
+
+            # Kişi göstergesi
             person = "👤" if cnt == 1 else "👥"
-            lines.append(f"  {pos} #{ticker} — {cnt} kişi {person}")
+
+            # Değişim oku
+            if ticker not in prev_ranks:
+                change_str = " 🆕"
+            else:
+                diff = prev_ranks[ticker] - rank_now  # pozitif = yükseldi
+                if diff > 0:
+                    change_str = f" ▲{diff}"
+                elif diff < 0:
+                    change_str = f" ▼{abs(diff)}"
+                else:
+                    change_str = ""
+
+            lines.append(f"  {pos_label} #{ticker} — {cnt} kişi {person}{change_str}")
+
         if len(rows) > 50:
-            lines.append(f"  ... +{len(rows) - 50} hisse daha")
+            lines.append(f"  ··· +{len(rows) - 50} hisse daha")
+
+        first_report = not prev_ranks
+        subtitle = "İlk Rapor" if first_report else "Sıralama Değişimleri: ▲ yükseldi · ▼ düştü · 🆕 yeni"
 
         msg = (
-            f"📊 <b>Haftalık Favori Hisse Raporu</b>\n"
-            f"📅 {now_tr}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🏆 <b>En Çok Takip Edilen Hisseler</b>\n"
+            f"📊 <b>Favori Hisse Raporu</b>\n"
+            f"📅 {date_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>{subtitle}</i>\n\n"
+            f"🏆 <b>Top 50 En Çok Takip Edilen</b>\n"
             + "\n".join(lines)
             + f"\n\n📈 Toplam: {len(rows)} farklı hisse · {total_entries} kayıt\n"
             f"━━━━━━━━━━━━━━━━━━━━"
         )
 
         await send_admin_message(msg, parse_mode="HTML")
-        logger.info("Haftalik watchlist raporu gonderildi: %d hisse, %d kayit", len(rows), total_entries)
+        logger.info(
+            "Watchlist raporu gonderildi: %d hisse, %d kayit, onceki=%d",
+            len(rows), total_entries, len(prev_ranks),
+        )
 
     except Exception as e:
-        logger.error("Haftalik watchlist raporu hatasi: %s", e)
+        logger.error("Watchlist raporu hatasi: %s", e)
         try:
             from app.services.admin_telegram import send_admin_message
             await send_admin_message(f"❌ Watchlist raporu hatası:\n{str(e)[:300]}")
@@ -5469,12 +5530,12 @@ def _setup_scheduler_impl():
     #     coalesce=True,
     # )
 
-    # ─── Haftalik Watchlist Raporu — Her Pazar 18:00 TR (15:00 UTC) ───
+    # ─── Watchlist Raporu — Pzt / Çar / Cum 20:00 TR (17:00 UTC) ───
     scheduler.add_job(
         weekly_watchlist_report,
-        CronTrigger(day_of_week="sun", hour=17, minute=0),  # 17:00 UTC = 20:00 TR
+        CronTrigger(day_of_week="mon,wed,fri", hour=17, minute=0),  # 17:00 UTC = 20:00 TR
         id="weekly_watchlist_report",
-        name="Haftalik Favori Hisse Raporu (Pazar 18:00 TR)",
+        name="Favori Hisse Raporu (Pzt/Çar/Cum 20:00 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
