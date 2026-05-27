@@ -9665,7 +9665,14 @@ async def list_kap_all_disclosures(
     query = select(KapAllDisclosure).order_by(desc(KapAllDisclosure.created_at))
 
     if ticker:
-        query = query.where(KapAllDisclosure.company_code == ticker.upper())
+        # CSV destegi — birden fazla hisse icin "AAA,BBB,CCC" filtre.
+        # Frontend'de "Listemi Uygula" watchlist'teki tum ticker'lari boyle gonderir.
+        if "," in ticker:
+            tickers_list = [t.strip().upper() for t in ticker.split(",") if t.strip()]
+            if tickers_list:
+                query = query.where(KapAllDisclosure.company_code.in_(tickers_list))
+        else:
+            query = query.where(KapAllDisclosure.company_code == ticker.upper())
 
     if category:
         from sqlalchemy import or_, func as _sqlfunc
