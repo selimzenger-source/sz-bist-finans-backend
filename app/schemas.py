@@ -711,6 +711,14 @@ class CompanyFinancialOut(BaseModel):
     net_margin_pct: Optional[Decimal] = None
     roe_pct: Optional[Decimal] = None
     debt_to_equity: Optional[Decimal] = None
+    # Sektör + banka/sigorta spesifik alanlar (sirket-karti için)
+    sector_type: Optional[str] = None
+    net_interest_income: Optional[Decimal] = None
+    net_fees_commissions: Optional[Decimal] = None
+    loans: Optional[Decimal] = None
+    deposits: Optional[Decimal] = None
+    gross_premiums: Optional[Decimal] = None
+    technical_balance: Optional[Decimal] = None
     source: Optional[str] = None
     scraped_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
