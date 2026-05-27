@@ -4173,12 +4173,12 @@ async def weekly_watchlist_report():
         total_entries = sum(c for _, c in rows)
         medals = ["🥇", "🥈", "🥉"]
         lines = []
-        for i, (ticker, cnt) in enumerate(rows[:25]):
+        for i, (ticker, cnt) in enumerate(rows[:50]):
             pos = medals[i] if i < 3 else f"  {i + 1}."
             person = "👤" if cnt == 1 else "👥"
             lines.append(f"  {pos} #{ticker} — {cnt} kişi {person}")
-        if len(rows) > 25:
-            lines.append(f"  ... +{len(rows) - 25} hisse daha")
+        if len(rows) > 50:
+            lines.append(f"  ... +{len(rows) - 50} hisse daha")
 
         msg = (
             f"📊 <b>Haftalık Favori Hisse Raporu</b>\n"
