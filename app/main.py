@@ -15852,15 +15852,21 @@ async def get_top_bilancos(
         if r.ticker not in ratio_by_ticker:
             ratio_by_ticker[r.ticker] = r
 
-    price_result = await db.execute(
-        select(DailyStockMarketStat)
-        .where(DailyStockMarketStat.ticker.in_(tickers))
-        .order_by(DailyStockMarketStat.ticker, desc(DailyStockMarketStat.date))
-    )
+    # Son fiyat — DailyStockMarketStat.close_price BIST lisans nedeniyle KALDIRILDI
+    # Anlik fiyat icin Yahoo Finance fallback'i tek tek cekiyoruz (bilanco kartlari icin)
     price_by_ticker: dict[str, float] = {}
-    for p in price_result.scalars().all():
-        if p.ticker not in price_by_ticker and p.close_price:
-            price_by_ticker[p.ticker] = float(p.close_price)
+    if tickers:
+        import asyncio as _asyncio
+        sem = _asyncio.Semaphore(20)
+        async def _fetch_one(t: str):
+            async with sem:
+                try:
+                    p = await _fetch_yahoo_v8(t)
+                    if p:
+                        price_by_ticker[t] = float(p)
+                except Exception:
+                    pass
+        await _asyncio.gather(*[_fetch_one(t) for t in tickers], return_exceptions=True)
 
     def _f(v):
         return float(v) if v is not None else None
