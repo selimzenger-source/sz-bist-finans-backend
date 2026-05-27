@@ -44,6 +44,7 @@ INDUSTRIAL_TAG_TO_FIELD: dict[str, str] = {
     "ifrs-full_NoncurrentLoansReceived|": "_longterm_borrowings",
     # Gelir Tablosu
     "ifrs-full_Revenue|": "revenue",
+    "kap-fr_OperatingIncome|": "revenue",  # Faktöring/Leasing — ESAS FAALİYET GELİRLERİ
     "ifrs-full_GrossProfit|": "gross_profit",
     "ifrs-full_ProfitLossFromOperatingActivities|": "operating_profit",
     "ifrs-full_ProfitLoss|": "_net_income_consolidated",
@@ -60,34 +61,37 @@ INDUSTRIAL_TAG_TO_FIELD: dict[str, str] = {
     "ifrs-full_DepreciationAndAmortisationExpense|": "_depreciation_amortization",
 }
 
-# BANKA (BDDK formatı) — XBRL etiketleri farklı
+# BANKA (BDDK formatı) — XBRL etiketleri farklı (gerçek KAP body'sinden teyit edildi)
 BANK_TAG_TO_FIELD: dict[str, str] = {
-    # Bilanço
-    "ifrs-full_Assets|": "total_assets",  # "VARLIKLAR TOPLAMI"
-    "ifrs-full_Equity|": "total_equity",
-    "ifrs-full_Liabilities|": "total_debt",
+    # Bilanço (TP / YP / Toplam — 3 sütunlu format)
+    "ifrs-full_Assets|": "total_assets",         # VARLIKLAR TOPLAMI
+    "ifrs-full_Equity|": "total_equity",         # ÖZKAYNAKLAR
+    "ifrs-full_EquityAndLiabilities|": "_total_eq_and_liab",  # YÜKÜMLÜLÜKLER TOPLAMI
     "ifrs-full_CashAndCashEquivalents|": "cash_and_equivalents",
     # Banka spesifik
-    "kap-fr_Loans|": "loans",
-    "kap-fr_Deposits|": "deposits",
-    # Gelir Tablosu (Banka)
-    "kap-fr_NetInterestIncomeExpense|": "net_interest_income",
-    "kap-fr_NetFeesAndCommissionsIncomeExpense|": "net_fees_commissions",
-    "kap-fr_OperatingGrossProfitLoss|": "gross_profit",
-    "kap-fr_NetOperatingProfitLoss|": "operating_profit",
-    "ifrs-full_ProfitLoss|": "net_income",
+    "kap-fr_Loans|": "loans",                     # Krediler
+    "kap-fr_Deposits|": "deposits",               # Mevduat (yükümlülük)
+    # Gelir Tablosu (Banka — BDDK)
+    "kap-fr_InterestIncomeOrExpense|": "net_interest_income",      # NET FAİZ GELİRİ VEYA GİDERİ
+    "kap-fr_FeeAndCommissionIncomeOrExpenses|": "net_fees_commissions",  # NET ÜCRET VE KOMİSYON
+    "kap-fr_GrossProfitLossFromOperatingActivitiesForBankingSector|": "gross_profit",  # FAALİYET BRÜT KARI
+    "ifrs-full_ProfitLossFromOperatingActivities|": "operating_profit",  # NET FAALİYET KARI
+    "ifrs-full_ProfitLoss|": "net_income",        # DÖNEM KARI
 }
 
-# SIGORTA — XBRL etiketleri farklı
+# SIGORTA — XBRL etiketleri farklı (gerçek KAP body'sinden teyit edildi)
 INSURANCE_TAG_TO_FIELD: dict[str, str] = {
     # Bilanço
     "ifrs-full_Assets|": "total_assets",
     "ifrs-full_Equity|": "total_equity",
     "ifrs-full_Liabilities|": "total_debt",
     "ifrs-full_CashAndCashEquivalents|": "cash_and_equivalents",
-    # Sigorta spesifik (varsa)
-    "kap-fr_GrossWrittenPremiums|": "gross_premiums",
-    "kap-fr_TechnicalBalance|": "technical_balance",
+    # Sigorta gelir tablosu
+    "kap-fr_NonlifeTechnicalIncome|": "_nonlife_tech_income",       # HAYAT DIŞI TEKNİK GELİR
+    "kap-fr_LifeTechnicalIncome|": "_life_tech_income",              # HAYAT TEKNİK GELİR
+    # Brüt Yazılan Prim — Hayat Dışı + Hayat ayrı satır, ikisini toplayacağız
+    "kap-fr_GrossWrittenPremiumsClassifiedAsNonlifeTechnicalIncome|": "_gross_premium_nonlife",
+    "kap-fr_GrossWrittenPremiumsClassifiedAsLifeTechnicalIncome|": "_gross_premium_life",
     "ifrs-full_ProfitLoss|": "net_income",
 }
 
@@ -170,26 +174,51 @@ def _detect_multiplier(body: str) -> int:
 
 def _detect_sector(body: str) -> str:
     """KAP body'sinde hangi sektör? (XBRL etiket varlığına göre)"""
-    # Banka — Net Faiz Geliri etiketi var
-    if "kap-fr_NetInterestIncomeExpense|" in body or "ifrs-full_InterestIncome|" in body:
+    # Banka — BDDK formatı (gerçek KAP body etiketleri)
+    bank_markers = [
+        "kap-fr_InterestIncomeOrExpense|",
+        "kap-fr_GrossProfitLossFromOperatingActivitiesForBankingSector|",
+        "kap-fr_FeeAndCommissionIncomeOrExpenses|",
+    ]
+    if any(m in body for m in bank_markers):
         return SECTOR_BANK
     # Sigorta — Teknik Bölüm Dengesi veya Brüt Yazılan Primler
-    if "kap-fr_TechnicalBalance|" in body or "kap-fr_GrossWrittenPremiums|" in body:
+    insurance_markers = [
+        "kap-fr_TechnicalBalance|",
+        "kap-fr_GrossWrittenPremiums|",
+        "HAYAT DIŞI TEKNİK GELİR",
+        "TEKNİK BÖLÜM DENGESİ",
+    ]
+    if any(m in body for m in insurance_markers):
         return SECTOR_INSURANCE
     return SECTOR_INDUSTRIAL
 
 
-def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
+def _detect_column_count(body: str) -> int:
+    """KAP body'sinde tablo kaç sütunlu? (sanayi: 2, banka: 6 TP/YP/Toplam ×2)
+
+    Banka format: Cari Dönem TP | Cari YP | Cari Toplam | Önceki TP | Önceki YP | Önceki Toplam
+    """
+    # 'Türk Lirası' + 'Yabancı Para' başlığı varsa banka tarzı 6 sütunlu
+    has_tp_yp = ("Türk Lirası" in body or "TP|" in body) and ("Yabancı Para" in body or "YP|" in body)
+    if has_tp_yp:
+        return 6
+    return 2
+
+
+def _extract_value_after_tag(body: str, tag: str, col_count: int = 2) -> Optional[float]:
     """XBRL etiketin SONUNDAKİ chunk'ta Cari Dönem sayısını çıkar.
 
-    Strateji:
+    UNIVERSAL strateji:
     1. Etiketten sonra BİR SONRAKİ XBRL etikete kadar olan içeriği al
-    2. Bu içerikteki TÜM sayıları regex ile bul
-    3. SON 2 sayı = (cari, önceki). Cari = sondan 2., önceki = son.
-       Mantık: KAP RSC formatında her satır sonunda 'Cari | Önceki' kolonları var.
+    2. İçerikteki TÜM filtrelenmiş sayıları bul (n adet)
+    3. Cari Dönem TOPLAM seç:
+       - n çift sayı → n//2 indeks = ilk yarının son sayısı = Cari Toplam
+         (sanayi 2 sütun: cari=[0], önceki=[1]; banka 6 sütun: cari=[2] (TP/YP/Toplam))
+       - n tek (1) → o tek değer cari
+       - n=0 → None
 
-    BUG FIX (v2): Önceki versiyon ILK büyük sayıyı alıyordu — URL içindeki
-    yıl numaralarını (2003, 2015) yanlışlıkla yakalıyordu.
+    col_count parametresi backward-compat için, artık otomatik tespit ediliyor.
     """
     idx = body.find(tag)
     if idx == -1:
@@ -207,22 +236,23 @@ def _extract_value_after_tag(body: str, tag: str) -> Optional[float]:
         v = _parse_number(raw)
         if v is None:
             continue
-        # Çok küçük (1-9) ve nokta/virgül içermiyorsa muhtemelen dipnot referansı (1, 2, 3, 23)
-        if abs(v) < 10 and "." not in raw and "," not in raw:
+        # Dipnot referansları (1-200 arası, nokta/virgül yok) — atla
+        # Finansal değerler ya binlik (286.641) ya ondalık ya çok büyük (10.000+)
+        if "." not in raw and "," not in raw and abs(v) < 1000:
             continue
-        # 4 haneli ve tam sayı ise URL'deki yıl olabilir (2003, 2015, 2026)
-        # Ama gerçek finansal değer de 4 haneli olabilir (örn 4567). Bunu ayırt etmek için:
-        # noktasız 4 haneli + 2000-2030 aralığında = yıl numarası (URL'den gelen)
+        # URL'deki yıl rakamları (2000-2030, nokta/virgül yok)
         if "." not in raw and "," not in raw and 2000 <= abs(v) <= 2030:
-            # Yıl numarası gibi görünüyor — atla
             continue
         valid.append(v)
 
-    if len(valid) < 1:
+    n = len(valid)
+    if n == 0:
         return None
-
-    # SON 2 sayı = (cari, önceki). Tek sayı varsa o cari.
-    return valid[-2] if len(valid) >= 2 else valid[-1]
+    if n == 1:
+        return valid[0]
+    # n çift ise n//2 indeks = ilk yarının son sayısı = Cari Toplam
+    half = n // 2
+    return valid[half - 1] if half >= 1 else valid[0]
 
 
 # ─── Ana Parse Fonksiyonu ──────────────────────────────────────────────────────
@@ -269,6 +299,7 @@ def parse_kap_finansal_rapor(body: str) -> dict:
     multiplier = _detect_multiplier(body)
     sector = _detect_sector(body)
     out["sector_type"] = sector
+    col_count = _detect_column_count(body)
 
     # Sektöre göre etiket seti
     if sector == SECTOR_BANK:
@@ -281,7 +312,7 @@ def parse_kap_finansal_rapor(body: str) -> dict:
     # XBRL etiketlerinden ham değerleri çek
     aux: dict = {}
     for tag, field in tag_map.items():
-        v = _extract_value_after_tag(body, tag)
+        v = _extract_value_after_tag(body, tag, col_count)
         if v is None:
             continue
         v_scaled = v * multiplier
@@ -332,6 +363,21 @@ def parse_kap_finansal_rapor(body: str) -> dict:
             nii = out.get("net_interest_income") or 0
             nfc = out.get("net_fees_commissions") or 0
             out["revenue"] = nii + nfc
+
+    elif sector == SECTOR_INSURANCE:
+        # Sigorta: gross_premiums = Hayat Dışı + Hayat brüt yazılan prim toplamı
+        gp_nl = aux.get("_gross_premium_nonlife") or 0
+        gp_life = aux.get("_gross_premium_life") or 0
+        if gp_nl or gp_life:
+            out["gross_premiums"] = gp_nl + gp_life
+            out["revenue"] = out["gross_premiums"]  # Fintables tarzı
+        # Teknik Bölüm = Hayat Dışı + Hayat Teknik Gelir toplamı (yaklaşık)
+        nl_inc = aux.get("_nonlife_tech_income") or 0
+        l_inc = aux.get("_life_tech_income") or 0
+        if nl_inc or l_inc:
+            out["technical_balance"] = nl_inc + l_inc
+            out["gross_profit"] = out["technical_balance"]
+            out["ebitda"] = out["technical_balance"]
 
     # Confidence: kritik alanlar dolu mu?
     critical = [out["period"], out["revenue"] or out["net_interest_income"],
