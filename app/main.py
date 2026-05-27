@@ -15815,15 +15815,12 @@ async def list_bilanco_periods(db: AsyncSession = Depends(get_db)):
 async def get_top_bilancos(
     period: str = Query(..., description="2026-Q1 formatinda donem"),
     limit: int = Query(50, ge=5, le=100),
+    sort: str = Query("recent", description="recent (yayinlanma tarihine gore) | ai (AI puanina gore)"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Donemin en iyi AI puanli bilancolari — Top 10/25/50.
-
-    Mantik:
-    - CompanyFinancial.period == period olan tum hisseleri al
-    - Her hisse icin son KAP bildirimini join (is_bilanco=true)
-    - ai_impact_score DESC sort, limit
-    - Yeni bilanco geldigi anda otomatik liste guncellenir (KAP'tan akan veriyle)
+    """Donemin bilancolari — sort param ile:
+      - recent (default): En son yayinlanan bilancolar (KLGYO, BORSK, ... Fintables tweet feed gibi)
+      - ai: En yuksek AI puanli bilancolar (TTRAK gibi yorum kalitesi sirali)
     """
     # 1. Bu donemde bilanco aciklayan hisseler
     fin_result = await db.execute(
@@ -15913,11 +15910,21 @@ async def get_top_bilancos(
             "ebitda": _f(fin.ebitda) if fin.ebitda is not None else _f(fin.operating_profit),
         })
 
-    # ai_score yoksa en sona at
-    items.sort(key=lambda x: (x["ai_score"] is None, -(x["ai_score"] or 0)))
+    # Sort: 'recent' (varsayilan) — yayinlanma tarihine gore DESC (Fintables feed gibi)
+    #       'ai' — ai_score DESC (en iyi puanli once)
+    if sort == "ai":
+        items.sort(key=lambda x: (x["ai_score"] is None, -(x["ai_score"] or 0)))
+    else:
+        # recent: published_at en yeni once. None'lari en sona at.
+        items.sort(key=lambda x: (x["published_at"] is None, x["published_at"] or ""), reverse=False)
+        # NOT: tuple compare ile None'lari sona attik. Simdi published_at icin reverse:
+        items_no_none = [i for i in items if i["published_at"] is not None]
+        items_none = [i for i in items if i["published_at"] is None]
+        items_no_none.sort(key=lambda x: x["published_at"], reverse=True)
+        items = items_no_none + items_none
 
     items = items[:limit]
-    return {"period": period, "count": len(items), "items": items}
+    return {"period": period, "count": len(items), "items": items, "sort": sort}
 
 
 @app.get("/api/v1/bilanco/{ticker}", response_model=BilancoAnalysisOut)
