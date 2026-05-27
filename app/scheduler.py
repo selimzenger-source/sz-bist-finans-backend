@@ -5472,7 +5472,7 @@ def _setup_scheduler_impl():
     # ─── Haftalik Watchlist Raporu — Her Pazar 18:00 TR (15:00 UTC) ───
     scheduler.add_job(
         weekly_watchlist_report,
-        CronTrigger(day_of_week="sun", hour=15, minute=0),  # 15:00 UTC = 18:00 TR
+        CronTrigger(day_of_week="sun", hour=17, minute=0),  # 17:00 UTC = 20:00 TR
         id="weekly_watchlist_report",
         name="Haftalik Favori Hisse Raporu (Pazar 18:00 TR)",
         replace_existing=True,

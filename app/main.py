@@ -14357,6 +14357,20 @@ async def admin_feature_interest_stats(
 # Admin: KAP All Scraper Manuel Trigger
 # -------------------------------------------------------
 
+@app.post("/api/v1/admin/trigger-watchlist-report")
+@limiter.limit("5/minute")
+async def admin_trigger_watchlist_report(request: Request, payload: dict):
+    """Admin: Haftalık watchlist raporu hemen gönder."""
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    try:
+        from app.scheduler import weekly_watchlist_report
+        await weekly_watchlist_report()
+        return {"status": "ok", "message": "Watchlist raporu Telegram'a gönderildi"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:500]}
+
+
 @app.post("/api/v1/admin/trigger-kap-scrape")
 @limiter.limit("5/minute")
 async def admin_trigger_kap_scrape(request: Request, payload: dict):
