@@ -146,16 +146,17 @@ def is_block_trade(title: str, body: str = "") -> bool:
     """
     if title:
         t = lower_tr(title)
-        # NOT: "tipe donusum" / "borsa disi pay devri" eskiden harici tutuluyordu
-        # ama kullanici bunlari da Toptan Alim Satim listesinde gormek istiyor
-        # (cunku coklu hisse senedinin tipe donusumu de bir islem). Bu yuzden
-        # haric tutma kaldirildi — tum "donusum" duyurulari da block_trade'e gelir.
-        if any(p in t for p in _BT_TITLE_PATTERNS):
-            return True
-        # Tipe donusum baslıkları da block_trade kabul (multi-ticker destekli)
-        if "tipe donus" in t or "tipe dönüş" in t or "borsada islem goren tipe" in t:
-            return True
+        # ★ ÖNCE TİPE DÖNÜŞÜM TESPİTİ — Tipe Dönüşüm bildirimi BlockTrade DEĞİLDİR.
+        # Multi-ticker tablo formatına sahip, her satır ayrı ticker+yatırımcı içerir.
+        # Bunu block_trade processor'a vermek tüm yatırımcıları birleştirip yanlış
+        # counterparties + lot_amount yazıyor (ENDAE 1606871 bug'ı).
+        if "tipe donus" in t or "tipe dönüş" in t or "borsada islem goren tipe" in t or "borsada işlem gören tipe" in t:
+            return False
+        # Borsa dışı pay devri de farklı bir mekanizma — ayrı işle.
         if "borsa disi pay devri" in t or "borsa dışı pay devri" in t:
+            return False
+        # Standart Toptan Alım Satım pattern'ları
+        if any(p in t for p in _BT_TITLE_PATTERNS):
             return True
     if body:
         b = lower_tr(body)
