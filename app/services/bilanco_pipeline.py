@@ -27,14 +27,17 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Bilanço pipeline — KAP "Finansal Durum Tablosu (Bilanço)" geldiğinde otomatik tetiklenir.
-# Pipeline akışı: KAP body parse → company_financials upsert → AI analiz + score
-# Duplicate kontrolü: aynı ticker+period+revenue varsa skip eder (idempotent).
-BILANCO_PIPELINE_ENABLED = True
+# ★ Bilanço pipeline — KAPATILDI (XBRL parser bozuk, 5 alan yanlis cikariyor).
+# Test sonuc: KLGYO Q1 2026 parse:
+#   gross_profit: 2mn (gercek: 287mn)      ❌
+#   ebitda:       9mn (gercek: 156mn)      ❌
+#   net_income:   +2mn (gercek: -527mn)    ❌ (isaret bile ters!)
+#   total_assets: 2mn (gercek: 37 milyar)  ❌
+#   net_debt:     122mn (gercek: 854mn)    ❌
+# Parser duzeltilene kadar pipeline KAPALI — xlsx kaynagi tek dogru data source.
+BILANCO_PIPELINE_ENABLED = False
 
-# Tweet kill-switch — pipeline açık ama tweet ATILMAZ.
-# Test fazında bilanço tweet'i atılmasın istiyoruz, pipeline doğru çalıştığına
-# emin olduktan sonra True yapılacak (kullanıcı kararı).
+# Tweet kill-switch — defence-in-depth, ek koruma.
 BILANCO_TWEET_ENABLED = False
 
 # Bilanco sezonu yogunluk kontrolu
