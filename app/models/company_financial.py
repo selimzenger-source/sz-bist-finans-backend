@@ -54,6 +54,19 @@ class CompanyFinancial(Base):
     roe_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Ozkaynak Karliligi (%)")
     debt_to_equity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Borc/Ozkaynak")
 
+    # Sektor tipi: industrial / bank / insurance / brokerage / factoring
+    sector_type: Mapped[str | None] = mapped_column(String(20), comment="industrial/bank/insurance/brokerage")
+
+    # Banka spesifik alanlar (industrial sirketlerde NULL)
+    net_interest_income: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Net Faiz Geliri (banka)")
+    net_fees_commissions: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Net Ucret Komisyon (banka)")
+    loans: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Krediler (banka)")
+    deposits: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Mevduatlar (banka)")
+
+    # Sigorta spesifik alanlar
+    gross_premiums: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Brut Yazilan Primler (sigorta)")
+    technical_balance: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), comment="Teknik Bolum Dengesi (sigorta)")
+
     # Kaynak & zaman
     source: Mapped[str | None] = mapped_column(String(50), default="isyatirim", comment="Veri kaynagi")
     scraped_at: Mapped[datetime] = mapped_column(

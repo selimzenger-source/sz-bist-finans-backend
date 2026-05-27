@@ -16106,6 +16106,16 @@ async def list_latest_bilancos(
             # Gelir prev = YoY (aynı çeyrek bir yıl önce), Bilanço prev = önceki yıl sonu (Q4)
             "prev_period": prev_to_use_income.period if prev_to_use_income else None,
             "prev_period_balance": prev_to_use_balance.period if prev_to_use_balance else None,
+            # Sektör tipi (frontend farklı template seçer)
+            "sector_type": fin.sector_type if fin and hasattr(fin, 'sector_type') else None,
+            # Banka spesifik
+            "net_interest_income": _f(fin.net_interest_income) if fin and hasattr(fin, 'net_interest_income') else None,
+            "net_fees_commissions": _f(fin.net_fees_commissions) if fin and hasattr(fin, 'net_fees_commissions') else None,
+            "loans": _f(fin.loans) if fin and hasattr(fin, 'loans') else None,
+            "deposits": _f(fin.deposits) if fin and hasattr(fin, 'deposits') else None,
+            # Sigorta spesifik
+            "gross_premiums": _f(fin.gross_premiums) if fin and hasattr(fin, 'gross_premiums') else None,
+            "technical_balance": _f(fin.technical_balance) if fin and hasattr(fin, 'technical_balance') else None,
             # Degerlik (financial_ratios -> temel_analiz fallback)
             "fk": fk_val,
             "pddd": pddd_val,
