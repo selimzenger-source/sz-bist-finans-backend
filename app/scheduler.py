@@ -4374,6 +4374,25 @@ def _setup_scheduler_impl():
         replace_existing=True,
     )
 
+    # 5b. Halkarz Sermaye Artırımı — her 5 dakikada bir
+    # halkarz.com/sermaye-artirimi/ → capital_increases tablosuna upsert
+    async def _scrape_halkarz_sermaye_wrapper():
+        try:
+            from app.scrapers.halkarz_sermaye_scraper import scrape_halkarz_sermaye
+            result = await scrape_halkarz_sermaye()
+            logger.info("Halkarz sermaye scrape: %s", result)
+        except Exception as e:
+            logger.warning("Halkarz sermaye scrape hata: %s", e)
+
+    scheduler.add_job(
+        _scrape_halkarz_sermaye_wrapper,
+        IntervalTrigger(minutes=5),
+        id="halkarz_sermaye_scraper",
+        name="Halkarz Sermaye Artırımı (her 5 dk)",
+        replace_existing=True,
+        next_run_time=datetime.now() + timedelta(seconds=_STARTUP_DELAY_SECONDS + 30),
+    )
+
     # 6. Telegram Poller — scheduler 3sn'de tetikler, job icinde dinamik gate:
     #    Hafta ici 10:00-18:00 TR seans ici: 3sn (her tick calisir)
     #    Disinda (seans disi, hafta sonu): 15sn (5 tick'te 1 calisir)
