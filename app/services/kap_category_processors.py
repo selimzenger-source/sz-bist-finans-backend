@@ -112,9 +112,10 @@ _BT_BODY_PATTERNS = [
     "toptan satış", "toptan satis",
     "toptan alış", "toptan alis",
     "toptan alım", "toptan alim",
-    "borsa dışı pay devri", "borsa disi pay devri",
-    "borsada işlem görmeyen pay", "borsada islem gormeyen pay",
-    "borsa dışında gerçekleş", "borsa disinda gerceklesti",
+    # NOT: "borsa dışı pay devri" / "borsada işlem görmeyen pay" / "borsa
+    # dışında gerçekleş" KALDIRILDI — bunlar Pay Devri (önemli nitelikte
+    # işlem) kategorisi, Toptan Alış Satış DEĞİL. BIZIM 1610087 ve DCTTR
+    # 1608819 bu yuzden yanlislikla block_trade'e isleniyordu.
     "block trade",
 ]
 
@@ -152,8 +153,13 @@ def is_block_trade(title: str, body: str = "") -> bool:
         # counterparties + lot_amount yazıyor (ENDAE 1606871 bug'ı).
         if "tipe donus" in t or "tipe dönüş" in t or "borsada islem goren tipe" in t or "borsada işlem gören tipe" in t:
             return False
-        # Borsa dışı pay devri de farklı bir mekanizma — ayrı işle.
+        # Borsa dışı pay devri / Pay Devri / Önemli Nitelikte İşlemler ayrı kategori — block_trade DEĞİL.
+        # (BIZIM 1610087 ve DCTTR 1608819 bu yuzden yanlislikla isleniyordu.)
         if "borsa disi pay devri" in t or "borsa dışı pay devri" in t:
+            return False
+        if "pay devri" in t or "ortaklik payi devri" in t or "ortaklık payı devri" in t:
+            return False
+        if "onemli nitelikte" in t or "önemli nitelikte" in t:
             return False
         # Standart Toptan Alım Satım pattern'ları
         if any(p in t for p in _BT_TITLE_PATTERNS):
