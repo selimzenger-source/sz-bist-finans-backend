@@ -4432,6 +4432,99 @@ async def news_pool(
     })
 
 
+# -------------------------------------------------------
+# BILANCO HAVUZU — Son gelen bilanço KAP'ları + DB finansal verileriyle birleşik
+# Admin Fintables tarzı kart ile inceler, paylaş tuşuyla resim alır (linksiz)
+# -------------------------------------------------------
+
+@router.get("/bilanco-havuzu", response_class=HTMLResponse)
+async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
+    """Son açıklanan bilanço KAP'ları + company_financials birleşik liste.
+
+    Fintables tarzı kartlar, paylaş için linksiz görsel önizleme.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from app.models.company_financial import CompanyFinancial
+
+    # KAP bilanço bildirimleri (ticker bazlı dedupe ile en yenisinden)
+    kap_q = (
+        select(KapAllDisclosure)
+        .where(KapAllDisclosure.is_bilanco == True)  # noqa: E712
+        .order_by(desc(KapAllDisclosure.published_at))
+        .limit(400)  # dedupe öncesi yeterli havuz
+    )
+    kap_rows = list((await db.execute(kap_q)).scalars().all())
+
+    # Ticker bazlı dedupe — en yeni KAP kalsın
+    seen: set[str] = set()
+    kap_items: list = []
+    for k in kap_rows:
+        tk = (k.company_code or "").upper()
+        if not tk or tk in seen:
+            continue
+        seen.add(tk)
+        kap_items.append(k)
+
+    # En son 80 unique şirket
+    kap_items = kap_items[:80]
+    tickers = [k.company_code for k in kap_items if k.company_code]
+
+    # Her ticker için en yeni 1 financial + 1 önceki dönem (sayfa kart için)
+    fin_by_ticker: dict[str, list] = {}
+    if tickers:
+        fin_q = (
+            select(CompanyFinancial)
+            .where(CompanyFinancial.ticker.in_(tickers))
+            .order_by(CompanyFinancial.ticker, desc(CompanyFinancial.period))
+        )
+        for f in (await db.execute(fin_q)).scalars().all():
+            fin_by_ticker.setdefault(f.ticker, []).append(f)
+
+    # Birleştirilmiş list (her item: kap + current + prev)
+    merged: list[dict] = []
+    for kap in kap_items:
+        ticker = kap.company_code
+        fins = fin_by_ticker.get(ticker, [])
+        current = fins[0] if fins else None
+        # Önceki dönem: gelir için YoY (aynı çeyrek bir yıl önce), bilanço için yıl sonu Q4
+        prev_income = None
+        prev_balance = None
+        if current and current.period:
+            try:
+                year, q = current.period.split("-")
+                yoy = f"{int(year)-1}-{q}"
+                year_end = f"{int(year)-1}-Q4"
+                for f in fins:
+                    if f.period == yoy and not prev_income:
+                        prev_income = f
+                    if f.period == year_end and not prev_balance:
+                        prev_balance = f
+            except Exception:
+                pass
+
+        merged.append({
+            "ticker": ticker,
+            "title": kap.title or "",
+            "published_at": kap.published_at,
+            "ai_score": kap.ai_impact_score,
+            "ai_sentiment": kap.ai_sentiment,
+            "ai_summary": kap.ai_summary,
+            "kap_url": kap.kap_url,
+            "current": current,
+            "prev_income": prev_income,
+            "prev_balance": prev_balance,
+        })
+
+    return templates.TemplateResponse("admin/bilanco_havuzu.html", {
+        "request": request,
+        "items": merged,
+        "count": len(merged),
+    })
+
+
 @router.post("/news-pool/{disclosure_id}/tweet")
 async def news_pool_tweet(
     disclosure_id: int,
