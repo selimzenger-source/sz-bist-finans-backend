@@ -106,7 +106,8 @@
           </td>
           <td>{{ r.source or '?' }}</td>
           <td>
-            <a class="btn-fintables" href="https://fintables.com/sirketler/{{ r.ticker }}/finansal-tablolar" target="_blank">Fintables ile karşılaştır</a>
+            <a class="btn-fintables" href="https://fintables.com/sirketler/{{ r.ticker }}/finansal-tablolar" target="_blank">Fintables</a>
+            <a class="btn-fix" href="javascript:void(0)" onclick="fixBilancoField('{{ r.ticker }}', '{{ r.period }}')">Düzelt</a>
           </td>
         </tr>
         {% endfor %}
@@ -142,7 +143,7 @@
     {% if dividend_issues %}
     <h3 class="text-orange-400 font-semibold mt-6 mb-3">⚠️ status='tarih_belli' ama payment_date NULL ({{ dividend_issues|length }})</h3>
     <table class="issue-table">
-      <thead><tr><th>Ticker</th><th>Dönem</th><th>Brüt</th><th>YKK</th><th>KAP</th></tr></thead>
+      <thead><tr><th>Ticker</th><th>Dönem</th><th>Brüt</th><th>YKK</th><th>KAP</th><th>İşlem</th></tr></thead>
       <tbody>
         {% for r in dividend_issues %}
         <tr>
@@ -151,6 +152,7 @@
           <td>{% if r.gross_amount_per_share %}{{ "%.4f"|format(r.gross_amount_per_share) }}{% else %}<span class="num-null">—</span>{% endif %}</td>
           <td>{% if r.ykk_date %}{{ r.ykk_date.strftime('%d.%m.%Y') }}{% endif %}</td>
           <td>{% if r.ykk_kap_url %}<a class="btn-link" href="{{ r.ykk_kap_url }}" target="_blank">KAP →</a>{% endif %}</td>
+          <td><a class="btn-fix" href="javascript:void(0)" onclick="fixDividend({{ r.id }}, '{{ r.ticker }}')">Düzelt</a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -192,7 +194,7 @@
     </div>
     {% if tc_issues %}
     <table class="issue-table">
-      <thead><tr><th>ID</th><th>Ticker</th><th>Tarih</th><th>Yatırımcı</th><th>KAP</th></tr></thead>
+      <thead><tr><th>ID</th><th>Ticker</th><th>Tarih</th><th>Yatırımcı</th><th>KAP</th><th>İşlem</th></tr></thead>
       <tbody>
         {% for r in tc_issues %}
         <tr>
@@ -201,6 +203,7 @@
           <td>{{ r.transaction_date.strftime('%d.%m.%Y') if r.transaction_date else '—' }}</td>
           <td>{{ r.investor_name or '—' }}</td>
           <td>{% if r.kap_url %}<a class="btn-link" href="{{ r.kap_url }}" target="_blank">KAP →</a>{% endif %}</td>
+          <td><a class="btn-fix" href="javascript:void(0)" onclick="fixTipeConversion({{ r.id }}, '{{ r.ticker }}')">Düzelt</a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -216,7 +219,7 @@
     </div>
     {% if ci_issues %}
     <table class="issue-table">
-      <thead><tr><th>ID</th><th>Ticker</th><th>Tip</th><th>Status</th><th>Tarih</th></tr></thead>
+      <thead><tr><th>ID</th><th>Ticker</th><th>Tip</th><th>Status</th><th>Tarih</th><th>İşlem</th></tr></thead>
       <tbody>
         {% for r in ci_issues %}
         <tr>
@@ -225,6 +228,7 @@
           <td>{{ r.type or '—' }}</td>
           <td>{{ r.status or '—' }}</td>
           <td>{{ r.created_at.strftime('%d.%m %H:%M') if r.created_at else '—' }}</td>
+          <td><a class="btn-fix" href="javascript:void(0)" onclick="fixCapitalIncrease({{ r.id }}, '{{ r.ticker }}', '{{ r.type or 'bedelsiz' }}')">Düzelt</a></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -292,6 +296,85 @@ function fixBusinessDeal(id, ticker) {
       deal_id: id,
       amount_original: parseFloat(amount.replace(/\./g, "").replace(/,/g, ".")),
       currency: currency.toUpperCase(),
+    }),
+  }).then(r => r.json()).then(d => {
+    alert(d.status === "ok" ? "Güncellendi ✓" : "Hata: " + JSON.stringify(d));
+    if (d.status === "ok") location.reload();
+  });
+}
+
+function fixBilancoField(ticker, period) {
+  const field = prompt(`${ticker} ${period} için hangi alan? (revenue/net_income/ebitda/total_assets/gross_profit/operating_profit/total_equity/total_debt/net_debt/cash_and_equivalents)`);
+  if (!field) return;
+  const value = prompt(`Yeni değer (Fintables'taki TL tutarı, nokta/virgül ayraçsız):`);
+  if (!value) return;
+  fetch("/api/v1/admin/set-bilanco-field", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      admin_password: prompt("Admin parolası:"),
+      ticker: ticker,
+      period: period,
+      field: field,
+      value: parseFloat(value.replace(/\./g, "").replace(/,/g, ".")),
+    }),
+  }).then(r => r.json()).then(d => {
+    alert(d.status === "ok" ? `Güncellendi ✓ (${d.old} → ${d.new})` : "Hata: " + JSON.stringify(d));
+    if (d.status === "ok") location.reload();
+  });
+}
+
+function fixDividend(id, ticker) {
+  const payDate = prompt(`${ticker} (id=${id}) için ödeme tarihi (YYYY-MM-DD):`);
+  if (!payDate) return;
+  const gross = prompt(`Brüt hisse başına TL (yoksa boş bırak):`);
+  fetch("/api/v1/admin/set-dividend-payment-date", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      admin_password: prompt("Admin parolası:"),
+      id: id,
+      payment_date: payDate,
+      gross_amount_per_share: gross ? parseFloat(gross.replace(",", ".")) : null,
+    }),
+  }).then(r => r.json()).then(d => {
+    alert(d.status === "ok" ? "Güncellendi ✓" : "Hata: " + JSON.stringify(d));
+    if (d.status === "ok") location.reload();
+  });
+}
+
+function fixTipeConversion(id, ticker) {
+  const lot = prompt(`${ticker} (id=${id}) için converted lot (TL nominal):`);
+  if (!lot) return;
+  const investor = prompt(`Yatırımcı adı (opsiyonel):`, "");
+  fetch("/api/v1/admin/set-tipe-conversion-lot", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      admin_password: prompt("Admin parolası:"),
+      id: id,
+      converted_lot: parseInt(lot.replace(/\./g, "").replace(/,/g, "")),
+      investor_name: investor || null,
+    }),
+  }).then(r => r.json()).then(d => {
+    alert(d.status === "ok" ? "Güncellendi ✓" : "Hata: " + JSON.stringify(d));
+    if (d.status === "ok") location.reload();
+  });
+}
+
+function fixCapitalIncrease(id, ticker, type) {
+  const pct = prompt(`${ticker} ${type} oranı (%) — örn 990.91:`);
+  if (!pct) return;
+  const amount = prompt(`Bölünme sonrası sermaye TL (opsiyonel):`);
+  fetch("/api/v1/admin/set-capital-increase-amount", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      admin_password: prompt("Admin parolası:"),
+      id: id,
+      type: type,
+      pct: parseFloat(pct.replace(",", ".")),
+      amount_tl: amount ? parseFloat(amount.replace(/\./g, "").replace(/,/g, ".")) : null,
     }),
   }).then(r => r.json()).then(d => {
     alert(d.status === "ok" ? "Güncellendi ✓" : "Hata: " + JSON.stringify(d));

@@ -18139,3 +18139,163 @@ async def admin_backfill_kap_processors(request: Request, payload: dict = Body(.
         await db.commit()
 
     return summary
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# PIPELINE HEALTH — MANUEL DÜZELTME ENDPOINT'LERI
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v1/admin/set-bilanco-field")
+@limiter.limit("20/minute")
+async def admin_set_bilanco_field(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bilanço kaydının tek bir alanını manuel düzelt (Fintables ile karşılaştırıp).
+
+    Body: {'admin_password': '...', 'ticker': 'KLGYO', 'period': '2026-Q1',
+           'field': 'revenue', 'value': 392050000}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.company_financial import CompanyFinancial
+    ticker = (payload.get("ticker") or "").upper()
+    period = payload.get("period")
+    field = payload.get("field")
+    value = payload.get("value")
+    allowed = {
+        "revenue", "gross_profit", "operating_profit", "net_income", "ebitda",
+        "total_assets", "current_assets", "non_current_assets",
+        "total_equity", "total_debt", "net_debt", "cash_and_equivalents",
+        "net_interest_income", "net_fees_commissions",
+        "gross_premiums", "technical_balance",
+    }
+    if not ticker or not period or field not in allowed:
+        raise HTTPException(status_code=400, detail="ticker+period+field zorunlu, field whitelist'te olmali")
+    row = (await db.execute(
+        select(CompanyFinancial).where(
+            CompanyFinancial.ticker == ticker,
+            CompanyFinancial.period == period,
+        )
+    )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Bilanço kaydı bulunamadı")
+    old = getattr(row, field, None)
+    setattr(row, field, float(value) if value is not None else None)
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok", "ticker": ticker, "period": period, "field": field,
+            "old": float(old) if old else None, "new": float(value) if value else None}
+
+
+@app.post("/api/v1/admin/set-tipe-conversion-lot")
+@limiter.limit("20/minute")
+async def admin_set_tipe_conversion_lot(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tipe dönüşüm kaydının converted_lot / investor_name düzeltme.
+
+    Body: {'admin_password': '...', 'id': 12, 'converted_lot': 1500000,
+           'investor_name': 'Ali Veli'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.share_type_conversion import ShareTypeConversion
+    _id = int(payload.get("id") or 0)
+    row = (await db.execute(select(ShareTypeConversion).where(ShareTypeConversion.id == _id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    changes = {}
+    if "converted_lot" in payload and payload["converted_lot"] is not None:
+        row.converted_lot = int(payload["converted_lot"])
+        changes["converted_lot"] = row.converted_lot
+    if "investor_name" in payload and payload["investor_name"]:
+        row.investor_name = str(payload["investor_name"])[:255]
+        changes["investor_name"] = row.investor_name
+    await db.commit()
+    return {"status": "ok", "id": row.id, "ticker": row.ticker, "changes": changes}
+
+
+@app.post("/api/v1/admin/set-dividend-payment-date")
+@limiter.limit("20/minute")
+async def admin_set_dividend_payment_date(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Temettü kaydının payment_date + brüt/net TL manuel düzelt.
+
+    Body: {'admin_password': '...', 'id': 42, 'payment_date': '2026-07-15',
+           'gross_amount_per_share': 1.25, 'net_amount_per_share': 1.0625}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.dividend_calendar import DividendCalendar
+    _id = int(payload.get("id") or 0)
+    row = (await db.execute(select(DividendCalendar).where(DividendCalendar.id == _id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    changes = {}
+    if "payment_date" in payload and payload["payment_date"]:
+        try:
+            row.payment_date = date.fromisoformat(payload["payment_date"])
+            changes["payment_date"] = str(row.payment_date)
+            # Status update: bugün/ileri/geçmiş
+            today = date.today()
+            if row.payment_date > today:
+                row.status = "tarih_belli"
+            elif row.payment_date == today:
+                row.status = "odeniyor"
+            else:
+                row.status = "tamamlandi"
+            changes["status"] = row.status
+        except ValueError:
+            raise HTTPException(status_code=400, detail="payment_date YYYY-MM-DD formatında olmalı")
+    if "gross_amount_per_share" in payload and payload["gross_amount_per_share"] is not None:
+        row.gross_amount_per_share = float(payload["gross_amount_per_share"])
+        changes["gross_amount_per_share"] = row.gross_amount_per_share
+    if "net_amount_per_share" in payload and payload["net_amount_per_share"] is not None:
+        row.net_amount_per_share = float(payload["net_amount_per_share"])
+        changes["net_amount_per_share"] = row.net_amount_per_share
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok", "id": row.id, "ticker": row.ticker, "changes": changes}
+
+
+@app.post("/api/v1/admin/set-capital-increase-amount")
+@limiter.limit("20/minute")
+async def admin_set_capital_increase_amount(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Sermaye artırımı kaydının yüzde/tutar düzelt.
+
+    Body: {'admin_password': '...', 'id': 5, 'type': 'bedelsiz',
+           'pct': 990.91, 'amount_tl': 1845000000}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.models.capital_increase import CapitalIncrease
+    _id = int(payload.get("id") or 0)
+    row = (await db.execute(select(CapitalIncrease).where(CapitalIncrease.id == _id))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı")
+    changes = {}
+    pct = payload.get("pct")
+    if pct is not None:
+        t = (payload.get("type") or row.type or "bedelsiz").lower()
+        field = f"{t}_pct"
+        if hasattr(row, field):
+            setattr(row, field, float(pct))
+            changes[field] = float(pct)
+    amount = payload.get("amount_tl")
+    if amount is not None and hasattr(row, "bolunme_sonrasi_sermaye_tl"):
+        row.bolunme_sonrasi_sermaye_tl = float(amount)
+        changes["bolunme_sonrasi_sermaye_tl"] = float(amount)
+    row.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok", "id": row.id, "ticker": row.ticker, "changes": changes}
