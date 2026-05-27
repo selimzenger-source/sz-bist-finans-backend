@@ -401,6 +401,31 @@ async def _convert_ytd_to_net_quarter(
     return parsed
 
 
+async def _alert_bilanco_issue(ticker: str, parsed: dict, kap_url: Optional[str] = None):
+    """Bilanco parse eksiklikleri icin Telegram alert (anti-spam)."""
+    try:
+        missing = []
+        sec = parsed.get("sector_type")
+        conf = parsed.get("confidence")
+        # Sanayi/sigorta icin revenue NULL kritik
+        if sec in ("industrial", "insurance") and parsed.get("revenue") is None:
+            missing.append("revenue")
+        if sec == "bank" and parsed.get("net_interest_income") is None:
+            missing.append("net_interest_income")
+        if parsed.get("total_assets") is None:
+            missing.append("total_assets")
+        if conf == "low":
+            missing.append("low_confidence")
+        if missing:
+            from app.services.admin_telegram import notify_kap_parse_issue
+            await notify_kap_parse_issue(
+                "bilanco", ticker, kap_url, missing,
+                detail=f"sector={sec} period={parsed.get('period')} confidence={conf}",
+            )
+    except Exception:
+        pass
+
+
 async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
     """
     AI ile parse edilen bilanço rakamlarını DB'ye kaydeder.
@@ -421,6 +446,9 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
         period = parsed.get("period")
         if not period:
             return False
+
+        # Eksik kritik alan varsa admin'e bildir
+        await _alert_bilanco_issue(ticker, parsed)
 
         # YTD -> Net Ceyrek donusumu (Q2/Q3/Q4 icin)
         async with async_session() as _conv_db:

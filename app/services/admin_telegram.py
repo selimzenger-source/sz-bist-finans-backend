@@ -295,6 +295,51 @@ async def notify_ipo_status_change(
     await send_admin_message(text)
 
 
+async def notify_kap_parse_issue(
+    category: str,
+    ticker: str,
+    kap_url: Optional[str],
+    missing_fields: list[str],
+    detail: str = "",
+):
+    """KAP parse sirasinda eksik/sapma tespit edildi — admin'e Telegram bildirim.
+
+    Args:
+        category: bilanco | temettu | tipe_donusum | block_trade | capital_increase | business_deal
+        ticker: Hisse kodu
+        kap_url: KAP bildirim linki (varsa)
+        missing_fields: Eksik alanlar listesi (orn ['lot_amount', 'broker'])
+        detail: Ek not (sektor, confidence, vb.)
+
+    Anti-spam: ayni kategori+kap_url icin son 1 saat icinde tekrar gonderilmez.
+    """
+    spam_key = f"parse_issue:{category}:{kap_url or ticker}"
+    if not _should_send_error(spam_key):
+        return
+
+    category_emoji = {
+        "bilanco": "📊", "temettu": "💰", "tipe_donusum": "🔄",
+        "block_trade": "📦", "capital_increase": "📈",
+        "business_deal": "🤝", "share_transaction": "💱",
+    }.get(category, "⚠️")
+
+    fields_str = ", ".join(missing_fields) if missing_fields else "—"
+    text = (
+        f"{category_emoji} <b>KAP Parse Sorunu</b>\n"
+        f"━━━━━━━━━━━━━━\n"
+        f"Kategori: {category}\n"
+        f"Ticker: <code>{ticker}</code>\n"
+        f"Eksik: <b>{fields_str}</b>"
+    )
+    if detail:
+        text += f"\n{detail[:200]}"
+    if kap_url:
+        text += f"\n🔗 {kap_url}"
+    text += f"\n\n🛠 Düzelt: /admin/pipeline-health"
+
+    await send_admin_message(text, silent=False)
+
+
 async def notify_scraper_error(scraper_name: str, error: str):
     """Scraper hatasi bildirimi (anti-spam: aynı hata max 3 mesaj / 10dk)."""
     spam_key = f"{scraper_name}:{error}"

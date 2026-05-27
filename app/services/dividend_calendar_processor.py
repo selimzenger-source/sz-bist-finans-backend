@@ -802,6 +802,29 @@ async def process_kap_disclosure(
             await mirror_to_dividend_history(db, existing)
     except Exception:
         pass
+
+    # ── Telegram alert: kritik eksiklikler ──
+    try:
+        if existing:
+            _missing = []
+            # Odeme tarihi event'i ama payment_date NULL — buyuk sorun
+            if event_type == "payment" and not existing.payment_date:
+                _missing.append("payment_date")
+            # GK onayinda brut TL ve odeme tarihi belli olmali
+            if event_type == "ga_approval":
+                if not existing.gross_amount_per_share and existing.payment_type != "stock" and existing.payment_type != "none":
+                    _missing.append("gross_amount_per_share")
+                if not existing.payment_date:
+                    _missing.append("payment_date")
+            if _missing:
+                from app.services.admin_telegram import notify_kap_parse_issue
+                await notify_kap_parse_issue(
+                    "temettu", ticker, kap_url, _missing,
+                    detail=f"event={event_type} status={existing.status} period={existing.period}",
+                )
+    except Exception:
+        pass
+
     return existing
 
 

@@ -484,6 +484,23 @@ async def process_block_trade(
         await db.flush()
         logger.info("BlockTrade: yeni (%s, %s)", _tk, tx_type)
         last_row = new_row
+        # ── Telegram alert: kritik alanlardan biri eksikse ──
+        _missing = []
+        if new_row.lot_amount is None:
+            _missing.append("lot_amount")
+        if new_row.broker is None:
+            _missing.append("broker")
+        if new_row.counterparties is None:
+            _missing.append("counterparties")
+        if _missing:
+            try:
+                from app.services.admin_telegram import notify_kap_parse_issue
+                await notify_kap_parse_issue(
+                    "block_trade", _tk, kap_url, _missing,
+                    detail=f"transaction_type={tx_type} cost_price={new_row.cost_price}",
+                )
+            except Exception:
+                pass
     return last_row
 
 
@@ -647,6 +664,34 @@ async def process_type_conversion(
         await db.flush()
         tickers = [r.ticker for r in inserted_rows]
         logger.info("TypeConversion: %d satir eklendi - tickers=%s", len(inserted_rows), tickers)
+
+        # ── Telegram alert: converted_lot veya investor_name eksikse ──
+        rows_missing_lot = [r.ticker for r in inserted_rows if r.converted_lot is None]
+        rows_missing_inv = [r.ticker for r in inserted_rows if not r.investor_name or r.investor_name == "?"]
+        if rows_missing_lot or rows_missing_inv:
+            try:
+                from app.services.admin_telegram import notify_kap_parse_issue
+                _missing_summary = []
+                if rows_missing_lot:
+                    _missing_summary.append(f"lot_amount eksik ({len(rows_missing_lot)} satir: {','.join(rows_missing_lot[:5])})")
+                if rows_missing_inv:
+                    _missing_summary.append(f"investor_name eksik ({len(rows_missing_inv)} satir)")
+                await notify_kap_parse_issue(
+                    "tipe_donusum", ",".join(tickers[:3]), kap_url, _missing_summary,
+                    detail=f"toplam {len(inserted_rows)} satir parse edildi",
+                )
+            except Exception:
+                pass
+    elif kap_url:
+        # Hicbir satir eklenemedi — buyuk sorun
+        try:
+            from app.services.admin_telegram import notify_kap_parse_issue
+            await notify_kap_parse_issue(
+                "tipe_donusum", ticker, kap_url, ["TUM_SATIRLAR"],
+                detail="Tablodan satir cikartilamadi, tum kayit kayboldu",
+            )
+        except Exception:
+            pass
 
     return inserted_rows
 
