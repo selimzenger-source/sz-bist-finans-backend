@@ -13746,6 +13746,7 @@ async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
     tickers = payload.get("tickers") or []
+    force = bool(payload.get("force", False))  # True ise dedup atla (test için)
     if not isinstance(tickers, list) or not tickers:
         raise HTTPException(status_code=400, detail="tickers list olmali")
 
@@ -13757,7 +13758,7 @@ async def admin_process_bilanco_from_kap(request: Request, payload: dict = Body(
         if not ticker:
             continue
         try:
-            await process_bilanco_bildirimi(ticker, kap_title="manuel_admin")
+            await process_bilanco_bildirimi(ticker, kap_title="manuel_admin", force=force)
             results.append({"ticker": ticker, "status": "ok"})
         except Exception as e:
             results.append({"ticker": ticker, "status": "error", "msg": str(e)[:200]})

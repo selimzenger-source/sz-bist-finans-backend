@@ -27,14 +27,14 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
-# Bilanço pipeline — TEKRAR KAPATILDI (yasal hazirlik donemi).
-# BFREN Q1 bilanco tweet'i atildigi icin geri False'a alindi. Tab mobilde gizli +
-# tweet atilmamali. AI scoring bilanco bildirimini Notr olarak puanlayip atlamali.
-BILANCO_PIPELINE_ENABLED = False
+# Bilanço pipeline — KAP "Finansal Durum Tablosu (Bilanço)" geldiğinde otomatik tetiklenir.
+# Pipeline akışı: KAP body parse → company_financials upsert → AI analiz + score
+# Duplicate kontrolü: aynı ticker+period+revenue varsa skip eder (idempotent).
+BILANCO_PIPELINE_ENABLED = True
 
-# Bagimsiz kill-switch — pipeline acilsa bile TWEET kesinlikle atilmaz.
-# Bilanco tweetleri pespese atildigi icin defense-in-depth olarak eklendi.
-# Acmak icin: BILANCO_TWEET_ENABLED = True yapilmali (manuel karar).
+# Tweet kill-switch — pipeline açık ama tweet ATILMAZ.
+# Test fazında bilanço tweet'i atılmasın istiyoruz, pipeline doğru çalıştığına
+# emin olduktan sonra True yapılacak (kullanıcı kararı).
 BILANCO_TWEET_ENABLED = False
 
 # Bilanco sezonu yogunluk kontrolu
@@ -55,7 +55,7 @@ async def _ensure_queue():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
+async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: bool = False):
     """
     Tek bir hisse icin bilanco pipeline'i calistirir.
     KAP scraper'dan tetiklenir.
@@ -63,6 +63,7 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
     Args:
         ticker: Hisse kodu
         kap_title: KAP bildirim basligi (tweet icin)
+        force: True ise idempotent dedup atla (admin test icin)
     """
     if not BILANCO_PIPELINE_ENABLED:
         logger.info(
@@ -70,6 +71,33 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = ""):
             ticker, kap_title,
         )
         return
+
+    # ★ IDEMPOTENT DEDUP — son saat icinde aynı hisse için pipeline calıştırıldıysa skip
+    # Sebep: KAP "Finansal Durum Tablosu" + "Sorumluluk Beyanı" + "Faaliyet Raporu"
+    # 3 ayrı KAP olarak gelir; üçünde de is_bilanco=True flag var. Üçü ardı arda
+    # pipeline'ı tetikler — sadece ilki işlensin yeterli.
+    if not force:
+        try:
+            from datetime import timedelta as _td2
+            from app.database import async_session as _as
+            from app.models.company_financial import CompanyFinancial as _CF
+            from sqlalchemy import select as _sel, desc as _desc
+            async with _as() as _db:
+                _r = await _db.execute(
+                    _sel(_CF).where(_CF.ticker == ticker)
+                    .order_by(_desc(_CF.scraped_at)).limit(1)
+                )
+                _last = _r.scalar_one_or_none()
+                if _last and _last.scraped_at:
+                    age = datetime.now(timezone.utc) - _last.scraped_at
+                    if age < _td2(hours=1):
+                        logger.info(
+                            "📊 Bilanco pipeline SKIP (dedup): %s — son işleme %d dakika önce",
+                            ticker, int(age.total_seconds() / 60),
+                        )
+                        return
+        except Exception as _e:
+            logger.debug("Dedup kontrolu hata (%s): %s — devam", ticker, _e)
 
     logger.info("📊 Bilanco pipeline baslatildi: %s — %s", ticker, kap_title)
 
