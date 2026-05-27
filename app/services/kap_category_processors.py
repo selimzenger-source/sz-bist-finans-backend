@@ -304,6 +304,30 @@ def _parse_block_trade_regex(body: str) -> dict:
         except ValueError:
             pass
 
+    # Fallback: "N.NNN.NNN TL nominal" — borsa disi pay devri duyurularinda
+    # (FLAP/BIZIM/DCTTR tarzi) KAP form'da LOT MIKTARI alani yok, sadece prose
+    # icinde "X TL nominal tutarli pay devri" yaziyor. 1 lot = 1 TL nominal
+    # oldugu icin tum nominal tutarlari topla.
+    if not out.get("lot_amount"):
+        nominal_matches = re.findall(
+            r"([\d]{1,3}(?:\.\d{3})+|[\d]+)\s*TL\s*nominal",
+            b, re.IGNORECASE,
+        )
+        if nominal_matches:
+            try:
+                # KAP body genelde ayni rakami birden fazla yerde tekrarliyor
+                # (HTML + JSON + meta). Unique degerleri topla.
+                unique_vals = set()
+                for raw in nominal_matches:
+                    val = int(raw.replace(".", "").replace(",", ""))
+                    if val >= 1000:  # cok kucuk degerleri (footnote) atla
+                        unique_vals.add(val)
+                total = sum(unique_vals)
+                if total > 0:
+                    out["lot_amount"] = total
+            except ValueError:
+                pass
+
     # cost_price: "71,00 TL" / "71.00 TL" / "71,00 ₺"
     m_price = re.search(r"MAL[İI]YET\s*F[İI]YAT[İI][\s\:\|]+([\d\.\,]+)\s*(?:TL|₺)?", b, re.IGNORECASE)
     if m_price:
