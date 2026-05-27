@@ -18299,3 +18299,53 @@ async def admin_set_capital_increase_amount(
     row.updated_at = datetime.now(timezone.utc)
     await db.commit()
     return {"status": "ok", "id": row.id, "ticker": row.ticker, "changes": changes}
+
+
+@app.post("/api/v1/admin/cleanup-is-bilanco-flags")
+@limiter.limit("3/minute")
+async def admin_cleanup_is_bilanco_flags(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Eski kayıtlardaki yanlış is_bilanco=True flag'lerini temizler.
+
+    Sadece "Finansal Durum Tablosu (Bilanço)" başlıklı KAP'lar gerçek bilançodur.
+    "Sorumluluk Beyanı", "Faaliyet Raporu", "Nakit Akış Tablosu" gibi yan
+    dokümanlar yanlışlıkla is_bilanco=True işaretlenmiş — bunları False yapar.
+
+    HİÇBİR KAP haberi silinmez, sadece flag düzeltilir. Mobil app bilanço
+    sayfası (company_financials tablosu) etkilenmez.
+
+    Body: {'admin_password': '...'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from sqlalchemy import update as _update, func as _f
+
+    # Once kac kayit etkilenecek bul
+    count_q = await db.execute(
+        select(_f.count(KapAllDisclosure.id))
+        .where(KapAllDisclosure.is_bilanco == True)  # noqa: E712
+        .where(_f.lower(KapAllDisclosure.title).notlike("%finansal durum tablosu%"))
+    )
+    affected = count_q.scalar() or 0
+
+    # Update
+    upd = (
+        _update(KapAllDisclosure)
+        .where(KapAllDisclosure.is_bilanco == True)  # noqa: E712
+        .where(_f.lower(KapAllDisclosure.title).notlike("%finansal durum tablosu%"))
+        .values(is_bilanco=False)
+    )
+    result = await db.execute(upd)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "affected_rows": affected,
+        "matched": result.rowcount,
+        "note": "Sadece 'Finansal Durum Tablosu (Bilanço)' başlıklı KAP'lar is_bilanco=True olarak kaldı",
+    }

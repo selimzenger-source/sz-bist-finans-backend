@@ -175,14 +175,30 @@ async def fetch_kap_disclosure(
                 headers=DEFAULT_HEADERS,
             )
 
-        try:
-            r = await client.get(canonical_url)
-            if r.status_code != 200:
-                logger.warning("KAP %s HTTP %d", bildirim_id, r.status_code)
+        # 3 deneme: 1s -> 3s -> 7s expo backoff. 5xx / timeout / RemoteProtocolError
+        # gecici hatalarina karsi koruma. 4xx ise tek seferde vazgec.
+        html = None
+        import asyncio as _asyncio
+        for _attempt in range(3):
+            try:
+                r = await client.get(canonical_url)
+                if r.status_code == 200:
+                    html = r.text
+                    break
+                if 400 <= r.status_code < 500:
+                    logger.warning("KAP %s HTTP %d (4xx, retry yok)", bildirim_id, r.status_code)
+                    return None
+                # 5xx — retry
+                logger.warning("KAP %s HTTP %d (deneme %d/3)", bildirim_id, r.status_code, _attempt + 1)
+            except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectError) as exc:
+                logger.warning("KAP %s fetch hata (deneme %d/3): %s", bildirim_id, _attempt + 1, exc)
+            except Exception as exc:
+                logger.warning("KAP %s beklenmedik hata: %s", bildirim_id, exc)
                 return None
-            html = r.text
-        except Exception as exc:
-            logger.warning("KAP %s fetch hata: %s", bildirim_id, exc)
+            if _attempt < 2:
+                await _asyncio.sleep(1 + 2 * _attempt + (4 if _attempt == 1 else 0))  # 1s, 3s, 7s
+        if html is None:
+            logger.error("KAP %s 3 deneme sonrasi alinamadi, vazgecildi", bildirim_id)
             return None
 
         decoded = _decode_rsc_chunks(html)

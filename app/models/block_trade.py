@@ -6,7 +6,7 @@ Format:
 """
 
 from datetime import date, datetime
-from sqlalchemy import String, Float, Date, DateTime, Index, Text, BigInteger
+from sqlalchemy import String, Float, Date, DateTime, Index, Text, BigInteger, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -40,4 +40,5 @@ class BlockTrade(Base):
 
     __table_args__ = (
         Index("idx_bt_ticker_date", "ticker", "transaction_date"),
+        UniqueConstraint("kap_url", "ticker", name="uq_block_trade_kap_ticker"),
     )

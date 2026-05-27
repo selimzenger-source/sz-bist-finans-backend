@@ -5,7 +5,7 @@ Format (KAP/Ucretsizderinlikbot):
 """
 
 from datetime import date, datetime
-from sqlalchemy import String, Integer, Date, DateTime, Index, Text, BigInteger
+from sqlalchemy import String, Integer, Date, DateTime, Index, Text, BigInteger, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -27,4 +27,5 @@ class ShareTypeConversion(Base):
 
     __table_args__ = (
         Index("idx_stc_ticker_date", "ticker", "transaction_date"),
+        UniqueConstraint("kap_url", "ticker", "investor_name", name="uq_share_type_conv_kap_ticker_investor"),
     )

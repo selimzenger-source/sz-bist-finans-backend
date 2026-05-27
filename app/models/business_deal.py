@@ -11,7 +11,7 @@ TCMB kuru ile TRY'a çevrilir.
 """
 
 from datetime import date, datetime
-from sqlalchemy import String, Float, Date, DateTime, Index, Text, BigInteger
+from sqlalchemy import String, Float, Date, DateTime, Index, Text, BigInteger, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
@@ -56,4 +56,5 @@ class BusinessDeal(Base):
     __table_args__ = (
         Index("idx_bd_ticker_date", "ticker", "deal_date"),
         Index("idx_bd_amount_try", "amount_try"),
+        UniqueConstraint("kap_url", "ticker", name="uq_business_deal_kap_ticker"),
     )
