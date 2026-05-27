@@ -512,9 +512,14 @@ class IPOService:
         track.pct_change = daily_pct
 
         # v3: 5 durum — gunluk degisime gore
-        if hit_ceiling:
+        # NOT: BIST tick-size yuvarlamasi yuzunden tavan kapanis bazen %9.5-9.99
+        # arasi gorunur (orn. EKDMR Day 3 = +%9.92, teorik tavan 59.895 → 59.85).
+        # hit_ceiling Excel'den False gelse bile daily_pct >= 9.5 ise tavan say.
+        # Ayni mantik taban icin: daily_pct <= -9.5
+        _CEILING_THRESHOLD = 9.5
+        if hit_ceiling or (daily_pct is not None and daily_pct >= _CEILING_THRESHOLD):
             track.durum = "tavan"
-        elif hit_floor:
+        elif hit_floor or (daily_pct is not None and daily_pct <= -_CEILING_THRESHOLD):
             track.durum = "taban"
         elif daily_pct is not None and daily_pct == 0:
             track.durum = "not_kapatti"
