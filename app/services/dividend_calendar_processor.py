@@ -341,12 +341,114 @@ Cunku dagitim yapilmiyor — herhangi bir sayisal deger yanlis bilgi verir.
 _DATE_REGEX = re.compile(r"([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})")
 
 
+def _regex_parse_dividend_fallback(body: str) -> dict[str, Any]:
+    """AI fail durumunda KAP body'den temettu alanlarini regex ile cikar.
+
+    Production'da Gemini bazen fail oluyor ve tum alanlar NULL kaliyordu.
+    Bu fallback en azindan payment_date + gross/net per share + payment_type
+    cikararak takvim akisini calistirir.
+    """
+    out: dict[str, Any] = {}
+    if not body:
+        return out
+
+    # ── Pay basina brut/net temettu ──────────────────────────────────────
+    # Tipik patterns: "Pay başına brüt temettü: 1,2500 TL" / "Hisse Başına Brüt: 0,85 TL"
+    gross_patterns = [
+        r"(?:pay|hisse|1\s*tl\s*nominal)\s*ba[şs][ıi]na\s*br[üu]t(?:\s*kar\s*pay[ıi])?[\s:]+([\d.,]+)\s*(?:tl|tl\.|₺)",
+        r"br[üu]t\s*(?:nakit\s*)?(?:kar\s*pay[ıi]|temett[uü])\s*tutar[ıi][\s:]+([\d.,]+)",
+        r"1\s*tl\s*nominal\s*degerli\s*paya\s*br[üu]t[\s:]+([\d.,]+)",
+    ]
+    for pat in gross_patterns:
+        m = re.search(pat, body, re.IGNORECASE)
+        if m:
+            try:
+                raw = m.group(1).replace(".", "").replace(",", ".")
+                v = float(raw)
+                if 0 < v < 10000:  # makul aralik
+                    out["gross_amount_per_share"] = v
+                    break
+            except ValueError:
+                pass
+
+    net_patterns = [
+        r"(?:pay|hisse|1\s*tl\s*nominal)\s*ba[şs][ıi]na\s*net(?:\s*kar\s*pay[ıi])?[\s:]+([\d.,]+)\s*(?:tl|tl\.|₺)",
+        r"net\s*(?:nakit\s*)?(?:kar\s*pay[ıi]|temett[uü])\s*tutar[ıi][\s:]+([\d.,]+)",
+        r"1\s*tl\s*nominal\s*degerli\s*paya\s*net[\s:]+([\d.,]+)",
+    ]
+    for pat in net_patterns:
+        m = re.search(pat, body, re.IGNORECASE)
+        if m:
+            try:
+                raw = m.group(1).replace(".", "").replace(",", ".")
+                v = float(raw)
+                if 0 < v < 10000:
+                    out["net_amount_per_share"] = v
+                    break
+            except ValueError:
+                pass
+
+    # ── Odeme tarihi ─────────────────────────────────────────────────────
+    # "Ödeme Tarihi: 15.06.2026" / "Nakit Kar Payi Odeme Tarihi: 01.07.2026"
+    pay_date_patterns = [
+        r"(?:nakit\s*(?:kar\s*pay[ıi]\s*)?)?[öo]deme\s*(?:ba[şs]lang[ıi]c\s*)?tarihi[\s:]+([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})",
+        r"hak\s*kullan[ıi]m\s*tarihi[\s:]+([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})",
+        r"temett[uü](?:\s*[öo]deme)?\s*tarihi[\s:]+([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})",
+    ]
+    for pat in pay_date_patterns:
+        m = re.search(pat, body, re.IGNORECASE)
+        if m:
+            try:
+                dd, mm, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                out["payment_date"] = date(yy, mm, dd)
+                break
+            except (ValueError, IndexError):
+                pass
+
+    # ── Genel Kurul tarihi ───────────────────────────────────────────────
+    gk_patterns = [
+        r"genel\s*kurul\s*(?:topla)?(?:nt[ıi])?\s*tarihi[\s:]+([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})",
+        r"olagan\s*genel\s*kurul.*?([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})",
+    ]
+    for pat in gk_patterns:
+        m = re.search(pat, body, re.IGNORECASE | re.DOTALL)
+        if m:
+            try:
+                dd, mm, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                out["general_assembly_date"] = date(yy, mm, dd)
+                break
+            except (ValueError, IndexError):
+                pass
+
+    # ── Period (donem) ───────────────────────────────────────────────────
+    # "2025 yılı kar payı" / "2025 hesap dönemi"
+    m = re.search(r"(20[0-9]{2})\s*(?:y[ıi]l[ıi]|hesap\s*d[öo]nemi)\s*(?:kar\s*pay[ıi]|temett[uü])", body, re.IGNORECASE)
+    if m:
+        out["period"] = m.group(1)
+
+    # ── Payment type ─────────────────────────────────────────────────────
+    body_l = body.lower()
+    if "bedelsiz" in body_l or "ic kaynaklar" in body_l or "iç kaynaklar" in body_l:
+        if out.get("gross_amount_per_share"):
+            out["payment_type"] = "cash_and_stock"
+        else:
+            out["payment_type"] = "stock"
+    elif out.get("gross_amount_per_share"):
+        out["payment_type"] = "cash"
+
+    return out
+
+
 async def ai_parse_dividend(
     ticker: str,
     title: str,
     body: str,
 ) -> dict[str, Any]:
-    """KAP body'sinden temettu yapilandirilmis veri cikar."""
+    """KAP body'sinden temettu yapilandirilmis veri cikar.
+
+    Once AI dener, AI bos donerse veya hata verirse regex fallback'i kullanir.
+    Production'da AI fail rate yuksek oldugu icin fallback CALISTIRMA SART.
+    """
     out: dict[str, Any] = {
         "period": None,
         "gross_amount_per_share": None,
@@ -361,8 +463,13 @@ async def ai_parse_dividend(
         "stock_ratio_text": None,
     }
 
+    # Once regex ile fallback degerleri cikar — sonra AI override etsin
+    regex_out = _regex_parse_dividend_fallback(body or "")
+
     gemini_key = _get_gemini_key()
     if not gemini_key or not body:
+        # AI yok — regex sonucunu dondur
+        out.update({k: v for k, v in regex_out.items() if v is not None})
         return out
 
     prompt = _PARSE_PROMPT.format(
@@ -419,6 +526,11 @@ async def ai_parse_dividend(
                 logger.warning("Dividend AI: HTTP %s — %s", resp.status_code, resp.text[:200])
     except Exception as e:
         logger.warning("Dividend AI hata: %s", e)
+
+    # AI'da bos kalan alanlari regex fallback ile doldur (sadece None olanlar)
+    for k, v in regex_out.items():
+        if out.get(k) is None and v is not None:
+            out[k] = v
 
     return out
 

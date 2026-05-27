@@ -81,5 +81,11 @@ class KapAllDisclosure(Base):
         Index("idx_kap_all_company", "company_code"),
         Index("idx_kap_all_sentiment", "ai_sentiment"),
         Index("idx_kap_all_created", "created_at"),
-        UniqueConstraint("company_code", "title", name="uq_kap_company_title"),
+        # ESKI: (company_code, title) → ayni sirket ayni baslikla 2. KAP'i
+        # reddediyordu (veri kaybi). YENI: published_at eklendi — ayni
+        # zaman damgasinda dedup, farkli zamanlarda kabul.
+        UniqueConstraint(
+            "company_code", "title", "published_at",
+            name="uq_kap_company_title_published",
+        ),
     )
