@@ -9541,9 +9541,10 @@ async def submit_error_report(
     ok = await send_admin_message(text, parse_mode="HTML", silent=False)
 
     # Kullanıcıya 50 puan ödül ver — 48 saat cooldown (suistimal önleme)
+    # NOT: iOS'ta puan/ödül sistemi YOK (Apple politikası) — sadece Android.
     points_awarded = False
     cooldown_active = False
-    if body.device_id and body.device_id != "unknown":
+    if (body.platform or "").lower() != "ios" and body.device_id and body.device_id != "unknown":
         try:
             result = await db.execute(
                 select(User).where(User.device_id == body.device_id).with_for_update()
