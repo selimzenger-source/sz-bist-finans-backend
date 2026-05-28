@@ -75,7 +75,10 @@ class CompanyFinancial(Base):
         String(32), comment="Çok İyi/İyi/Orta/Zayıf/Kötü"
     )
     ai_summary: Mapped[str | None] = mapped_column(
-        Text, comment="AI bilanço özet yorumu (Türkçe)"
+        Text, comment="AI bilanço özet yorumu (Türkçe, kısa)"
+    )
+    ai_analysis: Mapped[str | None] = mapped_column(
+        Text, comment="AI derin analiz — tam yapılandırılmış JSON (bölümler, trend, güçlü/risk)"
     )
     ai_analyzed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), comment="AI analiz zamanı"

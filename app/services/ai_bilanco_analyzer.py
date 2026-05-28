@@ -20,60 +20,181 @@ _CLAUDE_MODEL = "claude-sonnet-4-20250514"
 _AI_TIMEOUT = 120
 
 
-_SYSTEM_PROMPT = """Sen bir Türk borsası (BIST) finansal analiz uzmanısın.
-Görevin, verilen bilanço ve gelir tablosu verilerini analiz ederek yatırımcıya anlaşılır bir değerlendirme sunmak.
+_SYSTEM_PROMPT = """Sen kıdemli bir BIST (Borsa İstanbul) finansal analistisin. Bir CFA gibi,
+şirketin 5 YILLIK finansal gelişimini derinlemesine okur, rakamların ARDINDAKİ hikâyeyi
+çıkarırsın. Görevin yüzeysel bir puan vermek DEĞİL — şirketin gerçek finansal sağlığını,
+trendini ve risklerini titizce analiz etmek.
 
-KURALLAR:
-- Türkçe yaz, sade ve anlaşılır bir dil kullan.
-- Teknik terimleri parantez içinde açıkla.
-- Kesinlikle yatırım tavsiyesi VERME. Sadece finansal durumu değerlendir.
-- Veride olmayan bilgiyi uydurma.
-- Her zaman "Bu analiz yatırım tavsiyesi değildir" uyarısını ekle.
+═══════════════════ ANALİZ YÖNTEMİ ═══════════════════
+1) TREND OKU (en önemli kısım): Tek çeyreğe değil, ZAMAN SERİSİNE bak.
+   - Ciro/satış 5 yılda büyüyor mu, enflasyonun üzerinde mi? (TR enflasyonu yüksek —
+     nominal büyüme ≠ reel büyüme. Yıllık %40-50 altı nominal büyüme aslında DARALMA olabilir.)
+   - Net kâr istikrarlı mı, dalgalı mı, tek seferlik kalemlerle mi şiştî?
+   - FAVÖK (esas faaliyet kârlılığı) marjı korunuyor mu, eriyor mu?
+   - Özkaynak büyüyor mu (kâr birikimi/sermaye artışı)?
+   - Çeyrekten çeyreğe momentum: son 2-3 çeyrek hızlanıyor mu yavaşlıyor mu?
 
-ÇIKTI FORMATI (JSON):
+2) KÂRLILIK KALİTESİ:
+   - Brüt marj → faaliyet marjı → net marj zinciri. Nerede kâr eriyor?
+   - ROE (özkaynak kârlılığı) sektör için iyi mi? (TR'de %20+ iyi, enflasyon nedeniyle.)
+   - Net kâr esas faaliyetten mi yoksa finansman/kur/tek-seferlik gelirden mi geliyor?
+
+3) BİLANÇO SAĞLIĞI & BORÇ:
+   - Net Borç/FAVÖK kaç? (>4 yüksek risk, <2 sağlıklı, negatif=net nakit pozisyonu çok iyi)
+   - Borç/Özkaynak oranı. Kısa vadeli borç baskısı.
+   - Cari oran (dönen varlık/kısa borç) likidite.
+
+4) SEKTÖRE GÖRE BAK: Banka/sigorta/faktoring/aracı kurum farklı okunur.
+   - Banka: net faiz geliri, kredi/mevduat büyümesi öne çıkar (ciro/FAVÖK anlamsız).
+   - Sigorta: brüt prim üretimi, teknik denge.
+   - Sanayi/ticaret: ciro, FAVÖK marjı, net borç.
+
+═══════════════════ PUANLAMA (1-10) ═══════════════════
+Puanı analizden TÜRET, gelişigüzel verme. Rehber:
+  9-10: Çok güçlü — istikrarlı reel büyüme + yüksek ROE + düşük borç + güçlü nakit.
+  7-8 : İyi — sağlıklı büyüme/kârlılık, yönetilebilir borç, küçük zayıflıklar.
+  5-6 : Orta — karışık tablo; bazı kalemler iyi, bazıları zayıf/dalgalı.
+  3-4 : Zayıf — daralan ciro/kâr VEYA yüksek borç VEYA marj erimesi.
+  1-2 : Riskli — zarar, eriyen özkaynak, sürdürülemez borç, ciddi bozulma.
+Label: 9-10 "Çok Güçlü", 7-8 "Güçlü", 6 "İyi", 5 "Orta", 3-4 "Zayıf", 1-2 "Riskli".
+Ondalık kullan (örn 7.5). Tüm şirketlere 5-6 verme — gerçek farkları yansıt.
+
+═══════════════════ KURALLAR ═══════════════════
+- Türkçe, akıcı ve PROFESYONEL ama anlaşılır. Teknik terimi ilk geçtiğinde parantezle açıkla.
+- RAKAM KULLAN: "ciro %X büyüdü", "net borç/FAVÖK Y'ye düştü" gibi somut ifadeler.
+- ASLA yatırım tavsiyesi verme (al/sat/tut deme). Sadece finansal durumu değerlendir.
+- Veride olmayanı UYDURMA. Eksikse "veri yetersiz" de.
+- Hedef fiyat, getiri beklentisi YAZMA.
+
+═══════════════════ ÇIKTI (sadece geçerli JSON) ═══════════════════
 {
-    "overall_health_score": 1-10 arası puan,
-    "overall_health_label": "Güçlü" / "İyi" / "Orta" / "Zayıf" / "Riskli",
-    "revenue_trend": "Büyüyen ciro trendi açıklaması...",
-    "profitability_analysis": "Kârlılık durumu değerlendirmesi...",
-    "debt_analysis": "Borç yapısı ve risk değerlendirmesi...",
-    "sector_comparison": "Sektör ortalamasına göre konum...",
-    "key_strengths": ["Güçlü yön 1", "Güçlü yön 2"],
-    "key_risks": ["Risk 1", "Risk 2"],
-    "summary": "2-3 cümlelik genel değerlendirme",
+    "overall_health_score": 7.5,
+    "overall_health_label": "Güçlü",
+    "five_year_growth": "5 yıllık ciro/kâr/özkaynak gelişimi — somut yüzdelerle trend hikâyesi (3-5 cümle).",
+    "revenue_trend": "Satış/ciro trendi, reel büyüme yorumu, son çeyrek momentumu (2-4 cümle).",
+    "profitability_analysis": "Brüt→faaliyet→net marj zinciri, ROE, kâr kalitesi (2-4 cümle).",
+    "debt_analysis": "Net borç/FAVÖK, borç/özkaynak, likidite ve risk (2-4 cümle).",
+    "balance_sheet_quality": "Özkaynak gelişimi, varlık yapısı, nakit pozisyonu (2-3 cümle).",
+    "key_strengths": ["Somut güçlü yön 1", "Somut güçlü yön 2", "Somut güçlü yön 3"],
+    "key_risks": ["Somut risk 1", "Somut risk 2"],
+    "summary": "Yatırımcıya 3-4 cümlelik net genel değerlendirme — en kritik 2-3 bulguyu vurgula.",
     "disclaimer": "Bu analiz yatırım tavsiyesi değildir. Yatırım kararlarınızı kendi araştırmanıza dayandırın."
 }
 """
 
 
+def _fmt_tl(v) -> str:
+    """Büyük TL rakamlarını okunur kısalt: 1.2 milyar / 340 milyon / 12.5 bin."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "—"
+    a = abs(v)
+    if a >= 1_000_000_000:
+        return f"{v/1_000_000_000:,.2f} milyar TL"
+    if a >= 1_000_000:
+        return f"{v/1_000_000:,.1f} milyon TL"
+    if a >= 1_000:
+        return f"{v/1_000:,.0f} bin TL"
+    return f"{v:,.0f} TL"
+
+
+def _yoy(curr, prev) -> str:
+    """Yıldan yıla % değişim metni."""
+    try:
+        curr = float(curr); prev = float(prev)
+        if prev == 0:
+            return ""
+        pct = (curr - prev) / abs(prev) * 100
+        sign = "+" if pct >= 0 else ""
+        return f" ({sign}{pct:.0f}% y/y)"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _annual_aggregates(financials: list[dict]) -> list[dict]:
+    """Çeyreklik veriden YILLIK toplam/snapshot üret (5 yıllık trend için).
+
+    Gelir tablosu kalemleri (revenue/net_income/ebitda) → yıl içi NET çeyreklerin TOPLAMI.
+    Bilanço kalemleri (equity/assets/net_debt) → yılın EN SON çeyreğindeki değer (snapshot).
+    financials NET çeyreklik (YTD değil) varsayılır.
+    """
+    by_year: dict[str, dict] = {}
+    # En eskiden yeniye sırala ki "son çeyrek snapshot" doğru olsun
+    ordered = sorted(financials, key=lambda f: f.get("period", ""))
+    for f in ordered:
+        period = f.get("period", "")
+        year = period.split("-")[0] if "-" in period else period[:4]
+        if not year.isdigit():
+            continue
+        slot = by_year.setdefault(year, {
+            "year": year, "revenue": 0.0, "net_income": 0.0, "ebitda": 0.0,
+            "_rev_n": 0, "equity": None, "total_assets": None, "net_debt": None,
+            "net_interest_income": 0.0, "gross_premiums": 0.0,
+        })
+        for fld in ("revenue", "net_income", "ebitda", "net_interest_income", "gross_premiums"):
+            if f.get(fld) is not None:
+                slot[fld] += float(f[fld])
+        if f.get("revenue") is not None:
+            slot["_rev_n"] += 1
+        # Bilanço snapshot — en son işlenen (en yeni çeyrek) kazanır
+        for snap in ("equity", "total_assets", "net_debt"):
+            src = "total_equity" if snap == "equity" else snap
+            if f.get(src) is not None:
+                slot[snap] = float(f[src])
+    return [by_year[y] for y in sorted(by_year.keys())]
+
+
 def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | None = None) -> str:
-    """Bilanço verilerinden AI için context oluşturur."""
-    lines = [f"## {ticker} Finansal Verileri\n"]
+    """Bilanço verilerinden AI için context oluşturur — 5 yıllık + trend odaklı."""
+    sec = (ratios or {}).get("sector") or (financials[0].get("sector_type") if financials else None)
+    lines = [f"## {ticker} — Finansal Veri Seti", f"Sektör tipi: {sec or 'bilinmiyor'}\n"]
+
+    # ── YILLIK ÖZET TABLOSU (5 yıllık trend — en kritik kısım) ──
+    annuals = _annual_aggregates(financials)
+    if annuals:
+        lines.append("### 📊 Yıllık Gelişim (trend analizi için — en önemli)")
+        prev = None
+        for a in annuals[-5:]:  # son 5 yıl
+            parts = [f"**{a['year']}**:"]
+            if a["revenue"]:
+                parts.append(f"Ciro {_fmt_tl(a['revenue'])}{_yoy(a['revenue'], prev['revenue']) if prev else ''}")
+            if a["net_income"]:
+                parts.append(f"Net Kâr {_fmt_tl(a['net_income'])}{_yoy(a['net_income'], prev['net_income']) if prev else ''}")
+            if a["ebitda"]:
+                parts.append(f"FAVÖK {_fmt_tl(a['ebitda'])}{_yoy(a['ebitda'], prev['ebitda']) if prev else ''}")
+            if a["equity"] is not None:
+                parts.append(f"Özkaynak {_fmt_tl(a['equity'])}{_yoy(a['equity'], prev['equity']) if (prev and prev.get('equity')) else ''}")
+            if a["net_debt"] is not None:
+                parts.append(f"Net Borç {_fmt_tl(a['net_debt'])}")
+            if a["net_interest_income"]:
+                parts.append(f"Net Faiz Geliri {_fmt_tl(a['net_interest_income'])}")
+            if a["gross_premiums"]:
+                parts.append(f"Brüt Prim {_fmt_tl(a['gross_premiums'])}")
+            lines.append("- " + parts[0] + " " + " · ".join(parts[1:]))
+            prev = a
+        lines.append("")
 
     if financials:
-        lines.append("### Çeyreklik Veriler (son dönemden eskiye)")
-        for f in financials[:8]:  # Son 8 çeyrek (2 yıl)
-            lines.append(f"\n**{f.get('period', '?')}**")
-            if f.get("revenue"):
-                lines.append(f"- Ciro: {f['revenue']:,.0f} TL")
-            if f.get("gross_profit"):
-                lines.append(f"- Brüt Kâr: {f['gross_profit']:,.0f} TL")
-            if f.get("net_income"):
-                lines.append(f"- Net Kâr: {f['net_income']:,.0f} TL")
-            if f.get("ebitda"):
-                lines.append(f"- FAVÖK: {f['ebitda']:,.0f} TL")
-            if f.get("total_assets"):
-                lines.append(f"- Toplam Aktif: {f['total_assets']:,.0f} TL")
-            if f.get("total_equity"):
-                lines.append(f"- Özkaynaklar: {f['total_equity']:,.0f} TL")
-            if f.get("net_debt"):
-                lines.append(f"- Net Borç: {f['net_debt']:,.0f} TL")
-            if f.get("gross_margin_pct"):
-                lines.append(f"- Brüt Kâr Marjı: %{f['gross_margin_pct']:.1f}")
-            if f.get("net_margin_pct"):
-                lines.append(f"- Net Kâr Marjı: %{f['net_margin_pct']:.1f}")
-            if f.get("roe_pct"):
-                lines.append(f"- ROE: %{f['roe_pct']:.1f}")
+        lines.append("### 📈 Çeyreklik Veriler (son dönemden eskiye, momentum için)")
+        for f in financials[:12]:  # Son 12 çeyrek (3 yıl) — çeyreklik momentum
+            row = [f"**{f.get('period', '?')}**:"]
+            if f.get("revenue") is not None:
+                row.append(f"Ciro {_fmt_tl(f['revenue'])}")
+            if f.get("net_income") is not None:
+                row.append(f"Net Kâr {_fmt_tl(f['net_income'])}")
+            if f.get("ebitda") is not None:
+                row.append(f"FAVÖK {_fmt_tl(f['ebitda'])}")
+            if f.get("total_equity") is not None:
+                row.append(f"Özkaynak {_fmt_tl(f['total_equity'])}")
+            if f.get("net_debt") is not None:
+                row.append(f"Net Borç {_fmt_tl(f['net_debt'])}")
+            if f.get("net_interest_income") is not None:
+                row.append(f"Net Faiz Geliri {_fmt_tl(f['net_interest_income'])}")
+            if f.get("gross_premiums") is not None:
+                row.append(f"Brüt Prim {_fmt_tl(f['gross_premiums'])}")
+            lines.append("- " + row[0] + " " + " · ".join(row[1:]))
+        lines.append("")
 
     if ratios:
         lines.append("\n### Güncel Değerleme Çarpanları")

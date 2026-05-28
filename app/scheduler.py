@@ -4348,13 +4348,14 @@ async def run_overnight_bilanco_ai(sleep_sec: int = 28, max_count: int = 900,
             async with async_session() as db:
                 recent = (await db.execute(
                     select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
-                    .order_by(desc(CompanyFinancial.period)).limit(8)
+                    .order_by(desc(CompanyFinancial.period)).limit(20)  # 5 yil (20 ceyrek)
                 )).scalars().all()
                 if not recent:
                     continue
                 periods_data = [
                     {
                         "period": p.period,
+                        "sector_type": p.sector_type,
                         "revenue": float(p.revenue) if p.revenue else None,
                         "gross_profit": float(p.gross_profit) if p.gross_profit else None,
                         "operating_profit": float(p.operating_profit) if p.operating_profit else None,
@@ -4371,10 +4372,12 @@ async def run_overnight_bilanco_ai(sleep_sec: int = 28, max_count: int = 900,
                 ]
                 ai_result = await analyze_bilanco(ticker, periods_data)
                 if ai_result:
+                    import json as _json
                     latest = recent[0]
                     latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
                     latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
                     latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+                    latest.ai_analysis = _json.dumps(ai_result, ensure_ascii=False)[:8000]
                     latest.ai_analyzed_at = datetime.now(_tz.utc)
                     await db.commit()
                     ok += 1

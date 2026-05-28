@@ -15842,9 +15842,9 @@ async def get_top_bilancos(
     quarterly_by_ticker: dict[str, list] = {}
     for row in quarterly_q.scalars().all():
         quarterly_by_ticker.setdefault(row.ticker, []).append(row)
-    # Her ticker icin max 5 ceyrek (en yeni → en eski)
+    # Her ticker icin max 20 ceyrek = 5 yil (en yeni → en eski) — 5 yillik grafikler icin
     for tk in list(quarterly_by_ticker.keys()):
-        quarterly_by_ticker[tk] = quarterly_by_ticker[tk][:5]
+        quarterly_by_ticker[tk] = quarterly_by_ticker[tk][:20]
 
     # 2. Her ticker icin en son KAP Finansal Rapor + ai_impact_score
     kap_result = await db.execute(
@@ -15919,22 +15919,26 @@ async def get_top_bilancos(
         cf_ai = getattr(fin, "ai_score", None)
         cf_summary = getattr(fin, "ai_summary", None)
         cf_label = getattr(fin, "ai_label", None)
+        cf_analysis = getattr(fin, "ai_analysis", None)
         if cf_ai is not None:
             # Bilanco-spesifik AI analizi mevcut
             ai_score = float(cf_ai)
             ai_summary = (cf_summary[:600] if cf_summary else None)
+            ai_analysis = cf_analysis  # tam yapilandirilmis JSON (derin analiz bolumleri)
         else:
             # Henuz bilanco-AI uretilmemis. ai_score'u None birak,
             # ai_summary olarak KAP'in 'rutin/idari bildirim' metnini DONDURME
             # (kullaniciyi yaniltir). Sadece puanlanmamis goster.
             ai_score = None
             ai_summary = None
+            ai_analysis = None
         items.append({
             "ticker": ticker,
             "period": fin.period,
             "ai_score": ai_score,
             "ai_label": cf_label,
             "ai_summary": ai_summary,
+            "ai_analysis": ai_analysis,
             "ai_sentiment": kap.ai_sentiment if kap else None,
             # Sirayla: KAP published_at > earnings_calendar.announced_date > scraped_at
             "published_at": (
@@ -15958,6 +15962,7 @@ async def get_top_bilancos(
                     "revenue": _f(q.revenue),
                     "ebitda": _f(q.ebitda) if q.ebitda is not None else _f(q.operating_profit),
                     "net_income": _f(q.net_income),
+                    "total_equity": _f(q.total_equity),
                 }
                 for q in reversed(quarterly_by_ticker.get(ticker, []))
             ],
@@ -18564,13 +18569,14 @@ async def _batch_bilanco_ai_worker(period: str, limit: int):
                 async with _ases() as db:
                     recent = (await db.execute(
                         select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
-                        .order_by(desc(CompanyFinancial.period)).limit(8)
+                        .order_by(desc(CompanyFinancial.period)).limit(20)  # 5 yil
                     )).scalars().all()
                     if not recent:
                         continue
                     periods_data = [
                         {
                             "period": p.period,
+                            "sector_type": p.sector_type,
                             "revenue": float(p.revenue) if p.revenue else None,
                             "gross_profit": float(p.gross_profit) if p.gross_profit else None,
                             "operating_profit": float(p.operating_profit) if p.operating_profit else None,
@@ -18587,10 +18593,12 @@ async def _batch_bilanco_ai_worker(period: str, limit: int):
                     ]
                     ai_result = await analyze_bilanco(ticker, periods_data)
                     if ai_result:
+                        import json as _json
                         latest = recent[0]
                         latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
                         latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
                         latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+                        latest.ai_analysis = _json.dumps(ai_result, ensure_ascii=False)[:8000]
                         latest.ai_analyzed_at = datetime.now(timezone.utc)
                         await db.commit()
                         ok += 1
