@@ -15920,11 +15920,15 @@ async def get_top_bilancos(
         cf_summary = getattr(fin, "ai_summary", None)
         cf_label = getattr(fin, "ai_label", None)
         if cf_ai is not None:
+            # Bilanco-spesifik AI analizi mevcut
             ai_score = float(cf_ai)
-            ai_summary = (cf_summary[:200] if cf_summary else None)
+            ai_summary = (cf_summary[:600] if cf_summary else None)
         else:
-            ai_score = float(kap.ai_impact_score) if kap and kap.ai_impact_score else None
-            ai_summary = (kap.ai_summary[:200] if kap and kap.ai_summary else None)
+            # Henuz bilanco-AI uretilmemis. ai_score'u None birak,
+            # ai_summary olarak KAP'in 'rutin/idari bildirim' metnini DONDURME
+            # (kullaniciyi yaniltir). Sadece puanlanmamis goster.
+            ai_score = None
+            ai_summary = None
         items.append({
             "ticker": ticker,
             "period": fin.period,
