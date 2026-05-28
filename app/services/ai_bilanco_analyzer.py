@@ -178,16 +178,37 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
             pass
         prev_q = financials[1] if len(financials) > 1 else None  # bilanço için bir önceki çeyrek
         cmp_lines = []
-        def _row(lbl, cur, prev):
+        def _row(lbl, cur, prev, signed=False):
             if cur is None:
                 return None
             txt = f"{lbl}: {_fmt_tl(cur)}"
-            if prev is not None:
+            if prev is None:
+                return txt
+            # Negatif (zarar/net borç) içeren kalemlerde % YANILTICI — yönü AÇIK yaz
+            if signed and (cur < 0 or prev < 0):
+                cura, preva = abs(cur), abs(prev)
+                if prev < 0 and cur >= 0:
+                    txt += " (✅ ZARARDAN KÂRA GEÇTİ)"
+                elif prev >= 0 and cur < 0:
+                    txt += " (⛔ kârdan zarara döndü)"
+                elif prev < 0 and cur < 0:
+                    if cura < preva:
+                        pct = (preva - cura) / preva * 100
+                        txt += f" (✅ zarar %{pct:.0f} DARALDI — toparlanma)"
+                    elif cura > preva:
+                        pct = (cura - preva) / preva * 100
+                        txt += f" (⛔ zarar %{pct:.0f} GENİŞLEDİ)"
+                    else:
+                        txt += " (zarar sabit)"
+                else:
+                    txt += _yoy(cur, prev)
+            else:
                 txt += _yoy(cur, prev)
             return txt
-        # Gelir tablosu — YoY
-        for lbl, key in [("Ciro", "revenue"), ("Brüt Kâr", "gross_profit"), ("FAVÖK", "ebitda"), ("Net Kâr", "net_income")]:
-            r = _row(lbl, latest.get(key), yoy_row.get(key) if yoy_row else None)
+        # Gelir tablosu — YoY (net kâr & FAVÖK zarar-yönü açık yazılır)
+        for lbl, key, sgn in [("Ciro", "revenue", False), ("Brüt Kâr", "gross_profit", True),
+                              ("FAVÖK", "ebitda", True), ("Net Kâr", "net_income", True)]:
+            r = _row(lbl, latest.get(key), yoy_row.get(key) if yoy_row else None, sgn)
             if r: cmp_lines.append(r)
         # Bilanço — önceki çeyrek
         for lbl, key in [("Toplam Varlık", "total_assets"), ("Özkaynak", "total_equity"), ("Net Borç", "net_debt")]:
@@ -195,7 +216,9 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
             if r: cmp_lines.append(r)
         if cmp_lines:
             lines.append(f"### 🔔 GÜNCEL DÖNEM ({lp}) — ÖNCEKİ DÖNEMLE KIYAS")
-            lines.append("(Gelir kalemleri YoY = bir yıl önceki aynı çeyrek; bilanço = önceki çeyrek)")
+            lines.append("(Gelir kalemleri YoY = bir yıl önceki aynı çeyrek; bilanço = önceki çeyrek. "
+                         "ZARAR kalemlerinde yön AÇIK yazıldı — '% iyileşme/kötüleşme' diye TEKRAR yorumlama, "
+                         "parantezdeki yönü AYNEN kullan: daraldı=olumlu, genişledi=olumsuz.)")
             lines.append("- " + " · ".join(cmp_lines))
             lines.append("")
 

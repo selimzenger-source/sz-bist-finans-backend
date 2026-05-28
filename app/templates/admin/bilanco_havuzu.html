@@ -23,6 +23,7 @@
 <div class="row">
   <span class="label">{{ label }}</span>
   <span class="value" {% if bold %}style="font-weight:700"{% endif %}>{{ fmt_num(curr) }}</span>
+  <span class="value prev">{{ fmt_num(prev) }}</span>
   {%- if curr is not none and prev is not none and prev != 0 and curr != 0 -%}
     {%- set pct = ((curr|float - prev|float) / (prev|float if prev|float >= 0 else -prev|float)) * 100 -%}
     {%- set is_up = pct > 0 -%}
@@ -120,13 +121,17 @@
   .bilanco-card .row {
     display: grid;
     /* Sabit kolonlar: label esnek, value sabit, pct sabit */
-    grid-template-columns: 1fr 80px 50px;
+    grid-template-columns: 1fr 72px 72px 48px;
     column-gap: 4px;
     align-items: center;
     padding: 4px 0; font-size: 12px;
   }
   .bilanco-card .row .label { color: #94A3B8; text-align: left; }
   .bilanco-card .row .value { color: #ECF1F8; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  .bilanco-card .row .value.prev { color: #6B7A8D; font-weight: 500; }
+  .bilanco-card .row.head { border-bottom: 1px dashed #1F2C3D; margin-bottom: 2px; padding-bottom: 4px; }
+  .bilanco-card .row.head span { font-size: 10px; color: #6B7A8D; font-weight: 700; text-align: right; }
+  .bilanco-card .row.head .label { text-align: left; }
   .bilanco-card .row .pct { font-size: 10.5px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
   .bilanco-card .row .pct.up { color: #00E676; }
   .bilanco-card .row .pct.down { color: #FF5252; }
@@ -257,6 +262,12 @@
             {% elif sector == 'insurance' %}Sigortacılık
             {% else %}Gelir Tablosu{% endif %}
           </div>
+          <div class="row head">
+            <span class="label"></span>
+            <span>{{ short_period(fin.period) }}</span>
+            <span>{% if pi %}{{ short_period(pi.period) }}{% else %}—{% endif %}</span>
+            <span>%</span>
+          </div>
 
           {% if sector == 'bank' %}
             {{ row("Net Faiz", fin.net_interest_income, pi.net_interest_income if pi else None) }}
@@ -278,6 +289,12 @@
         <!-- Bilanço -->
         <div class="table-box">
           <div class="table-title">Bilanço</div>
+          <div class="row head">
+            <span class="label"></span>
+            <span>{{ short_period(fin.period) }}</span>
+            <span>{% if pb %}{{ short_period(pb.period) }}{% else %}—{% endif %}</span>
+            <span>%</span>
+          </div>
           {% if sector == 'bank' %}
             {{ row("Krediler", fin.loans, pb.loans if pb else None) }}
             {{ row("Mevduat", fin.deposits, pb.deposits if pb else None) }}
