@@ -4761,6 +4761,29 @@ async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
         .limit(10)
     )).scalars().all()
 
+    # ── AI'sız bilanco sayisi (gece batch butonu icin) ──
+    # Her ticker'in EN GUNCEL donemi AI'sız mı? sayisi.
+    try:
+        _ai_sub = (
+            select(
+                CompanyFinancial.ticker,
+                sa_func.max(CompanyFinancial.period).label("mp"),
+            )
+            .where(CompanyFinancial.total_assets.isnot(None))
+            .group_by(CompanyFinancial.ticker)
+            .subquery()
+        )
+        ai_pending_count = (await db.execute(
+            select(sa_func.count())
+            .select_from(CompanyFinancial)
+            .join(_ai_sub, (CompanyFinancial.ticker == _ai_sub.c.ticker) &
+                           (CompanyFinancial.period == _ai_sub.c.mp))
+            .where(CompanyFinancial.ai_score.is_(None))
+            .where(CompanyFinancial.total_assets.isnot(None))
+        )).scalar() or 0
+    except Exception:
+        ai_pending_count = 0
+
     # ── Bilanco anomalileri (son 7 gun) ──
     # SEKTOR-AWARE: Banka/sigorta/faktoring sektorlerinde 'revenue' alani NULL
     # olabilir cunku farkli alana yazilir (net_interest_income, gross_premiums).
@@ -4876,5 +4899,6 @@ async def pipeline_health(request: Request, db: AsyncSession = Depends(get_db)):
         "ci_issues": ci_issues,
         "bd_issues": bd_issues,
         "bd_recent": bd_recent,
+        "ai_pending_count": ai_pending_count,
         "now": now,
     })

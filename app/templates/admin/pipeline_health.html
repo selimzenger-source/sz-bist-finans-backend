@@ -55,6 +55,29 @@
     </div>
   </div>
 
+  <!-- GECE TOPLU BILANCO AI -->
+  <div class="health-card" style="border:1px solid #6d28d9;background:linear-gradient(180deg,#1e1b4b22,transparent);">
+    <div class="section-head">
+      <h2>🤖 Gece Toplu Bilanço AI Analizi</h2>
+      <span class="count-pill {% if ai_pending_count %}danger{% endif %}">{{ ai_pending_count }} şirket AI'sız</span>
+    </div>
+    <p style="color:#a5b4fc;font-size:13px;line-height:1.6;margin:8px 0 14px;">
+      700+ şirketin AI'sız (puanı olmayan) <b>en güncel</b> bilançosunu tek tek,
+      ~28 sn aralıkla analiz eder. Render 512MB'ı dondurmadan çalışır (~5-6 saat).
+      Sadece <b>puanı olmayan</b> kayıtlar işlenir → tekrar tıklarsan yalnızca yeni
+      gelenler analiz edilir, boşa maliyet çıkmaz.
+      <br>📅 Önerilen: Mart / Haziran / Eylül / Aralık aylarında, ayın 15-30'u arası
+      <b>bir kez</b> gece tıkla. (Aynı tarihte 3 ayda bir otomatik de çalışır.)
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button id="btnOvernightAi" onclick="startOvernightAi()"
+        style="background:#6d28d9;color:#fff;border:none;padding:11px 20px;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px;">
+        🌙 Gece Analizini Başlat ({{ ai_pending_count }} şirket)
+      </button>
+      <span id="overnightAiStatus" style="color:#cbd5e1;font-size:13px;"></span>
+    </div>
+  </div>
+
   <!-- BILANCO -->
   <div class="health-card">
     <div class="section-head">
@@ -287,6 +310,34 @@
 </div>
 
 <script>
+function startOvernightAi() {
+  const pwd = prompt("Admin parolası (gece bilanço AI batch):");
+  if (!pwd) return;
+  if (!confirm("700+ şirket için gece toplu AI analizi başlatılsın mı?\n\n• ~28 sn aralıkla tek tek işlenir (~5-6 saat)\n• Sadece puanı olmayan en güncel bilançolar\n• Render dondurulmaz\n\nBaşlat?")) return;
+  const btn = document.getElementById("btnOvernightAi");
+  const st = document.getElementById("overnightAiStatus");
+  btn.disabled = true; btn.style.opacity = "0.6";
+  st.textContent = "⏳ Başlatılıyor...";
+  fetch("/api/v1/admin/overnight-bilanco-ai", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ admin_password: pwd, sleep_sec: 28, max_count: 900 }),
+  }).then(r => r.json()).then(d => {
+    if (d.status === "queued") {
+      st.textContent = `✅ Başladı — ~${d.tahmini_sure_saat} saat sürecek. İlerleme: Render log [overnight_bilanco_ai]`;
+      st.style.color = "#86efac";
+    } else {
+      btn.disabled = false; btn.style.opacity = "1";
+      st.textContent = "❌ Hata: " + JSON.stringify(d);
+      st.style.color = "#fca5a5";
+    }
+  }).catch(e => {
+    btn.disabled = false; btn.style.opacity = "1";
+    st.textContent = "❌ Bağlantı hatası: " + e;
+    st.style.color = "#fca5a5";
+  });
+}
+
 function fixBlockTrade(id, ticker) {
   const lot = prompt(`${ticker} (id=${id}) için lot miktarı:`);
   if (!lot) return;

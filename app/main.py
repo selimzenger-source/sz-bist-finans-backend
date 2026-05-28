@@ -18624,3 +18624,44 @@ async def admin_batch_bilanco_ai(
     limit = min(int(payload.get("limit", 30)), 200)
     background_tasks.add_task(_batch_bilanco_ai_worker, period, limit)
     return {"status": "queued", "period": period, "limit": limit, "note": "Backend arkaplan'da isleniyor — Render log'larini izle veya /bilanco/top'tan sonuc gor"}
+
+
+async def _overnight_bilanco_ai_worker(sleep_sec: int, max_count: int):
+    """700+ sirket icin GECE toplu AI — scheduler'daki paylasimli worker'i cagirir."""
+    try:
+        from app.scheduler import run_overnight_bilanco_ai
+        await run_overnight_bilanco_ai(sleep_sec=sleep_sec, max_count=max_count)
+    except Exception as e:
+        import logging as _lg
+        _lg.getLogger("overnight_bilanco_ai").exception("worker hata: %s", e)
+
+
+@app.post("/api/v1/admin/overnight-bilanco-ai")
+@limiter.limit("2/minute")
+async def admin_overnight_bilanco_ai(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    payload: dict = Body(...),
+):
+    """GECE TOPLU AI — 700+ sirketin AI'sız en guncel bilancolarini tek tek isler.
+
+    Render 512MB'i tikamadan: her ticker icin taze DB session + aralarda ~28s sleep.
+    700 sirket ≈ 5.8 saat. Sadece ai_score NULL olanlar islenir (tekrar tiklanirsa
+    sadece yeni gelenler analiz edilir → bos yere maliyet cikmaz).
+
+    Body: {'admin_password': '...', 'sleep_sec': 28, 'max_count': 900}
+    Hemen 'queued' doner; ilerleme Render log'larinda ([overnight_bilanco_ai]).
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    sleep_sec = max(5, min(int(payload.get("sleep_sec", 28)), 120))
+    max_count = min(int(payload.get("max_count", 900)), 1500)
+    background_tasks.add_task(_overnight_bilanco_ai_worker, sleep_sec, max_count)
+    est_hours = round((max_count * sleep_sec) / 3600.0, 1)
+    return {
+        "status": "queued",
+        "sleep_sec": sleep_sec,
+        "max_count": max_count,
+        "tahmini_sure_saat": est_hours,
+        "note": "Gece batch baslatildi — sadece AI'sız (ai_score NULL) en guncel bilancolar islenir. Ilerleme: Render log [overnight_bilanco_ai]",
+    }

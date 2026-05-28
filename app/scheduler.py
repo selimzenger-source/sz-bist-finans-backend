@@ -4288,6 +4288,137 @@ async def cleanup_notification_logs():
         logger.error("Bildirim Merkezi sifirlama hatasi: %s", e)
 
 
+async def run_overnight_bilanco_ai(sleep_sec: int = 28, max_count: int = 900,
+                                   only_period: str | None = None):
+    """Gece toplu bilanco AI analizi — 700+ sirket icin tek tek, yavasca.
+
+    Render 512MB paketinde RAM'i tikamadan calismasi icin:
+      * Her ticker icin AYRI/TAZE DB session acilir, isi bitince kapanir.
+      * Her ticker arasinda `sleep_sec` saniye beklenir (default 28s).
+        700 sirket x ~30s ≈ 5.8 saat → gece sigar.
+      * Sadece AI puani NULL olan (henuz analiz edilmemis) ve total_assets
+        dolu olan en guncel donem satirlari islenir.
+
+    Admin panel butonu VE 3 ayda bir cron (Mart/Haziran/Eylul/Aralik 15-30
+    arasi) bu fonksiyonu cagirir.
+    """
+    from sqlalchemy import select, desc, func as _func
+    from app.models.company_financial import CompanyFinancial
+    from app.services.ai_bilanco_analyzer import analyze_bilanco
+    from datetime import datetime, timezone as _tz
+
+    started = datetime.now(_tz.utc)
+    logger.info("[overnight_bilanco_ai] BASLADI — sleep=%ss max=%s period=%s",
+                sleep_sec, max_count, only_period or "auto")
+
+    # ── 1) Aday ticker listesi: her ticker'in EN GUNCEL donemi AI'sız mı? ──
+    try:
+        async with async_session() as db:
+            # Ticker basina max(period) bul
+            sub = (
+                select(
+                    CompanyFinancial.ticker,
+                    _func.max(CompanyFinancial.period).label("mp"),
+                )
+                .where(CompanyFinancial.total_assets.isnot(None))
+                .group_by(CompanyFinancial.ticker)
+                .subquery()
+            )
+            q = (
+                select(CompanyFinancial.ticker)
+                .join(sub, (CompanyFinancial.ticker == sub.c.ticker) &
+                            (CompanyFinancial.period == sub.c.mp))
+                .where(CompanyFinancial.ai_score.is_(None))
+                .where(CompanyFinancial.total_assets.isnot(None))
+            )
+            if only_period:
+                q = q.where(CompanyFinancial.period == only_period)
+            q = q.order_by(CompanyFinancial.ticker).limit(max_count)
+            candidates = (await db.execute(q)).scalars().all()
+    except Exception as e:
+        logger.exception("[overnight_bilanco_ai] aday sorgusu hata: %s", e)
+        return {"ok": 0, "fail": 0, "error": str(e)}
+
+    logger.info("[overnight_bilanco_ai] %d aday bulundu", len(candidates))
+    ok = 0
+    fail = 0
+
+    for idx, ticker in enumerate(candidates, 1):
+        try:
+            async with async_session() as db:
+                recent = (await db.execute(
+                    select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
+                    .order_by(desc(CompanyFinancial.period)).limit(8)
+                )).scalars().all()
+                if not recent:
+                    continue
+                periods_data = [
+                    {
+                        "period": p.period,
+                        "revenue": float(p.revenue) if p.revenue else None,
+                        "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+                        "operating_profit": float(p.operating_profit) if p.operating_profit else None,
+                        "net_income": float(p.net_income) if p.net_income else None,
+                        "ebitda": float(p.ebitda) if p.ebitda else None,
+                        "total_assets": float(p.total_assets) if p.total_assets else None,
+                        "total_equity": float(p.total_equity) if p.total_equity else None,
+                        "total_debt": float(p.total_debt) if p.total_debt else None,
+                        "net_debt": float(p.net_debt) if p.net_debt else None,
+                        "net_interest_income": float(p.net_interest_income) if p.net_interest_income else None,
+                        "gross_premiums": float(p.gross_premiums) if p.gross_premiums else None,
+                    }
+                    for p in recent
+                ]
+                ai_result = await analyze_bilanco(ticker, periods_data)
+                if ai_result:
+                    latest = recent[0]
+                    latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
+                    latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
+                    latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+                    latest.ai_analyzed_at = datetime.now(_tz.utc)
+                    await db.commit()
+                    ok += 1
+                else:
+                    fail += 1
+            if idx % 25 == 0:
+                logger.info("[overnight_bilanco_ai] ilerleme %d/%d (ok=%d fail=%d)",
+                            idx, len(candidates), ok, fail)
+            await asyncio.sleep(sleep_sec)
+        except Exception as e:
+            fail += 1
+            logger.warning("[overnight_bilanco_ai] %s hata: %s", ticker, e)
+
+    elapsed = (datetime.now(_tz.utc) - started).total_seconds() / 60.0
+    logger.info("[overnight_bilanco_ai] BITTI — ok=%d fail=%d sure=%.1f dk",
+                ok, fail, elapsed)
+
+    # Telegram ozet (varsa)
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            f"🤖 <b>Gece bilanço AI analizi tamamlandı</b>\n"
+            f"✅ {ok} başarılı · ❌ {fail} hata\n"
+            f"⏱ {elapsed:.0f} dk",
+        )
+    except Exception:
+        pass
+
+    return {"ok": ok, "fail": fail, "elapsed_min": round(elapsed, 1)}
+
+
+async def _quarterly_bilanco_ai_cron():
+    """3 ayda bir gece toplu AI analizi — Mart/Haziran/Eylul/Aralik 15-30 arasi.
+
+    CronTrigger zaten ay/gun filtresi yapiyor (month='3,6,9,12', day='15-30').
+    Bu wrapper sadece guvenli sleep ile run_overnight_bilanco_ai cagirir.
+    """
+    logger.info("[quarterly_bilanco_ai_cron] tetiklendi — gece batch baslatiliyor")
+    try:
+        await run_overnight_bilanco_ai(sleep_sec=28, max_count=900)
+    except Exception as e:
+        logger.exception("[quarterly_bilanco_ai_cron] hata: %s", e)
+
+
 def setup_scheduler():
     """Tum zamanlanmis gorevleri ayarlar."""
     try:
@@ -5700,6 +5831,21 @@ def _setup_scheduler_impl():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=600,
+    )
+
+    # 3 AYDA BIR GECE TOPLU BILANCO AI — Mart/Haziran/Eylul/Aralik, ayin 28'i 02:00 TR
+    # (UTC 23:00). O gece 700+ sirket icin tek tek, ~28s aralikla AI analizi uretir
+    # (~5.8 saat). Sadece AI'sız (ai_score NULL) en guncel donemler islenir → tekrar
+    # calissa bile maliyet cikarmaz. Admin panel butonu ile manuel de tetiklenebilir.
+    scheduler.add_job(
+        _quarterly_bilanco_ai_cron,
+        CronTrigger(month="3,6,9,12", day=28, hour=23, minute=0),
+        id="quarterly_bilanco_ai",
+        name="3 Ayda Bir Gece Toplu Bilanco AI (28'i 02:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=21600,  # 6 saat grace — Render uykusu/restart koruması
     )
 
     # Bilanco queue worker — startup'ta bir kez baslat, surekli kuyrugu dinler.
