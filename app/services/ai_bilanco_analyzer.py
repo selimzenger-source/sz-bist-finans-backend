@@ -129,9 +129,10 @@ def _annual_aggregates(financials: list[dict]) -> list[dict]:
             continue
         slot = by_year.setdefault(year, {
             "year": year, "revenue": 0.0, "net_income": 0.0, "ebitda": 0.0,
-            "_rev_n": 0, "equity": None, "total_assets": None, "net_debt": None,
+            "_rev_n": 0, "n_quarters": 0, "equity": None, "total_assets": None, "net_debt": None,
             "net_interest_income": 0.0, "gross_premiums": 0.0,
         })
+        slot["n_quarters"] += 1  # bu yılda kaç çeyrek veri var (kısmi yıl tespiti)
         for fld in ("revenue", "net_income", "ebitda", "net_interest_income", "gross_premiums"):
             if f.get(fld) is not None:
                 slot[fld] += float(f[fld])
@@ -154,15 +155,23 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
     annuals = _annual_aggregates(financials)
     if annuals:
         lines.append("### 📊 Yıllık Gelişim (trend analizi için — en önemli)")
-        prev = None
-        for a in annuals[-5:]:  # son 5 yıl
-            parts = [f"**{a['year']}**:"]
+        lines.append("⚠️ DİKKAT: Gelir kalemleri (ciro/net kâr/FAVÖK) YILLIK TOPLAMDIR. "
+                     "Kısmi yıllar '(kısmi: N çeyrek)' diye işaretli — bunların yıllık % "
+                     "değişimi YANILTICIDIR, tam yılla kıyaslama, kıyaslama için TTM satırını kullan.")
+        prev = None  # bir önceki TAM yıl (income YoY için)
+        for a in annuals[-6:]:  # son 6 yıl (5 tam + olası kısmi)
+            complete = a.get("n_quarters", 0) >= 4
+            tag = "" if complete else f" (kısmi: {a.get('n_quarters', 0)} çeyrek)"
+            parts = [f"**{a['year']}**{tag}:"]
+            # Income YoY yalnızca İKİ TAM yıl arasında gösterilir (apples-to-apples)
+            inc_prev = prev if (complete and prev) else None
             if a["revenue"]:
-                parts.append(f"Ciro {_fmt_tl(a['revenue'])}{_yoy(a['revenue'], prev['revenue']) if prev else ''}")
+                parts.append(f"Ciro {_fmt_tl(a['revenue'])}{_yoy(a['revenue'], inc_prev['revenue']) if inc_prev else ''}")
             if a["net_income"]:
-                parts.append(f"Net Kâr {_fmt_tl(a['net_income'])}{_yoy(a['net_income'], prev['net_income']) if prev else ''}")
+                parts.append(f"Net Kâr {_fmt_tl(a['net_income'])}{_yoy(a['net_income'], inc_prev['net_income']) if inc_prev else ''}")
             if a["ebitda"]:
-                parts.append(f"FAVÖK {_fmt_tl(a['ebitda'])}{_yoy(a['ebitda'], prev['ebitda']) if prev else ''}")
+                parts.append(f"FAVÖK {_fmt_tl(a['ebitda'])}{_yoy(a['ebitda'], inc_prev['ebitda']) if inc_prev else ''}")
+            # Özkaynak/Net Borç bilanço SNAPSHOT'tur — kısmi yılda da geçerli, YoY serbest
             if a["equity"] is not None:
                 parts.append(f"Özkaynak {_fmt_tl(a['equity'])}{_yoy(a['equity'], prev['equity']) if (prev and prev.get('equity')) else ''}")
             if a["net_debt"] is not None:
@@ -172,7 +181,25 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
             if a["gross_premiums"]:
                 parts.append(f"Brüt Prim {_fmt_tl(a['gross_premiums'])}")
             lines.append("- " + parts[0] + " " + " · ".join(parts[1:]))
-            prev = a
+            if complete:
+                prev = a  # sadece tam yıllar income YoY referansı olur
+        # ── TTM (Son 4 Çeyrek) — gerçek "yıllıklandırılmış" güncel değer ──
+        # financials newest-first varsayılır; son 4 çeyreğin toplamı.
+        last4 = [f for f in financials[:4]]
+        if len(last4) >= 4:
+            ttm_rev = sum(float(f["revenue"]) for f in last4 if f.get("revenue") is not None)
+            ttm_ni = sum(float(f["net_income"]) for f in last4 if f.get("net_income") is not None)
+            ttm_eb = sum(float(f["ebitda"]) for f in last4 if f.get("ebitda") is not None)
+            ttm_parts = []
+            if ttm_rev:
+                ttm_parts.append(f"Ciro {_fmt_tl(ttm_rev)}")
+            if ttm_ni:
+                ttm_parts.append(f"Net Kâr {_fmt_tl(ttm_ni)}")
+            if ttm_eb:
+                ttm_parts.append(f"FAVÖK {_fmt_tl(ttm_eb)}")
+            if ttm_parts:
+                lines.append(f"- **TTM (Son 4 Çeyrek)**: " + " · ".join(ttm_parts) +
+                             "  ← güncel yıllıklandırılmış; tam yıllarla kıyaslanabilir")
         lines.append("")
 
     if financials:
