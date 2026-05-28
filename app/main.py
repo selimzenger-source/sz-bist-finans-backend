@@ -16100,6 +16100,7 @@ async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
 async def list_latest_bilancos(
     limit: int = Query(50, ge=1, le=800),
     offset: int = Query(0, ge=0),
+    tickers: Optional[str] = Query(None, description="Virgüllü ticker filtresi (izleme listesi) — sadece bunları döndür"),
     db: AsyncSession = Depends(get_db),
 ):
     """Son aciklanan bilancolar — FIFO, hisse adedi bazli.
@@ -16152,6 +16153,11 @@ async def list_latest_bilancos(
             return k.published_at if k.published_at.tzinfo else k.published_at.replace(tzinfo=_dtmod.timezone.utc)
         return _MINDT
     candidates = set(announced_map.keys()) | set(kap_by_ticker.keys())
+    # İzleme listesi filtresi — sadece istenen ticker'lar (limit'e takılmadan hepsi gelir)
+    if tickers:
+        wanted = {t.strip().upper() for t in tickers.split(",") if t.strip()}
+        if wanted:
+            candidates &= wanted
     ordered_tickers = sorted(candidates, key=_eff_dt, reverse=True)
     page_tickers = ordered_tickers[offset:offset + limit]
 
