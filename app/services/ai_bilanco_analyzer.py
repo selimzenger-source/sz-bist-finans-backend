@@ -50,14 +50,21 @@ trendini ve risklerini titizce analiz etmek.
    - Sanayi/ticaret: ciro, FAVÖK marjı, net borç.
 
 ═══════════════════ PUANLAMA (1-10) ═══════════════════
-Puanı analizden TÜRET, gelişigüzel verme. Rehber:
-  9-10: Çok güçlü — istikrarlı reel büyüme + yüksek ROE + düşük borç + güçlü nakit.
-  7-8 : İyi — sağlıklı büyüme/kârlılık, yönetilebilir borç, küçük zayıflıklar.
-  5-6 : Orta — karışık tablo; bazı kalemler iyi, bazıları zayıf/dalgalı.
-  3-4 : Zayıf — daralan ciro/kâr VEYA yüksek borç VEYA marj erimesi.
-  1-2 : Riskli — zarar, eriyen özkaynak, sürdürülemez borç, ciddi bozulma.
-Label: 9-10 "Çok Güçlü", 7-8 "Güçlü", 6 "İyi", 5 "Orta", 3-4 "Zayıf", 1-2 "Riskli".
-Ondalık kullan (örn 7.5). Tüm şirketlere 5-6 verme — gerçek farkları yansıt.
+Tek bir genel puan verme — ÜÇ AYRI FAKTÖRÜ ayrı ayrı puanla (her biri 1-10,
+MUTLAKA tek ondalıklı, örn 6.3 / 7.8 / 4.1 — yuvarlak sayı KULLANMA):
+
+1) growth_score (Büyüme): 5 yıllık + TTM ciro/kâr/özkaynak büyümesi, reel
+   (enflasyon-üstü) mü, momentum hızlanıyor mu? Daralma → düşük.
+2) profitability_score (Kârlılık): brüt→faaliyet→net marj, ROE, kâr kalitesi.
+   Sektöre GÖRE değerlendir (bankada ROE/net faiz, sanayide FAVÖK marjı, sigortada
+   teknik denge, faktoringde net faaliyet kârı). Zarar → 1-2.
+3) financial_health_score (Bilanço Sağlığı): net borç/FAVÖK, borç/özkaynak,
+   likidite, net nakit pozisyonu, özkaynak gücü. Sürdürülemez borç → düşük.
+
+Her alt-puanı analizden TÜRET, gelişigüzel verme. Genel puanı SİSTEM hesaplar —
+sen sadece üç alt-puanı doğru ver. Rehber (her faktör için):
+  8.5-10: çok güçlü · 7-8.4: iyi · 5.5-6.9: orta · 3.5-5.4: zayıf · 1-3.4: kritik/zarar
+Tüm şirketlere 5-6 verme; gerçek farkları ondalık hassasiyetle yansıt.
 
 ═══════════════════ KURALLAR ═══════════════════
 - Türkçe, akıcı ve PROFESYONEL ama anlaşılır. Teknik terimi ilk geçtiğinde parantezle açıkla.
@@ -68,8 +75,9 @@ Ondalık kullan (örn 7.5). Tüm şirketlere 5-6 verme — gerçek farkları yan
 
 ═══════════════════ ÇIKTI (sadece geçerli JSON) ═══════════════════
 {
-    "overall_health_score": 7.5,
-    "overall_health_label": "Güçlü",
+    "growth_score": 6.3,
+    "profitability_score": 7.8,
+    "financial_health_score": 8.1,
     "five_year_growth": "5 yıllık ciro/kâr/özkaynak gelişimi — somut yüzdelerle trend hikâyesi (3-5 cümle).",
     "revenue_trend": "Satış/ciro trendi, reel büyüme yorumu, son çeyrek momentumu (2-4 cümle).",
     "profitability_analysis": "Brüt→faaliyet→net marj zinciri, ROE, kâr kalitesi (2-4 cümle).",
@@ -304,6 +312,56 @@ async def _call_ai_anthropic(system_prompt: str, user_message: str) -> str | Non
     return None
 
 
+def _score_to_label(score: float) -> str:
+    if score >= 8.5: return "Çok Güçlü"
+    if score >= 7.0: return "Güçlü"
+    if score >= 5.5: return "İyi"
+    if score >= 4.0: return "Orta"
+    if score >= 2.5: return "Zayıf"
+    return "Riskli"
+
+
+# Sektöre göre alt-puan ağırlıkları (growth, profitability, financial_health)
+_SECTOR_WEIGHTS = {
+    "bank":       (0.20, 0.45, 0.35),
+    "factoring":  (0.20, 0.45, 0.35),
+    "insurance":  (0.25, 0.40, 0.35),
+    "brokerage":  (0.25, 0.40, 0.35),
+    "industrial": (0.30, 0.40, 0.30),
+}
+
+
+def _apply_overall_score(parsed: dict, sector_type: str) -> None:
+    """Alt-puanlardan (growth/profitability/financial_health) sektöre göre ağırlıklı
+    genel puanı hesapla → granüler (tek ondalık). parsed sözlüğünü yerinde günceller."""
+    def _num(v):
+        try:
+            f = float(v)
+            return f if 0 < f <= 10 else None
+        except (TypeError, ValueError):
+            return None
+
+    g = _num(parsed.get("growth_score"))
+    p = _num(parsed.get("profitability_score"))
+    h = _num(parsed.get("financial_health_score"))
+    subs = [(g, 0), (p, 1), (h, 2)]
+    present = [(v, idx) for v, idx in subs if v is not None]
+
+    if present:
+        wg = _SECTOR_WEIGHTS.get(sector_type, _SECTOR_WEIGHTS["industrial"])
+        num = sum(v * wg[idx] for v, idx in present)
+        den = sum(wg[idx] for _, idx in present)
+        overall = round(num / den, 1) if den else 5.0
+    else:
+        # Alt-puan yoksa AI'nın verdiği overall'a düş (geriye dönük uyum)
+        overall = _num(parsed.get("overall_health_score")) or 5.0
+        overall = round(overall, 1)
+
+    overall = max(1.0, min(10.0, overall))
+    parsed["overall_health_score"] = overall
+    parsed["overall_health_label"] = _score_to_label(overall)
+
+
 async def analyze_bilanco(ticker: str, financials: list[dict], ratios: dict | None = None) -> dict | None:
     """
     Bilanço verilerini AI ile analiz eder.
@@ -340,10 +398,16 @@ async def analyze_bilanco(ticker: str, financials: list[dict], ratios: dict | No
         if clean.startswith("```"):
             clean = clean.split("\n", 1)[1]
             clean = clean.rsplit("```", 1)[0]
-        return json.loads(clean)
+        parsed = json.loads(clean)
     except json.JSONDecodeError:
         logger.warning("Bilanço AI JSON parse hatası %s, raw content döndürülüyor", ticker)
         return {"summary": content, "disclaimer": "Bu analiz yatırım tavsiyesi değildir."}
+
+    # Genel puanı SİSTEM hesaplar — sektöre göre ağırlıklı alt-puan ortalaması.
+    # Bu sayede puan granüler olur (6.8, 7.3 gibi), tek ondalık.
+    sec = (financials[0].get("sector_type") if financials else None) or "industrial"
+    _apply_overall_score(parsed, sec)
+    return parsed
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
