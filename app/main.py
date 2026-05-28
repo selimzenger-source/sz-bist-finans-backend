@@ -18529,10 +18529,10 @@ async def admin_run_bilanco_ai(
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker zorunlu")
 
-    # Son 8 ceyrek
+    # Son 20 ceyrek (5 yil)
     recent = (await db.execute(
         select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
-        .order_by(desc(CompanyFinancial.period)).limit(8)
+        .order_by(desc(CompanyFinancial.period)).limit(20)
     )).scalars().all()
     if not recent:
         raise HTTPException(status_code=404, detail=f"{ticker} icin bilanco verisi yok")
@@ -18540,6 +18540,7 @@ async def admin_run_bilanco_ai(
     periods_data = [
         {
             "period": p.period,
+            "sector_type": p.sector_type,
             "revenue": float(p.revenue) if p.revenue else None,
             "gross_profit": float(p.gross_profit) if p.gross_profit else None,
             "operating_profit": float(p.operating_profit) if p.operating_profit else None,
@@ -18560,10 +18561,12 @@ async def admin_run_bilanco_ai(
         raise HTTPException(status_code=502, detail="AI analizi basarisiz")
 
     # En yeni doneme yaz
+    import json as _json
     latest = recent[0]
     latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
     latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
     latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+    latest.ai_analysis = _json.dumps(ai_result, ensure_ascii=False)[:8000]
     latest.ai_analyzed_at = datetime.now(timezone.utc)
     await db.commit()
 
@@ -18574,6 +18577,7 @@ async def admin_run_bilanco_ai(
         "ai_score": latest.ai_score,
         "ai_label": latest.ai_label,
         "summary_preview": (latest.ai_summary or "")[:200],
+        "analysis": ai_result,
     }
 
 
