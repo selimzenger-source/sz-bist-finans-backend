@@ -16004,9 +16004,13 @@ async def get_top_bilancos(
     return {"period": period, "count": len(items), "items": items, "sort": sort}
 
 
-@app.get("/api/v1/bilanco/{ticker}", response_model=BilancoAnalysisOut)
+@app.get("/api/v1/bilanco/{ticker}")
 async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
-    """Hissenin bilanco verileri + oranlar + AI analizi."""
+    """Hissenin bilanco verileri (5 yil) + oranlar + DERIN AI analizi + sektör.
+
+    Derin Analiz sekmesi bu endpoint'i kullanir. AI puan/yorum BILANCO-AI'dan
+    gelir (company_financials.ai_*), KAP rutin metninden DEGIL.
+    """
     t = ticker.upper()
 
     # Finansal veriler (son 20 donem = ~5 yil)
@@ -16021,6 +16025,8 @@ async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
     if not financials:
         raise HTTPException(status_code=404, detail=f"Bilanco verisi bulunamadi: {ticker}")
 
+    latest = financials[0]
+
     # Son oranlar
     ratio_result = await db.execute(
         select(FinancialRatio)
@@ -16030,29 +16036,62 @@ async def get_bilanco_analysis(ticker: str, db: AsyncSession = Depends(get_db)):
     )
     ratio = ratio_result.scalar_one_or_none()
 
-    # Son AI analizi (varsa KAP bildirimlerinden)
-    ai_result = await db.execute(
-        select(KapAllDisclosure)
-        .where(KapAllDisclosure.company_code == t, KapAllDisclosure.is_bilanco == True)
-        .order_by(desc(KapAllDisclosure.published_at))
-        .limit(1)
-    )
-    ai_news = ai_result.scalar_one_or_none()
-    ai_analysis = None
-    if ai_news and ai_news.ai_summary:
-        ai_analysis = {
-            "summary": ai_news.ai_summary,
-            "sentiment": ai_news.ai_sentiment,
-            "impact_score": ai_news.ai_impact_score,
-            "analyzed_at": ai_news.ai_analyzed_at.isoformat() if ai_news.ai_analyzed_at else None,
-        }
+    # Resmi BIST sektörü
+    sector_name = None
+    try:
+        from sqlalchemy import text as _sa_text
+        sres = await db.execute(
+            _sa_text("SELECT sector_name FROM stock_sectors WHERE ticker = :t"), {"t": t}
+        )
+        row = sres.fetchone()
+        if row and row[0]:
+            sector_name = row[0]
+    except Exception:
+        pass
 
-    return BilancoAnalysisOut(
-        ticker=t,
-        financials=financials,
-        ratios=ratio,
-        ai_analysis=ai_analysis,
-    )
+    def _f(v):
+        return float(v) if v is not None else None
+
+    # Çeyreklik seri (5 yıl, eskiden yeniye) — Derin Analiz grafikleri
+    quarterly = [
+        {
+            "period": q.period,
+            "revenue": _f(q.revenue),
+            "ebitda": _f(q.ebitda) if q.ebitda is not None else _f(q.operating_profit),
+            "net_income": _f(q.net_income),
+            "total_equity": _f(q.total_equity),
+            "total_debt": _f(q.total_debt),
+            "net_debt": _f(q.net_debt),
+        }
+        for q in reversed(financials)
+    ]
+
+    # DERIN AI analizi — company_financials.ai_* (bilanço-AI, rutin KAP DEĞİL)
+    deep = None
+    if getattr(latest, "ai_analysis", None):
+        try:
+            import json as _json
+            deep = _json.loads(latest.ai_analysis)
+        except Exception:
+            deep = None
+
+    return {
+        "ticker": t,
+        "period": latest.period,
+        "sector_name": sector_name,
+        "sector_type": latest.sector_type,
+        "ai_score": _f(latest.ai_score),
+        "ai_label": latest.ai_label,
+        "ai_summary": latest.ai_summary,
+        "ai_analysis": deep,  # tam yapılandırılmış derin analiz (bölümler)
+        "ai_analyzed_at": latest.ai_analyzed_at.isoformat() if latest.ai_analyzed_at else None,
+        "quarterly": quarterly,
+        "ratios": {
+            "fk": _f(ratio.fk) if ratio else None,
+            "pddd": _f(ratio.pddd) if ratio else None,
+            "fd_favok": _f(ratio.fd_favok) if ratio else None,
+        } if ratio else None,
+    }
 
 
 @app.get("/api/v1/bilanco")
