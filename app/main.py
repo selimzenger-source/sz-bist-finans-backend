@@ -16116,32 +16116,50 @@ async def list_latest_bilancos(
     # Sadece is_bilanco=True flag'ine guven — title pattern'a takilma.
     # ENJSA'nin Sorumluluk Beyanı / Faaliyet / Özkaynaklar bildirimlerinin hepsi
     # is_bilanco=True ile yazilir, bu hisseler de listede gorunur.
+    from app.models.company_financial import FinancialRatio
+    from app.models.temel_analiz import TemelAnaliz
+    from sqlalchemy import text as _sa_text
+    import datetime as _dtmod
+
+    # ── 1) announced_date olan ticker'lar (en yeni dönemin tarihi) — Fintables feed kaynağı ──
+    dated_rows = (await db.execute(_sa_text(
+        "SELECT DISTINCT ON (ticker) ticker, announced_date "
+        "FROM company_financials WHERE announced_date IS NOT NULL "
+        "ORDER BY ticker, period DESC"
+    ))).fetchall()
+    announced_map: dict[str, object] = {r[0]: r[1] for r in dated_rows}
+
+    # ── 2) KAP is_bilanco (ticker dedupe) — title + published_at fallback için ──
     kap_result = await db.execute(
         select(KapAllDisclosure)
         .where(KapAllDisclosure.is_bilanco == True)
         .order_by(desc(KapAllDisclosure.published_at))
-        .limit(limit * 5)  # ticker dedupe için fazladan çek
+        .limit(3000)
     )
-    all_items = list(kap_result.scalars().all())
-    # Ticker bazli dedupe — ayni hisseden bir kac KAP gelse bile (initial + duzeltme +
-    # yeniden yayin) yalnizca EN YENI 1 satir gosterilir.
-    seen_tickers = set()
-    kap_items: list[KapAllDisclosure] = []
-    for k in all_items:
-        if not k.company_code or k.company_code in seen_tickers:
-            continue
-        seen_tickers.add(k.company_code)
-        kap_items.append(k)
-    # Offset + limit uygula
-    kap_items = kap_items[offset:offset + limit]
+    kap_by_ticker: dict[str, KapAllDisclosure] = {}
+    for k in kap_result.scalars().all():
+        if k.company_code and k.company_code not in kap_by_ticker:
+            kap_by_ticker[k.company_code] = k
+
+    # ── 3) Aday ticker'lar = announced_date olanlar ∪ KAP'lılar; etkin tarihe göre DESC ──
+    _MINDT = _dtmod.datetime.min.replace(tzinfo=_dtmod.timezone.utc)
+    def _eff_dt(tk):
+        ad = announced_map.get(tk)
+        if ad is not None:
+            return ad if ad.tzinfo else ad.replace(tzinfo=_dtmod.timezone.utc)
+        k = kap_by_ticker.get(tk)
+        if k and k.published_at:
+            return k.published_at if k.published_at.tzinfo else k.published_at.replace(tzinfo=_dtmod.timezone.utc)
+        return _MINDT
+    candidates = set(announced_map.keys()) | set(kap_by_ticker.keys())
+    ordered_tickers = sorted(candidates, key=_eff_dt, reverse=True)
+    page_tickers = ordered_tickers[offset:offset + limit]
 
     def _f(v):
         return float(v) if v is not None else None
 
     # Tum unique ticker'lar icin financial_ratios + son fiyat'i once topluca cek
-    from app.models.company_financial import FinancialRatio
-    from app.models.temel_analiz import TemelAnaliz
-    unique_tickers = list({k.company_code for k in kap_items if k.company_code})
+    unique_tickers = list(page_tickers)
     ratios_map: dict[str, FinancialRatio] = {}
     temel_map: dict[str, TemelAnaliz] = {}
     if unique_tickers:
@@ -16198,8 +16216,8 @@ async def list_latest_bilancos(
 
     # Her bilanço bildirimi için finansal verileri birleştir
     items = []
-    for kap in kap_items:
-        ticker = kap.company_code
+    for ticker in page_tickers:
+        kap = kap_by_ticker.get(ticker)  # None olabilir (announced_date var, KAP yok)
 
         # Son 20 dönem (5 yıl) — Derin Analiz 5 yıllık grafikleri + karşılaştırma için
         fin_result = await db.execute(
@@ -16256,8 +16274,12 @@ async def list_latest_bilancos(
 
         items.append({
             "ticker": ticker,
-            "title": kap.title,
-            "published_at": kap.published_at.isoformat() if kap.published_at else None,
+            "title": (kap.title if kap else f"{ticker} Finansal Rapor"),
+            # Sıralama/gösterim tarihi: announced_date (Fintables) > KAP published_at
+            "published_at": (
+                fin.announced_date.isoformat() if fin and getattr(fin, "announced_date", None) else
+                (kap.published_at.isoformat() if kap and kap.published_at else None)
+            ),
             # ★ AI puan/yorum BILANCO-AI'dan gelir (gelen bilanconun 3-5 cumlelik ozeti).
             # KAP'in rutin/idari bildirim metnini DONDURME (kullaniciyi yaniltir).
             # Henuz analiz edilmediyse None — frontend "analiz bekleniyor" gosterir.
@@ -16265,7 +16287,7 @@ async def list_latest_bilancos(
             "ai_label": getattr(fin, "ai_label", None) if fin else None,
             "ai_summary": (fin.ai_summary[:600] if fin and getattr(fin, "ai_summary", None) else None),
             "ai_analysis": getattr(fin, "ai_analysis", None) if fin else None,
-            "ai_sentiment": kap.ai_sentiment,
+            "ai_sentiment": kap.ai_sentiment if kap else None,
             "period": fin.period if fin else None,
             # Gelir prev = YoY (aynı çeyrek bir yıl önce), Bilanço prev = önceki yıl sonu (Q4)
             "prev_period": prev_to_use_income.period if prev_to_use_income else None,
