@@ -5851,6 +5851,26 @@ def _setup_scheduler_impl():
         misfire_grace_time=21600,  # 6 saat grace — Render uykusu/restart koruması
     )
 
+    # BIST sektör/endeks CSV güncelleme — her gün 07:30 TR (UTC 04:30)
+    # Resmi hisse_endeks_ds.csv'den ticker→sektör + BIST30/50/100 üyeliği güncellenir.
+    async def _bist_sector_update_job():
+        try:
+            from app.scrapers.bist_sector_scraper import update_stock_sectors
+            await update_stock_sectors()
+        except Exception as e:
+            logger.warning("BIST sektör güncelleme cron hatası: %s", e)
+
+    scheduler.add_job(
+        _bist_sector_update_job,
+        CronTrigger(hour=4, minute=30),
+        id="bist_sector_update",
+        name="BIST Sektör/Endeks CSV Güncelleme (07:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=10800,
+    )
+
     # Bilanco queue worker — startup'ta bir kez baslat, surekli kuyrugu dinler.
     # Telegram poller'dan enqueue_bilanco cagrildiginda bu worker isler.
     try:

@@ -15846,6 +15846,20 @@ async def get_top_bilancos(
     for tk in list(quarterly_by_ticker.keys()):
         quarterly_by_ticker[tk] = quarterly_by_ticker[tk][:20]
 
+    # Resmi BIST sektör adlari (stock_sectors)
+    sector_name_map: dict[str, str] = {}
+    try:
+        from sqlalchemy import text as _sa_text
+        sres = await db.execute(
+            _sa_text("SELECT ticker, sector_name FROM stock_sectors WHERE ticker = ANY(:tickers)"),
+            {"tickers": tickers},
+        )
+        for row in sres.fetchall():
+            if row[1]:
+                sector_name_map[row[0]] = row[1]
+    except Exception:
+        pass
+
     # 2. Her ticker icin en son KAP Finansal Rapor + ai_impact_score
     kap_result = await db.execute(
         select(KapAllDisclosure)
@@ -15970,6 +15984,7 @@ async def get_top_bilancos(
             "total_equity": _f(fin.total_equity),
             "net_debt": _f(fin.net_debt),
             "sector_type": fin.sector_type,
+            "sector_name": sector_name_map.get(ticker),
         })
 
     # Sort: 'recent' (varsayilan) — yayinlanma tarihine gore DESC (Fintables feed gibi)
@@ -16105,6 +16120,21 @@ async def list_latest_bilancos(
         )
         for t in tr.scalars().all():
             temel_map[t.ticker] = t
+
+    # Resmi BIST sektör adlari (stock_sectors — hisse_endeks_ds.csv'den)
+    sector_name_map: dict[str, str] = {}
+    if unique_tickers:
+        try:
+            from sqlalchemy import text as _sa_text
+            sres = await db.execute(
+                _sa_text("SELECT ticker, sector_name FROM stock_sectors WHERE ticker = ANY(:tickers)"),
+                {"tickers": unique_tickers},
+            )
+            for row in sres.fetchall():
+                if row[1]:
+                    sector_name_map[row[0]] = row[1]
+        except Exception:
+            pass
     # Son fiyat — Yahoo Finance (close_price DailyStockMarketStat'tan BIST lisans nedeniyle kaldirildi)
     prices_map: dict[str, float] = {}
 
@@ -16130,12 +16160,12 @@ async def list_latest_bilancos(
     for kap in kap_items:
         ticker = kap.company_code
 
-        # Son 8 dönem (2 yıl) — quarterly chart + iki tip karşılaştırma için
+        # Son 20 dönem (5 yıl) — Derin Analiz 5 yıllık grafikleri + karşılaştırma için
         fin_result = await db.execute(
             select(CompanyFinancial)
             .where(CompanyFinancial.ticker == ticker)
             .order_by(desc(CompanyFinancial.period))
-            .limit(8)
+            .limit(20)
         )
         finals = list(fin_result.scalars().all())
         fin = finals[0] if finals else None
@@ -16164,8 +16194,8 @@ async def list_latest_bilancos(
         prev_to_use_income = prev_income or (finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None))
         prev_to_use_balance = prev_balance or prev_to_use_income
 
-        # Çeyreklik bars — eskiden yeniye sirala (son 5 kayıt yeterli)
-        quarterly = list(reversed(finals[:5]))
+        # Çeyreklik bars — eskiden yeniye sirala (5 yil = 20 ceyrek, Derin Analiz icin)
+        quarterly = list(reversed(finals[:20]))
 
         ratio = ratios_map.get(ticker)
         temel = temel_map.get(ticker)
@@ -16187,15 +16217,22 @@ async def list_latest_bilancos(
             "ticker": ticker,
             "title": kap.title,
             "published_at": kap.published_at.isoformat() if kap.published_at else None,
-            "ai_score": _f(kap.ai_impact_score),
+            # ★ AI puan/yorum BILANCO-AI'dan gelir (gelen bilanconun 3-5 cumlelik ozeti).
+            # KAP'in rutin/idari bildirim metnini DONDURME (kullaniciyi yaniltir).
+            # Henuz analiz edilmediyse None — frontend "analiz bekleniyor" gosterir.
+            "ai_score": _f(fin.ai_score) if fin and getattr(fin, "ai_score", None) is not None else None,
+            "ai_label": getattr(fin, "ai_label", None) if fin else None,
+            "ai_summary": (fin.ai_summary[:600] if fin and getattr(fin, "ai_summary", None) else None),
+            "ai_analysis": getattr(fin, "ai_analysis", None) if fin else None,
             "ai_sentiment": kap.ai_sentiment,
-            "ai_summary": kap.ai_summary[:200] if kap.ai_summary else None,
             "period": fin.period if fin else None,
             # Gelir prev = YoY (aynı çeyrek bir yıl önce), Bilanço prev = önceki yıl sonu (Q4)
             "prev_period": prev_to_use_income.period if prev_to_use_income else None,
             "prev_period_balance": prev_to_use_balance.period if prev_to_use_balance else None,
             # Sektör tipi (frontend farklı template seçer)
             "sector_type": fin.sector_type if fin and hasattr(fin, 'sector_type') else None,
+            # Resmi BIST sektör adı (örn "Tekstil, Deri") — stock_sectors'tan
+            "sector_name": sector_name_map.get(ticker),
             # Banka spesifik
             "net_interest_income": _f(fin.net_interest_income) if fin and hasattr(fin, 'net_interest_income') else None,
             "net_fees_commissions": _f(fin.net_fees_commissions) if fin and hasattr(fin, 'net_fees_commissions') else None,
@@ -16245,6 +16282,7 @@ async def list_latest_bilancos(
                     "revenue": _f(q.revenue),
                     "ebitda": _f(q.ebitda),
                     "net_income": _f(q.net_income),
+                    "total_equity": _f(q.total_equity),
                 }
                 for q in quarterly
             ],
@@ -18642,6 +18680,19 @@ async def _overnight_bilanco_ai_worker(sleep_sec: int, max_count: int):
     except Exception as e:
         import logging as _lg
         _lg.getLogger("overnight_bilanco_ai").exception("worker hata: %s", e)
+
+
+@app.post("/api/v1/admin/update-stock-sectors")
+@limiter.limit("3/minute")
+async def admin_update_stock_sectors(request: Request, payload: dict = Body(...)):
+    """Resmi BIST CSV'sinden ticker→sektör + endeks üyeliğini ŞIMDI güncelle.
+
+    Body: {'admin_password': '...'}
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.scrapers.bist_sector_scraper import update_stock_sectors
+    return await update_stock_sectors()
 
 
 @app.post("/api/v1/admin/overnight-bilanco-ai")
