@@ -54,6 +54,11 @@ class CompanyFinancial(Base):
     roe_pct: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Ozkaynak Karliligi (%)")
     debt_to_equity: Mapped[Decimal | None] = mapped_column(Numeric(20, 4), comment="Borc/Ozkaynak")
 
+    # Bilanco aciklama (KAP/Fintables yayinlanma) tarihi — Son Bilancolar siralamasi icin
+    announced_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="Bilançonun açıklandığı tarih (Fintables/KAP)"
+    )
+
     # Sektor tipi: industrial / bank / insurance / brokerage / factoring
     sector_type: Mapped[str | None] = mapped_column(String(20), comment="industrial/bank/insurance/brokerage")
 

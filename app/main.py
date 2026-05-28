@@ -15954,12 +15954,14 @@ async def get_top_bilancos(
             "ai_summary": ai_summary,
             "ai_analysis": ai_analysis,
             "ai_sentiment": kap.ai_sentiment if kap else None,
-            # Sirayla: KAP published_at > earnings_calendar.announced_date > scraped_at
+            # Sirayla: announced_date (Fintables backfill) > KAP published_at >
+            #          earnings_calendar.announced_date > scraped_at
             "published_at": (
-                kap.published_at.isoformat() if kap and kap.published_at else
-                (announced_by_ticker[ticker].isoformat() if ticker in announced_by_ticker else
-                 (fin.scraped_at.isoformat() if getattr(fin, "scraped_at", None) else
-                  (fin.updated_at.isoformat() if getattr(fin, "updated_at", None) else None)))
+                fin.announced_date.isoformat() if getattr(fin, "announced_date", None) else
+                (kap.published_at.isoformat() if kap and kap.published_at else
+                 (announced_by_ticker[ticker].isoformat() if ticker in announced_by_ticker else
+                  (fin.scraped_at.isoformat() if getattr(fin, "scraped_at", None) else
+                   (fin.updated_at.isoformat() if getattr(fin, "updated_at", None) else None))))
             ),
             "fk": _f(ratio.fk) if ratio else None,
             "pddd": _f(ratio.pddd) if ratio else None,
@@ -16268,6 +16270,8 @@ async def list_latest_bilancos(
             # Gelir prev = YoY (aynı çeyrek bir yıl önce), Bilanço prev = önceki yıl sonu (Q4)
             "prev_period": prev_to_use_income.period if prev_to_use_income else None,
             "prev_period_balance": prev_to_use_balance.period if prev_to_use_balance else None,
+            # Bilanço açıklama tarihi (Fintables/KAP backfill) — sıralama için
+            "announced_date": fin.announced_date.isoformat() if fin and getattr(fin, "announced_date", None) else None,
             # Sektör tipi (frontend farklı template seçer)
             "sector_type": fin.sector_type if fin and hasattr(fin, 'sector_type') else None,
             # Resmi BIST sektör adı (örn "Tekstil, Deri") — stock_sectors'tan
@@ -16326,6 +16330,12 @@ async def list_latest_bilancos(
                 for q in quarterly
             ],
         })
+
+    # ── Sıralama: önce announced_date (Fintables backfill), yoksa published_at ──
+    # Fintables tarz: en son açıklanan bilanço en üstte (KLGYO, BORSK, OTTO...).
+    def _eff_date(it):
+        return it.get("announced_date") or it.get("published_at") or ""
+    items.sort(key=_eff_date, reverse=True)
 
     return {
         "count": len(items),
@@ -18723,6 +18733,58 @@ async def _overnight_bilanco_ai_worker(sleep_sec: int, max_count: int):
     except Exception as e:
         import logging as _lg
         _lg.getLogger("overnight_bilanco_ai").exception("worker hata: %s", e)
+
+
+@app.post("/api/v1/admin/backfill-bilanco-dates")
+@limiter.limit("5/minute")
+async def admin_backfill_bilanco_dates(request: Request, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
+    """Bilanço açıklama tarihlerini elle backfill et (Fintables listesinden).
+
+    Son Bilançolar sıralaması bu tarihe göre yapılır.
+    Body: {'admin_password': '...', 'items': [{'ticker':'KLGYO','date':'2026-05-22','period':'2026-Q1'}, ...]}
+    period verilirse o döneme, verilmezse ticker'ın EN YENİ dönemine yazılır.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    items = payload.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items zorunlu")
+    from sqlalchemy import text as _t
+    from datetime import datetime as _dt, timezone as _tz
+    ok = 0; miss = 0
+    for it in items:
+        ticker = (it.get("ticker") or "").upper().strip()
+        date_s = (it.get("date") or "").strip()
+        period = (it.get("period") or "").strip()
+        if not ticker or not date_s:
+            continue
+        try:
+            dt = _dt.fromisoformat(date_s).replace(tzinfo=_tz.utc)
+        except Exception:
+            miss += 1; continue
+        if period:
+            res = await db.execute(_t(
+                "UPDATE company_financials SET announced_date = :d WHERE ticker = :t AND period = :p"
+            ), {"d": dt, "t": ticker, "p": period})
+            if (res.rowcount or 0) == 0:
+                # period eşleşmedi → en yeni döneme yaz
+                res2 = await db.execute(_t(
+                    "UPDATE company_financials SET announced_date = :d WHERE id = "
+                    "(SELECT id FROM company_financials WHERE ticker = :t ORDER BY period DESC LIMIT 1)"
+                ), {"d": dt, "t": ticker})
+                ok += 1 if (res2.rowcount or 0) else 0
+                miss += 0 if (res2.rowcount or 0) else 1
+            else:
+                ok += 1
+        else:
+            res = await db.execute(_t(
+                "UPDATE company_financials SET announced_date = :d WHERE id = "
+                "(SELECT id FROM company_financials WHERE ticker = :t ORDER BY period DESC LIMIT 1)"
+            ), {"d": dt, "t": ticker})
+            ok += 1 if (res.rowcount or 0) else 0
+            miss += 0 if (res.rowcount or 0) else 1
+    await db.commit()
+    return {"status": "ok", "updated": ok, "missed": miss, "total": len(items)}
 
 
 @app.post("/api/v1/admin/update-stock-sectors")
