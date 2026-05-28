@@ -210,6 +210,39 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
                              "  ← güncel yıllıklandırılmış; tam yıllarla kıyaslanabilir")
         lines.append("")
 
+    # ── HESAPLANMIŞ ORANLAR (sistem hesaplar — AI bunları AYNEN kullansın) ──
+    # ROE formülü TÜM sektörlerde aynı: TTM Net Kâr / Özkaynak (dönem sonu).
+    # Banka/sigorta/holding/faktoring/sanayi — hepsinde bu geçerli; sadece
+    # "iyi sayılan eşik" sektöre göre değişir (bankada %30+, sanayide %20+ iyi).
+    if financials:
+        latest = financials[0]
+        eq = latest.get("total_equity")
+        last4 = financials[:4]
+        ttm_ni = sum(float(f["net_income"]) for f in last4 if f.get("net_income") is not None) if last4 else None
+        ttm_eb = sum(float(f["ebitda"]) for f in last4 if f.get("ebitda") is not None) if last4 else None
+        ratio_lines = []
+        try:
+            if ttm_ni is not None and eq:
+                ratio_lines.append(f"ROE (TTM net kâr/özkaynak): %{ttm_ni / float(eq) * 100:.1f}")
+        except Exception:
+            pass
+        try:
+            nd = latest.get("net_debt")
+            if nd is not None and ttm_eb:
+                ratio_lines.append(f"Net Borç/FAVÖK (TTM): {float(nd) / ttm_eb:.2f}x")
+        except Exception:
+            pass
+        try:
+            td = latest.get("total_debt")
+            if td is not None and eq:
+                ratio_lines.append(f"Borç/Özkaynak: {float(td) / float(eq):.2f}x")
+        except Exception:
+            pass
+        if ratio_lines:
+            lines.append("### 🧮 Hesaplanmış Oranlar (TTM — bunları aynen kullan)")
+            lines.append("- " + " · ".join(ratio_lines))
+            lines.append("")
+
     if financials:
         lines.append("### 📈 Çeyreklik Veriler (son dönemden eskiye, momentum için)")
         for f in financials[:12]:  # Son 12 çeyrek (3 yıl) — çeyreklik momentum
