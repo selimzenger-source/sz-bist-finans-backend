@@ -57,13 +57,18 @@ MUTLAKA tek ondalıklı, örn 6.3 / 7.8 / 4.1 — yuvarlak sayı KULLANMA):
    (enflasyon-üstü) mü, momentum hızlanıyor mu? Daralma → düşük.
 2) profitability_score (Kârlılık): brüt→faaliyet→net marj, ROE, kâr kalitesi.
    Sektöre GÖRE değerlendir (bankada ROE/net faiz, sanayide FAVÖK marjı, sigortada
-   teknik denge, faktoringde net faaliyet kârı). Zarar → 1-2.
+   teknik denge, faktoringde net faaliyet kârı).
+   ⚠️ ZARAR'ı düz cezalandırma — KIYASLAMALI bak: Zarar BÜYÜYORSA 1-3. Ama zarar
+   ÖNEMLİ ÖLÇÜDE DARALIYORSA (örn -362mn → -35mn) bu pozitif bir toparlanma, 4-6
+   ver. ZARARDAN KÂRA geçiş olduysa güçlü pozitif sinyal, 6-8. Kâr büyüyorsa 7+.
 3) financial_health_score (Bilanço Sağlığı): net borç/FAVÖK, borç/özkaynak,
    likidite, net nakit pozisyonu, özkaynak gücü. Sürdürülemez borç → düşük.
 
-Her alt-puanı analizden TÜRET, gelişigüzel verme. Genel puanı SİSTEM hesaplar —
-sen sadece üç alt-puanı doğru ver. Rehber (her faktör için):
-  8.5-10: çok güçlü · 7-8.4: iyi · 5.5-6.9: orta · 3.5-5.4: zayıf · 1-3.4: kritik/zarar
+Her alt-puanı analizden TÜRET, gelişigüzel verme. EN ÜSTTEKİ "GÜNCEL DÖNEM KIYAS"
+bloğuna ÖNCELİK ver — bu çeyrek önceki döneme göre İYİLEŞİYOR mu KÖTÜLEŞİYOR mu?
+İyileşme yönü (zarar daralması, dönüşüm, marj artışı) puanı YUKARI çeker.
+Rehber (her faktör için):
+  8.5-10: çok güçlü · 7-8.4: iyi · 5.5-6.9: orta · 3.5-5.4: zayıf · 1-3.4: kritik
 Tüm şirketlere 5-6 verme; gerçek farkları ondalık hassasiyetle yansıt.
 
 ═══════════════════ KURALLAR ═══════════════════
@@ -85,7 +90,7 @@ Tüm şirketlere 5-6 verme; gerçek farkları ondalık hassasiyetle yansıt.
     "balance_sheet_quality": "Özkaynak gelişimi, varlık yapısı, nakit pozisyonu (2-3 cümle).",
     "key_strengths": ["Somut güçlü yön 1", "Somut güçlü yön 2", "Somut güçlü yön 3"],
     "key_risks": ["Somut risk 1", "Somut risk 2"],
-    "summary": "Yatırımcıya 3-4 cümlelik net genel değerlendirme — en kritik 2-3 bulguyu vurgula.",
+    "summary": "3-4 cümle — bu çeyreği ÖNCEKİ DÖNEMLE KIYASLA (gelir YoY, bilanço çeyreklik): neyi iyi/kötü yaptı? Zarar daralıyor mu, kâra mı geçti, marj/ciro arttı mı? Son Bilançolar'da bu özet gösterilir.",
     "disclaimer": "Bu analiz yatırım tavsiyesi değildir. Yatırım kararlarınızı kendi araştırmanıza dayandırın."
 }
 """
@@ -158,6 +163,41 @@ def _build_bilanco_context(ticker: str, financials: list[dict], ratios: dict | N
     """Bilanço verilerinden AI için context oluşturur — 5 yıllık + trend odaklı."""
     sec = (ratios or {}).get("sector") or (financials[0].get("sector_type") if financials else None)
     lines = [f"## {ticker} — Finansal Veri Seti", f"Sektör tipi: {sec or 'bilinmiyor'}\n"]
+
+    # ── 🔔 GÜNCEL DÖNEM KIYASLAMASI (Son Bilançolar yorumu BUNA odaklanır) ──
+    # Gelir: YoY (aynı çeyrek bir yıl önce) · Bilanço: önceki çeyrek (çeyreklik değişim)
+    if financials:
+        latest = financials[0]
+        lp = latest.get("period") or ""
+        yoy_row = None
+        try:
+            ly, lq = lp.split("-Q")
+            yoy_p = f"{int(ly) - 1}-Q{lq}"
+            yoy_row = next((f for f in financials if f.get("period") == yoy_p), None)
+        except Exception:
+            pass
+        prev_q = financials[1] if len(financials) > 1 else None  # bilanço için bir önceki çeyrek
+        cmp_lines = []
+        def _row(lbl, cur, prev):
+            if cur is None:
+                return None
+            txt = f"{lbl}: {_fmt_tl(cur)}"
+            if prev is not None:
+                txt += _yoy(cur, prev)
+            return txt
+        # Gelir tablosu — YoY
+        for lbl, key in [("Ciro", "revenue"), ("Brüt Kâr", "gross_profit"), ("FAVÖK", "ebitda"), ("Net Kâr", "net_income")]:
+            r = _row(lbl, latest.get(key), yoy_row.get(key) if yoy_row else None)
+            if r: cmp_lines.append(r)
+        # Bilanço — önceki çeyrek
+        for lbl, key in [("Toplam Varlık", "total_assets"), ("Özkaynak", "total_equity"), ("Net Borç", "net_debt")]:
+            r = _row(lbl, latest.get(key), prev_q.get(key) if prev_q else None)
+            if r: cmp_lines.append(r)
+        if cmp_lines:
+            lines.append(f"### 🔔 GÜNCEL DÖNEM ({lp}) — ÖNCEKİ DÖNEMLE KIYAS")
+            lines.append("(Gelir kalemleri YoY = bir yıl önceki aynı çeyrek; bilanço = önceki çeyrek)")
+            lines.append("- " + " · ".join(cmp_lines))
+            lines.append("")
 
     # ── YILLIK ÖZET TABLOSU (5 yıllık trend — en kritik kısım) ──
     annuals = _annual_aggregates(financials)
