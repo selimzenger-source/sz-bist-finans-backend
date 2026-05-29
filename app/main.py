@@ -608,6 +608,26 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+@app.post("/api/v1/client-error")
+@limiter.limit("30/minute")
+async def report_client_error(request: Request, payload: dict = Body(default={})):
+    """Mobil uygulamadan gelen yükleme/ağ hatalarını admin Telegram'a bildirir.
+    Frontend api client başarısız istekte (5xx/ağ) bunu çağırır → biz haberdar oluruz.
+    notify_backend_error'ın 1 saat dedup'ı spam'i engeller. '📱' prefix = mobil kaynaklı."""
+    try:
+        from app.services.admin_telegram import notify_backend_error
+        await notify_backend_error(
+            method=f"📱{(payload.get('method') or '?')}",
+            path=str(payload.get('path') or '?')[:120],
+            error_type=f"ClientError({payload.get('status', '?')})",
+            error_message=str(payload.get('message') or '')[:300],
+            user_device_id=request.headers.get("X-Device-Id"),
+        )
+    except Exception:
+        pass
+    return {"ok": True}
+
+
 # CORS — production'da spesifik origin, gelistirmede *
 app.add_middleware(
     CORSMiddleware,
