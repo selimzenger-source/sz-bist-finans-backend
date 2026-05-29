@@ -4616,27 +4616,30 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,
     )
 
-    # 7f. temettuhisseleri.com refresh — KAPATILDI (kullanici talebi).
-    # Periodik calismaya gerek yok: dividend_history DB'si bir kez dolduruldu
-    # (1759 kayit), sonrasinda KAP'tan akan YKK/odeme olaylari zaten anlik
-    # mirror ediliyor. Eski historik veriyi yeniden bozma riski olmasin.
-    # Manuel tetikleme gerekirse:
-    #   POST /api/v1/admin/trigger-temettu-refresh (varsa) veya
-    #   shell: from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
-    #
-    # Eski haftalik cron job devre disi — geri acmak icin asagidaki bloku
-    # tekrar aktiflestirin:
-    #
-    # async def _weekly_temettu_refresh():
-    #     try:
-    #         from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
-    #         stats = await scrape_temettuhisseleri()
-    #         logger.info("Haftalik temettu refresh: %s", stats)
-    #     except Exception as e:
-    #         logger.error("Haftalik temettu refresh hatasi: %s", e)
-    # scheduler.add_job(_weekly_temettu_refresh, CronTrigger(day_of_week='sun', hour=2, minute=0),
-    #                   id="weekly_temettu_refresh", ...)
-    logger.info("Haftalik temettuhisseleri scraper: KAPATILDI (manuel tetikleme gerekir)")
+    # 7f. temettuhisseleri.com refresh — AKTIF (kullanici talebi: surekli guncel, 30 dk'da bir).
+    # Her 30 dakikada tum BIST hisselerinin temettu gecmisini ceker; yeni temettu aninda yansir.
+    # Upsert guvenli: scraper sadece None-olmayan alanlari gunceller, eski veriyi bozmaz/silmez.
+    # max_instances=1 + coalesce: uzayan tarama bir sonraki tetigi ezmez/biriktirmez.
+    # Manuel tetikleme: POST /api/v1/admin/trigger-temettu-refresh
+    async def _temettu_refresh():
+        try:
+            from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
+            stats = await scrape_temettuhisseleri()
+            logger.info("Temettu refresh tamamlandi: %s", stats)
+        except Exception as e:
+            logger.error("Temettu refresh hatasi: %s", e)
+
+    scheduler.add_job(
+        _temettu_refresh,
+        CronTrigger(minute='*/30'),
+        id="temettu_refresh_30min",
+        name="temettuhisseleri.com refresh (30 dk'da bir)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    logger.info("temettuhisseleri scraper: AKTIF (30 dk'da bir)")
 
     # 7f-bis. BIST resmi tedbirli CSV sync — her 30 dakikada bir
     # Kaynak: https://www.borsaistanbul.com/erd/menkul_tedbir_listesi.csv
@@ -5849,6 +5852,27 @@ def _setup_scheduler_impl():
         max_instances=1,
         coalesce=True,
         misfire_grace_time=21600,  # 6 saat grace — Render uykusu/restart koruması
+    )
+
+    # GUNLUK Bilanco AI backfill — her ticker'in en son donemi ai_score NULL ise AI uretir.
+    # Yeni gelen bilanco (off-cycle/spor kulubu dahil) en gec ertesi sabah puan+yorum alir;
+    # ceyreklik cron'un atladigi tum durumlari kapatir. Maliyet dusuk (sadece NULL olanlar).
+    async def _daily_bilanco_ai_job():
+        try:
+            from app.main import _daily_bilanco_ai_backfill
+            await _daily_bilanco_ai_backfill(limit=50)
+        except Exception as e:
+            logger.error("Gunluk bilanco AI backfill hatasi: %s", e)
+
+    scheduler.add_job(
+        _daily_bilanco_ai_job,
+        CronTrigger(hour=3, minute=30),  # 06:30 TR — gece açıklanan bilançolar sabaha AI alır
+        id="daily_bilanco_ai_backfill",
+        name="Gunluk Bilanco AI backfill (06:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=7200,
     )
 
     # BIST sektör/endeks CSV güncelleme — her gün 07:30 TR (UTC 04:30)

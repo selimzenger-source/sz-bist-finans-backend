@@ -182,6 +182,11 @@ async def _handle_split_completed(
         # Body'deki ticker'i kullan (KAP genelde dogru)
         ticker = parsed["ticker"]
 
+    # FIX: pct/tip idempotent-skip blogundan ONCE tanimlanmali (UnboundLocalError)
+    today = _date.today()
+    pct = parsed["percentage"]
+    tip = parsed["type"]
+
     # Active kayit (her statu, dahil tamamlandi - duplicate koruma)
     existing = (await db.execute(
         select(CapitalIncrease).where(
@@ -196,10 +201,6 @@ async def _handle_split_completed(
         if existing_pct and abs((existing_pct or 0) - pct) < 0.5:
             logger.info("cap_inc split SKIP (zaten tamamlandi): %s id=%s", ticker, existing.id)
             return {"stage": "split_completed", "action": "skip", "id": existing.id}
-
-    today = _date.today()
-    pct = parsed["percentage"]
-    tip = parsed["type"]
 
     if not existing:
         # Aktif kayit yok — yeni olustur (degerlendirme isleminin once dustugu durum)

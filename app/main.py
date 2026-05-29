@@ -18733,6 +18733,81 @@ async def _batch_bilanco_ai_worker(period: str, limit: int):
         _logger.exception("batch_bilanco_ai worker hata: %s", e)
 
 
+async def _daily_bilanco_ai_backfill(limit: int = 40):
+    """Gunluk otomasyon — her ticker'in EN SON donemi ai_score NULL ise AI uretir.
+    Yeni gelen bilanco (off-cycle/spor kulubu dahil) en gec 1 gun icinde puan+yorum alir.
+    Period-bazli ceyreklik cron'un atladigi durumlari kapatir."""
+    from app.database import async_session as _ases
+    from app.models.company_financial import CompanyFinancial
+    from app.services.ai_bilanco_analyzer import analyze_bilanco
+    import asyncio as _asyncio
+    import json as _json
+    import logging as _lg
+    _logger = _lg.getLogger("daily_bilanco_ai")
+    try:
+        async with _ases() as db:
+            # Her ticker'in EN SON donemi (DISTINCT ON ticker, period desc)
+            latest_rows = (await db.execute(
+                select(CompanyFinancial)
+                .distinct(CompanyFinancial.ticker)
+                .order_by(CompanyFinancial.ticker, desc(CompanyFinancial.period))
+            )).scalars().all()
+        candidates = [
+            r.ticker for r in latest_rows
+            if r.ai_score is None and r.total_assets is not None
+        ][:limit]
+        if not candidates:
+            _logger.info("daily_bilanco_ai: AI'siz son donem yok, atlandi")
+            return
+        _logger.info("daily_bilanco_ai: %d hisse AI bekliyor", len(candidates))
+        ok = 0; fail = 0
+        for ticker in candidates:
+            try:
+                async with _ases() as db:
+                    recent = (await db.execute(
+                        select(CompanyFinancial).where(CompanyFinancial.ticker == ticker)
+                        .order_by(desc(CompanyFinancial.period)).limit(20)
+                    )).scalars().all()
+                    if not recent:
+                        continue
+                    periods_data = [
+                        {
+                            "period": p.period, "sector_type": p.sector_type,
+                            "revenue": float(p.revenue) if p.revenue else None,
+                            "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+                            "operating_profit": float(p.operating_profit) if p.operating_profit else None,
+                            "net_income": float(p.net_income) if p.net_income else None,
+                            "ebitda": float(p.ebitda) if p.ebitda else None,
+                            "total_assets": float(p.total_assets) if p.total_assets else None,
+                            "total_equity": float(p.total_equity) if p.total_equity else None,
+                            "total_debt": float(p.total_debt) if p.total_debt else None,
+                            "net_debt": float(p.net_debt) if p.net_debt else None,
+                            "net_interest_income": float(p.net_interest_income) if p.net_interest_income else None,
+                            "gross_premiums": float(p.gross_premiums) if p.gross_premiums else None,
+                        }
+                        for p in recent
+                    ]
+                    ai_result = await analyze_bilanco(ticker, periods_data)
+                    if ai_result:
+                        latest = recent[0]
+                        latest.ai_score = float(ai_result.get("overall_health_score", 5.0))
+                        latest.ai_label = str(ai_result.get("overall_health_label", ""))[:32] or None
+                        latest.ai_summary = str(ai_result.get("summary", ""))[:2000] or None
+                        latest.ai_analysis = _json.dumps(ai_result, ensure_ascii=False)[:8000]
+                        latest.ai_analyzed_at = datetime.now(timezone.utc)
+                        await db.commit()
+                        ok += 1
+                    else:
+                        fail += 1
+                await _asyncio.sleep(2)
+            except Exception as e:
+                fail += 1
+                _logger.warning("daily_bilanco_ai %s: %s", ticker, e)
+        _logger.info("daily_bilanco_ai TAMAM: ok=%d fail=%d", ok, fail)
+    except Exception as e:
+        _logger.exception("daily_bilanco_ai worker hata: %s", e)
+
+
 @app.post("/api/v1/admin/batch-bilanco-ai")
 @limiter.limit("3/minute")
 async def admin_batch_bilanco_ai(
