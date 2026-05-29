@@ -686,6 +686,20 @@ async def _route_to_calendars(
                             "Router→bilanco SKIP: %s sektor=%s conf=%s (whitelist/confidence dısı)",
                             ticker, sec, conf,
                         )
+                        # ADMIN UYARI: bilanco otomatik kaydedilemedi — manuel kontrol gerek
+                        try:
+                            from app.services.admin_telegram import send_admin_message
+                            await send_admin_message(
+                                f"⚠️ <b>Bilanço otomatik işlenemedi</b>\n"
+                                f"Hisse: <b>{ticker}</b>\n"
+                                f"Dönem: {parsed.get('period') or '?'}\n"
+                                f"Sektör: {sec or '?'} · Confidence: {conf or '?'}\n"
+                                f"Sebep: whitelist/confidence dışı — <b>manuel scrape gerekebilir</b>.\n"
+                                f"KAP: {kap_url}",
+                                silent=True,
+                            )
+                        except Exception as _ae:
+                            logger.debug("admin bilanco uyari hata: %s", _ae)
             except Exception as e:
                 logger.warning("Router→bilanco direkt parse hata (%s): %s", ticker, e)
         # Yedek: queue worker da calissin (full pipeline tweet/notification icin)
