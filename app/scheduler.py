@@ -4631,15 +4631,15 @@ def _setup_scheduler_impl():
 
     scheduler.add_job(
         _temettu_refresh,
-        CronTrigger(minute='*/30'),
-        id="temettu_refresh_30min",
-        name="temettuhisseleri.com refresh (30 dk'da bir)",
+        CronTrigger(hour='*/2', minute=0),  # 2 saatte bir — yeni temettü verisi taraması
+        id="temettu_refresh_2h",
+        name="temettuhisseleri.com refresh (2 saatte bir)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=600,
+        misfire_grace_time=1800,
     )
-    logger.info("temettuhisseleri scraper: AKTIF (30 dk'da bir)")
+    logger.info("temettuhisseleri scraper: AKTIF (2 saatte bir)")
 
     # 7f-bis. BIST resmi tedbirli CSV sync — her 30 dakikada bir
     # Kaynak: https://www.borsaistanbul.com/erd/menkul_tedbir_listesi.csv
