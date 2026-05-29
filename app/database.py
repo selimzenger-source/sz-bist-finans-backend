@@ -194,6 +194,17 @@ async def init_db():
         except Exception:
             pass
 
+        # notify_daily_bulletin: Sabah 07:00 gunluk haber bulteni push (varsayilan acik)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_daily_bulletin BOOLEAN DEFAULT TRUE")
+            )
+            await conn.execute(
+                text("UPDATE users SET notify_daily_bulletin = TRUE WHERE notify_daily_bulletin IS NULL")
+            )
+        except Exception:
+            pass
+
         # notify_news: Piyasa haberleri — aynı sekilde NULL'lari TRUE yap
         try:
             await conn.execute(

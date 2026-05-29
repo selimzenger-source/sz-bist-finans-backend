@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import select, and_, func, union_all
+from sqlalchemy import select, and_, or_, func, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User, UserSubscription, StockNotificationSubscription
@@ -124,6 +124,17 @@ async def count_recipients(db: AsyncSession, audience: str, device_id: str | Non
                 and_(base, User.id.notin_(select(paid_sub.c.user_id)))
             )
         )
+    elif audience == "daily_bulletin":
+        paid_sub = _paid_user_ids_subquery()
+        result = await db.execute(
+            select(func.count(User.id)).where(
+                and_(
+                    base,
+                    User.id.in_(select(paid_sub.c.user_id)),
+                    or_(User.notify_daily_bulletin == True, User.notify_daily_bulletin.is_(None)),
+                )
+            )
+        )
     else:
         return 0
 
@@ -168,6 +179,18 @@ async def _get_target_users(db: AsyncSession, audience: str, device_id: str | No
         result = await db.execute(
             select(User).where(
                 and_(base, User.notify_rehber == True)
+            )
+        )
+    elif audience == "daily_bulletin":
+        # Ucretli + sabah bulteni toggle'i acik (notify_daily_bulletin != False)
+        paid_sub = _paid_user_ids_subquery()
+        result = await db.execute(
+            select(User).where(
+                and_(
+                    base,
+                    User.id.in_(select(paid_sub.c.user_id)),
+                    or_(User.notify_daily_bulletin == True, User.notify_daily_bulletin.is_(None)),
+                )
             )
         )
     else:

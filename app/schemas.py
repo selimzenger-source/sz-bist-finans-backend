@@ -391,6 +391,7 @@ class UserUpdate(BaseModel):
     notify_tavan_taban: Optional[bool] = None
     notify_spk_bulten: Optional[bool] = None
     notify_edo_paid: Optional[bool] = None
+    notify_daily_bulletin: Optional[bool] = None  # Sabah 07:00 bülteni push toggle
     # Hesap silme
     deleted: Optional[bool] = None
 

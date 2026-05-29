@@ -76,6 +76,7 @@ class User(Base):
     notify_tavan_taban: Mapped[bool] = mapped_column(Boolean, default=True, comment="Gunun tavan taban hisseleri bildirimi")
     notify_spk_bulten: Mapped[bool] = mapped_column(Boolean, default=True, comment="SPK bulten analizi bildirimi")
     notify_rehber: Mapped[bool] = mapped_column(Boolean, default=True, comment="Rehber/blog yazi bildirimi")
+    notify_daily_bulletin: Mapped[bool] = mapped_column(Boolean, default=True, comment="Sabah 07:00 gunluk AI haber bulteni push")
     notify_edo_paid: Mapped[bool] = mapped_column(Boolean, default=True, comment="Ucretli EDO bildirimi")
     notify_kurum_onerileri: Mapped[bool] = mapped_column(Boolean, default=True, comment="Kurum onerileri/hedef fiyat bildirimi")
 
