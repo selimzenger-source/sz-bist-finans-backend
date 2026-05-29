@@ -151,6 +151,19 @@
   .disclaimer {
     margin-top: 12px; font-size: 9px; color: #6B7790; font-style: italic; text-align: center;
   }
+  /* Marka bandı (paylaşım görselinde alta düşer) */
+  .brand-banner {
+    margin-top: 14px; display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-radius: 12px;
+    background: linear-gradient(135deg, #0B1220 0%, #111B2E 100%);
+    border: 1px solid #1F2C3D;
+  }
+  .brand-banner img {
+    width: 34px; height: 34px; border-radius: 9px; object-fit: cover;
+    border: 1px solid #243248;
+  }
+  .brand-banner .brand-name { font-size: 15px; font-weight: 800; color: #FFFFFF; letter-spacing: 0.2px; }
+  .brand-banner .brand-url  { font-size: 12px; font-weight: 600; color: #6B7790; }
   /* Share button */
   .share-btn {
     margin-top: 10px; display: flex; align-items: center; justify-content: center;
@@ -360,7 +373,13 @@
       </div>
       {% endif %}
 
-      <div class="disclaimer">Bu içerik yatırım tavsiyesi değildir.</div>
+      <div class="brand-banner">
+        <img src="/static/img/logo.png" alt="Borsa Cebimde" crossorigin="anonymous">
+        <div>
+          <span class="brand-name">Borsa Cebimde</span>
+          <span class="brand-url"> · borsacebimde.com</span>
+        </div>
+      </div>
     </div>
 
     <!-- Share button (linksiz görsel paylaş) -->

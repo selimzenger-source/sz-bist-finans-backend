@@ -204,12 +204,27 @@ async def scrape_temettuhisseleri(limit: int | None = None) -> dict:
     """
     stats = {"stocks_total": 0, "processed": 0, "history_rows": 0, "errors": 0}
 
+    # Hisse evreni: BIST resmi CSV listesi (stock_markets tablosu) — her zaman guncel,
+    # sabit degil. hisse_endeks_ds.csv'den bist_market_segment_scraper ile beslenir.
+    # Boylece yeni kote olan / cikan hisseler otomatik kapsanir.
+    stocks: list[dict] = []
+    try:
+        from app.models.stock_market import StockMarket
+        async with async_session() as s:
+            rows = (await s.execute(select(StockMarket.ticker, StockMarket.company_name))).all()
+        stocks = [{"ticker": r[0], "name": r[1] or ""} for r in rows if r[0]]
+        logger.info("temettu: BIST CSV listesinden %d hisse alindi", len(stocks))
+    except Exception as e:
+        logger.warning("temettu: StockMarket listesi alinamadi (%s), temettuhisseleri listesine dusuluyor", e)
+
     async with httpx.AsyncClient(http2=False, headers=HEADERS) as client:
-        try:
-            stocks = await fetch_stocks_list(client)
-        except Exception as e:
-            logger.error("temettuhisseleri stocks listesi alinamadi: %s", e)
-            return {**stats, "error": str(e)[:200]}
+        # Fallback: StockMarket bossa temettuhisseleri'nin kendi listesi
+        if not stocks:
+            try:
+                stocks = await fetch_stocks_list(client)
+            except Exception as e:
+                logger.error("temettuhisseleri stocks listesi alinamadi: %s", e)
+                return {**stats, "error": str(e)[:200]}
 
         stats["stocks_total"] = len(stocks)
         if limit:
