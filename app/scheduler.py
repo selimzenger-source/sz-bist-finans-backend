@@ -5535,6 +5535,49 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,  # 1 saat grace
     )
 
+    # ─── Haftalik Puan Raporu — Cumartesi 17:00 TR (100+ puanli kullanicilar) ───
+    async def _send_weekly_points_report():
+        try:
+            from app.models import User
+            from sqlalchemy import select as _select
+            from app.services.admin_telegram import send_admin_message
+            async with async_session() as s:
+                res = await s.execute(
+                    _select(User.device_id, User.wallet_balance)
+                    .where(User.wallet_balance > 100)
+                    .order_by(User.wallet_balance.desc())
+                )
+                rows = res.all()
+            if not rows:
+                await send_admin_message("📊 <b>Haftalik Puan Raporu</b>\n100+ puanli kullanici yok.")
+                return
+            total = sum((r[1] or 0) for r in rows)
+            lines = [
+                "📊 <b>Haftalik Puan Raporu</b> — Cumartesi 17:00",
+                f"100+ puanli kullanici: <b>{len(rows)}</b>",
+                f"Toplam puan: <b>{total:.0f}</b>",
+                "",
+            ]
+            for did, bal in rows[:30]:
+                short = (did or "")[:8]
+                lines.append(f"• {short}… : <b>{(bal or 0):.0f}</b>")
+            if len(rows) > 30:
+                lines.append(f"… +{len(rows) - 30} kullanici daha")
+            await send_admin_message("\n".join(lines))
+        except Exception as e:
+            logger.error("Haftalik puan raporu hatasi: %s", e)
+
+    scheduler.add_job(
+        _send_weekly_points_report,
+        CronTrigger(day_of_week="sat", hour=14, minute=0),  # UTC 14:00 = TR 17:00 Cumartesi
+        id="weekly_points_report",
+        name="Haftalik Puan Raporu (Cumartesi 17:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # ─── KAP Uzmanpara Hizli Tarama — her 50 sn ───
     scheduler.add_job(
         kap_uzmanpara_quick_job,
