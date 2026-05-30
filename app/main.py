@@ -17231,7 +17231,7 @@ async def parse_portfolio_screenshot_endpoint(request: Request, payload: dict = 
 @app.get("/api/v1/feed/personalized")
 async def get_personalized_feed(
     tickers: str = Query("", description="Virgulle ayrilmis hisse kodlari (orn: TUPRS,ASELS)"),
-    limit: int = Query(10, ge=1, le=30),
+    limit: int = Query(10, ge=1, le=40),  # Diamond akış özelleştirme max 40 — 30 iken 40 seçince 422 dönüyordu
     db: AsyncSession = Depends(get_db),
 ):
     """Kullanicinin portfoy + watchlist hisselerine ait son haberler.
