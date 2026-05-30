@@ -92,6 +92,7 @@ class User(Base):
     last_ad_watched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, comment="Son reklam izleme zamani")
     ads_reset_date: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Gunluk reklam sayaci tarihi (YYYY-MM-DD)")
     last_daily_checkin: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Son gunluk giris puan tarihi (YYYY-MM-DD)")
+    last_weekly_checkin: Mapped[str | None] = mapped_column(String(20), nullable=True, comment="Son haftalik aktif kullanim puan tarihi (YYYY-MM-DD)")
 
     # Hesap silme (soft-delete — Google Play zorunlulugu)
     deleted: Mapped[bool] = mapped_column(Boolean, default=False, comment="Kullanici hesabini sildi")

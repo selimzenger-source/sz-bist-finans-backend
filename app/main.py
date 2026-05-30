@@ -5453,35 +5453,41 @@ async def wallet_daily_checkin(
 
     _check_daily_reset(user)
 
-    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    if user.last_daily_checkin == today_str:
-        # Bugun zaten giris yapilmis — sadece bakiye don
-        cooldown = _get_wallet_cooldown(user)
-        return WalletBalanceOut(
-            balance=user.wallet_balance or 0.0,
-            daily_ads_watched=user.daily_ads_watched or 0,
-            max_daily_ads=WALLET_MAX_DAILY_ADS,
-            cooldown_remaining=cooldown,
-            can_watch_ad=cooldown == 0 and (user.daily_ads_watched or 0) < WALLET_MAX_DAILY_ADS,
-        )
+    today = datetime.now(timezone.utc).date()
+    today_str = today.strftime("%Y-%m-%d")
 
-    # 1 puan ekle
-    user.wallet_balance = (user.wallet_balance or 0.0) + 1.0
-    user.last_daily_checkin = today_str
+    # ── Gunluk giris puani: +1 (gunde 1 kez) ──
+    if user.last_daily_checkin != today_str:
+        user.wallet_balance = (user.wallet_balance or 0.0) + 1.0
+        user.last_daily_checkin = today_str
+        db.add(WalletTransaction(
+            user_id=user.id, amount=1.0, tx_type="daily_checkin",
+            description="Gunluk giris puani", balance_after=user.wallet_balance,
+        ))
 
-    tx = WalletTransaction(
-        user_id=user.id,
-        amount=1.0,
-        tx_type="daily_checkin",
-        description="Gunluk giris puani",
-        balance_after=user.wallet_balance,
-    )
-    db.add(tx)
+    # ── Haftalik aktif kullanim puani: +10 (son bonustan 7+ gun gectiyse) ──
+    weekly_due = False
+    if not getattr(user, "last_weekly_checkin", None):
+        weekly_due = True
+    else:
+        try:
+            last_w = datetime.strptime(user.last_weekly_checkin, "%Y-%m-%d").date()
+            weekly_due = (today - last_w).days >= 7
+        except Exception:
+            weekly_due = True
+    if weekly_due:
+        user.wallet_balance = (user.wallet_balance or 0.0) + 10.0
+        user.last_weekly_checkin = today_str
+        db.add(WalletTransaction(
+            user_id=user.id, amount=10.0, tx_type="weekly_checkin",
+            description="Haftalik aktif kullanim puani", balance_after=user.wallet_balance,
+        ))
+
     await db.flush()
 
     cooldown = _get_wallet_cooldown(user)
     return WalletBalanceOut(
-        balance=user.wallet_balance,
+        balance=user.wallet_balance or 0.0,
         daily_ads_watched=user.daily_ads_watched or 0,
         max_daily_ads=WALLET_MAX_DAILY_ADS,
         cooldown_remaining=cooldown,

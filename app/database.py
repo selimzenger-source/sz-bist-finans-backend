@@ -335,6 +335,14 @@ async def init_db():
         except Exception:
             pass
 
+        # users.last_weekly_checkin (haftalik aktif kullanim puani — +10/hafta)
+        try:
+            await conn.execute(
+                text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_weekly_checkin VARCHAR(20)")
+            )
+        except Exception:
+            pass
+
         # v23 migration: telegram_news AI puanlama alanlari
         try:
             await conn.execute(
