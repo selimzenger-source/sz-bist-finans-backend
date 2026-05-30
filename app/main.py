@@ -5436,6 +5436,29 @@ async def get_wallet(request: Request, device_id: str = Depends(_validate_device
     )
 
 
+@app.get("/api/v1/users/{device_id}/wallet/transactions", response_model=List[WalletTransactionOut])
+@limiter.limit("30/minute")
+async def get_wallet_transactions(
+    request: Request,
+    device_id: str = Depends(_validate_device_id_param),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+):
+    """Kullanicinin puan hareketleri gecmisi (kazanc/harcama) — en yeni ustte."""
+    result = await db.execute(select(User).where(User.device_id == device_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    tx_result = await db.execute(
+        select(WalletTransaction)
+        .where(WalletTransaction.user_id == user.id)
+        .order_by(WalletTransaction.created_at.desc())
+        .limit(limit)
+    )
+    return list(tx_result.scalars().all())
+
+
 @app.post("/api/v1/users/{device_id}/wallet/daily-checkin", response_model=WalletBalanceOut)
 @limiter.limit("10/minute")
 async def wallet_daily_checkin(
@@ -5583,6 +5606,7 @@ async def wallet_spend(
         "spend_ipo": 950.0,
         "spend_notif_reward": 150.0,
         "spend_notif": 150.0,
+        "spend_diamond": 1350.0,  # Diamond Uyelik 3 Aylik (puan ile) — en ust paket
     }
 
     # spend_type dogrulama
@@ -5741,6 +5765,48 @@ async def wallet_spend(
                 "Puan ile bildirim paketi alindi (ipo_id yok): user_id=%s, desc=%s",
                 user.id, data.description,
             )
+
+    # ---- Puan ile Diamond Uyelik (3 Aylik) — EN UST paket → UserSubscription'i diamond yap ----
+    # UserSubscription tek satir oldugu icin package=diamond yazinca eski haber paketi "yanar" (uzerine yazilir).
+    if data.spend_type == "spend_diamond":
+        _now = datetime.now(timezone.utc)
+        sub_result = await db.execute(
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
+        )
+        existing_sub = sub_result.scalar_one_or_none()
+        if existing_sub:
+            existing_sub.package = "diamond"
+            existing_sub.is_active = True
+            existing_sub.store = "wallet"
+            existing_sub.product_id = "wallet_spend_diamond"
+            existing_sub.started_at = _now
+            existing_sub.expires_at = _now + timedelta(days=90)
+        else:
+            db.add(UserSubscription(
+                user_id=user.id,
+                package="diamond",
+                is_active=True,
+                store="wallet",
+                product_id="wallet_spend_diamond",
+                revenue_cat_id=None,
+                started_at=_now,
+                expires_at=_now + timedelta(days=90),
+            ))
+        await db.flush()
+        logger.info("Puan ile Diamond uyelik aktif edildi: user_id=%s, 90 gun", user.id)
+
+    # Admin Telegram — her puan harcama bildirimi (sessiz, akisi bozmaz)
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            f"💸 <b>Puan Harcama</b>\n"
+            f"Cihaz: {device_id[:8]}…\n"
+            f"Tip: {data.spend_type}\n"
+            f"Tutar: <b>-{server_amount:.0f}</b> puan\n"
+            f"Kalan: {user.wallet_balance:.0f} puan"
+        )
+    except Exception:
+        pass
 
     _check_daily_reset(user)
     cooldown = _get_wallet_cooldown(user)
