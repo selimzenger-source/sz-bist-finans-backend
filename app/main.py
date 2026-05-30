@@ -2087,7 +2087,7 @@ async def list_telegram_news(
                 select(UserSubscription).where(
                     and_(
                         UserSubscription.user_id == user.id,
-                        UserSubscription.package == "ana_yildiz",
+                        UserSubscription.package.in_(("ana_yildiz", "diamond")),
                         or_(
                             UserSubscription.is_active == True,
                             UserSubscription.expires_at > datetime.utcnow(),
@@ -2100,12 +2100,12 @@ async def list_telegram_news(
                 has_paid_sub = True
                 active_package = sub.package
 
-            # FALLBACK: DB'de henüz kayıt yoksa ama frontend ana_yildiz gönderiyorsa
+            # FALLBACK: DB'de henüz kayıt yoksa ama frontend ana_yildiz/diamond gönderiyorsa
             # (sync henüz tamamlanmamış — race condition)
             # Frontend RC entitlement'ı doğruladıktan sonra package gönderir
-            if not has_paid_sub and package == "ana_yildiz":
+            if not has_paid_sub and package in ("ana_yildiz", "diamond"):
                 has_paid_sub = True
-                active_package = "ana_yildiz"
+                active_package = package
                 # Arka planda sync'i tetikle — DB'yi güncelle
                 if user:
                     try:
@@ -2114,10 +2114,10 @@ async def list_telegram_news(
                         )
                         s = existing_sub.scalar_one_or_none()
                         if s:
-                            s.package = "ana_yildiz"
+                            s.package = package
                             s.is_active = True
                         else:
-                            db.add(UserSubscription(user_id=user.id, package="ana_yildiz", is_active=True))
+                            db.add(UserSubscription(user_id=user.id, package=package, is_active=True))
                         await db.commit()
                     except Exception:
                         pass  # Sessizce devam — haber gösterilsin
@@ -8090,6 +8090,34 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
                 )
                 db.add(subscription)
 
+    elif "diamond" in product_id.lower() or "bilanco_temettu" in product_id.lower():
+        # ─── Diamond / Bilanço+Temettü store aboneliği ───
+        # Diamond üst paket: Haber PRO'nun TÜM bildirimlerini (bülten + AI pozitif) alır.
+        # UserSubscription'a package="diamond" (veya "bilanco_temettu") yazılır ki
+        # broadcast "paid" + KAP/AI pozitif push hedef kitlesine girsin.
+        pkg_value = "diamond" if "diamond" in product_id.lower() else "bilanco_temettu"
+        result = await db.execute(
+            select(UserSubscription).where(UserSubscription.user_id == user.id)
+        )
+        sub = result.scalar_one_or_none()
+        if not sub:
+            sub = UserSubscription(user_id=user.id, package="free")
+            db.add(sub)
+
+        if event_type in ["INITIAL_PURCHASE", "RENEWAL", "PRODUCT_CHANGE", "UNCANCELLATION"]:
+            sub.package = pkg_value
+            sub.is_active = True
+            sub.product_id = product_id
+            sub.revenue_cat_id = app_user_id
+            sub.store = event.get("store", "")
+            expiration = event.get("expiration_at_ms")
+            if expiration:
+                sub.expires_at = datetime.fromtimestamp(expiration / 1000)
+
+        elif event_type in ["CANCELLATION", "EXPIRATION"]:
+            sub.is_active = False
+            sub.package = "free"
+
     await db.flush()
 
     # ─── Admin Telegram bildirimi — paket satın alma / trial / yenileme / iptal ───
@@ -8102,6 +8130,10 @@ async def revenuecat_webhook(request: Request, payload: dict, db: AsyncSession =
             pkg_name = f"bildirim:{notif_package_map.get(product_id, '?')}"
         elif product_id in ceiling_package_map:
             pkg_name = f"tavan:{ceiling_package_map.get(product_id, '?')}"
+        elif "diamond" in product_id.lower():
+            pkg_name = "diamond"
+        elif "bilanco_temettu" in product_id.lower():
+            pkg_name = "bilanco_temettu"
         else:
             pkg_name = product_id or "?"
 
@@ -8201,7 +8233,7 @@ async def sync_subscription(
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
 
     package = body.package
-    if package not in ("ana_yildiz", "yildiz_pazar", "free"):
+    if package not in ("ana_yildiz", "yildiz_pazar", "diamond", "bilanco_temettu", "free"):
         raise HTTPException(status_code=400, detail="Geçersiz paket")
 
     # UserSubscription bul veya oluştur
@@ -8240,16 +8272,25 @@ async def sync_subscription(
         "bist_finans_bist30_monthly", "bist_finans_bist50_monthly",
         "bist_finans_all_monthly",
     }
+    # Diamond/Bilanco+Temettu: frontend (build 166) bu paketler icin expiration gondermez
+    # (ayri news entitlement'i olmadigindan newsExpirationDate=null). Eksikse 31 gunluk
+    # rolling pencere ver — her app acilisinda yenilenir; kullanici cikarsa ~1 ayda kendiliginden
+    # duser, webhook EXPIRATION ise aninda kapatir. Boylece store-Diamond sahibi app acinca
+    # paid kanala (bulten + AI pozitif) girer.
+    eff_expiration = body.expiration_date
+    if body.is_active and package in ("diamond", "bilanco_temettu") and not eff_expiration:
+        eff_expiration = (datetime.now(timezone.utc) + timedelta(days=31)).isoformat()
+
     if body.is_active and package != "free":
         if body.store and body.store not in ("play_store", "app_store"):
             raise HTTPException(status_code=400, detail="Gecerli store gerekli (play_store veya app_store)")
         # product_id opsiyonel — eski client'lar göndermeyebilir
         if body.product_id and body.product_id not in KNOWN_NEWS_PRODUCTS:
             logger.warning("Sync: bilinmeyen product_id=%s, device=%s — kabul ediliyor", body.product_id, device_id)
-        if not body.expiration_date:
+        if not eff_expiration:
             raise HTTPException(status_code=400, detail="expiration_date gerekli")
         try:
-            exp_check = body.expiration_date.replace("Z", "+00:00")
+            exp_check = eff_expiration.replace("Z", "+00:00")
             exp_dt = datetime.fromisoformat(exp_check)
             if exp_dt < datetime.now(timezone.utc):
                 raise HTTPException(status_code=400, detail="Suresi dolmus abonelik senkronize edilemez")
@@ -8264,9 +8305,9 @@ async def sync_subscription(
         sub.revenue_cat_id = device_id
         if body.product_id:
             sub.product_id = body.product_id
-        if body.expiration_date:
+        if eff_expiration:
             try:
-                exp_str = body.expiration_date.replace("Z", "+00:00")
+                exp_str = eff_expiration.replace("Z", "+00:00")
                 sub.expires_at = datetime.fromisoformat(exp_str)
             except (ValueError, TypeError):
                 pass  # Geçersiz tarih — es geç
@@ -9971,9 +10012,10 @@ async def get_daily_news_summary(
                 # PRO Haber = ana_yildiz veya yildiz_pazar paketi
                 pkg = (getattr(sub, "package", "") or "").lower() if sub else ""
                 if not (
-                    pkg in ("ana_yildiz", "yildiz_pazar", "yildiz", "haber_ai", "haber")
+                    pkg in ("ana_yildiz", "yildiz_pazar", "yildiz", "haber_ai", "haber", "diamond")
                     or "yildiz" in pkg
                     or "haber" in pkg
+                    or "diamond" in pkg
                 ):
                     is_pro = False
             # user bulunamadıysa (yeni cihaz) → default-allow (is_pro=True kalır)

@@ -71,12 +71,13 @@ def _base_filter():
 def _paid_user_ids_subquery():
     """Ucretli kullanicilarin ID'lerini donduren union subquery.
 
-    Ucretli = aktif KAP aboneligi (ana_yildiz) VEYA aktif yillik hisse paketi
+    Ucretli = aktif KAP aboneligi (ana_yildiz veya diamond) VEYA aktif yillik hisse paketi
+    Diamond ust paket — Haber PRO'nun tum bildirimlerini (bulten + AI pozitif) alir.
     """
     sub_ids = select(UserSubscription.user_id).where(
         and_(
             UserSubscription.is_active == True,
-            UserSubscription.package == "ana_yildiz",
+            UserSubscription.package.in_(("ana_yildiz", "diamond")),
         )
     )
     stock_ids = select(StockNotificationSubscription.user_id).where(

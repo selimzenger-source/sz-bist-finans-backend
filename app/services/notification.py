@@ -1130,14 +1130,15 @@ class NotificationService:
         """
         from app.models.user import User, UserSubscription
 
-        # ana_yildiz KAP haber aboneleri — notify_kap_all == True zorunlu
+        # ana_yildiz/diamond KAP haber aboneleri — notify_kap_all == True zorunlu
+        # Diamond ust paket: Haber PRO ile ayni KAP/AI pozitif bildirimlerini alir.
         kap_sub_result = await self.db.execute(
             select(User)
             .join(UserSubscription, UserSubscription.user_id == User.id)
             .where(
                 and_(
                     UserSubscription.is_active == True,
-                    UserSubscription.package == "ana_yildiz",
+                    UserSubscription.package.in_(("ana_yildiz", "diamond")),
                     User.notifications_enabled == True,
                     User.deleted == False,
                     User.notify_kap_all == True,
@@ -1283,12 +1284,13 @@ class NotificationService:
         from app.models.user import User, UserSubscription
 
         # Ucretli KAP abonelerin user_id'leri (haric tutulacak — zaten tum haberleri aliyor)
+        # ana_yildiz + diamond (Diamond ust paket de tum KAP haberlerini paid kanaldan alir)
         paid_kap_ids = (
             select(UserSubscription.user_id)
             .where(
                 and_(
                     UserSubscription.is_active == True,
-                    UserSubscription.package == "ana_yildiz",
+                    UserSubscription.package.in_(("ana_yildiz", "diamond")),
                 )
             )
         )
