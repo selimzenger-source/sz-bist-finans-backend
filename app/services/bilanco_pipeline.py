@@ -342,6 +342,11 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
 
     except Exception as e:
         logger.exception("Bilanco pipeline hatasi %s: %s", ticker, e)
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error(f"Bilanço Pipeline ({ticker})", str(e))
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -410,6 +415,11 @@ async def start_bilanco_queue_worker():
             continue  # Queue bos, bekle
         except Exception as e:
             logger.exception("Bilanco queue worker hatasi: %s", e)
+            try:
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error("Bilanço Queue Worker", str(e))
+            except Exception:
+                pass
             await asyncio.sleep(30)
 
 

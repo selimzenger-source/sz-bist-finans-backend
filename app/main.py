@@ -17073,6 +17073,21 @@ async def get_earnings_calendar(
 # ADMIN — v3 manuel tetikleyiciler
 # -------------------------------------------------------
 
+async def _safe_bg(coro, label: str):
+    """Fire-and-forget arka plan görevi sarmalayıcısı: hata olursa Telegram'a bildirir.
+    create_task ile başlatılan görevler global exception handler'a düşmez; bu yüzden
+    her birini bununla sarmalayıp sessiz ölümü engelliyoruz."""
+    try:
+        await coro
+    except Exception as e:
+        try:
+            from app.services.admin_telegram import notify_scraper_error
+            await notify_scraper_error(label, str(e))
+        except Exception:
+            pass
+        logger.exception("Arka plan gorevi basarisiz (%s): %s", label, e)
+
+
 @app.post("/api/v1/admin/trigger-isyatirim-scrape")
 @limiter.limit("3/minute")
 async def admin_trigger_isyatirim(request: Request, payload: dict = Body(...)):
@@ -17086,7 +17101,7 @@ async def admin_trigger_isyatirim(request: Request, payload: dict = Body(...)):
     try:
         from app.services.bilanco_pipeline import weekly_bilanco_update
         import asyncio as _asyncio
-        _asyncio.create_task(weekly_bilanco_update())
+        _asyncio.create_task(_safe_bg(weekly_bilanco_update(), "Haftalık Bilanço Batch (İsYatırım)"))
         return {"status": "ok", "message": "Isyatirim batch baslatildi (~3-4 saat)"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}
@@ -17101,7 +17116,7 @@ async def admin_trigger_mynet_ratios(request: Request, payload: dict = Body(...)
     try:
         from app.scrapers.mynet_ratios_scraper import scrape_all_ratios
         import asyncio as _asyncio
-        _asyncio.create_task(scrape_all_ratios())
+        _asyncio.create_task(_safe_bg(scrape_all_ratios(), "Mynet Oranları Scraper"))
         return {"status": "ok", "message": "Mynet oranlari scrape baslatildi (~5 dk)"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}
@@ -17116,7 +17131,7 @@ async def admin_trigger_temettu(request: Request, payload: dict = Body(...)):
     try:
         from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
         import asyncio as _asyncio
-        _asyncio.create_task(scrape_temettuhisseleri())
+        _asyncio.create_task(_safe_bg(scrape_temettuhisseleri(), "Temettühisseleri Scraper"))
         return {"status": "ok", "message": "Temettu scrape baslatildi (background)"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:500]}

@@ -37,6 +37,7 @@ def _today_tr() -> date:
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.events import EVENT_JOB_ERROR
 
 from app.config import get_settings
 from app.database import async_session
@@ -50,6 +51,28 @@ _STARTUP_DELAY_SECONDS = 30
 _ceiling_retry_pending = False
 
 scheduler = AsyncIOScheduler()
+
+
+# ── Global cron hata yakalayıcı ───────────────────────────────────────────────
+# Kendi try/except'i OLMAYAN (veya yeniden raise eden) HER job hatası buraya düşer
+# ve otomatik Telegram'a bildirilir. Yeni eklenen tüm cron job'lar otomatik kapsanır.
+def _on_job_error(event):
+    try:
+        job = scheduler.get_job(event.job_id)
+        job_name = job.name if job else event.job_id
+        err = str(event.exception) if event.exception else "bilinmeyen hata"
+        from app.services.admin_telegram import notify_scraper_error
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.get_event_loop()
+        loop.create_task(notify_scraper_error(f"Cron: {job_name}", err))
+    except Exception:
+        # Listener asla scheduler'ı bozmamalı
+        logger.exception("Job error listener basarisiz")
+
+
+scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
 
 # --- Scraper Boost Modu ---
 # Yeni IPO tespit edilince halkarz+gedik scraper'i 12 saat boyunca 15dk'da 1 calistirir
@@ -4517,6 +4540,11 @@ def _setup_scheduler_impl():
             logger.info("Halkarz sermaye scrape: %s", result)
         except Exception as e:
             logger.warning("Halkarz sermaye scrape hata: %s", e)
+            try:
+                from app.services.admin_telegram import notify_scraper_error
+                await notify_scraper_error("Halkarz Sermaye Artırımı (5dk cron)", str(e))
+            except Exception:
+                pass
 
     scheduler.add_job(
         _scrape_halkarz_sermaye_wrapper,
