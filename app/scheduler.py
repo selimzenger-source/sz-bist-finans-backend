@@ -5535,7 +5535,7 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,  # 1 saat grace
     )
 
-    # ─── Haftalik Puan Raporu — Cumartesi 17:00 TR (100+ puanli kullanicilar) ───
+    # ─── Puan Raporu — 2 gunde bir 20:30 TR (100+ puanli kullanicilar) ───
     async def _send_weekly_points_report():
         try:
             from app.models import User
@@ -5549,11 +5549,11 @@ def _setup_scheduler_impl():
                 )
                 rows = res.all()
             if not rows:
-                await send_admin_message("📊 <b>Haftalik Puan Raporu</b>\n100+ puanli kullanici yok.")
+                await send_admin_message("📊 <b>Puan Raporu</b>\n100+ puanli kullanici yok.")
                 return
             total = sum((r[1] or 0) for r in rows)
             lines = [
-                "📊 <b>Haftalik Puan Raporu</b> — Cumartesi 17:00",
+                "📊 <b>Puan Raporu</b> — 2 gunde bir 20:30",
                 f"100+ puanli kullanici: <b>{len(rows)}</b>",
                 f"Toplam puan: <b>{total:.0f}</b>",
                 "",
@@ -5565,13 +5565,13 @@ def _setup_scheduler_impl():
                 lines.append(f"… +{len(rows) - 30} kullanici daha")
             await send_admin_message("\n".join(lines))
         except Exception as e:
-            logger.error("Haftalik puan raporu hatasi: %s", e)
+            logger.error("Puan raporu hatasi: %s", e)
 
     scheduler.add_job(
         _send_weekly_points_report,
-        CronTrigger(day_of_week="sat", hour=14, minute=0),  # UTC 14:00 = TR 17:00 Cumartesi
+        CronTrigger(day="*/2", hour=17, minute=30),  # UTC 17:30 = TR 20:30, her 2 gunde bir
         id="weekly_points_report",
-        name="Haftalik Puan Raporu (Cumartesi 17:00 TR)",
+        name="Puan Raporu (2 gunde bir 20:30 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
