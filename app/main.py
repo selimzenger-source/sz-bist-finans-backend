@@ -5436,7 +5436,7 @@ async def get_wallet(request: Request, device_id: str = Depends(_validate_device
     )
 
 
-@app.get("/api/v1/users/{device_id}/wallet/transactions", response_model=List[WalletTransactionOut])
+@app.get("/api/v1/users/{device_id}/wallet/transactions", response_model=list[WalletTransactionOut])
 @limiter.limit("30/minute")
 async def get_wallet_transactions(
     request: Request,
