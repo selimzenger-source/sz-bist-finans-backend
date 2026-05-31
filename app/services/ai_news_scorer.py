@@ -2391,6 +2391,9 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "olumlu adım", "pozitif adım",
             "olumlu olarak değer", "pozitif olarak değer",
             "olumlu yönde", "pozitif yönde",
+            # EKIZ örneği — "hafif olumlu değerlendirilebilir" ama skor 5.8'de kalmıştı
+            "hafif olumlu", "olumlu değerlendiril", "olumlu olarak değerlendir",
+            "pozitif değerlendiril", "olumlu olarak yorumlan", "olumlu karşılan",
             "stratejik yatırım", "stratejik ortaklık",
             "yatırımcı için olumlu", "yatırımcılar için olumlu", "yatırımcılar açısından olumlu",
             # ECZYT örneği — closing milestone / koşul tamamlanması
