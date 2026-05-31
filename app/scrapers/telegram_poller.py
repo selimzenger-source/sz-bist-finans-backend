@@ -34,6 +34,17 @@ TZ_TR = timezone(timedelta(hours=3))
 
 logger = logging.getLogger(__name__)
 
+
+async def _router_err(category: str, err, ticker: str = ""):
+    """KAP router kategori-parse hatasini hem logla hem Telegram'a bildir.
+    notify_scraper_error 10dk/3-mesaj dedup'li -> spam yok."""
+    logger.warning("Router→%s hata (%s): %s", category, ticker or "?", err)
+    try:
+        from app.services.admin_telegram import notify_scraper_error
+        await notify_scraper_error(f"KAP Router: {category} ({ticker or '?'})", str(err)[:300])
+    except Exception:
+        pass
+
 # -------------------------------------------------------------------
 # Telegram API
 # -------------------------------------------------------------------
@@ -395,7 +406,7 @@ async def _route_to_calendars(
                 if res:
                     logger.info("Router→cap_inc %s: %s", ticker, res)
         except Exception as e:
-            logger.warning("Router→capital_increase hata (%s): %s", ticker, e)
+            await _router_err("capital_increase", e, ticker)
 
     # is_dividend body-aware: 'Hak Kullanımı' generic - bedelsiz sermaye artırımıysa skip
     # Title tek başına is_dividend true diyorsa direkt kabul et — body re-fetch ile dolar
@@ -426,7 +437,7 @@ async def _route_to_calendars(
                     kap_url=kap_url, published_at=published_at,
                 )
         except Exception as e:
-            logger.warning("Router→dividend hata (%s): %s", ticker, e)
+            await _router_err("dividend", e, ticker)
 
     if is_business_deal(title):
         try:
@@ -438,7 +449,7 @@ async def _route_to_calendars(
                     kap_url=kap_url, published_at=published_at,
                 )
         except Exception as e:
-            logger.warning("Router→business_deal hata (%s): %s", ticker, e)
+            await _router_err("business_deal", e, ticker)
 
     # Pay Geri Alımı (buyback) — share_transaction'dan ÖNCE check.
     # Buyback ile share_transaction patterns'ı çakışıyor ("geri alın").
@@ -464,7 +475,7 @@ async def _route_to_calendars(
                 published_at=published_at,
             )
     except Exception as e:
-        logger.warning("Router→buyback hata (%s): %s", ticker, e)
+        await _router_err("buyback", e, ticker)
     # is_bb + bb_parsed bilgisini sonradan AI fail durumunda kullanmak icin sakla
     if is_bb and bb_parsed:
         # _route_to_calendars'in cagiren fonksiyona dondurmesi gerekiyor — burada
@@ -488,7 +499,7 @@ async def _route_to_calendars(
                 kap_url=kap_url, published_at=published_at,
             )
         except Exception as e:
-            logger.warning("Router→block_trade hata (%s): %s", ticker, e)
+            await _router_err("block_trade", e, ticker)
 
     # share_transaction sadece block_trade VE buyback DEĞİL ise çalışır
     # ("geri alın" share_transaction VE buyback pattern'ında ortak → çakışma)
@@ -515,7 +526,7 @@ async def _route_to_calendars(
                     kap_fetch_error = "upsert_returned_false"
             except Exception as e:
                 kap_fetch_error = f"exception:{type(e).__name__}:{str(e)[:120]}"
-                logger.warning("Router→kap_pay_fetch hata (%s): %s", ticker, e)
+                await _router_err("kap_pay_fetch", e, ticker)
 
         # KAP fetcher fail VEYA exception olursa AI parser fallback
         if not kap_fetch_ok:
@@ -544,7 +555,7 @@ async def _route_to_calendars(
                     kap_url=kap_url, published_at=published_at,
                 )
         except Exception as e:
-            logger.warning("Router→type_conversion hata (%s): %s", ticker, e)
+            await _router_err("type_conversion", e, ticker)
 
     if is_cautious(title):
         try:
@@ -566,7 +577,7 @@ async def _route_to_calendars(
                     kap_url=kap_url, published_at=published_at,
                 )
         except Exception as e:
-            logger.warning("Router→cautious hata (%s): %s", ticker, e)
+            await _router_err("cautious", e, ticker)
 
     # BISTECH VBTS multi-ticker — body'den tum ticker'lari cikart
     try:
@@ -585,7 +596,7 @@ async def _route_to_calendars(
                     body=body_for_vbts, kap_url=kap_url, published_at=published_at,
                 )
     except Exception as e:
-        logger.warning("Router→BISTECH VBTS hata: %s", e)
+        await _router_err("BISTECH_VBTS", e)
 
     # ════════════════════════════════════════════════════════════════
     # MKK/BIST DUYURULARI — title generic, body'ye bakmak gerek
@@ -626,7 +637,7 @@ async def _route_to_calendars(
                 if result.get("updated"):
                     logger.info("Router→DividendPayment: %s ticker güncellendi", result["updated"])
         except Exception as e:
-            logger.warning("Router→DividendPayment hata: %s", e)
+            await _router_err("DividendPayment", e)
 
         # 2. MKK gerçekleşme
         try:
@@ -642,7 +653,7 @@ async def _route_to_calendars(
                 if result.get("matched"):
                     logger.info("Router→MKK Realization: %s tamamlandi", result.get("ticker"))
         except Exception as e:
-            logger.warning("Router→MKK Realization hata: %s", e)
+            await _router_err("MKK_Realization", e)
 
     # v3.1 — Bilanco pipeline TETIKLEME SADECE "Finansal Durum Tablosu (Bilanço)" basliginda.
     # 11 ek mali tablo basligi (Kar veya Zarar Tablosu, Nakit Akis, Sorumluluk Beyani, Faaliyet
@@ -701,13 +712,13 @@ async def _route_to_calendars(
                         except Exception as _ae:
                             logger.debug("admin bilanco uyari hata: %s", _ae)
             except Exception as e:
-                logger.warning("Router→bilanco direkt parse hata (%s): %s", ticker, e)
+                await _router_err("bilanco_direkt", e, ticker)
         # Yedek: queue worker da calissin (full pipeline tweet/notification icin)
         try:
             from app.services.bilanco_pipeline import enqueue_bilanco
             await enqueue_bilanco(ticker, title or "")
         except Exception as e:
-            logger.warning("Router→bilanco queue hata (%s): %s", ticker, e)
+            await _router_err("bilanco_queue", e, ticker)
 
 
 # -------------------------------------------------------------------

@@ -5602,24 +5602,41 @@ def _setup_scheduler_impl():
                     "AND NOT EXISTS (SELECT 1 FROM dividend_history dh "
                     "WHERE dh.ticker=dc.ticker AND dh.payment_year=EXTRACT(YEAR FROM dc.payment_date)::int)"
                 ))).scalar() or 0
-            if dup_hist or dup_cal or gap:
+                # 4) Diğer pipeline anomalileri (son 7 gün) — eksik/okuma hatası
+                bt = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM block_trades WHERE created_at >= NOW()-INTERVAL '7 days' AND lot_amount IS NULL"))).scalar() or 0
+                bd = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM business_deals WHERE created_at >= NOW()-INTERVAL '7 days' AND amount_original IS NULL"))).scalar() or 0
+                tc = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM share_type_conversions WHERE created_at >= NOW()-INTERVAL '7 days' AND converted_lot IS NULL"))).scalar() or 0
+                ci = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM capital_increases WHERE created_at >= NOW()-INTERVAL '7 days' "
+                    "AND bedelsiz_pct IS NULL AND bedelli_pct IS NULL AND tahsisli_pct IS NULL"))).scalar() or 0
+                # NOT: eksik bilanço per-incident AI-kalkanı (Faz 1) tarafından anlık bildiriliyor
+                # -> burada tekrar saymaya gerek yok (287 tarihsel/sektör NULL gürültüsü olur).
+            issues = []
+            if dup_hist: issues.append(f"Temettü geçmiş çift kayıt: <b>{dup_hist}</b>")
+            if dup_cal:  issues.append(f"Temettü takvim çift kayıt: <b>{dup_cal}</b>")
+            if gap:      issues.append(f"Temettü ödendi-ama-geçmişte-yok: <b>{gap}</b>")
+            if bt:       issues.append(f"Toplu alım-satım eksik (lot yok): <b>{bt}</b>")
+            if bd:       issues.append(f"İş ilişkisi eksik (tutar yok): <b>{bd}</b>")
+            if tc:       issues.append(f"Tipe dönüşüm eksik (lot yok): <b>{tc}</b>")
+            if ci:       issues.append(f"Sermaye artırımı eksik (oran yok): <b>{ci}</b>")
+            if issues:
                 await send_admin_message(
-                    "⚠️ <b>Temettü Sağlık Uyarısı</b>\n"
-                    f"dividend_history çift kayıt: <b>{dup_hist}</b>\n"
-                    f"dividend_calendar çift kayıt: <b>{dup_cal}</b>\n"
-                    f"Takvimde ödendi ama geçmişte yok: <b>{gap}</b>\n"
-                    "(Tek-kaynak: takvim=KAP, geçmiş=temettuhisseleri)"
+                    "⚠️ <b>Pipeline Veri Sağlık Uyarısı</b>\n" + "\n".join(issues) +
+                    "\n→ Admin → Pipeline Sağlık'tan düzelt (xlsx / görsel / Düzelt)"
                 )
             else:
-                logger.info("Temettü sağlık nöbetçisi: temiz (dup=0, gap=0)")
+                logger.info("Pipeline veri sağlık nöbetçisi: TÜM SİSTEMLER TEMİZ")
         except Exception as e:
-            logger.error("Temettü sağlık nöbetçisi hatası: %s", e)
+            logger.error("Pipeline veri sağlık nöbetçisi hatası: %s", e)
 
     scheduler.add_job(
         _dividend_health_check,
         CronTrigger(day="*/2", hour=17, minute=35),  # UTC 17:35 = TR 20:35
         id="dividend_health_check",
-        name="Temettü Sağlık Nöbetçisi (2 günde bir 20:35 TR)",
+        name="Pipeline Veri Sağlık Nöbetçisi (2 günde bir 20:35 TR)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
