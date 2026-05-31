@@ -828,6 +828,12 @@ async def process_kap_disclosure(
     return existing
 
 
+# Tek-kaynak kurali: dividend_history yalnizca temettuhisseleri.com'dan beslenir.
+# Bu flag False iken KAP -> dividend_history mirror DEVRE DISI (cift kayit riski yok).
+# Geri acmak istersen True yap (o zaman 2 yazar + app-dedup'a doner).
+MIRROR_KAP_TO_HISTORY = False
+
+
 async def mirror_to_dividend_history(db: AsyncSession, row: "DividendCalendar") -> bool:
     """KAP'tan gelen GK temettu kararini dividend_history tablosuna da yansit.
 
@@ -839,6 +845,14 @@ async def mirror_to_dividend_history(db: AsyncSession, row: "DividendCalendar") 
     Args:
         row: DividendCalendar satiri (process_kap_disclosure cikti)
     """
+    # ── TEK-KAYNAK KURALI ──
+    # dividend_history artik SADECE temettuhisseleri.com (2 saatte bir) tarafindan beslenir.
+    # KAP -> dividend_history mirror'i KAPATILDI -> cift kayit riski yapisal olarak biter.
+    # KAP yalnizca dividend_calendar (canli takvim/TAB) besler; gecmis arsivi temettuhisseleri'nde.
+    # NOT: calendar guncellemesi cagiranlarda devam eder; burasi sadece history-yazimini no-op yapar.
+    if not MIRROR_KAP_TO_HISTORY:
+        return False
+
     from app.models.dividend import DividendHistory
 
     if not row or not row.ticker:

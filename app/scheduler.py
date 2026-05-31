@@ -5578,6 +5578,54 @@ def _setup_scheduler_impl():
         misfire_grace_time=3600,
     )
 
+    # ─── Temettü Sağlık Nöbetçisi — çift kayıt / kapsama açığı (2 günde bir 20:35 TR) ───
+    async def _dividend_health_check():
+        try:
+            from sqlalchemy import text as _t
+            from app.services.admin_telegram import send_admin_message
+            async with async_session() as s:
+                # 1) dividend_history cift kayit (ayni ticker+yil+tarih)
+                dup_hist = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM (SELECT ticker,payment_year,payment_date "
+                    "FROM dividend_history GROUP BY ticker,payment_year,payment_date "
+                    "HAVING COUNT(*)>1) q"
+                ))).scalar() or 0
+                # 2) dividend_calendar cift kayit (ayni ticker+period)
+                dup_cal = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM (SELECT ticker,period FROM dividend_calendar "
+                    "WHERE period IS NOT NULL GROUP BY ticker,period HAVING COUNT(*)>1) q"
+                ))).scalar() or 0
+                # 3) Takvimde 'tamamlandi' (odendi) ama gecmiste (history) olmayan — kapsama acigi
+                gap = (await s.execute(_t(
+                    "SELECT COUNT(*) FROM dividend_calendar dc WHERE dc.status='tamamlandi' "
+                    "AND dc.payment_date IS NOT NULL "
+                    "AND NOT EXISTS (SELECT 1 FROM dividend_history dh "
+                    "WHERE dh.ticker=dc.ticker AND dh.payment_year=EXTRACT(YEAR FROM dc.payment_date)::int)"
+                ))).scalar() or 0
+            if dup_hist or dup_cal or gap:
+                await send_admin_message(
+                    "⚠️ <b>Temettü Sağlık Uyarısı</b>\n"
+                    f"dividend_history çift kayıt: <b>{dup_hist}</b>\n"
+                    f"dividend_calendar çift kayıt: <b>{dup_cal}</b>\n"
+                    f"Takvimde ödendi ama geçmişte yok: <b>{gap}</b>\n"
+                    "(Tek-kaynak: takvim=KAP, geçmiş=temettuhisseleri)"
+                )
+            else:
+                logger.info("Temettü sağlık nöbetçisi: temiz (dup=0, gap=0)")
+        except Exception as e:
+            logger.error("Temettü sağlık nöbetçisi hatası: %s", e)
+
+    scheduler.add_job(
+        _dividend_health_check,
+        CronTrigger(day="*/2", hour=17, minute=35),  # UTC 17:35 = TR 20:35
+        id="dividend_health_check",
+        name="Temettü Sağlık Nöbetçisi (2 günde bir 20:35 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+
     # ─── KAP Uzmanpara Hizli Tarama — her 50 sn ───
     scheduler.add_job(
         kap_uzmanpara_quick_job,
