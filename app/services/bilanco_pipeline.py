@@ -303,7 +303,37 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
             for p in recent_q
         ]}
 
-        # 2. AI analiz — DB'deki son 8 ceyrek karsilastirilarak
+        # 2. ★ AI TOKEN KALKANI — eksik parse'a AI harcama
+        # En yeni dönem bilanço-tamlık kontrolü: total_assets + total_equity + (gelir kalemi).
+        # Eksikse → AI ÇALIŞTIRMA (token israfı + bilançosuz yanlış puan önlenir),
+        # admin'e "manuel fill gerekli" uyarısı at. xlsx/görsel ile sonra düzeltilir.
+        _latest = recent_q[0] if recent_q else None
+        _income_ok = bool(_latest and (_latest.net_income is not None or _latest.revenue))
+        _complete = bool(_latest and _latest.total_assets and _latest.total_equity and _income_ok)
+        if not _complete:
+            _miss = []
+            if _latest:
+                if not _latest.total_assets: _miss.append("total_assets")
+                if not _latest.total_equity: _miss.append("total_equity")
+                if not _income_ok: _miss.append("revenue/net_income")
+            logger.warning(
+                "📊 AI ATLANDI (eksik veri, token korundu): %s %s — eksik=%s",
+                ticker, _latest.period if _latest else "?", ",".join(_miss) or "veri yok",
+            )
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    "⚠️ <b>Bilanço AI atlandı — eksik veri</b>\n"
+                    f"Hisse: <b>{ticker}</b> · Dönem: {_latest.period if _latest else '?'}\n"
+                    f"Eksik alan: <b>{', '.join(_miss) or 'veri yok'}</b>\n"
+                    "AI harcanmadı. xlsx/görsel ile manuel doldurup yeniden üret.",
+                    silent=True,
+                )
+            except Exception:
+                pass
+            return  # AI yok — eksik parse
+
+        # AI analiz — DB'deki son 8 ceyrek karsilastirilarak (sadece TAM veride)
         ai_result = await _run_ai_analysis(ticker, bilanco_data["periods"])
 
         # 3. AI sonucunu DB'ye kaydet (en yeni donem icin)
