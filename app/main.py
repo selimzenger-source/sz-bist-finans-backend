@@ -18794,8 +18794,8 @@ async def admin_bilanco_xlsx_upload(
     _ai = str(run_ai).lower() in ("1", "true", "yes", "on")
     # ticker = dosya adından (A1CAP.xlsx → A1CAP)
     fname = (file.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-    ticker = re.sub(r"\.xlsx$", "", fname, flags=re.IGNORECASE).upper().strip()
-    if not re.match(r"^[A-Z0-9]{2,8}$", ticker):
+    ticker = _re.sub(r"\.xlsx$", "", fname, flags=_re.IGNORECASE).upper().strip()
+    if not _re.match(r"^[A-Z0-9]{2,8}$", ticker):
         raise HTTPException(status_code=400, detail=f"Dosya adından geçerli ticker çıkmadı: {fname}")
 
     tmp_path = None
