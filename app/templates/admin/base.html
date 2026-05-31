@@ -8,6 +8,18 @@
     <style>
         [x-cloak] { display: none !important; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        /* ── Mobil uyum: geniş tablolar yatay-scroll, taşma yok ── */
+        @media (max-width: 768px) {
+            main { padding-left: 0.6rem !important; padding-right: 0.6rem !important; }
+            table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch;
+                    white-space: nowrap; max-width: 100%; }
+            h1 { font-size: 1.35rem !important; }
+            h2 { font-size: 1.1rem !important; }
+            .health-card { padding: 14px !important; }
+        }
+        /* Yatay kaydırılabilir bölgeler için ince scrollbar */
+        table::-webkit-scrollbar { height: 6px; }
+        table::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
     </style>
 </head>
 <body class="bg-gray-900 min-h-screen text-gray-100">

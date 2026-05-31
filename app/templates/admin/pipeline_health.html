@@ -78,6 +78,40 @@
     </div>
   </div>
 
+  <!-- MANUEL BILANCO DUZELTME (xlsx + Fintables gorsel) -->
+  <div class="health-card" style="border:1px solid #0e7490;background:linear-gradient(180deg,#06374822,transparent);">
+    <h2>🛠️ Manuel Bilanço Düzeltme</h2>
+    <p style="color:#7dd3fc;font-size:13px;line-height:1.6;margin:8px 0 14px;">
+      Eksik/hatalı parse olan hisseleri elle düzelt. <b>xlsx</b> ile doğrusunu üret;
+      <b>Fintables görseli</b> ile bizim verimizi doğrula (fark varsa Telegram'a gider).
+    </p>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;">
+      <!-- xlsx yukle -->
+      <form id="xlsxForm" onsubmit="uploadXlsx(event)" style="flex:1;min-width:260px;background:#0b2530;border-radius:10px;padding:14px;">
+        <div style="font-weight:700;color:#67e8f9;margin-bottom:8px;">📄 xlsx Yükle → Doldur + AI üret</div>
+        <input type="file" id="xlsxFile" accept=".xlsx" required
+               style="width:100%;color:#cbd5e1;font-size:13px;margin-bottom:8px;">
+        <label style="display:flex;align-items:center;gap:6px;color:#94a3b8;font-size:12px;margin-bottom:10px;">
+          <input type="checkbox" id="xlsxOverwrite"> mevcut değeri de ez (varsayılan: sadece eksik)
+        </label>
+        <button type="submit" style="width:100%;background:#0891b2;color:#fff;border:none;padding:11px;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px;">Yükle & Doldur</button>
+        <div id="xlsxResult" style="margin-top:10px;font-size:13px;color:#cbd5e1;white-space:pre-line;"></div>
+      </form>
+      <!-- Fintables gorsel dogrula -->
+      <form id="imgForm" onsubmit="verifyImage(event)" style="flex:1;min-width:260px;background:#0b2530;border-radius:10px;padding:14px;">
+        <div style="font-weight:700;color:#67e8f9;margin-bottom:8px;">🖼️ Fintables Görseli → Doğrula (AI)</div>
+        <input type="file" id="imgFile" accept="image/*" required
+               style="width:100%;color:#cbd5e1;font-size:13px;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="text" id="imgTicker" placeholder="Hisse (ops.)" style="flex:1;min-width:0;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;font-size:13px;">
+          <input type="text" id="imgPeriod" placeholder="2026-Q1 (ops.)" style="flex:1;min-width:0;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px;border-radius:6px;font-size:13px;">
+        </div>
+        <button type="submit" style="width:100%;background:#0d9488;color:#fff;border:none;padding:11px;border-radius:8px;font-weight:600;cursor:pointer;font-size:14px;">Görseli Doğrula</button>
+        <div id="imgResult" style="margin-top:10px;font-size:13px;color:#cbd5e1;white-space:pre-line;"></div>
+      </form>
+    </div>
+  </div>
+
   <!-- BILANCO -->
   <div class="health-card">
     <div class="section-head">
@@ -455,6 +489,65 @@ function fixCapitalIncrease(id, ticker, type) {
     alert(d.status === "ok" ? "Güncellendi ✓" : "Hata: " + JSON.stringify(d));
     if (d.status === "ok") location.reload();
   });
+}
+
+function uploadXlsx(e) {
+  e.preventDefault();
+  const f = document.getElementById("xlsxFile").files[0];
+  if (!f) return;
+  const pw = prompt("Admin şifresi:");
+  if (!pw) return;
+  const out = document.getElementById("xlsxResult");
+  out.textContent = "Yükleniyor + parse + AI...";
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("admin_password", pw);
+  fd.append("overwrite", document.getElementById("xlsxOverwrite").checked ? "true" : "false");
+  fetch("/api/v1/admin/bilanco-xlsx-upload", { method: "POST", body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === "ok") {
+        out.textContent = `✅ ${d.ticker} ${d.period}\nDolduruldu: ${(d.filled||[]).join(", ") || "(eksik yok)"}` +
+          (d.ai ? `\n🤖 AI: ${d.ai.score} (${d.ai.label})` : "");
+      } else {
+        out.textContent = "❌ " + (d.detail || JSON.stringify(d));
+      }
+    })
+    .catch(err => out.textContent = "❌ " + err);
+}
+
+function verifyImage(e) {
+  e.preventDefault();
+  const f = document.getElementById("imgFile").files[0];
+  if (!f) return;
+  const pw = prompt("Admin şifresi:");
+  if (!pw) return;
+  const out = document.getElementById("imgResult");
+  out.textContent = "Görsel okunuyor (AI vision)...";
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("admin_password", pw);
+  fd.append("ticker", document.getElementById("imgTicker").value.trim());
+  fd.append("period", document.getElementById("imgPeriod").value.trim());
+  fetch("/api/v1/admin/bilanco-image-verify", { method: "POST", body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === "ok") {
+        out.textContent = `✅ ${d.ticker} ${d.period}\nTüm kalemler eşleşti: ${(d.matched||[]).join(", ")}`;
+      } else if (d.status === "mismatch") {
+        let s = `⚠️ ${d.ticker} ${d.period} — FARK VAR\n✅ ${(d.matched||[]).join(", ")||"-"}\n`;
+        (d.diffs||[]).forEach(x => {
+          s += x.note === "bizde YOK"
+            ? `❌ ${x.field}: bizde YOK · FT ${Number(x.fintables).toLocaleString()}\n`
+            : `❌ ${x.field}: biz ${Number(x.db).toLocaleString()} · FT ${Number(x.fintables).toLocaleString()} (%${x.diff_pct})\n`;
+        });
+        s += "→ xlsx ile düzelt";
+        out.textContent = s;
+      } else {
+        out.textContent = "ℹ️ " + (d.note || d.detail || JSON.stringify(d));
+      }
+    })
+    .catch(err => out.textContent = "❌ " + err);
 }
 </script>
 {% endblock %}

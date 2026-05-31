@@ -16,7 +16,7 @@ from typing import Optional
 
 import hmac
 
-from fastapi import FastAPI, BackgroundTasks, Body, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, BackgroundTasks, Body, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18767,6 +18767,198 @@ async def admin_run_bilanco_ai(
         "summary_preview": (latest.ai_summary or "")[:200],
         "analysis": ai_result,
     }
+
+
+@app.post("/api/v1/admin/bilanco-xlsx-upload")
+@limiter.limit("10/minute")
+async def admin_bilanco_xlsx_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    admin_password: str = Form(...),
+    overwrite: str = Form("false"),
+    run_ai: str = Form("true"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: bilanço xlsx (Fintables/İş Yatırım formatı) yükle → eksik alanları doldur.
+
+    Sektör-bağımsız parser; SADECE NULL alanları doldurur (overwrite=true ile ezer),
+    sanity + çapraz kontrol; sonra AI yeniden üretir.
+    """
+    if not _verify_admin_password(admin_password):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    import tempfile, os as _os
+    from app.services.bilanco_xlsx_parser import parse_bilanco_xlsx
+    from app.models.company_financial import CompanyFinancial
+
+    _ow = str(overwrite).lower() in ("1", "true", "yes", "on")
+    _ai = str(run_ai).lower() in ("1", "true", "yes", "on")
+    # ticker = dosya adından (A1CAP.xlsx → A1CAP)
+    fname = (file.filename or "").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    ticker = re.sub(r"\.xlsx$", "", fname, flags=re.IGNORECASE).upper().strip()
+    if not re.match(r"^[A-Z0-9]{2,8}$", ticker):
+        raise HTTPException(status_code=400, detail=f"Dosya adından geçerli ticker çıkmadı: {fname}")
+
+    tmp_path = None
+    try:
+        data = await file.read()
+        if not data or len(data) < 1000:
+            raise HTTPException(status_code=400, detail="Geçersiz/boş dosya")
+        fd, tmp_path = tempfile.mkstemp(suffix=".xlsx")
+        with _os.fdopen(fd, "wb") as f:
+            f.write(data)
+        parsed = parse_bilanco_xlsx(tmp_path)
+    finally:
+        if tmp_path:
+            try:
+                _os.remove(tmp_path)
+            except Exception:
+                pass
+
+    if not parsed or not parsed.get("period"):
+        raise HTTPException(status_code=422, detail=f"{ticker}: xlsx parse edilemedi / dönem yok")
+    period = parsed["period"]
+    ta, te = parsed.get("total_assets"), parsed.get("total_equity")
+    # SANITY
+    if ta and (ta <= 0 or (te and ta < abs(te))):
+        raise HTTPException(status_code=422, detail=f"{ticker} {period}: sanity FAIL (assets<=0 veya assets<equity)")
+
+    _fields = ["total_assets", "total_equity", "current_assets", "non_current_assets",
+               "cash_and_equivalents", "revenue", "gross_profit", "operating_profit", "net_income"]
+    res = await db.execute(select(CompanyFinancial).where(
+        CompanyFinancial.ticker == ticker, CompanyFinancial.period == period))
+    rowobj = res.scalar_one_or_none()
+    if not rowobj:
+        raise HTTPException(status_code=404, detail=f"{ticker} {period}: DB'de kayıt yok (pipeline işi). Manuel satır oluşturulmuyor.")
+
+    filled = []
+    for fld in _fields:
+        v = parsed.get(fld)
+        if v is None:
+            continue
+        if _ow or getattr(rowobj, fld, None) is None:
+            setattr(rowobj, fld, v)
+            filled.append(fld)
+    if filled:
+        await db.commit()
+
+    ai_info = None
+    if _ai and filled:
+        try:
+            from app.services.ai_bilanco_analyzer import analyze_bilanco
+            recent = (await db.execute(select(CompanyFinancial).where(
+                CompanyFinancial.ticker == ticker).order_by(desc(CompanyFinancial.period)).limit(20))).scalars().all()
+            pdata = [{
+                "period": p.period, "sector_type": p.sector_type,
+                "revenue": float(p.revenue) if p.revenue else None,
+                "net_income": float(p.net_income) if p.net_income else None,
+                "ebitda": float(p.ebitda) if p.ebitda else None,
+                "total_assets": float(p.total_assets) if p.total_assets else None,
+                "total_equity": float(p.total_equity) if p.total_equity else None,
+                "gross_profit": float(p.gross_profit) if p.gross_profit else None,
+            } for p in recent]
+            ai_r = await analyze_bilanco(ticker, pdata)
+            if ai_r and recent:
+                import json as _json
+                latest = recent[0]
+                latest.ai_score = float(ai_r.get("overall_health_score", 5.0))
+                latest.ai_label = str(ai_r.get("overall_health_label", ""))[:32] or None
+                latest.ai_summary = str(ai_r.get("summary", ""))[:2000] or None
+                latest.ai_analysis = _json.dumps(ai_r, ensure_ascii=False)[:8000]
+                latest.ai_analyzed_at = datetime.now(timezone.utc)
+                await db.commit()
+                ai_info = {"score": latest.ai_score, "label": latest.ai_label}
+        except Exception as e:
+            logger.warning("xlsx-upload AI hata (%s): %s", ticker, e)
+
+    return {"status": "ok", "ticker": ticker, "period": period,
+            "filled": filled, "skipped": not filled, "ai": ai_info}
+
+
+@app.post("/api/v1/admin/bilanco-image-verify")
+@limiter.limit("10/minute")
+async def admin_bilanco_image_verify(
+    request: Request,
+    file: UploadFile = File(...),
+    admin_password: str = Form(...),
+    ticker: str = Form(""),
+    period: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: Fintables kartı (görsel) yükle → AI vision okur → DB ile karşılaştır.
+
+    Fark varsa hangi alan, bizimki kaç, Fintables kaç → döndürür + Telegram.
+    DB'ye YAZMAZ — sadece doğrulama/teşhis. Düzeltme xlsx ile yapılır.
+    """
+    if not _verify_admin_password(admin_password):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    import base64 as _b64
+    from app.services.ai_fintables_card import parse_fintables_card
+    from app.models.company_financial import CompanyFinancial
+
+    data = await file.read()
+    if not data or len(data) < 500:
+        raise HTTPException(status_code=400, detail="Geçersiz/boş görsel")
+    media = file.content_type or "image/jpeg"
+    if media not in ("image/jpeg", "image/png", "image/webp"):
+        media = "image/jpeg"
+    img_b64 = _b64.b64encode(data).decode("ascii")
+    card = await parse_fintables_card(img_b64, media)
+    if not card:
+        raise HTTPException(status_code=502, detail="Görsel okunamadı (vision)")
+
+    tk = (ticker or card.get("ticker") or "").upper().strip()
+    per = (period or card.get("period_db") or "").strip()
+    if not tk or not per:
+        return {"status": "incomplete", "vision": card,
+                "note": "ticker/dönem belirlenemedi — formda elle gir"}
+
+    res = await db.execute(select(CompanyFinancial).where(
+        CompanyFinancial.ticker == tk, CompanyFinancial.period == per))
+    rowobj = res.scalar_one_or_none()
+    if not rowobj:
+        return {"status": "no_db_row", "ticker": tk, "period": per, "vision": card,
+                "note": f"{tk} {per} DB'de yok"}
+
+    # Karşılaştırma — %1 tolerans
+    cmp_fields = [("total_assets", "Toplam Varlıklar"), ("total_equity", "Özkaynaklar"),
+                  ("revenue", "Satışlar"), ("gross_profit", "Brüt Kar"),
+                  ("ebitda", "FAVÖK"), ("net_income", "Net Dönem Karı")]
+    diffs, oks = [], []
+    for fld, label in cmp_fields:
+        fin_v = card.get(fld)
+        db_v = getattr(rowobj, fld, None)
+        if fin_v is None:
+            continue
+        if db_v is None:
+            diffs.append({"field": label, "db": None, "fintables": fin_v, "note": "bizde YOK"})
+            continue
+        db_f = float(db_v)
+        denom = max(abs(db_f), abs(float(fin_v)), 1.0)
+        pct = abs(db_f - float(fin_v)) / denom * 100
+        if pct < 1.0:
+            oks.append(label)
+        else:
+            diffs.append({"field": label, "db": db_f, "fintables": float(fin_v), "diff_pct": round(pct, 2)})
+
+    # Telegram bildir
+    try:
+        from app.services.admin_telegram import send_admin_message
+        if diffs:
+            lines = [f"⚠️ <b>Fintables doğrulama — {tk} {per}</b>", f"✅ Eşleşen: {', '.join(oks) or '-'}", "❌ Farklı:"]
+            for d in diffs:
+                if d.get("note") == "bizde YOK":
+                    lines.append(f"• {d['field']}: bizde YOK · Fintables {d['fintables']:,.0f}")
+                else:
+                    lines.append(f"• {d['field']}: bizde {d['db']:,.0f} · Fintables {d['fintables']:,.0f} (%{d['diff_pct']})")
+            lines.append("→ xlsx ile düzelt")
+            await send_admin_message("\n".join(lines))
+        else:
+            await send_admin_message(f"✅ <b>Fintables doğrulama — {tk} {per}</b>\nTüm kalemler eşleşti ({', '.join(oks)})")
+    except Exception:
+        pass
+
+    return {"status": "ok" if not diffs else "mismatch", "ticker": tk, "period": per,
+            "matched": oks, "diffs": diffs, "vision_confidence": card.get("confidence")}
 
 
 @app.post("/api/v1/admin/run-raw-sql")
