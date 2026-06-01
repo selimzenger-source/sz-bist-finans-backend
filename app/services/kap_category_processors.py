@@ -604,16 +604,25 @@ async def process_type_conversion(
     if not is_type_conversion(title):
         return None
 
-    # Body yoksa RSC extractor'dan canli cek
+    # ── HAM KAP BODY ZORUNLU ──────────────────────────────────────────────
+    # Tipe Dönüşüm TABLOSU (ticker|sıra|unvan|grup|YATIRIMCI|nominal) SADECE ham KAP
+    # body'sinde var. Poller buraya AI ÖZETİ geçiyor; özet tabloyu "ana ortak + toplam
+    # lot"a collapse ediyor (örn. tüm satırlar yerine 'BERA Holding / 960.000'). Özet >200
+    # karakter olunca eski kod re-fetch yapmıyor, _parse_tc_table boş dönüyor ve AI fallback
+    # TEK yanlış satır (BERA Holding) üretiyordu. Bu yüzden kap_url varsa HER ZAMAN ham
+    # body'yi çek (BISTECH temettü / block_trade ile aynı pattern). Ham fetch başarısızsa
+    # gelen body'ye düşeriz.
     body_text = body or ""
-    if (not body_text or len(body_text) < 200) and kap_url:
+    if kap_url:
         try:
             from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
             disclosure = await fetch_kap_disclosure(kap_url)
-            if disclosure and disclosure.get("full_text"):
-                body_text = disclosure["full_text"]
+            _raw = (disclosure or {}).get("full_text") or ""
+            # Ham body tablo içeriyorsa (daha uzun + "|" ayraçlı) onu kullan
+            if _raw and len(_raw) > len(body_text):
+                body_text = _raw
         except Exception as e:
-            logger.warning("TypeConversion body fetch hata: %s", e)
+            logger.warning("TypeConversion ham body fetch hata: %s", e)
 
     # Tablodaki TÜM satırları parse et
     rows_data = _parse_tc_table(body_text)
