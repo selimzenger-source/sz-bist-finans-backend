@@ -1434,9 +1434,13 @@ class NotificationService:
         else:
             norm_sentiment = "neutral"; emoji = "📋"; sentiment_tag = "Nötr"
 
-        title = f"{emoji} {ticker} — {sentiment_tag} Haber"
+        # KAP Pozitif formatiyla AYNI: AI puani SADECE ucretli aboneye basliga eklenir,
+        # ucretsiz kullanici puansiz baslik alir (premium kuralı). Yorum/ozet ikisine de gider.
+        _score_tag = f" (AI: {_sc:.1f}/10)" if (score is not None) else ""
+        title_paid = f"{emoji} {ticker} — {sentiment_tag} Haber{_score_tag}"
+        title_free = f"{emoji} {ticker} — {sentiment_tag} Haber"
 
-        # Bildirim govdesi — AI ozeti varsa ekle
+        # Bildirim govdesi — AI ozeti varsa ekle (puan/etiket basligi tamamlar)
         body = (disclosure.title or "")[:200]
         if disclosure.ai_summary and disclosure.ai_summary.strip():
             body += f"\n\n📝 AI Analiz:\n{disclosure.ai_summary.strip()}"
@@ -1530,12 +1534,23 @@ class NotificationService:
         )
         users = list(users_result.scalars().all())
 
+        # AI puani gosterilecek ucretli aboneler (ana_yildiz/diamond) — tek sorgu, set.
+        from app.models.user import UserSubscription as _USub
+        _paid_rows = await self.db.execute(
+            select(_USub.user_id).where(
+                _USub.is_active == True,
+                _USub.package.in_(("ana_yildiz", "diamond")),
+            )
+        )
+        _paid_user_ids = {r[0] for r in _paid_rows.all()}
+
         sent_count = 0
         for user in users:
+            _title = title_paid if user.id in _paid_user_ids else title_free
             try:
                 success = await self._send_to_user(
                     user=user,
-                    title=title,
+                    title=_title,
                     body=body,
                     data=data,
                     channel_id="kap_news_v2",
