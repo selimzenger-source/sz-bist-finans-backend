@@ -2394,6 +2394,11 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             # EKIZ örneği — "hafif olumlu değerlendirilebilir" ama skor 5.8'de kalmıştı
             "hafif olumlu", "olumlu değerlendiril", "olumlu olarak değerlendir",
             "pozitif değerlendiril", "olumlu olarak yorumlan", "olumlu karşılan",
+            # BRSAN örneği — güçlü olumlu özet ama 5.0 Nötr kalmıştı
+            "çok pozitif", "çok olumlu", "olağanüstü olumlu", "son derece olumlu",
+            "olumlu bir sinyal", "olumlu sinyaldir", "pozitif bir sinyal", "pozitif sinyaldir",
+            "güçlü bir görünürlük", "güçlü görünürlük", "güçlü büyüme", "sipariş defteri",
+            "gelirlere katkı", "güçlü performans", "rekabetçiliğini pekiştir",
             "stratejik yatırım", "stratejik ortaklık",
             "yatırımcı için olumlu", "yatırımcılar için olumlu", "yatırımcılar açısından olumlu",
             # ECZYT örneği — closing milestone / koşul tamamlanması

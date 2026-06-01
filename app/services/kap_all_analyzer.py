@@ -888,6 +888,30 @@ SADECE asagidaki JSON formatinda yanit ver:
     if not isinstance(summary, str) or not summary.strip():
         summary = None
 
+    # ── ÖZET-PUAN TUTARLILIK GUARDRAIL'i (score_news ile aynı mantık) ──
+    # AI özeti güçlü olumlu ("çok pozitif", "olağanüstü olumlu", "büyüme potansiyeli",
+    # "güçlü sinyal" vb.) deyip puanı Nötr/düşük bırakırsa (BRSAN $742M sipariş paradoksu)
+    # skoru içeriğe göre tabanlar. Sadece framing tutarsızlığını düzeltir, rutinlere dokunmaz.
+    if summary:
+        try:
+            from app.services.ai_news_scorer import _validate_score_against_content
+            _adj = _validate_score_against_content(impact_score, "", company_code, ai_summary=summary)
+            if _adj and abs(_adj - impact_score) >= 0.1:
+                logger.info(
+                    "KAP Analyzer [TUTARLILIK] %s: %.1f -> %.1f (özet framing ile uyumlandı)",
+                    company_code, impact_score, _adj,
+                )
+                impact_score = round(float(_adj), 1)
+                try:
+                    from app.utils.ai_score_label import score_to_label
+                    _rl = score_to_label(impact_score)
+                    if _rl:
+                        sentiment = _rl
+                except Exception:
+                    pass
+        except Exception as _ve:
+            logger.debug("KAP Analyzer tutarlılık guardrail hata (%s): %s", company_code, _ve)
+
     # Yeni alanlar: category + hashtags
     category = result.get("category", "bilgi")
     if category not in ("finansal", "strateji", "bilgi"):
