@@ -420,6 +420,27 @@ def build_parsed_title(message_type: str, ticker: str | None) -> str:
     return type_labels.get(message_type, f"Haber — {ticker_str}")
 
 
+# Bilanco-paketi bildirim basliklari — bir bilanco aciklamasinda KAP'a 5+ ayri
+# tablo/rapor dusebiliyor (Finansal Durum, Kar/Zarar, Ozkaynaklar, Nakit Akis,
+# Faaliyet Raporu, Sorumluluk Beyani). Bunlar favori listesine TEK TEK push
+# GONDERILMEZ (spam); yerine tek "bilanco aciklandi" bildirimi gider.
+_BILANCO_PKG_KW = (
+    "finansal durum tablosu", "(bilanço)", "(bilanco)",
+    "kar veya zarar", "kâr veya zarar", "kar/zarar", "kâr/zarar",
+    "özkaynaklar değişim", "ozkaynaklar degisim", "özkaynak değişim",
+    "nakit akış tablosu", "nakit akis tablosu",
+    "diğer kapsamlı gelir", "diger kapsamli gelir",
+    "finansal rapor", "finansal tablo ve dipnot", "finansal tablolar ve dipnot",
+    "faaliyet raporu", "sorumluluk beyanı", "sorumluluk beyani",
+)
+
+
+def _is_bilanco_package_title(title: str) -> bool:
+    """Baslik bir bilanco-paketi bildirimi mi? (favori push'tan haric tutulur)"""
+    t = (title or "").lower()
+    return any(k in t for k in _BILANCO_PKG_KW)
+
+
 # -------------------------------------------------------------------
 # Router — 6 ozel takvime dagit
 # -------------------------------------------------------------------
@@ -1309,17 +1330,24 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             # tercihine gore yapilir. ESKIDEN uzmanpara scraper
                             # (_process_kap_disclosures) yapiyordu; KAP kaynagi Telegram poller'a
                             # tasininca baglanti koptu (favori bildirimleri + rapor atmaz olmustu) — geri baglandi.
-                            try:
-                                from app.services.notification import NotificationService as _WLNS
-                                async with session.begin_nested():
-                                    _wl_sent = await _WLNS(db=session).notify_kap_watchlist(kap_disc)
-                                if _wl_sent:
-                                    logger.info(
-                                        "Favori/watchlist bildirimi gonderildi: %s — %d kullaniciya",
-                                        _tk, _wl_sent,
-                                    )
-                            except Exception as _wl_err:
-                                logger.warning("Favori/watchlist bildirim hatasi (%s): %s", _tk, _wl_err)
+                            # Bilanco-paketi bildirimleri (Finansal Durum, Kar/Zarar,
+                            # Ozkaynaklar, Nakit Akis, Faaliyet Raporu, Sorumluluk Beyani)
+                            # favoriye TEK TEK push GONDERILMEZ — 5 ayri spam yerine, asagida
+                            # (ka_is_bilanco geldiginde) TEK "bilanco aciklandi" bildirimi gider.
+                            # Bunlar yine kap_all_disclosures'a (Tum KAP) 5.0 Notr + KAP linki
+                            # ile yaziliyor (yukarida); sadece favori PUSH'tan haric tutulur.
+                            if not _is_bilanco_package_title(ka_title):
+                                try:
+                                    from app.services.notification import NotificationService as _WLNS
+                                    async with session.begin_nested():
+                                        _wl_sent = await _WLNS(db=session).notify_kap_watchlist(kap_disc)
+                                    if _wl_sent:
+                                        logger.info(
+                                            "Favori/watchlist bildirimi gonderildi: %s — %d kullaniciya",
+                                            _tk, _wl_sent,
+                                        )
+                                except Exception as _wl_err:
+                                    logger.warning("Favori/watchlist bildirim hatasi (%s): %s", _tk, _wl_err)
 
                             # ── ROUTER: 6 ozel takvime dagit ──
                             try:
@@ -1341,6 +1369,22 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
                             # ── BILANCO PIPELINE ──
                             if ka_is_bilanco:
+                                # ── TEK "BILANCO ACIKLANDI" FAVORI BILDIRIMI ──
+                                # Bilanco-paketi 5 bildirimi favoriye tek tek gitmez; bunun
+                                # yerine burada (Finansal Durum Tablosu = is_bilanco, TEK SEFER)
+                                # tek konsolide bildirim gider. Tiklayinca Bilanco sekmesine
+                                # (Son Bilancolar — bu hissenin karti) yonlendirir.
+                                try:
+                                    from app.services.notification import NotificationService as _BNS
+                                    async with session.begin_nested():
+                                        _bn = await _BNS(db=session).notify_bilanco_announced(_tk)
+                                    if _bn:
+                                        logger.info(
+                                            "Bilanco aciklandi favori bildirimi: %s — %d kullaniciya", _tk, _bn,
+                                        )
+                                except Exception as _bn_err:
+                                    logger.warning("Bilanco aciklandi bildirim hatasi (%s): %s", _tk, _bn_err)
+
                                 try:
                                     from app.services.bilanco_pipeline import process_bilanco_bildirimi
                                     import asyncio as _asyncio
