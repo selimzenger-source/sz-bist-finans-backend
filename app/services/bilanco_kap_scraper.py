@@ -253,8 +253,8 @@ def _detect_column_count(body: str) -> int:
     return 2
 
 
-def _extract_value_after_tag(body: str, tag: str, col_count: int = 2) -> Optional[float]:
-    """XBRL etiketin SONUNDAKİ chunk'ta Cari Dönem sayısını çıkar.
+def _extract_value_after_tag(body: str, tag: str, col_count: int = 2, prev: bool = False) -> Optional[float]:
+    """XBRL etiketin SONUNDAKİ chunk'ta Cari (veya Önceki) Dönem sayısını çıkar.
 
     UNIVERSAL strateji:
     1. Etiketten sonra BİR SONRAKİ XBRL etikete kadar olan içeriği al
@@ -264,6 +264,9 @@ def _extract_value_after_tag(body: str, tag: str, col_count: int = 2) -> Optiona
          (sanayi 2 sütun: cari=[0], önceki=[1]; banka 6 sütun: cari=[2] (TP/YP/Toplam))
        - n tek (1) → o tek değer cari
        - n=0 → None
+    4. prev=True → ÖNCEKİ Dönem (ikinci yarının son sayısı = valid[n-1]).
+       Enflasyon muhasebesinde bu, GÜNCEL döneme göre yeniden düzeltilmiş (restated)
+       karşılaştırma değeridir — Fintables de bunu kullanır.
 
     col_count parametresi backward-compat için, artık otomatik tespit ediliyor.
     """
@@ -296,7 +299,10 @@ def _extract_value_after_tag(body: str, tag: str, col_count: int = 2) -> Optiona
     if n == 0:
         return None
     if n == 1:
-        return valid[0]
+        return None if prev else valid[0]
+    if prev:
+        # Önceki Dönem = ikinci yarının son sayısı (Cari ile simetrik)
+        return valid[n - 1]
     # n çift ise n//2 indeks = ilk yarının son sayısı = Cari Toplam
     half = n // 2
     return valid[half - 1] if half >= 1 else valid[0]
@@ -438,6 +444,46 @@ def parse_kap_finansal_rapor(body: str) -> dict:
         # bundan farkli hesaplanir). UI tarafinda gizlenecek olan alanlara hayalet
         # veri yazmaktan kacin: sadece technical_balance set et.
         # out["gross_profit"] = out["ebitda"] = None  (kasten doldurmuyoruz)
+
+    # ── ÖNCEKİ DÖNEM (restated) — Fintables karşılaştırma değerleri ──
+    # Güncel raporun "Önceki Dönem" kolonu enflasyona göre yeniden düzeltilmiştir.
+    # Kart karşılaştırması (YoY gelir + önceki-dönem bilanço) BUNDAN gelir → solo/
+    # konsolide ve enflasyon-restatement farkı olmadan Fintables ile birebir.
+    prev: dict = {}
+    aux_prev: dict = {}
+    for tag, field in tag_map.items():
+        v = _extract_value_after_tag(body, tag, col_count, prev=True)
+        if v is None:
+            continue
+        v_scaled = v * multiplier
+        if field.startswith("_"):
+            aux_prev[field] = v_scaled
+        elif prev.get(field) is None:
+            prev[field] = v_scaled
+    if sector == SECTOR_INDUSTRIAL:
+        if prev.get("total_equity") is None and aux_prev.get("_total_equity_consolidated") is not None:
+            prev["total_equity"] = aux_prev["_total_equity_consolidated"]
+        if prev.get("net_income") is None and aux_prev.get("_net_income_consolidated") is not None:
+            prev["net_income"] = aux_prev["_net_income_consolidated"]
+        _fd = sum(v for v in (aux_prev.get("_current_borrowings"), aux_prev.get("_current_portion_lt_borrowings"), aux_prev.get("_longterm_borrowings")) if v is not None)
+        if _fd > 0:
+            prev["net_debt"] = _fd - (prev.get("cash_and_equivalents") or 0)
+        _g = prev.get("gross_profit")
+        if _g is not None:
+            _sga = abs(aux_prev.get("_sga_general") or 0) + abs(aux_prev.get("_sga_marketing") or 0) + abs(aux_prev.get("_sga_rd") or 0)
+            prev["ebitda"] = _g - _sga + abs(aux_prev.get("_depreciation_amortization") or 0)
+    elif sector == SECTOR_BANK:
+        if prev.get("gross_profit") is not None:
+            prev["ebitda"] = prev["gross_profit"]
+        if prev.get("revenue") is None and (prev.get("net_interest_income") or prev.get("net_fees_commissions")):
+            prev["revenue"] = (prev.get("net_interest_income") or 0) + (prev.get("net_fees_commissions") or 0)
+    elif sector == SECTOR_INSURANCE:
+        _gpnl = aux_prev.get("_gross_premium_nonlife") or 0
+        _gplife = aux_prev.get("_gross_premium_life") or 0
+        if _gpnl or _gplife:
+            prev["gross_premiums"] = _gpnl + _gplife
+            prev["revenue"] = prev["gross_premiums"]
+    out["prev_period_values"] = {k: v for k, v in prev.items() if v is not None}
 
     # Confidence: kritik alanlar dolu mu?
     critical = [out["period"], out["revenue"] or out["net_interest_income"],

@@ -16505,6 +16505,21 @@ async def list_latest_bilancos(
         prev_to_use_income = prev_income or (finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None))
         prev_to_use_balance = prev_balance or (finals[1] if len(finals) >= 2 else None)
 
+        # ★ ÖNCELİK: raporun KENDİ "Önceki Dönem" (restated) kolonu. Enflasyon-düzeltilmiş
+        # + aynı konsolidasyon bazlı → Fintables ile birebir. Yoksa tarihsel lookup'a düş.
+        _ppd: dict = {}
+        if fin and getattr(fin, "prev_period_data", None):
+            try:
+                import json as _json_ppd
+                _ppd = _json_ppd.loads(fin.prev_period_data) or {}
+            except Exception:
+                _ppd = {}
+
+        def _pp(field, fallback_obj):
+            if _ppd.get(field) is not None:
+                return _f(_ppd[field])
+            return _f(getattr(fallback_obj, field, None)) if fallback_obj else None
+
         # Çeyreklik bars — eskiden yeniye sirala (5 yil = 20 ceyrek, Derin Analiz icin)
         quarterly = list(reversed(finals[:20]))
 
@@ -16581,17 +16596,18 @@ async def list_latest_bilancos(
             "gross_margin_pct": _f(fin.gross_margin_pct) if fin else None,
             "net_margin_pct": _f(fin.net_margin_pct) if fin else None,
             "roe_pct": _f(fin.roe_pct) if fin else None,
-            # Önceki dönem — GELİR TABLOSU (YoY karşılaştırma)
-            "revenue_prev": _f(prev_to_use_income.revenue) if prev_to_use_income else None,
-            "gross_profit_prev": _f(prev_to_use_income.gross_profit) if prev_to_use_income else None,
-            "ebitda_prev": _f(prev_to_use_income.ebitda) if prev_to_use_income else None,
-            "net_income_prev": _f(prev_to_use_income.net_income) if prev_to_use_income else None,
-            # Önceki dönem — BİLANÇO (bir önceki ÇEYREK = QoQ karşılaştırma)
-            "current_assets_prev": _f(prev_to_use_balance.current_assets) if prev_to_use_balance else None,
-            "non_current_assets_prev": _f(prev_to_use_balance.non_current_assets) if prev_to_use_balance else None,
-            "total_assets_prev": _f(prev_to_use_balance.total_assets) if prev_to_use_balance else None,
-            "total_equity_prev": _f(prev_to_use_balance.total_equity) if prev_to_use_balance else None,
-            "net_debt_prev": _f(prev_to_use_balance.net_debt) if prev_to_use_balance else None,
+            # Önceki dönem — GELİR TABLOSU (YoY): raporun restated Önceki Dönem kolonu
+            # (yoksa tarihsel YoY çeyrek). _pp() önceliği prev_period_data'ya verir.
+            "revenue_prev": _pp("revenue", prev_to_use_income),
+            "gross_profit_prev": _pp("gross_profit", prev_to_use_income),
+            "ebitda_prev": _pp("ebitda", prev_to_use_income),
+            "net_income_prev": _pp("net_income", prev_to_use_income),
+            # Önceki dönem — BİLANÇO: raporun restated Önceki Dönem kolonu (yoksa önceki çeyrek)
+            "current_assets_prev": _pp("current_assets", prev_to_use_balance),
+            "non_current_assets_prev": _pp("non_current_assets", prev_to_use_balance),
+            "total_assets_prev": _pp("total_assets", prev_to_use_balance),
+            "total_equity_prev": _pp("total_equity", prev_to_use_balance),
+            "net_debt_prev": _pp("net_debt", prev_to_use_balance),
             # Ceyreklik bars (artık gerçek quarterly veri — parser YTD'den dönüştürdü)
             "quarterly": [
                 {

@@ -880,6 +880,10 @@ async def init_db():
             await conn.execute(
                 text("ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS non_current_assets NUMERIC(18, 2)")
             )
+            # v56: raporun "Önceki Dönem" (restated) degerleri — kart karsilastirmasi icin
+            await conn.execute(
+                text("ALTER TABLE company_financials ADD COLUMN IF NOT EXISTS prev_period_data TEXT")
+            )
         except Exception:
             pass
 

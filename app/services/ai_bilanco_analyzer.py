@@ -796,6 +796,11 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                 return enriched
 
             from datetime import datetime, timezone
+            import json as _json
+
+            # Raporun "Önceki Dönem" (restated) degerleri — kart karsilastirmasi icin
+            _ppv = parsed.get("prev_period_values") or None
+            _ppv_json = _json.dumps(_ppv, ensure_ascii=False) if _ppv else None
 
             if existing:
                 # AI parse verisini güncelle (henüz IsYatirim gelmemişse)
@@ -806,6 +811,8 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                     val = parsed.get(field)
                     if val is not None:
                         setattr(existing, field, val)
+                if _ppv_json:
+                    existing.prev_period_data = _ppv_json
                 existing.source = "kap_ai_parse"
                 existing.updated_at = datetime.now(timezone.utc)
                 # announced_date "Son Bilançolar" feed siralamasinin kaynagi. NULL ise
@@ -830,6 +837,7 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                     net_debt=parsed.get("net_debt"),
                     cash_and_equivalents=parsed.get("cash_and_equivalents"),
                     source="kap_ai_parse",
+                    prev_period_data=_ppv_json,
                     # "Son Bilançolar" feed siralamasi announced_date'e bakar — bildirim
                     # aninda set ediyoruz ki yeni bilanco feed'in EN USTUNDE gorunsun.
                     announced_date=datetime.now(timezone.utc),

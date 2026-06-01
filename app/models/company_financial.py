@@ -89,6 +89,14 @@ class CompanyFinancial(Base):
         DateTime(timezone=True), comment="AI analiz zamanı"
     )
 
+    # Önceki dönem (restated) karşılaştırma değerleri — RAPORUN KENDİ "Önceki Dönem"
+    # kolonundan (enflasyon-düzeltilmiş). Kart YoY/önceki-dönem kıyası bundan gelir
+    # (solo/konsolide + restatement farkı olmadan Fintables ile birebir). JSON:
+    # {"revenue":.., "net_income":.., "total_assets":.., "total_equity":.., ...}
+    prev_period_data: Mapped[str | None] = mapped_column(
+        Text, comment="Raporun Önceki Dönem (restated) değerleri — JSON"
+    )
+
     # Kaynak & zaman
     source: Mapped[str | None] = mapped_column(String(50), default="isyatirim", comment="Veri kaynagi")
     scraped_at: Mapped[datetime] = mapped_column(
