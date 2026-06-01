@@ -1581,12 +1581,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         except Exception as _cnt_err:
                             logger.warning("[TWEET-FLOW] Sayac DB yuklemesi basarisiz: %s", _cnt_err)
 
-                    # Tweet politikasi: TUM olumlu haberler 5'te 1 atilir (spam koruma).
-                    # Onemli haberleri admin /news-pool sayfasindan manuel tweetler.
-                    _kap_tweet_counter["total"] += 1
-                    _counter_val = _kap_tweet_counter["total"]
+                    # Tweet politikasi: seans ici/disi × POZITIF orani admin'den ayarli
+                    # (1-5; 1=hepsi). Kategori bazli sayac + (sayac-1) % N == 0 kurali.
+                    from app.services.twitter_service import get_tweet_rates, _kap_tweet_counters
+                    _rates = await get_tweet_rates(session)
+                    _pcat = "ici_poz" if message_type == "seans_ici_pozitif" else "disi_poz"
+                    _pN = _rates.get(_pcat, 3 if _pcat == "ici_poz" else 4)
+                    _kap_tweet_counters[_pcat]["total"] += 1
+                    _counter_val = _kap_tweet_counters[_pcat]["total"]
 
-                    if _counter_val % 5 == 1:
+                    if (_counter_val - 1) % _pN == 0:
                         tweet_kw = matched_kw
                         if not tweet_kw or "BULUNAMADI" in tweet_kw.upper() or tweet_kw == ticker:
                             tweet_kw = "Yeni KAP Bildirimi"
@@ -1617,8 +1621,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         )
                     else:
                         logger.info(
-                            "[TWEET-FLOW] Sayac %d (skor=%.1f), tweet atlandi (her 5'te 1): %s",
-                            _counter_val, ai_score or 0, ticker,
+                            "[TWEET-FLOW] Sayac %d (skor=%.1f), tweet atlandi (%s: her %d'te 1): %s",
+                            _counter_val, ai_score or 0, _pcat, _pN, ticker,
                         )
 
                 except Exception as tw_err:
@@ -1640,31 +1644,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 and ticker
             ):
                 if ai_score < 4.1:
-                    # Tum olumsuz haberler (Guclu/Cok/Olumsuz/Hafif) -> sayac 2'de 1
-                    # Kullanici karari: yuksek skor istisnasi YOK.
+                    # Tum olumsuz haberler (Guclu/Cok/Olumsuz/Hafif).
+                    # Seans ici/disi × NEGATIF orani admin'den ayarli (1-5; 1=hepsi).
                     try:
-                        from app.services.twitter_service import _kap_negative_tweet_counter
-                        # Restart sonrasi sayaci DB'den yukle
-                        if _kap_negative_tweet_counter["total"] == 0:
-                            try:
-                                from app.models.pending_tweet import PendingTweet
-                                from sqlalchemy import func as sqlfunc
-                                from datetime import time as _time_type
-                                _today_start = datetime.combine(date.today(), _time_type.min)
-                                _db_neg_count_result = await session.execute(
-                                    select(sqlfunc.count(PendingTweet.id)).where(
-                                        PendingTweet.source == "kap_haber_negatif",
-                                        PendingTweet.created_at >= _today_start,
-                                    )
-                                )
-                                _db_neg_count = _db_neg_count_result.scalar() or 0
-                                if _db_neg_count > 0:
-                                    _kap_negative_tweet_counter["total"] = _db_neg_count * 3
-                            except Exception:
-                                pass
-                        _kap_negative_tweet_counter["total"] += 1
-                        _neg_counter_val = _kap_negative_tweet_counter["total"]
-                        if _neg_counter_val % 3 == 1:
+                        from app.services.twitter_service import get_tweet_rates, _kap_tweet_counters
+                        _nrates = await get_tweet_rates(session)
+                        _ncat = "ici_neg" if message_type == "seans_ici_pozitif" else "disi_neg"
+                        _nN = _nrates.get(_ncat, 2 if _ncat == "ici_neg" else 3)
+                        _kap_tweet_counters[_ncat]["total"] += 1
+                        _neg_counter_val = _kap_tweet_counters[_ncat]["total"]
+                        if (_neg_counter_val - 1) % _nN == 0:
                             _should_negative_tweet = True
                             if ai_score < 1.1:
                                 _category_label = "guclu_olumsuz"
@@ -1677,8 +1666,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _negative_category = f"{_category_label} (sayac={_neg_counter_val})"
                         else:
                             logger.info(
-                                "[TWEET-FLOW-NEG] Olumsuz sayac %d, tweet atlandi (her 3'te 1): %s",
-                                _neg_counter_val, ticker,
+                                "[TWEET-FLOW-NEG] Olumsuz sayac %d, tweet atlandi (%s: her %d'te 1): %s",
+                                _neg_counter_val, _ncat, _nN, ticker,
                             )
                     except Exception as _cnt_e:
                         logger.warning("[TWEET-FLOW-NEG] sayac hata: %s", _cnt_e)

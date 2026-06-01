@@ -1955,6 +1955,64 @@ def tweet_yearly_summary(
 _kap_tweet_counter = {"total": 0}
 _kap_negative_tweet_counter = {"total": 0}
 
+# ── KATEGORI BAZLI TWEET ORANI (seans ici/disi × pozitif/negatif) ──
+# Her kategoride "N haberden 1'i" tweetlenir. N=1 -> hepsi tweetlenir.
+# Deger admin panelden (app_settings) 1-5 arasi ayarlanir; 60s cache'li.
+_kap_tweet_counters = {
+    "ici_poz": {"total": 0},
+    "ici_neg": {"total": 0},
+    "disi_poz": {"total": 0},
+    "disi_neg": {"total": 0},
+}
+TWEET_RATE_DEFAULTS = {"ici_poz": 3, "ici_neg": 2, "disi_poz": 4, "disi_neg": 3}
+TWEET_RATE_KEYS = {
+    "ici_poz": "tweet_rate_seans_ici_pozitif",
+    "ici_neg": "tweet_rate_seans_ici_negatif",
+    "disi_poz": "tweet_rate_seans_disi_pozitif",
+    "disi_neg": "tweet_rate_seans_disi_negatif",
+}
+_tweet_rate_cache: dict = {"rates": None, "ts": 0.0}
+_TWEET_RATE_TTL = 60.0
+
+
+async def get_tweet_rates(session) -> dict:
+    """4 kategorinin tweet orani (her N haberden 1). app_settings'ten okur, 60s cache.
+    Gecersiz/eksik deger -> default. N her zaman 1..5 araliginda zorlanir."""
+    import time as _t
+    now = _t.time()
+    cached = _tweet_rate_cache.get("rates")
+    if cached is not None and (now - _tweet_rate_cache.get("ts", 0)) < _TWEET_RATE_TTL:
+        return cached
+    rates = dict(TWEET_RATE_DEFAULTS)
+    try:
+        from app.models.app_setting import AppSetting
+        from sqlalchemy import select as _sel
+        res = await session.execute(
+            _sel(AppSetting).where(AppSetting.key.in_(list(TWEET_RATE_KEYS.values())))
+        )
+        by_key = {r.key: r.value for r in res.scalars().all()}
+        for cat, key in TWEET_RATE_KEYS.items():
+            v = by_key.get(key)
+            if v is None:
+                continue
+            try:
+                n = int(str(v).strip())
+                if 1 <= n <= 5:
+                    rates[cat] = n
+            except (ValueError, TypeError):
+                pass
+    except Exception:
+        pass
+    _tweet_rate_cache["rates"] = rates
+    _tweet_rate_cache["ts"] = now
+    return rates
+
+
+def invalidate_tweet_rate_cache() -> None:
+    """Admin ayari degistirince cache'i hemen dusur (yeni deger aninda gecerli)."""
+    _tweet_rate_cache["rates"] = None
+    _tweet_rate_cache["ts"] = 0.0
+
 
 def tweet_kap_news(
     ticker: str,

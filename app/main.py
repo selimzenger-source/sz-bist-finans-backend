@@ -3901,6 +3901,71 @@ async def admin_set_app_version(
     }
 
 
+@app.get("/api/v1/admin/tweet-rates")
+@limiter.limit("30/minute")
+async def admin_get_tweet_rates(request: Request, db: AsyncSession = Depends(get_db)):
+    """KAP tweet orani ayarlari (her N haberden 1 tweet; N=1 -> hepsi).
+
+    4 kategori: seans ici/disi × pozitif/negatif. Deger 1-5.
+    """
+    from app.services.twitter_service import TWEET_RATE_KEYS, TWEET_RATE_DEFAULTS
+    out = {}
+    for cat, key in TWEET_RATE_KEYS.items():
+        raw = await _get_app_setting(db, key, str(TWEET_RATE_DEFAULTS[cat]))
+        try:
+            n = int(str(raw).strip())
+            if not (1 <= n <= 5):
+                n = TWEET_RATE_DEFAULTS[cat]
+        except (ValueError, TypeError):
+            n = TWEET_RATE_DEFAULTS[cat]
+        out[key] = n
+    return {"rates": out, "defaults": TWEET_RATE_DEFAULTS}
+
+
+@app.post("/api/v1/admin/tweet-rates")
+@limiter.limit("10/minute")
+async def admin_set_tweet_rates(
+    request: Request,
+    payload: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: KAP tweet oranlarini ayarla (1-5; 1=hepsi tweetlenir).
+
+    body (her alan opsiyonel, sadece verilenler guncellenir):
+      admin_password: zorunlu
+      tweet_rate_seans_ici_pozitif: 1..5
+      tweet_rate_seans_ici_negatif: 1..5
+      tweet_rate_seans_disi_pozitif: 1..5
+      tweet_rate_seans_disi_negatif: 1..5
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    from app.services.twitter_service import TWEET_RATE_KEYS, invalidate_tweet_rate_cache
+
+    updates = {}
+    for key in TWEET_RATE_KEYS.values():
+        if key not in payload:
+            continue
+        try:
+            n = int(payload.get(key))
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"{key} 1-5 arasi tam sayi olmali")
+        if not (1 <= n <= 5):
+            raise HTTPException(status_code=400, detail=f"{key} 1-5 arasi olmali")
+        await _set_app_setting(db, key, str(n))
+        updates[key] = n
+
+    if not updates:
+        return {"success": False, "message": "Guncellenecek alan yok"}
+
+    await db.commit()
+    try:
+        invalidate_tweet_rate_cache()  # yeni deger aninda gecerli
+    except Exception:
+        pass
+    return {"success": True, "updated": updates, "message": f"{len(updates)} oran guncellendi"}
+
+
 @app.post("/api/v1/admin/reprocess-kap-news")
 @limiter.limit("5/minute")
 async def admin_reprocess_kap_news(
