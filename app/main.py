@@ -153,6 +153,26 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "CREATE INDEX IF NOT EXISTS idx_stock_market_ticker ON stock_markets(ticker)"
             ))
+            # ── KRİTİK: kap_all_disclosures unique constraint'e TITLE ekle ──────────
+            # Eski constraint (kap_url, company_code) bir sirketin AYNI KAP bildirim
+            # numarasi altindaki FARKLI mali tablolarini (Finansal Durum Tablosu / Kar-Zarar
+            # / Ozkaynaklar — hepsi ayni kap_url'e cozumlenir) engelliyordu: ilki yaziliyor,
+            # "Finansal Durum Tablosu (Bilanço)" INTEGRITY hatasi alip DUSUYOR -> is_bilanco
+            # hic yazilmiyor -> BILANCO PIPELINE HIC TETIKLENMIYOR (MRGYO bug'i). Title'i
+            # constraint'e ekleyerek her tablo ayri yazilir, bilanco pipeline garanti calisir.
+            try:
+                _cons = (await db.execute(sa_text(
+                    "SELECT conname FROM pg_constraint WHERE conrelid='kap_all_disclosures'::regclass "
+                    "AND contype='u' AND conname='uq_kap_url_ticker_title'"
+                ))).scalar_one_or_none()
+                if not _cons:
+                    await db.execute(sa_text("ALTER TABLE kap_all_disclosures DROP CONSTRAINT IF EXISTS uq_kap_url_ticker"))
+                    await db.execute(sa_text(
+                        "ALTER TABLE kap_all_disclosures ADD CONSTRAINT uq_kap_url_ticker_title "
+                        "UNIQUE (kap_url, company_code, title)"
+                    ))
+            except Exception as _ce:
+                logger.warning("kap_all unique constraint (title) migration atlandi: %s", _ce)
             await db.commit()
     except Exception as e:
         logger.warning("kap_min_score/notify_filter/stock_markets migration atlandi: %s", e)
