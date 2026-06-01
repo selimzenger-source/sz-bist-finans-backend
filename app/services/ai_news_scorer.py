@@ -447,6 +447,81 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
         return None
 
 
+def _norm_title(s: str) -> str:
+    """Baslik normalize: kucuk harf, parantez ici at, TR karakter sadelestir."""
+    s = (s or "").lower()
+    s = re.sub(r"\([^)]*\)", " ", s)  # "(Konsolide Olmayan)" gibi ekleri at
+    for a, b in (("ı", "i"), ("ş", "s"), ("ç", "c"), ("ğ", "g"), ("ö", "o"), ("ü", "u"), ("â", "a")):
+        s = s.replace(a, b)
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# Finansal tablo bolumleri ayri "title" gelir ama KAP'ta tek "Finansal Rapor" bildirimidir
+_FIN_TABLE_KW = (
+    "ozkaynak", "finansal durum", "bilanco", "kar zarar", "kar veya zarar",
+    "nakit akis", "gelir tablo", "diger kapsamli gelir", "ozet finansal",
+)
+
+
+async def resolve_kap_url_by_title(ticker: str, target_title: str) -> str | None:
+    """KAP'in kendi bildirim sorgusundan, BASLIK eslestirerek gercek Bildirim url'sini bulur.
+
+    TradingView'e bagimli DEGIL — KAP kaynak oldugu icin indeksleme gecikmesi yok.
+    Rutin bilanco bildirimleri (Faaliyet Raporu, Sorumluluk Beyani, Ozkaynaklar Degisim
+    vb.) icin kullanilir; bunlarin TradingView sayfasinda KAP linki bulunmuyor.
+
+    - Finansal tablo bolumleri (Ozkaynaklar/Finansal Durum/Kar-Zarar) -> "Finansal Rapor" bildirimi
+    - Digerleri -> baslik birebir/icerme/token-overlap eslesmesi (en yeni kazanir)
+    """
+    ticker = (ticker or "").upper()
+    tgt = _norm_title(target_title)
+    if not ticker or not tgt:
+        return None
+    oid_map = await _refresh_oid_cache()
+    oid = oid_map.get(ticker)
+    if not oid:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=_KAP_TIMEOUT, headers=_HEADERS, follow_redirects=True) as client:
+            resp = await client.get(f"{_KAP_DISCLOSURE_URL}?member={oid}")
+            if resp.status_code != 200:
+                return None
+            pattern = (
+                r'publishDate\\":\\"([^\\"]+)\\".*?'
+                r'disclosureIndex\\":(\d+).*?'
+                r'title\\":\\"([^\\"]+)\\"'
+            )
+            matches = re.findall(pattern, resp.text, re.DOTALL)
+            if not matches:
+                return None
+
+            # Finansal tablo bolumu ise -> en yeni "Finansal Rapor" bildirimine bagla
+            if any(k in tgt for k in _FIN_TABLE_KW):
+                for _d, idx, title in matches:
+                    if "finansal rapor" in _norm_title(title):
+                        return f"https://www.kap.org.tr/tr/Bildirim/{idx}"
+
+            # Baslik eslesmesi (sira yeniden->eskiye; ilk eslesen en yeni)
+            tgt_tokens = set(tgt.split())
+            best = None  # (overlap, idx)
+            for _d, idx, title in matches:
+                nt = _norm_title(title)
+                if not nt:
+                    continue
+                if nt == tgt or tgt in nt or nt in tgt:
+                    return f"https://www.kap.org.tr/tr/Bildirim/{idx}"
+                ov = len(tgt_tokens & set(nt.split()))
+                if ov and (best is None or ov > best[0]):
+                    best = (ov, idx)
+            if best and best[0] >= 2:
+                return f"https://www.kap.org.tr/tr/Bildirim/{best[1]}"
+            return None
+    except Exception as e:
+        logger.debug("resolve_kap_url_by_title hatasi (%s): %s", ticker, e)
+        return None
+
+
 # -------------------------------------------------------
 # ADIM 2: AI Puanlama (Abacus RouteLLM — gpt-4o)
 # -------------------------------------------------------

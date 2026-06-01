@@ -1160,7 +1160,22 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as _gerr:
                     logger.warning("Son guardrail hatası (%s): %s", ticker, _gerr)
 
-            # KAP URL yoksa TradingView + Matriks ID ile olustur
+            # KAP URL yoksa — once KAP'in KENDI sorgusundan baslik eslestir (TV'ye bagimsiz).
+            # Rutin bilanco bildirimleri (Faaliyet Raporu, Sorumluluk Beyani, Ozkaynaklar
+            # Degisim) TradingView'da KAP linki icermez; KAP kaynak oldugu icin burada
+            # gercek Bildirim url'si bulunur. Boylece bilanco bildirimleri de diger
+            # haberler gibi ORJINAL KAP linki gosterir (TV linki degil).
+            if not kap_url and ticker and news_title:
+                try:
+                    from app.services.ai_news_scorer import resolve_kap_url_by_title
+                    _rk = await resolve_kap_url_by_title(ticker, news_title)
+                    if _rk:
+                        kap_url = _rk
+                        logger.info("KAP url baslik eslestirme: %s — %s (%s)", ticker, kap_url, news_title[:40])
+                except Exception as _rk_err:
+                    logger.debug("KAP url baslik eslestirme hatasi (%s): %s", ticker, _rk_err)
+
+            # Hala yoksa son care: TradingView + Matriks ID
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
 
