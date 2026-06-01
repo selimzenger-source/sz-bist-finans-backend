@@ -1572,14 +1572,21 @@ class NotificationService:
             )
 
         # ── Admin özet: watchlist takip / filtre / gönderim breakdown ──
+        # HER kullanicinin nereye gittigi hesaba katilir:
+        #   total = gonderildi + tercih_filtresi + spam + (bildirim_kapali/token_yok) + gonderim_hatasi
         total_watching = len(watchlist_rows)
         if total_watching > 0:
             try:
                 from app.services.admin_telegram import send_admin_message
-                pref_filtered = total_watching - len(filtered_device_ids) - skipped_spam
-                _sent_emoji = {"Olumlu": "📈", "Olumsuz": "📉"}.get(sentiment, "📋")
+                # tercih (pozitif/negatif/notr) filtresine takilanlar
+                pref_filtered = max(0, total_watching - len(filtered_device_ids) - skipped_spam)
+                # Tercih+spam'i gecip de FINAL users sorgusunda elenenler:
+                # bildirimi kapali / notify_kap_watchlist kapali / push token yok / kullanici kaydi yok
+                settings_dropped = max(0, len(filtered_device_ids) - len(users))
+                # users'a girip de _send_to_user basarisiz olanlar (token gecersiz vb.)
+                send_failed = max(0, len(users) - sent_count)
                 _lines = [
-                    f"{_sent_emoji} <b>KAP Bildirim Özeti</b> — #{ticker}",
+                    f"{emoji} <b>KAP Bildirim Özeti</b> — #{ticker}",
                     f"Duygu: {sentiment_tag}",
                     "━━━━━━━━━━━━━━━━━━━━",
                     f"👥 Watchlist'te: {total_watching} kişi",
@@ -1588,8 +1595,12 @@ class NotificationService:
                 if pref_filtered > 0:
                     _lines.append(f"🔕 Tercih filtresi: {pref_filtered} kişi bu tür bildirim istemedi")
                 if skipped_spam > 0:
-                    _lines.append(f"⏱ Spam koruması: {skipped_spam} kişi (5dk cooldown)")
-                if sent_count == 0 and total_watching > 0:
+                    _lines.append(f"⏱ Spam koruması: {skipped_spam} kişi (aynı bildirim tekrarı)")
+                if settings_dropped > 0:
+                    _lines.append(f"🔕 Bildirim kapalı / takip bildirimi kapalı / token yok: {settings_dropped} kişi")
+                if send_failed > 0:
+                    _lines.append(f"❌ Gönderim hatası (token geçersiz vb.): {send_failed} kişi")
+                if sent_count == 0:
                     _lines.append("⚠️ Hiçbirine gönderilmedi")
                 await send_admin_message("\n".join(_lines), parse_mode="HTML", silent=True)
             except Exception:
