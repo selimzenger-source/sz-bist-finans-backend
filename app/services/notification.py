@@ -1177,7 +1177,19 @@ class NotificationService:
         filtered_by_score = 0
         filtered_by_market = 0
         filtered_by_seans = 0
+        filtered_by_watchlist = 0
         for user in kap_users:
+            # ─── FAVORI ONCELIGI (duplicate engelle) ───
+            # notify_kap_watchlist poller'da ONCE calisir; bu ticker'i favorisine
+            # ekleyen kullaniciya favori bildirimi gonderip cache'e yazar. Genel
+            # broadcast (bu fonksiyon) ayni kullaniciya TEKRAR gondermesin — favori
+            # onceliklidir. Kullanici talebi: "hem AI pozitif hem favoride ise sadece
+            # favori dussun, duplicate olmasin."
+            _wl_key = f"{user.device_id}:{ticker}"
+            if time.time() - _watchlist_notif_cache.get(_wl_key, 0) < _WATCHLIST_NOTIF_COOLDOWN:
+                filtered_by_watchlist += 1
+                continue
+
             # ─── AI Skor Filtresi (kullanicinin secimi) ───
             # kap_min_score: 6.0=tum pozitifler | 7.0=Olumlu+ | 8.0=Cok+ | 9.0=Guclu+
             user_min = float(getattr(user, "kap_min_score", 6.0) or 6.0)
@@ -1317,7 +1329,17 @@ class NotificationService:
         sent_count = 0
         failed_count = 0
         filtered_by_score = 0
+        filtered_by_watchlist = 0
         for user in users:
+            # ─── FAVORI ONCELIGI (duplicate engelle) ───
+            # BIST50 free kullanici bu ticker'i favorisine eklediyse, notify_kap_watchlist
+            # zaten favori bildirimi gonderdi (poller'da once calisti) — ucretsiz broadcast'i
+            # TEKRAR gondermesin. Favori onceliklidir.
+            _wl_key = f"{user.device_id}:{ticker}"
+            if time.time() - _watchlist_notif_cache.get(_wl_key, 0) < _WATCHLIST_NOTIF_COOLDOWN:
+                filtered_by_watchlist += 1
+                continue
+
             # ─── AI Skor Filtresi (Free kullanicilar icin de aktif) ───
             # Modal'da "Sadece Cok Olumlu" secen free kullaniciya BIST50 push'larin
             # tamami gitmesin — sadece o skor uzeri olanlar gonderilir.
