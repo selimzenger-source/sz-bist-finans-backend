@@ -16412,27 +16412,30 @@ async def list_latest_bilancos(
 
         # ★ İki farklı önceki dönem hesabı (Fintables tarzı):
         # - Gelir tablosu için: aynı çeyrek bir yıl önce (YoY — büyüme trendi)
-        # - Bilanço için: önceki yıl sonu (Q4) — yıl başına göre değişim
-        prev_income = None  # YoY (gelir tablosu karşılaştırması)
-        prev_balance = None  # Önceki yıl sonu (bilanço karşılaştırması)
+        # - Bilanço için: bir ÖNCEKİ ÇEYREK (QoQ — çeyreklik değişim)
+        #   örn 2025-Q4 → gelir: 2024-Q4 · bilanço: 2025-Q3
+        prev_income = None   # YoY (gelir tablosu karşılaştırması)
+        prev_balance = None  # Önceki çeyrek (bilanço karşılaştırması)
         if fin and fin.period:
             try:
-                year, q = fin.period.split('-')
+                year, q = fin.period.split('-Q')
                 cur_year = int(year)
-                yoy_period = f"{cur_year - 1}-{q}"          # örn 2025-Q1
-                year_end_period = f"{cur_year - 1}-Q4"      # örn 2025-Q4
+                qi = int(q)
+                yoy_period = f"{cur_year - 1}-Q{qi}"                 # gelir: aynı çeyrek 1 yıl önce
+                prev_q_period = (f"{cur_year - 1}-Q4" if qi == 1
+                                 else f"{cur_year}-Q{qi - 1}")        # bilanço: bir önceki çeyrek
 
                 for f in finals:
                     if f.period == yoy_period:
                         prev_income = f
-                    if f.period == year_end_period:
+                    if f.period == prev_q_period:
                         prev_balance = f
             except Exception:
                 pass
 
-        # Fallback: prev_income veya prev_balance yoksa son 5. dönemi kullan
+        # Fallback: bulunamazsa — gelir 5. dönem (YoY ~ 4 çeyrek önce), bilanço bir önceki kayıt
         prev_to_use_income = prev_income or (finals[4] if len(finals) >= 5 else (finals[1] if len(finals) >= 2 else None))
-        prev_to_use_balance = prev_balance or prev_to_use_income
+        prev_to_use_balance = prev_balance or (finals[1] if len(finals) >= 2 else None)
 
         # Çeyreklik bars — eskiden yeniye sirala (5 yil = 20 ceyrek, Derin Analiz icin)
         quarterly = list(reversed(finals[:20]))
@@ -16515,7 +16518,7 @@ async def list_latest_bilancos(
             "gross_profit_prev": _f(prev_to_use_income.gross_profit) if prev_to_use_income else None,
             "ebitda_prev": _f(prev_to_use_income.ebitda) if prev_to_use_income else None,
             "net_income_prev": _f(prev_to_use_income.net_income) if prev_to_use_income else None,
-            # Önceki dönem — BİLANÇO (önceki yıl sonu = Q4 karşılaştırma)
+            # Önceki dönem — BİLANÇO (bir önceki ÇEYREK = QoQ karşılaştırma)
             "current_assets_prev": _f(prev_to_use_balance.current_assets) if prev_to_use_balance else None,
             "non_current_assets_prev": _f(prev_to_use_balance.non_current_assets) if prev_to_use_balance else None,
             "total_assets_prev": _f(prev_to_use_balance.total_assets) if prev_to_use_balance else None,
