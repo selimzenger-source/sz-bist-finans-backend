@@ -177,6 +177,37 @@ async def _get_equity_tickers(session) -> set[str]:
     return _EQUITY_TICKERS
 
 
+# Forex / emtia / kripto kodlari (hisse degil)
+_FOREX_COMMODITY = {
+    "BTCTRY", "BTCUSD", "ETHTRY", "ETHUSD", "USDTRY", "EURTRY", "GBPTRY",
+    "USDJPY", "EURUSD", "GBPUSD", "XAUUSD", "XAGUSD",
+    "COPPER", "BRENT", "GOLD", "SILVER",
+}
+
+
+def _looks_like_fund_or_index(ticker: str) -> bool:
+    """Pattern bazli FON / FOREX / EMTIA tespiti — whitelist'e EK guvenlik katmani.
+
+    Whitelist (company_financials ∪ stock_markets) birincil filtre; bu fonksiyon
+    whitelist yuklenememesi durumunda fallback + her durumda ekstra koruma.
+    Gercek BIST hisse kodlari: max 5 harf, RAKAM icermez. Buna gore:
+      - Rakam iceren  -> fon/varant (Z30EAF, OPT25F, ZPX30F ...)
+      - Forex/emtia set -> (BTCTRY, USDJPY, COPPER ...)
+      - 6+ harf + 'F' ile biten -> yatirim fonu (OPTGYF, ZGOLDF, ZTLRFF, APBDLF ...)
+    Gercek hisseler (THYAO, EKIZ, ISKUR) bu kaliplara TAKILMAZ.
+    """
+    tk = (ticker or "").upper().strip()
+    if not tk:
+        return True
+    if tk in _FOREX_COMMODITY:
+        return True
+    if any(ch.isdigit() for ch in tk):
+        return True
+    if len(tk) >= 6 and tk.endswith("F"):
+        return True
+    return False
+
+
 def detect_message_type(text: str) -> str | None:
     """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli.
 
@@ -879,20 +910,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Endeks / BIST'te olmayan ticker'lari ele (XU100, XU030, vs.)
             all_tickers = [t for t in all_tickers if _is_valid_bist_ticker(t)]
 
-            # ── FON / FOREX / EMTIA ELEME ──────────────────────────────────
-            # Sadece GERCEK hisseler (company_financials ∪ stock_markets) islensin.
-            # OPTGYF, Z30EAF, ZGOLDF gibi fonlar + BTCTRY/USDJPY gibi forex kodlari
-            # AI'a GITMEZ (token israfi) ve bildirim/feed'e dusmez. Whitelist bos
-            # ise (yukleme bozuk) filtre uygulanmaz — guvenli fallback.
+            # ── FON / FOREX / EMTIA ELEME (2 katman) ───────────────────────
+            # Sadece GERCEK hisseler islensin. OPTGYF, Z30EAF gibi fonlar +
+            # BTCTRY/USDJPY gibi forex kodlari AI'a GITMEZ (token israfi) ve
+            # bildirim/feed'e dusmez.
+            #   1) Pattern (her durumda): rakam iceren / forex / 6+harf+F -> fon
+            #   2) Whitelist (yukluyse): company_financials ∪ stock_markets
+            # Whitelist bos ise (yukleme bozuk) -> pattern tek basina fallback.
             _equity_wl = await _get_equity_tickers(session)
-            if _equity_wl:
-                _pre_eq = list(all_tickers)
-                all_tickers = [t for t in all_tickers if t.upper() in _equity_wl]
-                if _pre_eq and not all_tickers:
-                    logger.info(
-                        "Telegram: hisse olmayan kod atlandi (fon/endeks/forex) — %s (msg_id=%s)",
-                        ",".join(_pre_eq), telegram_message_id,
-                    )
+            _pre_eq = list(all_tickers)
+
+            def _is_real_equity(_t: str) -> bool:
+                # Whitelist BIRINCIL ve KESIN: icindeyse gercek hissedir, pattern'e
+                # BAKMA (A1CAP, A1YEN gibi rakamli ama gercek hisseler korunur).
+                if _equity_wl:
+                    return _t.upper() in _equity_wl
+                # Whitelist yuklenemedi -> pattern fallback (fon/forex ele)
+                return not _looks_like_fund_or_index(_t)
+
+            all_tickers = [t for t in all_tickers if _is_real_equity(t)]
+            if _pre_eq and not all_tickers:
+                logger.info(
+                    "Telegram: hisse olmayan kod atlandi (fon/endeks/forex) — %s (msg_id=%s)",
+                    ",".join(_pre_eq), telegram_message_id,
+                )
 
             # Birincil ticker — AI/router/push icin kullanilir
             ticker = all_tickers[0] if all_tickers else None

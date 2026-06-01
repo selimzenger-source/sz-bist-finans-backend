@@ -1521,18 +1521,14 @@ class NotificationService:
         if not filtered_device_ids:
             return 0
 
-        # Bildirimleri acik olan kullanicilari getir
-        users_result = await self.db.execute(
+        # Adaylari getir — settings FILTRESI YOK (neden elendigini AYRI AYRI sayabilmek icin)
+        cand_result = await self.db.execute(
             select(User).where(
-                and_(
-                    User.device_id.in_(filtered_device_ids),
-                    User.notifications_enabled == True,
-                    User.notify_kap_watchlist == True,
-                    or_(User.deleted == False, User.deleted.is_(None)),
-                )
+                User.device_id.in_(filtered_device_ids),
+                or_(User.deleted == False, User.deleted.is_(None)),
             )
         )
-        users = list(users_result.scalars().all())
+        candidates = list(cand_result.scalars().all())
 
         # AI puani gosterilecek ucretli aboneler (ana_yildiz/diamond) — tek sorgu, set.
         from app.models.user import UserSubscription as _USub
@@ -1544,8 +1540,26 @@ class NotificationService:
         )
         _paid_user_ids = {r[0] for r in _paid_rows.all()}
 
+        # ── Siniflandirma: kim neden gonderilemedi (AYRI sayaclar) ──
+        notif_off = 0       # bildirimleri tamamen kapali (notifications_enabled=False)
+        watchlist_off = 0   # takip (watchlist) bildirimi kapali (notify_kap_watchlist=False)
+        no_token = 0        # push token yok
+        sendable = []
+        for u in candidates:
+            if not getattr(u, "notifications_enabled", False):
+                notif_off += 1; continue
+            if not getattr(u, "notify_kap_watchlist", False):
+                watchlist_off += 1; continue
+            _has_token = bool(
+                (getattr(u, "fcm_token", None) and u.fcm_token.strip())
+                or (getattr(u, "expo_push_token", None) and u.expo_push_token.strip())
+            )
+            if not _has_token:
+                no_token += 1; continue
+            sendable.append(u)
+
         sent_count = 0
-        for user in users:
+        for user in sendable:
             _title = title_paid if user.id in _paid_user_ids else title_free
             try:
                 success = await self._send_to_user(
@@ -1565,27 +1579,21 @@ class NotificationService:
             except Exception as e:
                 logger.warning("Watchlist bildirim hatasi (user=%s): %s", user.id, e)
 
+        send_failed = max(0, len(sendable) - sent_count)  # token gecerli gorunup gonderim patlayanlar
+
         if sent_count > 0:
             logger.info(
                 "KAP Watchlist bildirim: %s — %d kullaniciya gonderildi",
                 ticker, sent_count,
             )
 
-        # ── Admin özet: watchlist takip / filtre / gönderim breakdown ──
-        # SADECE en az 1 kisiye GERCEKTEN gonderildiyse rapor at — "0 gonderildi" raporlari
-        # spam yaratiyordu (token yok / bildirim kapali kullanicilar). Kullanici talebi:
-        # "birine bildirim gitmediyse 'Gonderildi 0' gondermesin".
+        # ── Admin özet: takip / filtre / gönderim breakdown (AYRI satirlar) ──
+        # SADECE en az 1 kisiye GERCEKTEN gonderildiyse rapor at (0-sent spam'i onlenir).
         total_watching = len(watchlist_rows)
         if sent_count > 0:
             try:
                 from app.services.admin_telegram import send_admin_message
-                # tercih (pozitif/negatif/notr) filtresine takilanlar
                 pref_filtered = max(0, total_watching - len(filtered_device_ids) - skipped_spam)
-                # Tercih+spam'i gecip de FINAL users sorgusunda elenenler:
-                # bildirimi kapali / notify_kap_watchlist kapali / push token yok / kullanici kaydi yok
-                settings_dropped = max(0, len(filtered_device_ids) - len(users))
-                # users'a girip de _send_to_user basarisiz olanlar (token gecersiz vb.)
-                send_failed = max(0, len(users) - sent_count)
                 _lines = [
                     f"{emoji} <b>KAP Bildirim Özeti</b> — #{ticker}",
                     f"Duygu: {sentiment_tag}",
@@ -1597,8 +1605,12 @@ class NotificationService:
                     _lines.append(f"🔕 Tercih filtresi: {pref_filtered} kişi bu tür bildirim istemedi")
                 if skipped_spam > 0:
                     _lines.append(f"⏱ Spam koruması: {skipped_spam} kişi (aynı bildirim tekrarı)")
-                if settings_dropped > 0:
-                    _lines.append(f"🔕 Bildirim kapalı / takip bildirimi kapalı / token yok: {settings_dropped} kişi")
+                if notif_off > 0:
+                    _lines.append(f"🔕 Bildirim kapalı: {notif_off} kişi")
+                if watchlist_off > 0:
+                    _lines.append(f"🔕 Takip bildirimi kapalı: {watchlist_off} kişi")
+                if no_token > 0:
+                    _lines.append(f"📵 Push token yok: {no_token} kişi")
                 if send_failed > 0:
                     _lines.append(f"❌ Gönderim hatası (token geçersiz vb.): {send_failed} kişi")
                 await send_admin_message("\n".join(_lines), parse_mode="HTML", silent=True)
