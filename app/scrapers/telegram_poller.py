@@ -1187,6 +1187,26 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 _tk, ka_title[:50], ka_sentiment, ai_score,
                             )
 
+                            # ── FAVORI/WATCHLIST BILDIRIMI + notify-bot raporu ──
+                            # Bu hisseyi favorisine/portfoyune ekleyen kullanicilara
+                            # (notify_kap_watchlist pref + pozitif/negatif/tum filtresine gore)
+                            # push gonderir VE notify-bot'a "👥 Watchlist'te N · ✅ Gonderildi N kisi"
+                            # raporu atar. Notr dahil — filtreleme fonksiyon icinde, kullanici
+                            # tercihine gore yapilir. ESKIDEN uzmanpara scraper
+                            # (_process_kap_disclosures) yapiyordu; KAP kaynagi Telegram poller'a
+                            # tasininca baglanti koptu (favori bildirimleri + rapor atmaz olmustu) — geri baglandi.
+                            try:
+                                from app.services.notification import NotificationService as _WLNS
+                                async with session.begin_nested():
+                                    _wl_sent = await _WLNS(db=session).notify_kap_watchlist(kap_disc)
+                                if _wl_sent:
+                                    logger.info(
+                                        "Favori/watchlist bildirimi gonderildi: %s — %d kullaniciya",
+                                        _tk, _wl_sent,
+                                    )
+                            except Exception as _wl_err:
+                                logger.warning("Favori/watchlist bildirim hatasi (%s): %s", _tk, _wl_err)
+
                             # ── ROUTER: 6 ozel takvime dagit ──
                             try:
                                 async with session.begin_nested():
