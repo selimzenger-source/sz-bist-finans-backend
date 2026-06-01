@@ -161,6 +161,9 @@ async def lifespan(app: FastAPI):
             # hic yazilmiyor -> BILANCO PIPELINE HIC TETIKLENMIYOR (MRGYO bug'i). Title'i
             # constraint'e ekleyerek her tablo ayri yazilir, bilanco pipeline garanti calisir.
             try:
+                # KOSULSUZ: title'siz uq_kap_url_ticker index'ini her acilista dusur.
+                # (database.py v52 bunu yeniden yaratabiliyordu -> bilanco blokeri geri geliyordu.)
+                await db.execute(sa_text("DROP INDEX IF EXISTS uq_kap_url_ticker"))
                 _cons = (await db.execute(sa_text(
                     "SELECT conname FROM pg_constraint WHERE conrelid='kap_all_disclosures'::regclass "
                     "AND contype='u' AND conname='uq_kap_url_ticker_title'"

@@ -708,12 +708,20 @@ async def init_db():
             await conn.execute(text(
                 "DROP INDEX IF EXISTS uq_kap_url"
             ))
+            # KRITIK: title'siz (kap_url, company_code) index'i bir sirketin AYNI KAP
+            # bildirimi altindaki FARKLI mali tablolarini (Finansal Durum / Kar-Zarar /
+            # Ozkaynaklar — hepsi ayni kap_url) blokluyor -> "Finansal Durum Tablosu"
+            # yazilamiyor -> is_bilanco yazilmiyor -> BILANCO PIPELINE HIC tetiklenmiyor.
+            # Eski title'siz index'i DUSUR, yerine TITLE dahil unique olustur.
             await conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_url_ticker "
-                "ON kap_all_disclosures(kap_url, company_code) "
+                "DROP INDEX IF EXISTS uq_kap_url_ticker"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_kap_url_ticker_title "
+                "ON kap_all_disclosures(kap_url, company_code, title) "
                 "WHERE kap_url IS NOT NULL"
             ))
-            logger.info("v52: uq_kap_url_ticker composite unique index olusturuldu")
+            logger.info("v52: uq_kap_url_ticker_title (title dahil) composite unique index olusturuldu")
         except Exception as _v52_err:
             logger.warning("v52 migration hatasi: %s", _v52_err)
 
