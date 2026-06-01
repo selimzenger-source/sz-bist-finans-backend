@@ -417,13 +417,24 @@ async def _route_to_calendars(
             # dağıtım kararı / dağıtmama / ödeme bildirimleri kaçıyordu.
             # Buyback router'ındaki gibi KAP'tan tam body çekiyoruz.
             body_for_div = body or ""
-            if (not body_for_div or len(body_for_div) < 200) and kap_url:
+            # BISTECH/bulk: AI özeti tek ticker'a indirgenmiş olabilir (363 char > 200 eşiği)
+            # -> ham metinde "Pay Başına Brüt Temettü" yoksa MUTLAKA ham body çek
+            # (yoksa multi-ticker tutarlar kaybolur, hepsine ilk ticker'ın değeri yazılır).
+            _tl = (title or "").lower()
+            _is_bistech_bulk = ("bistech pay piyasas" in _tl or "bıstech pay piyasas" in _tl
+                                or "borsa istanbul a.ş." in _tl or "borsa istanbul a.s." in _tl)
+            _needs_raw = (
+                not body_for_div or len(body_for_div) < 200
+                or (_is_bistech_bulk and "pay başına brüt temettü" not in body_for_div.lower()
+                    and "pay basina brut temettu" not in body_for_div.lower())
+            )
+            if _needs_raw and kap_url:
                 try:
                     from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
                     disc = await fetch_kap_disclosure(kap_url)
                     if disc and disc.get("full_text"):
                         body_for_div = disc["full_text"]
-                        logger.info("Dividend body KAP re-fetch (%s): %d kar", ticker, len(body_for_div))
+                        logger.info("Dividend body KAP re-fetch (%s): %d kar (bistech=%s)", ticker, len(body_for_div), _is_bistech_bulk)
                 except Exception as _fe:
                     logger.debug("Dividend body re-fetch hata (%s): %s", ticker, _fe)
 
