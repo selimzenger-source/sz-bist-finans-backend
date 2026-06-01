@@ -2446,6 +2446,19 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         has_pos_framing = any(kw in summary_lower for kw in pos_framing)
         has_neg_framing = any(kw in summary_lower for kw in neg_framing)
 
+        # ── GENEL VERDİKT (keyword listesinden BAĞIMSIZ — kalıcı çözüm) ──
+        # AI özeti sonuç olarak "olumlu/pozitif" diyorsa pozitif, "olumsuz/negatif"
+        # diyorsa negatif say. Negasyon-aware ("olumlu değil" pozitif sayılmaz).
+        # Böylece her yeni ifade için keyword eklemeye gerek kalmaz; AI kendi
+        # verdiktini bu kelimelerle söylediği sürece skor-özet paradoksu otomatik düzelir.
+        import re as _vr
+        _pos_v = len(_vr.findall(r"(?:olumlu|pozitif)(?!\s*(?:değil|olmay|d[ei]ğil))", summary_lower))
+        _neg_v = len(_vr.findall(r"(?:olumsuz|negatif)", summary_lower))
+        if _pos_v > _neg_v:
+            has_pos_framing = True
+        elif _neg_v > _pos_v:
+            has_neg_framing = True
+
         # ── STRONG NEG: özet net şekilde olumsuz diyorsa pos varsa BİLE override ──
         # AI bazen aynı özet içinde "finansal yapı güçleniyor" (pos) yazsa da
         # ana sonuç "olumsuz sinyal" diyebiliyor (EGEPO örneği). Bu durumda
