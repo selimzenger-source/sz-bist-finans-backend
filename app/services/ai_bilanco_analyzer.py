@@ -808,6 +808,11 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                         setattr(existing, field, val)
                 existing.source = "kap_ai_parse"
                 existing.updated_at = datetime.now(timezone.utc)
+                # announced_date "Son Bilançolar" feed siralamasinin kaynagi. NULL ise
+                # bildirim aninda (now) set et — yoksa bilanco feed'in DIBINE dusuyor
+                # (BRMEN/MEPET bug'i: announced_date=NULL -> feed'de gorunmuyordu).
+                if getattr(existing, "announced_date", None) is None:
+                    existing.announced_date = datetime.now(timezone.utc)
             else:
                 new_record = CompanyFinancial(
                     ticker=ticker,
@@ -825,6 +830,9 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
                     net_debt=parsed.get("net_debt"),
                     cash_and_equivalents=parsed.get("cash_and_equivalents"),
                     source="kap_ai_parse",
+                    # "Son Bilançolar" feed siralamasi announced_date'e bakar — bildirim
+                    # aninda set ediyoruz ki yeni bilanco feed'in EN USTUNDE gorunsun.
+                    announced_date=datetime.now(timezone.utc),
                 )
                 db.add(new_record)
 
