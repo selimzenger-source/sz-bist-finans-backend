@@ -1418,16 +1418,21 @@ class NotificationService:
         # broadcast cift gonderimi engellenir. (Kullanici: "ne haber geliyorsa gondermek lazim")
         _dedup_tok = getattr(disclosure, "kap_url", None) or ticker
 
-        # Sentiment emoji + etiket
-        if sentiment == "Olumlu":
-            emoji = "📈"
-            sentiment_tag = "Pozitif"
-        elif sentiment == "Olumsuz":
-            emoji = "📉"
-            sentiment_tag = "Negatif"
+        # Sentiment emoji + etiket — SKOR BAZLI (broadcast/notify_kap_news ve uygulamanin
+        # geneliyle TUTARLI: score>=6 pozitif). ESKI BUG: ai_sentiment string'inde sadece
+        # tam "Olumlu"/"Olumsuz" araniyordu; "Hafif Olumlu"/"Cok Olumlu"/"Guclu Olumsuz"
+        # gibi 9-kategori etiketleri Notr'e dusuyordu (DAPGM 6.4 -> yanlislikla Notr +
+        # pozitif-filtreli kullanicilara gitmiyordu). Artik skor kaynak alinir.
+        try:
+            _sc = float(score) if score is not None else 5.0
+        except (ValueError, TypeError):
+            _sc = 5.0
+        if _sc >= 6.0:
+            norm_sentiment = "positive"; emoji = "📈"; sentiment_tag = "Pozitif"
+        elif _sc <= 4.0:
+            norm_sentiment = "negative"; emoji = "📉"; sentiment_tag = "Negatif"
         else:
-            emoji = "📋"
-            sentiment_tag = "Nötr"
+            norm_sentiment = "neutral"; emoji = "📋"; sentiment_tag = "Nötr"
 
         title = f"{emoji} {ticker} — {sentiment_tag} Haber"
 
@@ -1490,17 +1495,19 @@ class NotificationService:
                 skipped_spam += 1
                 continue
 
-            # Bildirim tercihi filtresi
+            # Bildirim tercihi filtresi — SKOR BAZLI norm_sentiment (positive/negative/
+            # neutral) kullanir. Eski kod tam "Olumlu"/"Olumsuz" string'i ariyordu →
+            # "Hafif Olumlu" (6.4) Notr sayilip pozitif-filtreli kullaniciya GITMIYORDU.
             if pref == "all" or pref == "both" or not pref:
-                # Tum haberler (Olumlu + Notr + Olumsuz)
+                # Tum haberler (Pozitif + Notr + Negatif)
                 filtered_device_ids.append(device_id)
             elif pref == "positive_negative":
                 # Hem pozitif hem negatif — notr haric
-                if sentiment in ("Olumlu", "Olumsuz"):
+                if norm_sentiment in ("positive", "negative"):
                     filtered_device_ids.append(device_id)
-            elif pref == "positive_only" and sentiment == "Olumlu":
+            elif pref == "positive_only" and norm_sentiment == "positive":
                 filtered_device_ids.append(device_id)
-            elif pref == "negative_only" and sentiment == "Olumsuz":
+            elif pref == "negative_only" and norm_sentiment == "negative":
                 filtered_device_ids.append(device_id)
             # "Nötr" → sadece "all"/"both" tercih edenler alir (yukarida yakalandi)
 
