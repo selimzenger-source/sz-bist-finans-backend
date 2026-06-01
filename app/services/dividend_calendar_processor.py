@@ -252,6 +252,12 @@ def classify_event_with_body(title: str, body: str) -> str:
             "dağıtılmasına gerek olmadığı", "dagitilmasina gerek olmadigi",
             "kar payı ödenmeyecek", "kar payi odenmeyecek",
             "temettü ödenmeyecek", "temettu odenmeyecek",
+            # KAP STANDART ALANI: "Nakit Kar Payı Ödeme Şekli: Ödenmeyecek" — en kesin
+            # dağıtmama sinyali (KONKA 1611556 örneği: tabloda brüt tutar olsa BİLE ödeme
+            # şekli 'Ödenmeyecek' ise temettü DAĞITILMAYACAK demektir → rejection).
+            "ödeme şekli ödenmeyecek", "odeme sekli odenmeyecek",
+            "ödeme şekli: ödenmeyecek", "odeme sekli: odenmeyecek",
+            "kar payı ödeme şekli ödenmeyecek", "kar payi odeme sekli odenmeyecek",
             "kar dağıtmama yönünde", "kar dagitmama yonunde",
             "dağıtım gerçekleştirilmemesine", "dagitim gerceklestirilmemesine",
             "dağıtım gerçekleştirmeme", "dagitim gerceklestirmeme",
@@ -612,8 +618,28 @@ async def process_kap_disclosure(
         logger.info("Dividend skip — body bos/cok kisa (orphan oluşmasin): %s", ticker)
         return None
 
+    # ── HAM KAP BODY (sınıflandırma için) ──────────────────────────────────
+    # Dağıtmama kararının kesin sinyali "Nakit Kar Payı Ödeme Şekli: Ödenmeyecek"
+    # SADECE ham KAP body'sinde var. Poller buraya AI ÖZETİ geçiyor; özet bu detayı
+    # kaybediyor → DAĞITMAMA kararı 'ykk_alindi' (dağıtacak) gibi işleniyordu (KONKA
+    # 1611556 bug'ı: temettü dağıtmadığı halde temettü listesinde görünüyordu).
+    # Ham body'yi çek ve SINIFLANDIRMA için kullan (tutar parse'ı body ile aynı kalır).
+    _classify_body = body or ""
+    if kap_url:
+        try:
+            from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+            _disc = await fetch_kap_disclosure(kap_url)
+            _raw = (_disc or {}).get("full_text") or ""
+            if _raw and len(_raw) > len(_classify_body):
+                _classify_body = _raw
+                # Ham body daha zenginse tutar parse'ı da ondan daha iyi olur
+                if not body or len(body) < len(_raw):
+                    body = _raw
+        except Exception as _e:
+            logger.warning("Dividend ham body fetch hata (%s): %s", ticker, _e)
+
     # Title yetersizse body'ye bak (dağıtmama coğunlukla body'de gizli)
-    event_type = classify_event_with_body(title, body or "")
+    event_type = classify_event_with_body(title, _classify_body)
     if event_type == "unknown":
         event_type = "ykk"
 
