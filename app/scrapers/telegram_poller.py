@@ -142,6 +142,41 @@ def _is_valid_bist_ticker(ticker: str) -> bool:
     return True
 
 
+# ── HISSE WHITELIST (fon/endeks/forex eleme) ──────────────────────────────
+# OPTGYF, Z30EAF, ZGOLDF gibi yatirim FONLARI ve BTCTRY/USDJPY/COPPER gibi forex/
+# emtia kodlari KAP "pozitif haber" gibi yakalanip AI'a gidiyor, token harciyor ve
+# AI Pozitif + favori bildirimine dusuyordu. Whitelist = company_financials (bilanco
+# veren gercek sirketler) ∪ stock_markets (pazar listesi). IZENR/RUBNS gibi YENI ve
+# EKIZ/QNBTR gibi kucuk hisseler dahil; fonlar/forex haric. Saatlik cache.
+_EQUITY_TICKERS: set[str] = set()
+_EQUITY_TICKERS_TS: float = 0.0
+_EQUITY_TTL = 3600.0  # 1 saat
+
+
+async def _get_equity_tickers(session) -> set[str]:
+    """Gercek BIST hisse evreni (company_financials ∪ stock_markets), cache'li."""
+    global _EQUITY_TICKERS, _EQUITY_TICKERS_TS
+    import time as _t
+    now = _t.time()
+    if _EQUITY_TICKERS and (now - _EQUITY_TICKERS_TS) < _EQUITY_TTL:
+        return _EQUITY_TICKERS
+    try:
+        from sqlalchemy import text as _sqltxt
+        res = await session.execute(_sqltxt(
+            "SELECT ticker FROM company_financials "
+            "UNION SELECT ticker FROM stock_markets"
+        ))
+        s = {(r[0] or "").upper().strip() for r in res.fetchall() if r[0]}
+        # Sanity: beklenen ~600. Cok az donduyse yukleme bozuk — eski seti koru
+        # (yanlislikla tum hisseleri elemeyi onler).
+        if len(s) >= 400:
+            _EQUITY_TICKERS = s
+            _EQUITY_TICKERS_TS = now
+    except Exception as _eq_err:
+        logger.warning("Equity whitelist yuklenemedi: %s", _eq_err)
+    return _EQUITY_TICKERS
+
+
 def detect_message_type(text: str) -> str | None:
     """Mesaj metninden tipini tespit et. Sadece pozitif haberler gecerli.
 
@@ -843,6 +878,21 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             all_tickers = parse_tickers(text)
             # Endeks / BIST'te olmayan ticker'lari ele (XU100, XU030, vs.)
             all_tickers = [t for t in all_tickers if _is_valid_bist_ticker(t)]
+
+            # ── FON / FOREX / EMTIA ELEME ──────────────────────────────────
+            # Sadece GERCEK hisseler (company_financials ∪ stock_markets) islensin.
+            # OPTGYF, Z30EAF, ZGOLDF gibi fonlar + BTCTRY/USDJPY gibi forex kodlari
+            # AI'a GITMEZ (token israfi) ve bildirim/feed'e dusmez. Whitelist bos
+            # ise (yukleme bozuk) filtre uygulanmaz — guvenli fallback.
+            _equity_wl = await _get_equity_tickers(session)
+            if _equity_wl:
+                _pre_eq = list(all_tickers)
+                all_tickers = [t for t in all_tickers if t.upper() in _equity_wl]
+                if _pre_eq and not all_tickers:
+                    logger.info(
+                        "Telegram: hisse olmayan kod atlandi (fon/endeks/forex) — %s (msg_id=%s)",
+                        ",".join(_pre_eq), telegram_message_id,
+                    )
 
             # Birincil ticker — AI/router/push icin kullanilir
             ticker = all_tickers[0] if all_tickers else None
