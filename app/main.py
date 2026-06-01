@@ -10124,12 +10124,21 @@ async def get_daily_news_summary(
                     if sec.lower() in line.lower() and len(line) < 60 and "•" not in line and "-" not in line[:10]:
                         current_section = line.rstrip(":")
                         break
-                # Bullet satırı?
+                # Bullet satırı? — ticker'lı (• TICKER - karar) VEYA genel (• Borsa İstanbul...)
                 m = BULLET_RE.match(line)
-                if not m:
-                    continue
-                ticker = m.group(1).upper()
-                spk_desc = m.group(2).strip()  # 'desc' SQLAlchemy import'unu ezmesin
+                if m:
+                    ticker = m.group(1).upper()
+                    spk_desc = m.group(2).strip()  # 'desc' SQLAlchemy import'unu ezmesin
+                else:
+                    # GENEL (ticker'sız) SPK kararı — açığa satış, regülasyon, piyasa tedbiri vb.
+                    # Bullet ile başlayan, anlamlı uzunlukta, section başlığı olmayan satırlar.
+                    _gen = line.lstrip("•▪▫◦·*– -").strip()
+                    if (line.lstrip()[:1] in ("•", "▪", "▫", "◦", "·")
+                            and len(_gen) >= 40 and _gen != (current_section or "")):
+                        ticker = "SPK"
+                        spk_desc = _gen
+                    else:
+                        continue
                 # Hash-only id (deduplication için)
                 item_id = -(abs(hash(f"spk_{st.id}_{ticker}_{line_idx}")) % (10**9))
                 if item_id in seen_ids_per_day[sd]:
