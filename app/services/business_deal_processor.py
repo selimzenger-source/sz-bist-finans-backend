@@ -154,7 +154,7 @@ def _normalize_currency(raw: str) -> str:
     return "TRY"
 
 
-def _parse_tr_number(raw: str) -> Optional[float]:
+def _parse_tr_number(raw: str, is_multiplier_base: bool = False) -> Optional[float]:
     """Türkçe sayı parser.
 
     Format ayrımı (KRİTİK — eski versiyon "18.8" → 188 bug'i için düzeltildi):
@@ -163,6 +163,12 @@ def _parse_tr_number(raw: str) -> Optional[float]:
     - "18.8"          → 18.8        (3 haneden farklı → ondalık)
     - "0.95"          → 0.95        (ondalık)
     - "3,5"           → 3.5         (virgül = ondalık)
+
+    is_multiplier_base=True (çarpanlı "X milyon/milyar" tabanı):
+    - "20.528 milyon" → 20.528 (ondalık) → 20.5 milyon. TEK noktalı sayı her
+      zaman ondalıktır; "20528 milyon" yazımı "20.528 milyon" olmaz.
+    - Önceki bug: "20.528 milyon EUR" → 20528×milyon = 20.528 MİLYAR EUR →
+      1097.9 milyar TL (gerçek ~20.5M EUR ≈ 1.1 milyar TL). YEOTK kaydı.
 
     Önceki bug: "18.8" → noktayı binlik sayıp `188.0` döndürüyordu.
     Sonuç: ASELS 188 milyar TL (gerçek 18.8 milyar), LINK 402 mn (gerçek 40 mn),
@@ -182,6 +188,13 @@ def _parse_tr_number(raw: str) -> Optional[float]:
     # Sadece nokta var
     if "." in s:
         parts = s.split(".")
+        # Çarpan tabanı ("X milyon/milyar") + TEK nokta → her zaman ondalık.
+        # "20.528 milyon" = 20.528 milyon (20.5M), binlik (20528) DEĞİL.
+        if is_multiplier_base and len(parts) == 2:
+            try:
+                return float(s)
+            except ValueError:
+                return None
         # Tüm "nokta sonrası" grupları tam 3 hane ise → binlik ayraç ("12.100.000")
         if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
             try:
@@ -238,7 +251,7 @@ def regex_extract_business_deal(body: str) -> dict[str, Any]:
     if amount is None:
         m = _MULTIPLIER_RE.search(body)
         if m:
-            base = _parse_tr_number(m.group(1))
+            base = _parse_tr_number(m.group(1), is_multiplier_base=True)
             mult_word = m.group(2).lower()
             mult = {"bin": 1_000, "milyon": 1_000_000, "milyar": 1_000_000_000, "trilyon": 1_000_000_000_000}.get(mult_word, 1)
             if base:
