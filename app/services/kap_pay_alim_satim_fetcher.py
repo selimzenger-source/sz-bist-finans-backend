@@ -286,6 +286,18 @@ def extract_party_name(body: str) -> Optional[str]:
     """
     if not body:
         return None
+    # ── HTML ENTITY + nbsp NORMALIZE (KRİTİK) ──────────────────────────────
+    # KAP body'sinde isimler arasinda &#160; (non-breaking space) gibi HTML entity'ler
+    # olabiliyor: "Tera&#160;Portföy Yönetimi A.Ş.". Regex karakter sinifi #/; icermedigi
+    # icin isim ORTADAN kopuyor ve ilk kelime ("Tera") DUSUYOR -> "Portföy Yönetimi A.Ş."
+    # Once tum entity'leri coz + nbsp'yi normal bosluga cevir + bosluklari sadelestir.
+    try:
+        import html as _html
+        body = _html.unescape(body)
+    except Exception:
+        pass
+    body = body.replace("\xa0", " ").replace(" ", " ")
+    body = re.sub(r"[ \t]{2,}", " ", body)
     # Önce A.Ş. (kurumsal) pattern
     patterns_corp = [
         r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\.\s\-&]{5,80}?)\s*(?:A\.\s*Ş\.|AŞ\.|A\.Ş)\.?'?\s*[ni]?n[ıi]?n",
