@@ -136,20 +136,64 @@ def _parse_number(s: str) -> Optional[float]:
         return None
 
 
-def _detect_period(body: str) -> Optional[str]:
-    """Body'de 'Cari Dönem ... 31.03.2026' kalıbından dönem çıkar.
-
-    Birden fazla 'Cari Dönem' bloğu olabilir (Bilanço + Gelir Tablosu).
-    EN YENİ tarihi seç (2026-Q1 vs 2025-Q4 birlikte olabilir).
+def _span_to_quarter(span_months: int) -> Optional[str]:
+    """Gelir tablosu kümülatif (YTD) dönem uzunluğundan çeyrek belirle.
+    Bu, hesap dönemi başlangıç ayından BAĞIMSIZ çalışır:
+      ~3 ay → Q1, ~6 ay → Q2, ~9 ay → Q3, ~12 ay → Q4 (yıllık).
+    Özel hesap dönemli şirketler (örn. Nisan–Mart) için de doğru.
     """
+    if span_months <= 4:
+        return "Q1"
+    if span_months <= 7:
+        return "Q2"
+    if span_months <= 10:
+        return "Q3"
+    return "Q4"
+
+
+def _detect_period(body: str) -> Optional[str]:
+    """KAP gelir tablosu Cari Dönem tarih ARALIĞINDAN dönem çıkar.
+
+    ÖNEMLİ: Sadece bitiş tarihine bakmak yanlıştır — özel hesap dönemli
+    şirketler (örn. MRGYO Nisan–Mart) yıllık raporda '31.03.2026' bitişi
+    gösterir ama bu Q1 DEĞİL, YILLIK (12 ay) dönemdir.
+
+    Doğru yöntem: '01.04.2025 - 31.03.2026' aralığını oku → span 12 ay →
+    Q4 (yıllık). Yıl = başlangıç yılı (mali yılın adı), Fintables konvansiyonu
+    ile uyumlu (01.04.2025–31.03.2026 → 2025-Q4 ≈ '2025/12').
+
+    KAP gelir tablosu kümülatiftir; aynı bitiş tarihli birden fazla aralık
+    varsa (kümülatif + 3-aylık kolonlar) EN UZUN span (kümülatif) seçilir.
+    """
+    # 1) Tarih aralıklarını topla: "DD.MM.YYYY - DD.MM.YYYY" (tire/en-dash)
+    ranges: list[tuple[int, int, int, int]] = []  # (end_ord, start_ord, start_year, span)
+    for m in re.finditer(
+        r"(\d{2})\.(\d{2})\.(20\d{2})\s*[-–—]\s*(\d{2})\.(\d{2})\.(20\d{2})", body
+    ):
+        try:
+            s_m, s_y = int(m.group(2)), int(m.group(3))
+            e_m, e_y = int(m.group(5)), int(m.group(6))
+        except (ValueError, IndexError):
+            continue
+        start_ord = s_y * 12 + s_m
+        end_ord = e_y * 12 + e_m
+        span = end_ord - start_ord + 1
+        if span < 1 or span > 13:  # geçersiz / ters aralık
+            continue
+        ranges.append((end_ord, start_ord, s_y, span))
+
+    if ranges:
+        # En yeni bitiş; eşitse en uzun span (kümülatif YTD)
+        ranges.sort(key=lambda r: (r[0], r[3]), reverse=True)
+        _, _, start_year, span = ranges[0]
+        q = _span_to_quarter(span)
+        return f"{start_year}-{q}" if q else None
+
+    # 2) Aralık yoksa (örn. yalnızca bilanço snapshot) — eski tekil-tarih fallback
     candidates: list[tuple[int, int]] = []
-    # Pattern: "Cari Donem 31.03.2026" veya "Cari Donem  ... 31.03.2026"
     for m in re.finditer(r"Cari\s*D[öo]nem[^|]{0,300}?(\d{2})\.(\d{2})\.(20\d{2})", body, re.IGNORECASE):
         try:
-            day = int(m.group(1))
-            month = int(m.group(2))
-            year = int(m.group(3))
-            candidates.append((year, month))
+            candidates.append((int(m.group(3)), int(m.group(2))))
         except (ValueError, IndexError):
             continue
     if not candidates:
@@ -157,9 +201,7 @@ def _detect_period(body: str) -> Optional[str]:
     candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
     end_year, end_month = candidates[0]
     q = {3: "Q1", 6: "Q2", 9: "Q3", 12: "Q4"}.get(end_month)
-    if not q:
-        return None
-    return f"{end_year}-{q}"
+    return f"{end_year}-{q}" if q else None
 
 
 def _detect_multiplier(body: str) -> int:
