@@ -2464,6 +2464,23 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         import re as _vr
         _pos_v = len(_vr.findall(r"(?:olumlu|pozitif)(?!\s*(?:değil|olmay|d[ei]ğil))", summary_lower))
         _neg_v = len(_vr.findall(r"(?:olumsuz|negatif)", summary_lower))
+        # ── NEGASYON DÜZELTME (KRİTİK) ──────────────────────────────────────
+        # "doğrudan pozitif etkisi BEKLENMEZ", "olumlu etki YOK/OLMAZ", "pozitif
+        # sinyal DEĞİL" gibi ifadeler aslinda NÖTR/negatif — ama naif sayac "pozitif"i
+        # pozitif sayip yanlis 6.2 floor uyguluyordu (EKGYO borçlanma aracı: özet net
+        # Nötr ama 6.2 Hafif Olumlu olmustu). pozitif/olumlu'dan SONRA ayni cumlecikte
+        # (~40 char, nokta/virgule kadar) negasyon varsa o "pozitif"i sayma.
+        # NOT: "beklenmektedir"/"bekleniyor" (POZİTİF form) bilerek HARİÇ — sadece
+        # "beklenmez/beklenmemekte/beklenmiyor" negatif formlari yakalanir.
+        _pos_negated = len(_vr.findall(
+            r"(?:olumlu|pozitif)[^.;,!?]{0,40}?(?:"
+            r"beklenm[ei]z|beklenmemekte|beklenmiyor|"
+            r"etkisi yok|etki yok|etkisi bulunma|etki bulunma|"
+            r"olmaz|olmamakta|taşımaz|tasimaz|içermez|icermez|sağlamaz|saglamaz|"
+            r"d[ei]ğil)",
+            summary_lower,
+        ))
+        _pos_v = max(0, _pos_v - _pos_negated)
         if _pos_v > _neg_v:
             has_pos_framing = True
         elif _neg_v > _pos_v:
