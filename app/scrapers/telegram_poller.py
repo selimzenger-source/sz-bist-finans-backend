@@ -1046,6 +1046,29 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
                 logger.info("Garanti skor uygulandı (%s): ai_score=%s", ticker, ai_score)
 
+            # ── SON GUARDRAIL: skor-özet tutarlılık (pozitif özet → Nötr skor paradoksu) ──
+            # analyze_news içindeki guardrail BAZI path'lerde atlanabiliyor:
+            #   - analyze_news skor=None döndürüp garanti-skor 5.0 atadığında
+            #   - skor düşük dönüp guardrail çağrılmadığında
+            # Bu SON pass her durumda (özet varsa) çalışır → özet "olumlu/pozitif"
+            # diyorsa skor en az 6.2'ye, "olumsuz/negatif" diyorsa en fazla 3.8'e çekilir.
+            # FORTE örneği: özet "pozitif sinyal, olumlu yansıma" diyordu ama skor 5.0
+            # kalmıştı (Yeni İş İlişkisi). Hangi path'ten gelirse gelsin artık tutarlı.
+            if ai_summary and ai_score is not None and message_type in ("seans_ici_pozitif", "borsa_kapali"):
+                try:
+                    from app.services.ai_news_scorer import _validate_score_against_content
+                    _adj = _validate_score_against_content(
+                        float(ai_score), text or "", ticker or "", ai_summary=ai_summary
+                    )
+                    if _adj is not None and abs(float(_adj) - float(ai_score)) >= 0.1:
+                        logger.info(
+                            "Son guardrail (%s): skor %.1f -> %.1f (özet framing tutarlılık)",
+                            ticker, float(ai_score), float(_adj),
+                        )
+                        ai_score = round(float(_adj), 1)
+                except Exception as _gerr:
+                    logger.warning("Son guardrail hatası (%s): %s", ticker, _gerr)
+
             # KAP URL yoksa TradingView + Matriks ID ile olustur
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
