@@ -1379,6 +1379,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         ai_summary=ai_summary,
                         prev_close=str(prev_close) if (message_type == "seans_disi_acilis" and prev_close is not None) else None,
                         theoretical_open=str(theo_open) if (message_type == "seans_disi_acilis" and theo_open is not None) else None,
+                        kap_url=kap_url,
                     )
                     logger.info("Push bildirim gonderildi: %s — skor=%s — %s", ticker, ai_score, title)
                 except Exception as notif_err:

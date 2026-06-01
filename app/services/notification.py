@@ -1025,6 +1025,7 @@ class NotificationService:
         ai_summary: Optional[str] = None,
         prev_close: Optional[str] = None,
         theoretical_open: Optional[str] = None,
+        kap_url: Optional[str] = None,
     ) -> int:
         """KAP haber bildirimini gonder (sadece pozitif).
 
@@ -1096,9 +1097,12 @@ class NotificationService:
 
         sent = 0
         ticker_upper = ticker.upper()
+        # Favori-vs-broadcast dedup token (notify_kap_watchlist ile AYNI olmali → kap_url).
+        # Her bildirim bazli; favori zaten gonderdiyse broadcast bu token'i gorup atlar.
+        _dedup_id = kap_url or (kap_id or "") or ticker_upper
 
         # 1. Ucretli abonelere PER-USER bildirim (notify_kap_all == True olanlara)
-        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper, ai_score=ai_score, news_type=news_type)
+        sent += await self._send_paid_kap_news(title_paid, body, data, ticker_upper, ai_score=ai_score, news_type=news_type, dedup_id=_dedup_id)
 
         # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         # Ucretsiz kullanicilara AI puani GOSTERILMEZ — premium ozellik
@@ -1106,7 +1110,7 @@ class NotificationService:
         if ticker_upper in BIST50_TICKERS:
             # Free kullanicinin data'sinda ai_score olmasin (UI'da gizli kalsin)
             data_free = {k: v for k, v in data.items() if k != "ai_score"}
-            sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper, ai_score=ai_score)
+            sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper, ai_score=ai_score, dedup_id=_dedup_id)
 
             # Tweet: poller'da zaten tweet_bist30_news cagriliyor, burada TEKRAR atma (dedup)
 
@@ -1120,6 +1124,7 @@ class NotificationService:
         ticker: str,
         ai_score: float | None = None,
         news_type: str = "seans_disi",
+        dedup_id: str | None = None,
     ) -> int:
         """Ucretli abonelere KAP haber bildirimi gonder.
 
@@ -1180,12 +1185,11 @@ class NotificationService:
         filtered_by_watchlist = 0
         for user in kap_users:
             # ─── FAVORI ONCELIGI (duplicate engelle) ───
-            # notify_kap_watchlist poller'da ONCE calisir; bu ticker'i favorisine
-            # ekleyen kullaniciya favori bildirimi gonderip cache'e yazar. Genel
-            # broadcast (bu fonksiyon) ayni kullaniciya TEKRAR gondermesin — favori
-            # onceliklidir. Kullanici talebi: "hem AI pozitif hem favoride ise sadece
-            # favori dussun, duplicate olmasin."
-            _wl_key = f"{user.device_id}:{ticker}"
+            # notify_kap_watchlist poller'da ONCE calisir; BU bildirimi (kap_url=dedup_id)
+            # favorisine ekleyen kullaniciya gonderip cache'e yazar. Genel broadcast (bu
+            # fonksiyon) ayni kullaniciya AYNI bildirimi TEKRAR gondermesin — favori
+            # onceliklidir. Token bildirim bazli oldugu icin FARKLI haberler etkilenmez.
+            _wl_key = f"{user.device_id}:{dedup_id or ticker}"
             if time.time() - _watchlist_notif_cache.get(_wl_key, 0) < _WATCHLIST_NOTIF_COOLDOWN:
                 filtered_by_watchlist += 1
                 continue
@@ -1236,9 +1240,8 @@ class NotificationService:
                 )
                 if success:
                     sent_count += 1
-                    # Watchlist dedup: VIP kullaniciya bu ticker icin
-                    # ayrica watchlist bildirimi gitmesini engelle
-                    cache_key = f"{user.device_id}:{ticker}"
+                    # Bu bildirim (kap_url) bu kullaniciya gitti diye isaretle (mukerrer engelle)
+                    cache_key = f"{user.device_id}:{dedup_id or ticker}"
                     _watchlist_notif_cache[cache_key] = time.time()
                 else:
                     failed_count += 1
@@ -1283,6 +1286,7 @@ class NotificationService:
         data: dict,
         ticker: str,
         ai_score: float | None = None,
+        dedup_id: str | None = None,
     ) -> int:
         """BIST 50 ucretsiz bildirim — ana_yildiz aboneligi OLMAYAN kullanicilara.
 
@@ -1332,10 +1336,11 @@ class NotificationService:
         filtered_by_watchlist = 0
         for user in users:
             # ─── FAVORI ONCELIGI (duplicate engelle) ───
-            # BIST50 free kullanici bu ticker'i favorisine eklediyse, notify_kap_watchlist
-            # zaten favori bildirimi gonderdi (poller'da once calisti) — ucretsiz broadcast'i
-            # TEKRAR gondermesin. Favori onceliklidir.
-            _wl_key = f"{user.device_id}:{ticker}"
+            # BIST50 free kullanici bu hisseyi favorisine eklediyse, notify_kap_watchlist
+            # BU bildirimi (kap_url=dedup_id) zaten gonderdi (poller'da once calisti) —
+            # ucretsiz broadcast ayni bildirimi TEKRAR gondermesin. Token bildirim bazli →
+            # farkli haberler etkilenmez.
+            _wl_key = f"{user.device_id}:{dedup_id or ticker}"
             if time.time() - _watchlist_notif_cache.get(_wl_key, 0) < _WATCHLIST_NOTIF_COOLDOWN:
                 filtered_by_watchlist += 1
                 continue
@@ -1408,6 +1413,10 @@ class NotificationService:
         ticker = disclosure.company_code
         sentiment = disclosure.ai_sentiment or ""
         score = disclosure.ai_impact_score
+        # Dedup token = HER BILDIRIM bazli (kap_url). Boylece ayni hisseye 5 dk icinde
+        # gelen FARKLI bir haber bastirilmaz; sadece AYNI bildirimin mukerrer/favori-vs-
+        # broadcast cift gonderimi engellenir. (Kullanici: "ne haber geliyorsa gondermek lazim")
+        _dedup_tok = getattr(disclosure, "kap_url", None) or ticker
 
         # Sentiment emoji + etiket
         if sentiment == "Olumlu":
@@ -1473,8 +1482,9 @@ class NotificationService:
         skipped_spam = 0
 
         for device_id, pref in watchlist_rows:
-            # Spam korumasi — ayni ticker icin son 5 dk icinde bildirim gittiyse atla
-            cache_key = f"{device_id}:{ticker}"
+            # Mukerrer korumasi — AYNI bildirim (kap_url) bu kullaniciya gittiyse atla.
+            # Farkli haberler ayri token oldugu icin her zaman gecer.
+            cache_key = f"{device_id}:{_dedup_tok}"
             last_sent = _watchlist_notif_cache.get(cache_key, 0)
             if now - last_sent < _WATCHLIST_NOTIF_COOLDOWN:
                 skipped_spam += 1
@@ -1526,8 +1536,9 @@ class NotificationService:
                 )
                 if success:
                     sent_count += 1
-                    # Spam cache guncelle — basarili gonderimde cooldown baslat
-                    cache_key = f"{user.device_id}:{ticker}"
+                    # Mukerrer cache — bu bildirim (kap_url) bu kullaniciya gitti diye isaretle.
+                    # Genel broadcast (notify_kap_news) ayni token'i gorup ATLAR (favori onceligi).
+                    cache_key = f"{user.device_id}:{_dedup_tok}"
                     _watchlist_notif_cache[cache_key] = time.time()
             except Exception as e:
                 logger.warning("Watchlist bildirim hatasi (user=%s): %s", user.id, e)
