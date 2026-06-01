@@ -645,13 +645,18 @@ async def process_type_conversion(
 
     inserted_rows: list[ShareTypeConversion] = []
     for d in rows_data:
-        # Duplicate kontrolü: kap_url + ticker + investor + nominal kombinasyonu
+        _lot = int(d["nominal_tl"]) if d.get("nominal_tl") else None
+        # Duplicate kontrolü: kap_url + ticker + investor + LOT.
+        # LOT da dahil — AYNI yatirimci ayni hissede FARKLI lotlarla birden cok satir
+        # acabilir (orn FRIGO/KENAN BARAN TEKER: 570.799 + 690.002 iki ayri satir).
+        # Lot dahil olmayinca ikincisi "duplicate" sanilip dusuyordu (6 yerine 4 satir).
         if kap_url:
             check = await db.execute(
                 select(ShareTypeConversion).where(
                     ShareTypeConversion.kap_url == kap_url,
                     ShareTypeConversion.ticker == d["ticker"],
                     ShareTypeConversion.investor_name == d["investor_name"],
+                    ShareTypeConversion.converted_lot == _lot,
                 ).limit(1)
             )
             if check.scalar_one_or_none():
@@ -662,7 +667,7 @@ async def process_type_conversion(
             company_name=d.get("company_name"),
             transaction_date=tx_date,
             investor_name=d["investor_name"],
-            converted_lot=int(d["nominal_tl"]) if d.get("nominal_tl") else None,
+            converted_lot=_lot,
             kap_url=kap_url,
             source="kap_table_parse",
         )
