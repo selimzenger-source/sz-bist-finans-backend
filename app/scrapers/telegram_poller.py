@@ -1233,9 +1233,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # Diger mali tablo bildirimleri RUTIN -> "Mali Tablo Eki" kategorisinde, notr.
                     ka_is_bilanco = ka_category == "Bilanço/Finansal Rapor"
 
-                    # ── DUPLICATE KONTROLU: (kap_url + company_code) uzerinden ──
-                    # Cok-sembollu bildirimlerde ayni kap_url N farkli ticker icin
-                    # yazilir, bu yuzden ticker'i da kontrole dahil ediyoruz.
+                    # ── DUPLICATE KONTROLU: (kap_url + company_code + TITLE) uzerinden ──
+                    # Cok-sembollu bildirimlerde ayni kap_url N farkli ticker icin yazilir
+                    # (ticker kontrole dahil). AYRICA: bir sirketin TUM finansal raporu
+                    # KAP'ta TEK bildirim numarasi altinda toplanir (orn 1611638) ama matriks
+                    # her tabloyu (Finansal Durum Tablosu / Kar-Zarar / Nakit Akis / Ozkaynaklar)
+                    # AYRI mesaj olarak yollar — hepsi AYNI kap_url'e cozumlenir. Eski dedup
+                    # (kap_url+ticker) bunlari "duplicate" sanip ilkini yazip kalanini atiyordu;
+                    # "Finansal Durum Tablosu (Bilanço)" son sirada gelirse DUSUYOR -> is_bilanco
+                    # hic yazilmiyor -> bilanco pipeline HIC tetiklenmiyordu (BRMEN/MEPET bug'i).
+                    # TITLE'i da anahtara ekleyerek her farkli tablo ayri yazilir, bilanco garanti.
                     for _tk in all_tickers:
                         is_duplicate = False
                         if kap_url:
@@ -1243,6 +1250,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 _sa_select(KapAllDisclosure.id).where(
                                     KapAllDisclosure.kap_url == kap_url,
                                     KapAllDisclosure.company_code == _tk,
+                                    KapAllDisclosure.title == ka_title,
                                 ).limit(1)
                             )
                             is_duplicate = existing_check.scalar_one_or_none() is not None
