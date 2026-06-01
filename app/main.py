@@ -10624,6 +10624,9 @@ async def list_share_transactions(
             "ticker": r.ticker,
             "company_name": r.company_name,
             "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
+            # Bildirim (KAP'a geliş) tarihi — frontend "İşlem: X · Bildirim: Y" gösterir.
+            # created_at canlı işlemede KAP yayın gününe denk gelir (BIMAS/TEHOL → 1 Haz).
+            "disclosure_date": r.created_at.date().isoformat() if r.created_at else None,
             "transaction_type": r.transaction_type,
             "party_name": r.party_name,
             "party_role": r.party_role,
