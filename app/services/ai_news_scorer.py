@@ -2052,8 +2052,14 @@ NOTLAR:
             hashtags = []
 
         # ─── Post-processing: bildirim tipi bazli skor dogrulama ───
-        if score is not None and content:
-            score = _validate_score_against_content(score, content, ticker, ai_summary=summary)
+        # ÖNEMLİ FIX: AI bazen geçerli ÖZET döndürüp skoru geçersiz/eksik veriyor
+        # (score=None). Eski kod guardrail'i `score is not None` ile atlıyordu →
+        # pozitif özet skorsuz kalıp sonra 5.0 Nötr'e düşüyordu (FORTE örneği).
+        # Artık özet varsa, skor None olsa bile 5.0 tabanından guardrail'e sokulur →
+        # özet pozitifse 6.2'ye, negatifse 3.8'e oturur. Skor da özet de yoksa None kalır.
+        if content and (score is not None or (summary and summary.strip())):
+            _base = score if score is not None else 5.0
+            score = _validate_score_against_content(_base, content, ticker, ai_summary=summary)
 
         # ─── TEKRAR EDEN BILDIRIM DAMPER (STRICT) ───
         # Ayni ticker icin son 30 gunde ayni konuda yuksek skor verilmisse,
@@ -2256,10 +2262,14 @@ _FOLLOWUP_TOPICS = {
     # body'sinde dogal olarak gecer ve yanlislikla halka_arz takip-bildirimi
     # zannedip mega-pozitif kararlari (orn. GK ile %500 bedelsiz) Notr'a cekiyordu.
     "halka_arz": ["halka arz", "halka acilma", "halka açılma"],
-    "sözleşme": ["sözleşme imzaland", "sozlesme imzaland", "anlaşma imzaland", "ihale kazan", "ihale alın"],
-    "satın_alma": ["satın al", "satin al", "iktisap", "devralın", "devralin"],
-    "yeni_iş_ilişkisi": ["yeni iş ilişkisi", "yeni is iliskisi", "yeni müşteri", "yeni musteri"],
-    "kapasite": ["kapasite artır", "kapasite artir", "yeni tesis", "yatırım planı"],
+    # ── KALDIRILDI (KRİTİK FIX): sözleşme / satın_alma / yeni_iş_ilişkisi / kapasite ──
+    # Bunlar PROSEDÜR ZİNCİRİ DEĞİL, her biri BAĞIMSIZ yeni iş olayıdır.
+    # FORTE gibi sık ihale/sözleşme kazanan şirkette, yeni bir "Yeni İş İlişkisi"
+    # önceki (alakasız) bir ihaleye topic olarak benzediği için "takip bildirimi"
+    # sanılıp skoru ZORLA 5.0 Nötr'e çekiliyordu (+ pozitif cümleler siliniyordu).
+    # Sonuç: "yeni iş ilişkisi" haberleri sürekli Nötr görünüyordu — kullanıcı şikayeti.
+    # Temettü/bedelli/bedelsiz/halka arz/buyback GERÇEK prosedür zinciridir (tek kararın
+    # karar→hak kullanım→ödeme→tescil adımları), onlar damper'da KALIYOR. İş olayları çıktı.
     "pay_geri_alimi": [
         "pay geri alım", "pay geri alim",
         "geri alım programı", "geri alim programi",
