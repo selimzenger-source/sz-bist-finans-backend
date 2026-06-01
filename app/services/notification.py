@@ -1572,10 +1572,11 @@ class NotificationService:
             )
 
         # ── Admin özet: watchlist takip / filtre / gönderim breakdown ──
-        # HER kullanicinin nereye gittigi hesaba katilir:
-        #   total = gonderildi + tercih_filtresi + spam + (bildirim_kapali/token_yok) + gonderim_hatasi
+        # SADECE en az 1 kisiye GERCEKTEN gonderildiyse rapor at — "0 gonderildi" raporlari
+        # spam yaratiyordu (token yok / bildirim kapali kullanicilar). Kullanici talebi:
+        # "birine bildirim gitmediyse 'Gonderildi 0' gondermesin".
         total_watching = len(watchlist_rows)
-        if total_watching > 0:
+        if sent_count > 0:
             try:
                 from app.services.admin_telegram import send_admin_message
                 # tercih (pozitif/negatif/notr) filtresine takilanlar
@@ -1600,8 +1601,6 @@ class NotificationService:
                     _lines.append(f"🔕 Bildirim kapalı / takip bildirimi kapalı / token yok: {settings_dropped} kişi")
                 if send_failed > 0:
                     _lines.append(f"❌ Gönderim hatası (token geçersiz vb.): {send_failed} kişi")
-                if sent_count == 0:
-                    _lines.append("⚠️ Hiçbirine gönderilmedi")
                 await send_admin_message("\n".join(_lines), parse_mode="HTML", silent=True)
             except Exception:
                 pass
