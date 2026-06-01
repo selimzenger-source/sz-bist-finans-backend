@@ -1010,6 +1010,42 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as _bb_fb_err:
                     logger.warning("Buyback fallback hata (%s): %s", ticker, _bb_fb_err)
 
+            # ── GARANTİ SKOR — hiçbir öğe puansız (bare kart) kalmasın ──
+            # Pay alım-satım / seans-dışı gibi AI dalına girmeyen tipler ai_score=None
+            # kalıp feed'de puansız "KAP Bildirimi" kartı oluyordu. Kural: puan yoksa
+            # da Nötr 5.0 ver. Pay alım-satımda yön (alım/satım) belirlenebiliyorsa ona göre.
+            if ai_score is None:
+                _full = f"{news_title or ''} {text or ''}".lower()
+                _is_pas = any(k in _full for k in (
+                    "pay alım", "pay alim", "alım-satım", "alim-satim",
+                    "pay alış", "pay alis", "pay satış", "pay satis", "pay alim satim",
+                ))
+                if _is_pas and ticker:
+                    # share_transaction_details'tan pay oranı değişimine bak (alım=+, satım=-)
+                    _dir = None
+                    try:
+                        from app.models.share_transaction_detail import ShareTransactionDetail as _STD
+                        from sqlalchemy import select as _sel2, desc as _desc2
+                        _r = (await session.execute(
+                            _sel2(_STD).where(_STD.ticker == (ticker or "").upper())
+                            .order_by(_desc2(_STD.created_at)).limit(1)
+                        )).scalar_one_or_none()
+                        if _r is not None and getattr(_r, "pay_orani_change_pct", None) is not None:
+                            _dir = float(_r.pay_orani_change_pct)
+                    except Exception:
+                        _dir = None
+                    if _dir is not None and _dir >= 0.5:
+                        ai_score = 6.5; _pl = "içeriden/ortak pay ALIM işlemi — güven sinyali"
+                    elif _dir is not None and _dir <= -0.5:
+                        ai_score = 3.8; _pl = "pay SATIM işlemi — pozisyon azaltımı"
+                    else:
+                        ai_score = 5.0; _pl = "pay alım-satım bildirimi (sınırlı etki)"
+                    ai_summary = ai_summary or f"{ticker} — {_pl}."
+                else:
+                    ai_score = 5.0
+                    ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
+                logger.info("Garanti skor uygulandı (%s): ai_score=%s", ticker, ai_score)
+
             # KAP URL yoksa TradingView + Matriks ID ile olustur
             if not kap_url and kap_id:
                 kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
