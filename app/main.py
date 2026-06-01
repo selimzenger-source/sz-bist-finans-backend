@@ -10734,10 +10734,18 @@ async def list_cautious_stocks(
     from sqlalchemy import or_ as _or, and_ as _and, not_ as _not, extract as _extract
     query = select(CautiousStock)
     if active_only:
-        # Tarih bazli kontrol — bitiş tarihi bugün veya sonrası
-        # end_date null ise (tarih bilinmiyor) yine göster
+        # İKİ koşul birden:
+        #  1) is_active=True → resmi CSV'de HÂLÂ listeli (scraper CSV'den düşeni
+        #     is_active=False yapar). BIST bir tedbiri end_date'ten ÖNCE iptal
+        #     ederse (YEOTK örneği: 1-30 Haz listelendi, sonra çıkarıldı), kayıt
+        #     is_active=False olur ama end_date hâlâ gelecekte → eski kod bunu
+        #     yanlışlıkla göstermeye devam ediyordu.
+        #  2) end_date >= bugün → süresi dolmamış (cron gecikse bile expired gizlenir)
         today = date.today()
-        query = query.where(_or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)))
+        query = query.where(
+            CautiousStock.is_active == True,
+            _or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)),
+        )
     # Placeholder filtresi — start=Jan 1 + end=Dec 31 olan kalıcı/yıl-genişliğinde kayıtları çıkar
     query = query.where(
         _not(_and(
