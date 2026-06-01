@@ -441,6 +441,12 @@ def _is_bilanco_package_title(title: str) -> bool:
     return any(k in t for k in _BILANCO_PKG_KW)
 
 
+# Bir sirket ayni donem icin hem KONSOLIDE hem SOLO (Konsolide Olmayan) bilanco
+# filing'i yapabilir (orn AVGYO). Fintables KONSOLIDE'yi gosterir. SOLO, konsolide
+# zaten kaydedildiyse ONU EZMEMELI. {ticker:period -> timestamp} (konsolide kaydedildi).
+_CONSOL_BILANCO_CACHE: dict[str, float] = {}
+
+
 # -------------------------------------------------------------------
 # Router — 6 ozel takvime dagit
 # -------------------------------------------------------------------
@@ -795,17 +801,33 @@ async def _route_to_calendars(
                     # Safeguard: sektor whitelist + confidence kontrol
                     sec = parsed.get("sector_type") if parsed else None
                     conf = parsed.get("confidence") if parsed else None
+                    # KONSOLIDE TERCIHI: "Finansal Tablo Niteliği" Konsolide mi, Konsolide
+                    # Olmayan (solo) mu? Konsolide zaten kaydedildiyse SOLO onu ezmesin
+                    # (her iki gelis sirasinda da konsolide kazanir).
+                    import re as _re_k, time as _time_k
+                    _mn = _re_k.search(r"Finansal Tablo Niteli[ğg]i\s+(Konsolide Olmayan|Konsolide)", body_xbrl)
+                    _is_solo = bool(_mn and "Olmayan" in _mn.group(1))
+                    _pkey = f"{ticker}:{parsed.get('period')}" if parsed and parsed.get("period") else None
+                    _kons_recent = bool(_pkey and (_time_k.time() - _CONSOL_BILANCO_CACHE.get(_pkey, 0) < 1800))
                     if (
                         parsed and parsed.get("period")
                         and (parsed.get("total_assets") or parsed.get("revenue"))
                         and sec in BILANCO_ALLOWED_SECTORS
                         and conf in ("high", "medium")
                     ):
-                        await save_parsed_bilanco(ticker, parsed)
-                        logger.info(
-                            "Router→bilanco DIREKT save: %s %s sec=%s conf=%s",
-                            ticker, parsed.get("period"), sec, conf,
-                        )
+                        if _is_solo and _kons_recent:
+                            logger.info(
+                                "Router→bilanco: %s %s SOLO atlandi (konsolide zaten kayitli)",
+                                ticker, parsed.get("period"),
+                            )
+                        else:
+                            await save_parsed_bilanco(ticker, parsed)
+                            if not _is_solo and _pkey:
+                                _CONSOL_BILANCO_CACHE[_pkey] = _time_k.time()
+                            logger.info(
+                                "Router→bilanco DIREKT save: %s %s sec=%s conf=%s konsolide=%s",
+                                ticker, parsed.get("period"), sec, conf, (not _is_solo),
+                            )
                     elif parsed:
                         logger.warning(
                             "Router→bilanco SKIP: %s sektor=%s conf=%s (whitelist/confidence dısı)",
