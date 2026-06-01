@@ -504,9 +504,25 @@ async def _route_to_calendars(
     is_bt = is_block_trade(title or "", body or "") and not is_bb
     if is_bt:
         try:
+            # KRİTİK: body genelde AI özeti (lot/fiyat/taraf YOK) — yapısal parse için
+            # HAM KAP metni şart. Özet ise (kısa veya "lot/adet" geçmiyorsa) ham çek.
+            body_for_bt = body or ""
+            _bt_lo = body_for_bt.lower()
+            if kap_url and (len(body_for_bt) < 250
+                            or not any(k in _bt_lo for k in ("lot", "adet", "tl", "pay", "nominal"))
+                            or "yapılan teknik bir duyuru" in _bt_lo  # AI özet imzası
+                            or "fiyat etkisi beklenm" in _bt_lo):
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    disc = await fetch_kap_disclosure(kap_url)
+                    if disc and disc.get("full_text"):
+                        body_for_bt = disc["full_text"]
+                        logger.info("block_trade ham body re-fetch (%s): %d kar", ticker, len(body_for_bt))
+                except Exception:
+                    pass
             await process_block_trade(
                 session, disclosure_id=disclosure_id, ticker=ticker,
-                company_name=company_name, title=title, body=body,
+                company_name=company_name, title=title, body=body_for_bt,
                 kap_url=kap_url, published_at=published_at,
             )
         except Exception as e:
