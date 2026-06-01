@@ -2533,11 +2533,20 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             # Halka arz (yeni şirket için, mevcut değil)
             "halka arz onayı", "halka arzın onaylan",
         )
-        # Olumsuz indikatörler — varsa M&A floor uygulanmaz
+        # Olumsuz/diskalifiye indikatörler — varsa M&A floor uygulanmaz
         ma_negative = (
             "iptal edildi", "iptal etti", "vazgeçil", "vazgeçti",
             "feshedil", "feshetti", "reddedil", "reddetti",
             "onaylanmadı", "onay verilme",
+            # ── SUNULAN / BEKLEYEN / IZAHNAME = milestone DEGIL, prosedurel formalite ──
+            # "SPK Onayına Sunulan", izahname, araci notu, ihrac belgesi → tamamlanmis bir
+            # onay/kapanis DEGIL. "spk onayı" kelimesi "spk onayINA sunulan" icinde gecip
+            # floor'u yanlis tetikliyordu (IMASM: rutin izahname 6.8 oluyordu). Karar zaten
+            # onceden alinmis; bu sadece prosedur adimi → Notr kalmali.
+            "izahname", "aracı notu", "araci notu",
+            "onayına sunul", "onaya sunul", "onayina sunul",
+            "onayına sunulan", "onaya sunulan",
+            "ihraç belgesi", "ihrac belgesi",
         )
         is_ma_milestone = any(kw in combined_text for kw in ma_keywords)
         is_ma_cancelled = any(kw in combined_text for kw in ma_negative)
