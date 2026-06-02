@@ -420,6 +420,20 @@ _EXECUTION_STAGE_PATTERNS = [
     # anlamli bir notr ozet uretebilsin. Pre-filter default text "rutin/idari
     # bildirim" yetersiz kaliyordu. AI prompt'unda BISTECH/MKK kurali var.
 
+    # ── YABANCI/DIŞ FON BILDIRIMLERI ──
+    # Matriks bazi yabanci fon (AMUNDI, BlackRock vb.) yatirimci bilgi
+    # bildirimlerini saklayici/dagitici Turk bankasi tickerina (YKBNK, GARAN
+    # vb.) etiketleyebiliyor. Bunlar BANKA'NIN haberi DEGIL, fon kataloglarinin
+    # rutin yatirimci bilgilendirmesi -> banka fiyatina etki YOK. Notr/5.0.
+    "funds ii",  # AMUNDI FUNDS II vb.
+    "fund bilgi",  # "FUND BILGI" / "Fund Bilgileri"
+    "fona ilişkin bilgi",  # "FONA İLİŞKİN BİLGİLER"
+    "fona iliskin bilgi",  # ASCII varyant
+    "fund supplement",  # "Fund Supplement"
+    "kiid",  # Key Investor Information Document
+    "key investor information",
+    "ucits",  # UCITS fon bildirimleri
+
     # ── BORCLANMA ARACI IHRACI ──
     # Sirketin BORC alma yetkisi/uygulamasi — gelir/kar getirmez, fiyata
     # pozitif etki yoktur. AI yanlislikla "yeni finansman" diye olumlu
