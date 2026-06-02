@@ -2014,6 +2014,13 @@ def invalidate_tweet_rate_cache() -> None:
     _tweet_rate_cache["ts"] = 0.0
 
 
+def reset_tweet_counters() -> None:
+    """Admin oranlari kaydedince sayaclari SIFIRLA — yeni oran bastan baslar
+    (orn. 5'te 1 iken 3'te 1 yapilinca, bir sonraki haber 1. sayilir)."""
+    for c in _kap_tweet_counters.values():
+        c["total"] = 0
+
+
 def tweet_kap_news(
     ticker: str,
     matched_keyword: str,

@@ -3943,7 +3943,7 @@ async def admin_set_tweet_rates(
     """
     if not _verify_admin_password(payload.get("admin_password", "")):
         raise HTTPException(status_code=403, detail="Yetkisiz erisim")
-    from app.services.twitter_service import TWEET_RATE_KEYS, invalidate_tweet_rate_cache
+    from app.services.twitter_service import TWEET_RATE_KEYS, invalidate_tweet_rate_cache, reset_tweet_counters
 
     updates = {}
     for key in TWEET_RATE_KEYS.values():
@@ -3964,9 +3964,10 @@ async def admin_set_tweet_rates(
     await db.commit()
     try:
         invalidate_tweet_rate_cache()  # yeni deger aninda gecerli
+        reset_tweet_counters()         # sayaclar sifirlanir → yeni oran bastan baslar
     except Exception:
         pass
-    return {"success": True, "updated": updates, "message": f"{len(updates)} oran guncellendi"}
+    return {"success": True, "updated": updates, "message": f"{len(updates)} oran guncellendi (sayaclar sifirlandi)"}
 
 
 @app.post("/api/v1/admin/reprocess-kap-news")
