@@ -4423,13 +4423,63 @@ async def news_pool(
         _ts = it.published_at or it.created_at
         it.is_fresh = bool(_ts and _ts >= fresh_cutoff)
 
+    # Mevcut tweet oranlari (admin formu icin)
+    from app.services.twitter_service import TWEET_RATE_KEYS, TWEET_RATE_DEFAULTS
+    from app.models.app_setting import AppSetting as _AppSetting
+    _rate_rows = (await db.execute(
+        select(_AppSetting).where(_AppSetting.key.in_(list(TWEET_RATE_KEYS.values())))
+    )).scalars().all()
+    _rate_by_key = {r.key: r.value for r in _rate_rows}
+    tweet_rates = {}
+    for _cat, _key in TWEET_RATE_KEYS.items():
+        try:
+            _v = int(_rate_by_key.get(_key, TWEET_RATE_DEFAULTS[_cat]))
+            tweet_rates[_cat] = _v if 1 <= _v <= 5 else TWEET_RATE_DEFAULTS[_cat]
+        except (ValueError, TypeError):
+            tweet_rates[_cat] = TWEET_RATE_DEFAULTS[_cat]
+
     return templates.TemplateResponse("admin/news_pool.html", {
         "request": request,
         "all_items": all_items,
         "status": status,
         "cutoff_hours": 12,
         "tweeted_count": len(tweeted_tickers),
+        "tweet_rates": tweet_rates,
     })
+
+
+@router.post("/tweet-rates")
+async def admin_save_tweet_rates(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    ici_poz: int = Form(...),
+    ici_neg: int = Form(...),
+    disi_poz: int = Form(...),
+    disi_neg: int = Form(...),
+):
+    """Tweet oranlarini kaydet (1-5) + sayaclari sifirla (bastan baslar)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    from app.services.twitter_service import (
+        TWEET_RATE_KEYS, invalidate_tweet_rate_cache, reset_tweet_counters,
+    )
+    from app.models.app_setting import AppSetting as _AppSetting
+    vals = {"ici_poz": ici_poz, "ici_neg": ici_neg, "disi_poz": disi_poz, "disi_neg": disi_neg}
+    for _cat, _n in vals.items():
+        _n = max(1, min(5, int(_n)))
+        _key = TWEET_RATE_KEYS[_cat]
+        _row = (await db.execute(select(_AppSetting).where(_AppSetting.key == _key))).scalar_one_or_none()
+        if _row:
+            _row.value = str(_n)
+        else:
+            db.add(_AppSetting(key=_key, value=str(_n)))
+    await db.commit()
+    try:
+        invalidate_tweet_rate_cache()
+        reset_tweet_counters()
+    except Exception:
+        pass
+    return RedirectResponse(url="/admin/news-pool?status=tweet_rates_saved", status_code=303)
 
 
 # -------------------------------------------------------
