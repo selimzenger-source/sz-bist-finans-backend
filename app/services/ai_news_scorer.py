@@ -2477,6 +2477,52 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     content_lower = content.lower()
     summary_lower = (ai_summary or "").lower()
 
+    # ─── 🛑 NÖTR OVERRIDE (MUTLAK ÖNCELİK) ──────────────────────────
+    # AI ozet KENDI ICINDE "etki yok / rutin / yeni bilgi yok / icermemektedir"
+    # diyorsa skor 5.0'dan yuksek OLAMAZ — pozitif keyword'ler (stratejik karar,
+    # olumlu adim, vb.) BAGLAMI gormeden yakalandigi icin yanlislikla skoru
+    # yukseltiyordu. AI'nin kendi yazdigi "etki BEKLENMEMEKTEDIR" cumlesi
+    # otomatik olarak Notr demektir; bu durumda ON OLCEK overrides.
+    # KAREL: "stratejik karar ICERMEMEKTEDIR ... etki BEKLENMEMEKTEDIR" -> 6.2 -> 5.0 olmali
+    NEUTRAL_OVERRIDE_PATTERNS = (
+        "etki beklenmemektedir", "etki beklenmez", "etki beklenmiyor",
+        "etkisi beklenmemektedir", "etkisi beklenmez",
+        "etki yaratmas", "etki yaratmiyor",  # "etki yaratmasi beklenmemekted"
+        "anlamli etki yok", "anlamli bir etki yok",
+        "anlamli etki beklenm", "anlamli bir etki beklenm",
+        "dogrudan etki yok", "dogrudan bir etki yok",
+        "dogrudan etki beklenm", "dogrudan bir etki beklenm",
+        "fiyata etki beklenm", "fiyat uzerinde etki beklenm",
+        "fiyat uzerinde dogrudan",  # "fiyat uzerinde dogrudan bir etki beklenmemektedir"
+        "yeni bilgi icermemek", "yeni bir bilgi icermemek",
+        "yeni bir bilgi veya", "yeni bilgi veya",
+        "stratejik karar icermemek", "stratejik bir karar icermemek",
+        "rutin bir parca", "rutin bir bildirim", "rutin bildirim",
+        "rutin idari", "rutin/idari", "rutin operasyonel",
+        "bilgilendirme niteligindedir", "bilgilendirme niteligi",
+        "bildirim niteligindedir", "bilgi amaclidir",
+        "olcek nedeniyle sinirli",  # KAP bildirim olcek nedeniyle sinirli
+        "haber gercek bir etki", "haber gercek etki",
+        "etki yaratmasi beklenm", "etki yaratacagi beklenm",
+        # TR karakterli versiyonlar (lower'da degisiyor ama emin olalim)
+        "etki beklenmemekted", "anlamlı etki yok", "doğrudan etki yok",
+        "doğrudan bir etki beklenm", "fiyata etki beklenm",
+        "yeni bilgi içermem", "yeni bir bilgi içermem",
+        "stratejik karar içermem", "stratejik bir karar içermem",
+        "rutin bir parça", "bilgilendirme niteliğinde",
+    )
+    if summary_lower and any(p in summary_lower for p in NEUTRAL_OVERRIDE_PATTERNS):
+        # Eger skor zaten 5.0 civariysa dokunma; 6.0+ ise 5.0'a CEK
+        if score >= 5.5:
+            logger.info(
+                "Notr override (%s): ozet 'etki yok/rutin/icermemek' diyor -> skor %.1f -> 5.0",
+                ticker, score,
+            )
+            return 5.0
+        # Negatif skor da (ornek 3.5) Notr'e dogru cek
+        if score <= 4.0:
+            return 5.0
+
     # ─── AI ÖZET FRAMING TUTARLILIK KONTROLÜ ─────────────────────────
     # AI bazen yorumu pozitif yazıp puanı 5.0 nötr veriyor (PASEU, LMKDC örnekleri).
     # Özet pozitif framing içeriyorsa skor en az 6.2 (Hafif Olumlu), negatif framing
