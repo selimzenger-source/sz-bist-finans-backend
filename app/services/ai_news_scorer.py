@@ -409,6 +409,27 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
             date_str, disc_idx, title = matches[0]
             kap_url = f"https://www.kap.org.tr/tr/Bildirim/{disc_idx}"
 
+            # ★ TAZELIK FILTRESI: bu fallback "ticker'in son bildirimi"ni dondurur ama
+            # CAGIRAN AKIS muhtemelen YENI bir habere KAP url ariyor. Eger son bildirim
+            # COK ESKIYSE (>10 dakika), YANLIS eslesme riski var: yeni haberin kap_url'ine
+            # SAATLER ONCEKI bildirimin url'si yapistirilir -> kap_all_disclosures'da
+            # duplicate sayilip atlanir, Tum KAP listesinde haber GORUNMEZ (KTLEV 6490249 bug'i).
+            # date_str format: "DD.MM.YYYY HH:MM:SS" (KAP TR saati = UTC+3)
+            try:
+                from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+                _bd = _dt.strptime(date_str.strip(), "%d.%m.%Y %H:%M:%S")
+                # KAP TR saati → UTC
+                _bd_utc = _bd.replace(tzinfo=_tz(_td(hours=3))).astimezone(_tz.utc)
+                _age_min = (_dt.now(_tz.utc) - _bd_utc).total_seconds() / 60
+                if _age_min > 10:
+                    logger.warning(
+                        "KAP direkt: %s en son bildirim %s (%.0f dk eski) — YENI haberle eslestirme RISKLI, atlandi",
+                        ticker, disc_idx, _age_min,
+                    )
+                    return None
+            except Exception as _dage_err:
+                logger.debug("KAP direkt tazelik kontrolu hata (%s): %s — fallback devam", ticker, _dage_err)
+
             logger.info(
                 "KAP direkt: %s — %s (%s) [%s]",
                 ticker, title[:50], disc_idx, date_str,
