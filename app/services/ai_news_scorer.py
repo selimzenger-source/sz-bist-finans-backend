@@ -2523,6 +2523,45 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         if score <= 4.0:
             return 5.0
 
+    # ─── 🛑 GENİŞ NÖTR SİNYAL: "etki yok / rutin / yansımayacak / olağan" ───
+    # Yukaridaki PATTERNS spesifik ifadeler. Bu blok daha GENIS — ozette yalniz
+    # KELIME duzeyinde negatif-etki sinyali varsa skor 6.0+'dan 5.0'a CEKILSIN.
+    # Amac: gelecek varyantlari da yakalamak. Ornek: "piyasaya yansimayacaktir",
+    # "somut bir etki yoktur", "olagan idari islem", "tesir etmemekted" vb.
+    if summary_lower and score >= 5.5:
+        broad_neutral_phrases = (
+            "etki yok", "etki yoktur", "etkisi yok", "etkisi yoktur",
+            "etki olm", "etkisi olm",  # "etki olmayacak / etkisi olmayacak"
+            "etki bulunm", "etkisi bulunm",  # "etki bulunmamaktadir"
+            "tesir etm", "tesir yok",  # tesir etmez, tesir etmemekted
+            "yansimayacak", "yansımayacak", "yansimama", "yansımama",
+            "yansimasi beklenm", "yansıması beklenm",
+            "kayda deger etki", "kayda değer etki", "kayda deger bir etki", "kayda değer bir etki",
+            "olagan", "olağan",  # "olagan idari islem"
+            "rutin",  # tek basina bile yeter (FORTE icin de gecerli)
+            "sembolik nitelik", "sembolik islem",
+            "prosedurel", "prosedürel", "formalit",
+            "duzeltici", "düzeltici", "duzeltme niteligindedir",
+            "hicbir etki", "hiçbir etki",
+        )
+        if any(p in summary_lower for p in broad_neutral_phrases):
+            # Pozitif kararli bir ifade YOKSA (ornek "guclu kar artisi") nötr'e cek
+            STRONG_POS = ("yüzde", "milyon tl kar", "milyar tl gelir", "satis artti", "satış arttı",
+                          "kar artti", "kâr arttı", "büyüme gerçekleşti", "%[0-9]+", "rekor")
+            # Basit kontrol: net pozitif metrik var mi?
+            import re as _re_np
+            # Pozitif/buyuk metrik var mi? "%30", "30%", "150 milyon TL", "2 milyar"
+            has_strong_metric = bool(_re_np.search(
+                r"(?:%\s*\d+|\d+\s*%|\d+(?:[\.,]\d+)?\s*(?:milyon|milyar|mn|mr))",
+                summary_lower,
+            ))
+            if not has_strong_metric:
+                logger.info(
+                    "Genis notr override (%s): ozet etki-yok/rutin/yansimayacak ima ediyor + somut metrik yok -> %.1f -> 5.0",
+                    ticker, score,
+                )
+                return 5.0
+
     # ─── AI ÖZET FRAMING TUTARLILIK KONTROLÜ ─────────────────────────
     # AI bazen yorumu pozitif yazıp puanı 5.0 nötr veriyor (PASEU, LMKDC örnekleri).
     # Özet pozitif framing içeriyorsa skor en az 6.2 (Hafif Olumlu), negatif framing
