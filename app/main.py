@@ -3904,6 +3904,89 @@ async def admin_set_app_version(
     }
 
 
+@app.post("/api/v1/share-bilanco-tweet")
+@limiter.limit("10/minute")
+async def share_bilanco_tweet(request: Request, payload: dict = Body(...)):
+    """Web/admin bilanco kartini borsacebimde Twitter hesabindan paylas.
+
+    Body: {
+      "ticker": "MRGYO",
+      "period": "2025-Q4" | "2025/12" (gosterim icin),
+      "image_base64": "<PNG base64 — data URI prefix OPSIYONEL>"
+    }
+
+    PNG'i temp dosyaya yazar, _safe_tweet_with_media ile borsacebimde
+    Twitter'indan tweetler. force_send=True ile auto_send kontrolu bypass.
+    """
+    import base64 as _b64, os as _os, tempfile as _tf
+    from app.services.twitter_service import _safe_tweet_with_media
+
+    ticker = (payload.get("ticker") or "").upper().strip()
+    period_raw = (payload.get("period") or "").strip()
+    img_b64 = payload.get("image_base64") or ""
+    if not ticker or not img_b64:
+        raise HTTPException(status_code=400, detail="ticker ve image_base64 zorunlu")
+
+    # Data URI prefix temizle
+    if "," in img_b64[:64] and img_b64.startswith("data:"):
+        img_b64 = img_b64.split(",", 1)[1]
+
+    try:
+        img_bytes = _b64.b64decode(img_b64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Gecersiz base64 image")
+
+    if len(img_bytes) > 8_000_000:
+        raise HTTPException(status_code=413, detail="Gorsel 8MB'dan buyuk olamaz")
+    if len(img_bytes) < 500:
+        raise HTTPException(status_code=400, detail="Gorsel cok kucuk/gecersiz")
+
+    # Donem etiketi: "2025-Q4" -> "2025 4.Ceyrek", "2026-Q1" -> "2026 1.Ceyrek"
+    period_label = period_raw
+    if period_raw and "-Q" in period_raw:
+        try:
+            _y, _q = period_raw.split("-Q")
+            period_label = f"{_y} {int(_q)}.Çeyrek"
+        except Exception:
+            pass
+    elif period_raw and "/" in period_raw:
+        # "2025/12" -> "2025 Yillik"
+        try:
+            _y, _m = period_raw.split("/")
+            _qmap = {"3": "1.Çeyrek", "6": "2.Çeyrek", "9": "3.Çeyrek", "12": "Yıllık"}
+            period_label = f"{_y} {_qmap.get(_m.strip(), _m)}"
+        except Exception:
+            pass
+
+    text = (
+        f"#{ticker} {period_label} bilançosunu açıkladı.. #bilanço 👇\n\n"
+        f"📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık "
+        f"uygulamamızda bulabilirsiniz...\n\n"
+        f"🔗 borsacebimde.com"
+    )
+
+    # PNG'i temp dosyaya yaz (rastgele suffix — eszamanli istekler carpismasin)
+    import uuid as _uuid
+    tmp_path = _os.path.join(_tf.gettempdir(), f"bilanco_share_{ticker}_{_uuid.uuid4().hex[:8]}.png")
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(img_bytes)
+        # Senkron Twitter SDK'sini thread'e at — event loop bloklamasin
+        import asyncio as _aio
+        ok = await _aio.to_thread(
+            _safe_tweet_with_media, text, tmp_path, "share_bilanco", True, False
+        )
+        return {"success": bool(ok), "ticker": ticker, "period": period_label}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Tweet hatasi: {e}")
+    finally:
+        try:
+            if _os.path.exists(tmp_path):
+                _os.remove(tmp_path)
+        except OSError:
+            pass
+
+
 @app.get("/api/v1/admin/tweet-rates")
 @limiter.limit("30/minute")
 async def admin_get_tweet_rates(request: Request, db: AsyncSession = Depends(get_db)):
