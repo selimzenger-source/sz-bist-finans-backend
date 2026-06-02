@@ -1168,12 +1168,32 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             _dir = float(_r.pay_orani_change_pct)
                     except Exception:
                         _dir = None
-                    if _dir is not None and _dir >= 0.5:
-                        ai_score = 6.5; _pl = "içeriden/ortak pay ALIM işlemi — güven sinyali"
-                    elif _dir is not None and _dir <= -0.5:
-                        ai_score = 3.8; _pl = "pay SATIM işlemi — pozisyon azaltımı"
+                    # Esikler (sermaye orani degisimi):
+                    # |%0.3| alti -> Notr (mikro/insider rutin)
+                    # %0.3-1     -> hafif sinyal (6.3 / 4.0)
+                    # %1-3       -> belirgin (6.8 / 3.5)
+                    # %3-5       -> guclu (7.3 / 2.8)
+                    # >%5        -> cok guclu (7.8 / 2.3)
+                    if _dir is not None:
+                        _abs = abs(_dir)
+                        _alim = _dir > 0
+                        if _abs < 0.3:
+                            ai_score = 5.0
+                            _pl = "pay alım-satım bildirimi (mikro, sınırlı etki)"
+                        elif _abs < 1.0:
+                            ai_score = 6.3 if _alim else 4.0
+                            _pl = ("içeriden hafif ALIM sinyali" if _alim else "hafif pay SATIM sinyali")
+                        elif _abs < 3.0:
+                            ai_score = 6.8 if _alim else 3.5
+                            _pl = ("içeriden belirgin ALIM — güven sinyali" if _alim else "belirgin pay SATIM — pozisyon azaltımı")
+                        elif _abs < 5.0:
+                            ai_score = 7.3 if _alim else 2.8
+                            _pl = ("güçlü içeriden ALIM" if _alim else "güçlü pay SATIM — kayda değer")
+                        else:
+                            ai_score = 7.8 if _alim else 2.3
+                            _pl = ("çok güçlü içeriden ALIM (>%5)" if _alim else "çok güçlü pay SATIM (>%5)")
                     else:
-                        ai_score = 5.0; _pl = "pay alım-satım bildirimi (sınırlı etki)"
+                        ai_score = 5.0; _pl = "pay alım-satım bildirimi"
                     ai_summary = ai_summary or f"{ticker} — {_pl}."
                 else:
                     ai_score = 5.0
@@ -1218,9 +1238,25 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as _rk_err:
                     logger.debug("KAP url baslik eslestirme hatasi (%s): %s", ticker, _rk_err)
 
-            # Hala yoksa son care: TradingView + Matriks ID
-            if not kap_url and kap_id:
-                kap_url = f"https://tr.tradingview.com/news/matriks:{kap_id}:0/"
+            # ★ KAP URL ZORUNLU — gercek kap.org.tr linki yoksa bu haber YBORSADA
+            # GORUNMEZ. TradingView matriks linki YETERLI DEGIL (AMUNDI FUNDS gibi
+            # yabanci fon bildirimleri gercekte KAP'a dusmemis olabilir). Boyle
+            # haberler push gondermez, kap_all'a yazilmaz, twitter atilmaz.
+            _has_real_kap_url = bool(kap_url) and "kap.org.tr" in (kap_url or "")
+            if not _has_real_kap_url:
+                logger.info(
+                    "KAP url yok (TV linki yetersiz) — haber atlandi: ticker=%s, baslik='%s', matriks_id=%s",
+                    ticker, (news_title or '')[:60], kap_id,
+                )
+                # commit yapip sonraki mesaja gec (rollback gerekmez, hicbir DB yazimi yapilmadi)
+                try:
+                    await session.commit()
+                except Exception:
+                    try:
+                        await session.rollback()
+                    except Exception:
+                        pass
+                continue
 
             # ──────────────────────────────────────────────────────────────────
             # YENI: kap_all_disclosures'a yaz — Tum KAP Haber sekmesi icin
