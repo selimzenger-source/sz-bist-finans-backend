@@ -738,10 +738,16 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["temettu"],
     ),
     (
-        r"hak\s*kullan[ıi]m(?:\s*tarihi|\s*surec)|temettu\s*hak\s*kazanim|"
-        r"ex.?(?:dividend|date)|ex.?temettu",
+        # Ödeme/hak kullanım aşaması: "Hak Kullanımı (Tarihi/Süreç/İşlemi)",
+        # "Pay Mali Hak Kullanım İşlemi - Nakit Ödeme", "Mali Hak Kullanım", ex-temettü.
+        # Bunlar TEMETTÜNÜN DAĞITILMASI/ÖDENMESİ aşamasıdır — karar zaten YKK'da alındı
+        # ve fiyatlandı. Tutar değişimi (düşük/yüksek temettü) burada NEGATİF/POZİTİF
+        # algılanmamalı; o değerlendirme YKK kararında yapılır. Bu yüzden DETERMİNİSTİK NÖTR.
+        r"hak\s*kullan[ıi]m(?:\s*tarihi|\s*surec|\s*i[şs]lem)|"
+        r"pay\s*mali\s*hak\s*kullan|mali\s*hak\s*kullan|"
+        r"temettu\s*hak\s*kazanim|ex.?(?:dividend|date)|ex.?temettu",
         "Hak Kullanim Tarihi",
-        "Yönetim kurulunun daha önce açıkladığı kâr payı kararının ödeme/uygulama aşamasıdır. İlk karar zaten önceden ilan edildiği için bu bildirim yeni bir sürpriz ya da fiyat etkisi taşımaz; o kararın teyidi niteliğindedir.",
+        "Daha önce açıklanan kâr payının ödeme/hak kullanım aşamasıdır (temettünün dağıtılması). Temettü kararı zaten YKK aşamasında alınıp kamuya açıklandığından, bu bildirim teknik bir takip niteliğindedir; hisse fiyatı üzerinde yeni bir etki beklenmez.",
         ["temettu"],
     ),
     (
