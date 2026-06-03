@@ -16877,6 +16877,7 @@ async def get_temettu_detail(ticker: str, db: AsyncSession = Depends(get_db)):
 @app.get("/api/v1/temettu-akisi")
 async def get_temettu_akisi(
     filter: str = Query("karar", regex="^(karar|dagitmama|odendi|all)$"),
+    stage: str = Query("all", regex="^(all|ykk|ga)$"),
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -16895,135 +16896,210 @@ async def get_temettu_akisi(
     cutoff_dt = datetime.now(timezone.utc) - _td(days=days)
     cutoff_d = cutoff_dt.date()
 
-    STATUS_MAP = {
-        "karar": ["ykk_alindi", "genel_kurul_onayli", "tarih_belli"],
-        "dagitmama": ["reddedildi"],
-        "odendi": ["odeniyor", "tamamlandi"],
-    }
-    statuses = STATUS_MAP.get(filter)
-
-    query = select(DividendCalendar)
-    if statuses:
-        query = query.where(DividendCalendar.status.in_(statuses))
-    # En son aktivite tarihi >= cutoff
-    query = query.where(
-        or_(
-            DividendCalendar.ykk_date >= cutoff_d,
-            DividendCalendar.general_assembly_date >= cutoff_d,
-            DividendCalendar.payment_date >= cutoff_d,
-            DividendCalendar.rejected_at >= cutoff_dt,
-            DividendCalendar.created_at >= cutoff_dt,
+    # ── Adayları geniş çek — kart bazlı filtreleme/limit SONRA yapılır ──
+    # Tek bir calendar satırı birden fazla "haber kartı" üretebilir (YKK önerisi +
+    # GK onayı + ödeme bildirimi ayrı kartlar). Bu yüzden status'a göre değil, tarih
+    # penceresine göre çekip kartları stage bazında üretiyoruz.
+    query = (
+        select(DividendCalendar)
+        .where(
+            or_(
+                DividendCalendar.ykk_date >= cutoff_d,
+                DividendCalendar.general_assembly_date >= cutoff_d,
+                DividendCalendar.payment_date >= cutoff_d,
+                DividendCalendar.rejected_at >= cutoff_dt,
+                DividendCalendar.created_at >= cutoff_dt,
+            )
         )
-    ).order_by(desc(DividendCalendar.updated_at), desc(DividendCalendar.created_at)).limit(limit)
-
+        .order_by(desc(DividendCalendar.updated_at), desc(DividendCalendar.created_at))
+        .limit(400)
+    )
     rows = (await db.execute(query)).scalars().all()
 
-    def _type_for_status(st: str) -> str:
-        if st in ("odeniyor", "tamamlandi"): return "odendi"
-        if st == "reddedildi": return "dagitmama"
-        return "karar"
+    # ── Tüm stage disclosure'larının AI verisini topla ──
+    all_dids: set[int] = set()
+    for r in rows:
+        for did in (
+            r.ykk_kap_disclosure_id,
+            r.general_assembly_kap_disclosure_id,
+            r.payment_kap_disclosure_id,
+            r.rejection_kap_disclosure_id,
+        ):
+            if did:
+                all_dids.add(did)
 
-    def _title_for(st: str) -> str:
-        return {
-            "ykk_alindi": "Kâr Payı Dağıtım Kararı (YKK)",
-            "genel_kurul_onayli": "Genel Kurul Temettü Onayı",
-            "tarih_belli": "Temettü Ödeme Tarihi Belli",
-            "odeniyor": "Temettü Ödemesi Bugün",
-            "tamamlandi": "Temettü Ödendi",
-            "reddedildi": "Temettü Dağıtmama Kararı",
-        }.get(st, "Temettü Bildirimi")
-
-    def _latest_event_iso(r) -> str | None:
-        # En son hangi aktivite tarihi
-        candidates = [
-            (r.payment_date, "payment_date"),
-            (r.general_assembly_date, "general_assembly_date"),
-            (r.ykk_date, "ykk_date"),
-        ]
-        candidates = [(d, k) for d, k in candidates if d is not None]
-        if r.rejected_at is not None:
-            return r.rejected_at.isoformat()
-        if not candidates:
-            return r.created_at.isoformat() if r.created_at else None
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        return candidates[0][0].isoformat()
-
-    def _kap_url_for(r) -> str | None:
-        if r.status in ("odeniyor", "tamamlandi") and r.payment_kap_url:
-            return r.payment_kap_url
-        if r.status == "reddedildi" and r.rejection_kap_url:
-            return r.rejection_kap_url
-        if r.status == "genel_kurul_onayli" and r.general_assembly_kap_url:
-            return r.general_assembly_kap_url
-        return r.ykk_kap_url or r.general_assembly_kap_url or r.payment_kap_url
-
-    # En son aktivite KAP disclosure_id'lerini topla → AI verilerini join et
-    def _latest_disclosure_id(r) -> int | None:
-        if r.status in ("odeniyor", "tamamlandi") and r.payment_kap_disclosure_id:
-            return r.payment_kap_disclosure_id
-        if r.status == "reddedildi" and r.rejection_kap_disclosure_id:
-            return r.rejection_kap_disclosure_id
-        if r.status == "genel_kurul_onayli" and r.general_assembly_kap_disclosure_id:
-            return r.general_assembly_kap_disclosure_id
-        return r.ykk_kap_disclosure_id or r.general_assembly_kap_disclosure_id or r.payment_kap_disclosure_id
-
-    disclosure_ids = [d for d in (_latest_disclosure_id(r) for r in rows) if d is not None]
     ai_map: dict[int, dict] = {}
-    if disclosure_ids:
+    if all_dids:
         ai_rows = (await db.execute(
-            select(KapAllDisclosure).where(KapAllDisclosure.id.in_(disclosure_ids))
+            select(KapAllDisclosure).where(KapAllDisclosure.id.in_(all_dids))
         )).scalars().all()
         for k in ai_rows:
             ai_map[k.id] = {
+                "title": k.title,
+                "published_at": k.published_at,
+                "kap_url": k.kap_url,
                 "ai_summary": (k.ai_summary or "")[:300] if k.ai_summary else None,
                 "ai_sentiment": k.ai_sentiment,
                 "ai_impact_score": float(k.ai_impact_score) if k.ai_impact_score is not None else None,
             }
 
-    items = []
-    for r in rows:
-        did = _latest_disclosure_id(r)
-        ai = ai_map.get(did or -1) or {"ai_summary": None, "ai_sentiment": None, "ai_impact_score": None}
-        # Gerçek KAP "Özet Bilgi" başlığı varsa onu kullan, yoksa generic label
-        actual_title = getattr(r, "source_title", None) or _title_for(r.status or "")
-        # payment_type yoksa amount'a göre tahmin et (geri uyumluluk)
+    # ── Stage skoru / özet / sentiment override ──
+    # Genel Kurul ONAYI: ilk karar (YKK) zaten önceden ilan edildiğinden bu bildirim
+    # yeni bir fiyat etkisi taşımaz → NÖTR (başlık "Nötr") ama UCUNDAN renk:
+    #   • dağıtım onayı  → 5.5  (Nötr bandı 4.1–5.99 içinde, 5.4 üstü = yeşilimsi koku)
+    #   • dağıtmama onayı → 4.5  (Nötr bandı içinde, 4.6 altı = kırmızımsı koku)
+    # Ödeme bildirimi → 5.0 (tam düz gri).
+    # YKK (ilk karar) → gerçek AI skoru korunur (dağıtım pozitif / dağıtmama negatif).
+    def _stage_score(type_: str, stg: str, real_score):
+        if stg == "ga_approval":
+            return 5.5 if type_ != "dagitmama" else 4.5
+        if stg == "payment":
+            return 5.0
+        return real_score
+
+    def _stage_summary(type_: str, stg: str, real_summary):
+        if stg == "ga_approval":
+            if type_ == "dagitmama":
+                return (
+                    "Yönetim kurulunun kâr payı dağıtmama kararı genel kurulda onaylandı. "
+                    "İlk karar daha önce duyurulduğu için bu onay yeni bir sürpriz ya da ek "
+                    "fiyat etkisi taşımaz; teyit niteliğindedir."
+                )
+            return (
+                "Yönetim kurulunun açıkladığı kâr payı dağıtım kararı genel kurulda onaylandı. "
+                "İlk karar daha önce duyurulduğu için bu onay yeni bir sürpriz ya da ek fiyat "
+                "etkisi taşımaz; teyit niteliğindedir."
+            )
+        return real_summary
+
+    def _stage_sentiment(type_: str, stg: str, real_sent):
+        if stg in ("ga_approval", "payment"):
+            return "neutral"
+        return real_sent
+
+    _STAGE_TITLE_DEFAULT = {
+        ("karar", "ykk"): "Kâr Payı Dağıtım Kararı (Yönetim Kurulu)",
+        ("karar", "ga_approval"): "Kâr Payı Dağıtımı Genel Kurul Onayı",
+        ("dagitmama", "ykk"): "Kâr Payı Dağıtmama Kararı (Yönetim Kurulu)",
+        ("dagitmama", "ga_approval"): "Kâr Payı Dağıtmama Genel Kurul Onayı",
+        ("odendi", "payment"): "Temettü Ödeme Bildirimi",
+    }
+
+    def _to_date(v):
+        if v is None:
+            return None
+        if isinstance(v, datetime):
+            return v.date()
+        return v
+
+    def _iso(v):
+        return v.isoformat() if v is not None else None
+
+    def _build_card(r, type_: str, stg: str, did, kap_url, evt_dt):
+        disc = ai_map.get(did) if did else None
+        disc = disc or {}
+        # Kart başlığı: gerçek KAP başlığı > (YKK için) calendar source_title > generic
+        title = disc.get("title")
+        if not title and stg == "ykk":
+            title = getattr(r, "source_title", None)
+        if not title:
+            title = _STAGE_TITLE_DEFAULT.get((type_, stg), "Temettü Bildirimi")
+        is_rej = (type_ == "dagitmama")
         pt = getattr(r, "payment_type", None)
-        if not pt and r.status != "reddedildi":
+        if not pt and not is_rej:
             if r.gross_amount_per_share or r.net_amount_per_share:
                 pt = "cash"
-        items.append({
+        return {
             "ticker": r.ticker,
             "company_name": r.company_name,
-            "title": actual_title,
-            "category_label": _title_for(r.status or ""),  # frontend isterse kategori adı için
-            "type": _type_for_status(r.status or ""),
+            "title": title,
+            "category_label": _STAGE_TITLE_DEFAULT.get((type_, stg)),
+            "type": type_,
+            "stage": stg,  # 'ykk' | 'ga_approval' | 'payment'
             "status": r.status,
-            "published_at": _latest_event_iso(r),
-            "kap_url": _kap_url_for(r),
+            "published_at": _iso(evt_dt) or _iso(disc.get("published_at")),
+            "kap_url": kap_url or disc.get("kap_url"),
             "period": r.period,
-            "gross_amount_per_share": float(r.gross_amount_per_share) if r.gross_amount_per_share else None,
-            "net_amount_per_share": float(r.net_amount_per_share) if r.net_amount_per_share else None,
-            "gross_yield_pct": float(r.gross_yield_pct) if r.gross_yield_pct else None,
-            "net_yield_pct": float(r.net_yield_pct) if r.net_yield_pct else None,
-            "total_amount_tl": float(r.total_amount_tl) if r.total_amount_tl else None,
-            "payment_type": pt,
-            "stock_ratio_text": getattr(r, "stock_ratio_text", None),
+            "gross_amount_per_share": None if is_rej else (float(r.gross_amount_per_share) if r.gross_amount_per_share else None),
+            "net_amount_per_share": None if is_rej else (float(r.net_amount_per_share) if r.net_amount_per_share else None),
+            "gross_yield_pct": None if is_rej else (float(r.gross_yield_pct) if r.gross_yield_pct else None),
+            "net_yield_pct": None if is_rej else (float(r.net_yield_pct) if r.net_yield_pct else None),
+            "total_amount_tl": None if is_rej else (float(r.total_amount_tl) if r.total_amount_tl else None),
+            "payment_type": "none" if is_rej else pt,
+            "stock_ratio_text": None if is_rej else getattr(r, "stock_ratio_text", None),
             "payment_date": r.payment_date.isoformat() if r.payment_date else None,
-            "ai_summary": ai["ai_summary"],
-            "ai_sentiment": ai["ai_sentiment"],
-            "ai_impact_score": ai["ai_impact_score"],
-        })
+            "ai_summary": _stage_summary(type_, stg, disc.get("ai_summary")),
+            "ai_sentiment": _stage_sentiment(type_, stg, disc.get("ai_sentiment")),
+            "ai_impact_score": _stage_score(type_, stg, disc.get("ai_impact_score")),
+            "_evt_date": _to_date(evt_dt),
+        }
 
-    # Son bildirim → en eski sıralaması (latest_event_iso DESC)
-    # SQL updated_at sıralaması yetersiz çünkü backfill eski kayıtlari yenileyip basa cikarir.
-    # Burada gercek olay tarihine gore yeniden sirala.
-    items.sort(key=lambda x: x.get("published_at") or x.get("payment_date") or "", reverse=True)
+    cards: list[dict] = []
+    for r in rows:
+        st = r.status or ""
+        if st == "reddedildi":
+            # Dağıtmama — tek kart. YKK önerisi mi (ilk/asıl karar, negatif) yoksa GK
+            # onayı mı (teyit, nötr 4.5)? Sinyaller: özet "genel kurulda onaylandı" der
+            # VEYA feed skoru GK-nötr bandındadır (4.3-4.7, sync 4.5'e sabitler).
+            did = r.rejection_kap_disclosure_id
+            _disc = ai_map.get(did) or {}
+            _dt = (
+                (_disc.get("title") or "") + " "
+                + (_disc.get("ai_summary") or "") + " "
+                + (getattr(r, "source_title", "") or "")
+            ).lower()
+            _sc = _disc.get("ai_impact_score")
+            is_ga = (
+                "genel kurulda onay" in _dt or "genel kurulda kabul" in _dt
+                or "genel kurulda onaylan" in _dt
+                or (_sc is not None and 4.3 <= _sc <= 4.7)
+            )
+            stg = "ga_approval" if is_ga else "ykk"
+            evt_dt = r.rejected_at or r.general_assembly_date or r.ykk_date or r.created_at
+            cards.append(_build_card(r, "dagitmama", stg, did, r.rejection_kap_url, evt_dt))
+            continue
+        # Dağıtım döngüsü — mevcut her stage için ayrı kart
+        emitted_any = False
+        if r.ykk_kap_disclosure_id or r.ykk_date:
+            evt_dt = r.ykk_date or (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("published_at") or r.created_at
+            cards.append(_build_card(r, "karar", "ykk", r.ykk_kap_disclosure_id, r.ykk_kap_url, evt_dt))
+            emitted_any = True
+        if r.general_assembly_kap_disclosure_id or r.general_assembly_date:
+            evt_dt = r.general_assembly_date or (ai_map.get(r.general_assembly_kap_disclosure_id) or {}).get("published_at") or r.created_at
+            cards.append(_build_card(r, "karar", "ga_approval", r.general_assembly_kap_disclosure_id, r.general_assembly_kap_url, evt_dt))
+            emitted_any = True
+        if r.payment_date or st in ("odeniyor", "tamamlandi"):
+            evt_dt = r.payment_date or (ai_map.get(r.payment_kap_disclosure_id) or {}).get("published_at") or r.created_at
+            cards.append(_build_card(r, "odendi", "payment", r.payment_kap_disclosure_id, r.payment_kap_url, evt_dt))
+            emitted_any = True
+        if not emitted_any:
+            cards.append(_build_card(r, "karar", "ykk", None, r.ykk_kap_url, r.created_at))
+
+    # ── Filtreler: tarih penceresi + tip (filter) + alt-stage (stage) ──
+    def _passes(c) -> bool:
+        d = c.get("_evt_date")
+        if d is not None and d < cutoff_d:
+            return False
+        if filter != "all" and c["type"] != filter:
+            return False
+        if stage == "ykk" and c["stage"] != "ykk":
+            return False
+        if stage == "ga" and c["stage"] != "ga_approval":
+            return False
+        return True
+
+    cards = [c for c in cards if _passes(c)]
+    cards.sort(key=lambda x: x.get("published_at") or "", reverse=True)
+    cards = cards[:limit]
+    for c in cards:
+        c.pop("_evt_date", None)
 
     return {
         "filter": filter,
+        "stage": stage,
         "days": days,
-        "count": len(items),
-        "items": items,
+        "count": len(cards),
+        "items": cards,
     }
 
 

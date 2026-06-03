@@ -273,7 +273,69 @@ def classify_event_with_body(title: str, body: str) -> str:
         if any(p in b for p in rejection_phrases):
             return "rejection"
 
+        # ── GENEL KURUL ONAYI tespiti (body) ──────────────────────────────
+        # YKK kararı önceden alınır; genel kurul ONAYLAR. Body'de "genel kurulda
+        # ... kabul/onay/karar" geçiyorsa bu bir GK onay bildirimidir. Bu durumda
+        # ilk karar zaten ilan edildiğinden yeni fiyat etkisi taşımaz → ga_approval.
+        # NOT: rejection_phrases yukarıda kontrol edildi; buraya gelen body dağıtmama
+        # DEĞİL. Yani GK onayı = dağıtım onayı (dağıtmama onayı rejection olarak döner).
+        ga_body_phrases = [
+            "genel kurulda kabul", "genel kurulda onay",
+            "genel kurulda karara bağlan", "genel kurulda görüşül",
+            "genel kurul tarafından kabul", "genel kurul tarafindan kabul",
+            "genel kurul tarafından onay", "genel kurul tarafindan onay",
+            "genel kurulca kabul", "genel kurulca onay",
+            "genel kurulda kararlaştırıl", "genel kurulda kararlastiril",
+            "genel kurul toplantısında kabul", "genel kurul toplantisinda kabul",
+            "olağan genel kurul toplantısında", "olagan genel kurul toplantisinda",
+            "genel kurulun onayı", "genel kurulun onayi",
+            "genel kurulda görüşülerek kabul", "genel kurulda gorusulerek kabul",
+            # KAP "Özet Bilgi" başlığı: "...Dağıtımına İlişkin Genel Kurul Kararı"
+            # (kararın GENEL KURUL'da ALINDIĞI = onay aşaması; YKK önerisi "Yönetim
+            # Kurulu Kararı" der). YKK'nın "genel kurula sunulacaktır" ifadesinden
+            # ayrılır çünkü orada "genel kurul kararı" GEÇMİŞ/alınmış değildir.
+            "dağıtımına ilişkin genel kurul karar", "dagitimina iliskin genel kurul karar",
+            "ilişkin genel kurul kararı", "iliskin genel kurul karari",
+            "kar payına ilişkin genel kurul karar", "kar payina iliskin genel kurul karar",
+        ]
+        if any(p in b for p in ga_body_phrases):
+            return "ga_approval"
+
     return by_title
+
+
+# Genel Kurul (onay/teyit) AŞAMASI sinyalleri — YKK önerisinden (ilk karar) ayırır.
+# Karar GENEL KURUL'da ALINMIŞSA bu bir onay/teyittir (yeni fiyat etkisi yok). YKK
+# önerisinde özet "Yönetim Kurulu Kararı"/"...Öneri" der ve GK henüz toplanmamıştır.
+_GA_STAGE_SIGNALS = [
+    "ilişkin genel kurul kararı", "iliskin genel kurul karari",
+    "dağıtımına ilişkin genel kurul karar", "dagitimina iliskin genel kurul karar",
+    "dağıtmamasına ilişkin genel kurul karar", "dagitmamasina iliskin genel kurul karar",
+    "kar payına ilişkin genel kurul karar", "kar payina iliskin genel kurul karar",
+    "genel kurulda kabul", "genel kurulda onay", "genel kurulda görüşül", "genel kurulda gorusul",
+    "genel kurulda kararlaştırıl", "genel kurulda kararlastiril",
+    "genel kurulda karara bağlan", "genel kurulda karara baglan",
+    "genel kurul tarafından kabul", "genel kurul tarafindan kabul",
+    "genel kurul tarafından onay", "genel kurul tarafindan onay",
+    "genel kurulca kabul", "genel kurulca onay",
+    "genel kurul toplantısında kabul", "genel kurul toplantisinda kabul",
+    "konusu görüşüldü", "konusu gorusuldu",
+]
+
+
+def is_genel_kurul_decision(body: str) -> bool:
+    """Bildirim GENEL KURUL aşaması mı (karar GK'da ALINMIŞ = onay/teyit)?
+
+    True  → GK onayı/teyidi (yeni fiyat etkisi yok; dağıtım onayı nötr 5.5,
+            dağıtmama onayı nötr 4.5).
+    False → YKK önerisi / ilk karar (asıl fiyat etkisi; dağıtım pozitif, dağıtmama negatif).
+    """
+    if not body:
+        return False
+    # Apostrofları temizle: "Genel Kurul'da onaylandı" → "genel kurulda onaylandi"
+    # (AI özeti apostrof kullanır, ham KAP body kullanmaz — ikisini de yakala).
+    b = lower_tr(body).replace("'", "").replace("’", "").replace("`", "")
+    return any(s in b for s in _GA_STAGE_SIGNALS)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -345,6 +407,68 @@ Cunku dagitim yapilmiyor — herhangi bir sayisal deger yanlis bilgi verir.
 
 
 _DATE_REGEX = re.compile(r"([0-3]?[0-9])[./]([0-1]?[0-9])[./](20[0-9]{2})")
+
+
+def _parse_kap_dividend_table(body: str, ticker: str = "") -> dict[str, Any]:
+    """KAP standart 'Nakit Kar Payı Ödeme Tutar ve Oranları' tablosundan hisse başı
+    brüt/net temettüyü çıkar — AI'dan DAHA GÜVENİLİR (sabit kolon düzeni).
+
+    Tablo formatı (kolonlar): Brüt(TL) | Brüt(%) | Stopaj(%) | Net(TL) | Net(%)
+    Taksitli ödemelerde her grup için bir 'TOPLAM' satırı vardır; tek ödemede tek satır.
+    İşlem gören ticker'ın grubunu tercih eder (A/B grubu aynı tutarsa fark etmez).
+
+    Örnek (BVSAN): 'B Grubu, BVSAN, TRE... TOPLAM 1,4529342 145,29342 15 1,2349940 123,4994'
+      → gross=1.4529342, net=1.2349940
+
+    NOT: Brüt(%) kolonu NOMINAL'e göredir (fiyat verimi DEĞİL); yield hesabı frontend'de
+    canlı fiyatla yapılır, bu yüzden yüzde alınmaz.
+    """
+    out: dict[str, Any] = {}
+    if not body:
+        return out
+    tkr = (ticker or "").upper().strip()
+
+    def _num(s: str) -> Optional[float]:
+        try:
+            v = float(s.replace(".", "").replace(",", "."))
+            return v if 0 < v < 100000 else None
+        except (ValueError, AttributeError):
+            return None
+
+    # Aday kalıplar (öncelik sırası):
+    #   1) İşlem gören ticker'ın TOPLAM satırı (taksitli)
+    #   2) Herhangi bir TOPLAM satırı
+    #   3) İşlem gören ticker'ın tek ödeme satırı (Peşin/Tek/1. Taksit)
+    #   4) "TOPLAM <brüt> <brüt%> <stopaj> <net>" (grup bilgisi olmadan)
+    patterns: list[re.Pattern] = []
+    if tkr:
+        patterns.append(re.compile(rf"{re.escape(tkr)}[^|]*?TOPLAM\s+([\d.,]+)\s+[\d.,]+\s+\d+\s+([\d.,]+)"))
+    patterns.append(re.compile(r"TOPLAM\s+([\d.,]+)\s+[\d.,]+\s+\d+\s+([\d.,]+)"))
+    if tkr:
+        patterns.append(re.compile(rf"{re.escape(tkr)}[^|]*?(?:Pe[şs]in|Tek\b|1\.\s*Taksit)\s+([\d.,]+)\s+[\d.,]+\s+\d+\s+([\d.,]+)"))
+
+    for pat in patterns:
+        m = pat.search(body)
+        if not m:
+            continue
+        g = _num(m.group(1))
+        n = _num(m.group(2))
+        if g is not None:
+            out["gross_amount_per_share"] = g
+            if n is not None and n <= g:
+                out["net_amount_per_share"] = n
+            out["payment_type"] = "cash"
+            break
+
+    # Taksit sayısı (özet için faydalı; serbest metin)
+    mt = re.search(r"(\d+)\s*Taksit", body, re.IGNORECASE)
+    if mt:
+        try:
+            out["taksit_count"] = int(mt.group(1))
+        except ValueError:
+            pass
+
+    return out
 
 
 def _regex_parse_dividend_fallback(body: str) -> dict[str, Any]:
@@ -537,6 +661,16 @@ async def ai_parse_dividend(
     for k, v in regex_out.items():
         if out.get(k) is None and v is not None:
             out[k] = v
+
+    # ★ KAP STANDART TABLO — en güvenilir kaynak: brüt/net/ödeme tipini OVERRIDE eder.
+    # AI taksitli tabloyu yanlış okuyabiliyor (BVSAN: gross=None kaldı), tablo parser
+    # sabit kolon düzeninden kesin çıkarır.
+    table_out = _parse_kap_dividend_table(body or "", ticker)
+    if table_out.get("gross_amount_per_share") is not None:
+        out["gross_amount_per_share"] = table_out["gross_amount_per_share"]
+        if table_out.get("net_amount_per_share") is not None:
+            out["net_amount_per_share"] = table_out["net_amount_per_share"]
+        out["payment_type"] = table_out.get("payment_type") or out.get("payment_type") or "cash"
 
     return out
 

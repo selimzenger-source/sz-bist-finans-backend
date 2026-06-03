@@ -741,7 +741,7 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         r"hak\s*kullan[ıi]m(?:\s*tarihi|\s*surec)|temettu\s*hak\s*kazanim|"
         r"ex.?(?:dividend|date)|ex.?temettu",
         "Hak Kullanim Tarihi",
-        "Hak kullanım/ex-temettü tarih bildirimi. Bu tarihte hisseyi elinde tutan yatırımcılar temettü hak sahibi olur — teknik tescil bildirimi olup ilk karar zaten önceden ilan edildiğinden fiyata yeni etki katmaz.",
+        "Yönetim kurulunun daha önce açıkladığı kâr payı kararının ödeme/uygulama aşamasıdır. İlk karar zaten önceden ilan edildiği için bu bildirim yeni bir sürpriz ya da fiyat etkisi taşımaz; o kararın teyidi niteliğindedir.",
         ["temettu"],
     ),
     (

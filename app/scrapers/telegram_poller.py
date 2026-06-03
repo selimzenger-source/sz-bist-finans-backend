@@ -45,6 +45,146 @@ async def _router_err(category: str, err, ticker: str = ""):
     except Exception:
         pass
 
+
+async def _sync_dividend_feed_score(session, disclosure_id: int, div_row, body: str | None = None) -> None:
+    """Kâr payı kararının feed (kap_all_disclosures) skorunu OTORİTER dividend
+    sınıflandırmasına + AŞAMA (YKK/GK) ayrımına göre düzeltir.
+
+    SİMETRİK KURAL (kullanıcı):
+      • YKK dağıtım önerisi  (ilk/asıl karar) → POZİTİF (7.0)
+      • YKK dağıtmama önerisi (ilk/asıl karar) → NEGATİF (3.7)
+      • GK dağıtım onayı  (teyit, yeni etki yok) → NÖTR 5.5 (yeşilimsi koku)
+      • GK dağıtmama onayı (teyit, yeni etki yok) → NÖTR 4.5 (kırmızımsı koku)
+      • Ödeme/uygulama → NÖTR 5.0
+
+    Aşama (YKK mı GK mı) body'den `is_genel_kurul_decision` ile belirlenir. Çünkü
+    div_row.status hem YKK-dağıtmama hem GK-dağıtmama onayını 'reddedildi' yapar —
+    body olmadan ayrılamaz.
+
+    OVERRIDE POLİTİKASI:
+      • GK onayı / ödeme → DEFINİTİF nötr olduklarından HER ZAMAN override edilir
+        (gerçek AI skoru "dağıtmama=negatif" verse bile, teyit haberi nötr olmalı).
+      • YKK (pozitif/negatif) → gerçek AI skoru DOĞRU yöndedir; yalnızca AI içerik
+        çekemeyip GARANTİ-GENERIC nötr (5.0) verdiğinde düzeltilir.
+    """
+    if not disclosure_id or div_row is None:
+        return
+    from app.models.kap_all_disclosure import KapAllDisclosure
+
+    disc = await session.get(KapAllDisclosure, disclosure_id)
+    if disc is None:
+        return
+    cur = float(disc.ai_impact_score) if disc.ai_impact_score is not None else None
+    summ = disc.ai_summary or ""
+    is_generic_neutral = (
+        cur is not None and 4.8 <= cur <= 5.2 and (
+            not summ
+            or "etki beklenmemektedir" in summ
+            or "rutin/idari bildirim" in summ
+            or "— bildirim." in summ
+        )
+    )
+
+    status = (getattr(div_row, "status", None) or "")
+    ticker = getattr(div_row, "ticker", "") or ""
+
+    # AŞAMA: bu bildirim GENEL KURUL onayı mı (teyit) yoksa YKK önerisi mi (ilk karar)?
+    is_gk = False
+    try:
+        from app.services.dividend_calendar_processor import is_genel_kurul_decision
+        is_gk = is_genel_kurul_decision(body or "")
+    except Exception:
+        is_gk = False
+    if status == "genel_kurul_onayli":
+        is_gk = True
+
+    # Gerçek brüt/net tutarı (varsa) — özette göster
+    def _tl(v) -> str:
+        try:
+            return f"{float(v):.4f}".rstrip("0").rstrip(".").replace(".", ",")
+        except Exception:
+            return ""
+    _g = getattr(div_row, "gross_amount_per_share", None)
+    _n = getattr(div_row, "net_amount_per_share", None)
+    _parts = []
+    if _g:
+        _parts.append(f"brüt {_tl(_g)} TL")
+    if _n:
+        _parts.append(f"net {_tl(_n)} TL")
+    amt = (" Pay başına " + " / ".join(_parts) + ".") if _parts else ""
+    _pt = (getattr(div_row, "payment_type", None) or "")
+    _pay_kind = "nakit" if _pt == "cash" else ("nakit + pay" if _pt == "cash_and_stock" else ("bedelsiz pay" if _pt == "stock" else ""))
+
+    if status == "reddedildi" and is_gk:
+        # GK DAĞITMAMA ONAYI → teyit, yeni etki yok → NÖTR 4.5 (HER ZAMAN)
+        disc.ai_impact_score = 4.5
+        disc.ai_sentiment = "Nötr"
+        disc.ai_summary = (
+            f"{ticker} — Kâr payı dağıtmama kararı genel kurulda onaylandı. Yönetim "
+            "kurulunun ilk kararı önceden ilan edildiği için bu onay yeni bir sürpriz ya "
+            "da ek fiyat etkisi taşımaz; teyit niteliğindedir."
+        )
+    elif status == "reddedildi":
+        # YKK DAĞITMAMA ÖNERİSİ → ilk/asıl karar → NEGATİF.
+        # Gerçek AI negatif skoru DOĞRU; sadece garanti-generic nötr ise düzelt.
+        if not is_generic_neutral:
+            return
+        disc.ai_impact_score = 3.7
+        disc.ai_sentiment = "Hafif Olumsuz"
+        disc.ai_summary = (
+            f"{ticker} — Yönetim kurulu, ilgili dönem için kâr payı (temettü) "
+            "dağıtmama yönünde öneri/karar aldı. İlk ve asıl karar olduğundan, "
+            "hissedarlara nakit getiri sağlamaması nedeniyle olumsuz değerlendirilir."
+        )
+    elif status == "genel_kurul_onayli":
+        # GK DAĞITIM ONAYI → teyit → NÖTR 5.5 (HER ZAMAN)
+        disc.ai_impact_score = 5.5
+        disc.ai_sentiment = "Nötr"
+        disc.ai_summary = (
+            f"{ticker} — Kâr payı dağıtımı genel kurulda onaylandı.{amt} "
+            "İlk karar (yönetim kurulu) önceden ilan edildiği için bu onay yeni bir "
+            "sürpriz ya da fiyat etkisi taşımaz; teyit niteliğindedir."
+        )
+    elif status in ("tarih_belli", "odeniyor", "tamamlandi"):
+        # ÖDEME/UYGULAMA → NÖTR 5.0 (HER ZAMAN)
+        disc.ai_impact_score = 5.0
+        disc.ai_sentiment = "Nötr"
+        disc.ai_summary = (
+            f"{ticker} — Kâr payı ödeme/uygulama aşaması.{amt} "
+            "İlk karar önceden ilan edildiği için yeni bir fiyat etkisi taşımaz."
+        )
+    else:
+        # ykk_alindi — ilk YKK kâr payı DAĞITIM kararı (asıl fiyat etkisi burada) → POZİTİF.
+        # Sadece garanti-generic nötr ise düzelt (gerçek AI skoru zaten doğru yönde).
+        if not is_generic_neutral:
+            return
+        has_real_parse = bool(
+            getattr(div_row, "period", None) or _g or _n or _pt
+            or getattr(div_row, "stock_ratio_text", None)
+        )
+        if not has_real_parse:
+            return
+        disc.ai_impact_score = 7.0
+        disc.ai_sentiment = "Olumlu"
+        _kind_txt = f" ({_pay_kind})" if _pay_kind else ""
+        disc.ai_summary = (
+            f"{ticker} — Yönetim kurulu kâr payı (temettü) dağıtım kararı aldı{_kind_txt}."
+            f"{amt} Hissedarlara getiri sağlayan olumlu bir gelişmedir; ödeme tarihi "
+            "onay sürecinde netleşir."
+        )
+    logger.info(
+        "Dividend feed skor senkron (%s): %s -> %.1f (status=%s, gk=%s)",
+        ticker, cur, disc.ai_impact_score, status, is_gk,
+    )
+    # Override'ı çağırana DÖNDÜR — poller bu değeri tweet/push kararı için
+    # ai_score/ai_summary değişkenlerine yansıtsın (GK onayı nötr → tweetlenmez).
+    return {
+        "score": disc.ai_impact_score,
+        "summary": disc.ai_summary,
+        "sentiment": disc.ai_sentiment,
+    }
+
+
 # -------------------------------------------------------------------
 # Telegram API
 # -------------------------------------------------------------------
@@ -487,6 +627,9 @@ async def _route_to_calendars(
         is_cautious, process_cautious,
     )
 
+    # Dividend GK-nötr override'ı — poller'a geri döndürülür (tweet/push düzeltmesi için)
+    _feed_override = None
+
     # Capital increase — yeni 3-pct schema processor (state machine)
     if _ci_detect_stage(title or "", body or ""):
         try:
@@ -534,12 +677,21 @@ async def _route_to_calendars(
             # ★ SAVEPOINT: divident processor hatasi outer transaction'i bozmasin
             # (BORSK bug: dividend_calendar.payment_type kolonu eksikti, hata
             # kap_all_disclosures kaydını kaybettiriyordu)
+            div_row = None
             async with session.begin_nested():
-                await div_process(
+                div_row = await div_process(
                     session, disclosure_id=disclosure_id, ticker=ticker,
                     company_name=company_name, title=title, body=body_for_div,
                     kap_url=kap_url, published_at=published_at,
                 )
+            # ── FEED SKORU SENKRONU ──
+            # AI içerik çekemeyip garanti-generic nötr verdiyse, dividend processor'ın
+            # OTORİTER sınıflandırmasına göre feed skorunu düzelt (kâr payı dağıtım
+            # kararı yanlışlıkla "nötr/etki yok" görünmesin — BVSAN vakası).
+            try:
+                _feed_override = await _sync_dividend_feed_score(session, disclosure_id, div_row, body_for_div)
+            except Exception as _se:
+                logger.debug("Dividend feed skor senkron hata (%s): %s", ticker, _se)
         except Exception as e:
             await _router_err("dividend", e, ticker)
 
@@ -855,6 +1007,8 @@ async def _route_to_calendars(
             await enqueue_bilanco(ticker, title or "")
         except Exception as e:
             await _router_err("bilanco_queue", e, ticker)
+
+    return _feed_override
 
 
 # -------------------------------------------------------------------
@@ -1337,7 +1491,74 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # "Finansal Durum Tablosu (Bilanço)" son sirada gelirse DUSUYOR -> is_bilanco
                     # hic yazilmiyor -> bilanco pipeline HIC tetiklenmiyordu (BRMEN/MEPET bug'i).
                     # TITLE'i da anahtara ekleyerek her farkli tablo ayri yazilir, bilanco garanti.
+                    # ── PER-TICKER ANALİZ (çok-tickerlı / zıt-yönlü bildirimler) ──
+                    # Tek bildirim birden çok hisseyi ZIT yönde etkileyebilir:
+                    # endeks değişikliğinde biri DAHIL (pozitif), diğeri ÇIKARILDI
+                    # (negatif); pay devrinde alan/satan farklı yönde. Eskiden primary
+                    # ticker'ın tek analizi HER tickera aynen yazılıyordu (FADE pozitif
+                    # özeti TRILC'e de basıldı). Artık 2-4 tickerlı bildirimlerde her
+                    # ticker AYRI ve o hisseye SABİTLENMİŞ analiz edilir.
+                    _multi_opposed = (2 <= len(all_tickers) <= 4) and bool(text)
+
+                    # ── AFFILIATE GUARD (tek-konulu kategoriler) ──
+                    # "Borsada İşlem Gören Tipe Dönüşüm" gibi bildirimlerde KAP "İlgili
+                    # Şirketler" alanı holding grubundaki tüm şirketleri listeler (DARDL,
+                    # ENDAE, MAGEN) ama dönüşüm SADECE asıl şirketi (DARDL) ilgilendirir.
+                    # parse_tickers hepsini çekip her birine kart açıyordu (DARDL metni
+                    # ENDAE/MAGEN'e de basılıyordu). Kural: tek-konulu kategoride yalnızca
+                    # AI özetinde adı geçen (asıl konu) ticker kart alır. Özette hiçbir
+                    # ticker geçmiyorsa güvenli taraf: hepsini bırak (drop etme).
+                    _single_subject_cat = False
+                    try:
+                        from app.services.kap_category_processors import is_type_conversion as _is_tc
+                        _single_subject_cat = _is_tc(ka_title)
+                    except Exception:
+                        _single_subject_cat = False
+                    _summary_uc = (ai_summary or "").upper()
+                    _subjects_in_summary = [t for t in all_tickers if t and t.upper() in _summary_uc]
+
                     for _tk in all_tickers:
+                        # Affiliate drop: tek-konulu kategori + özette asıl konu belli +
+                        # bu ticker özette yoksa → kart açma.
+                        if (
+                            _single_subject_cat
+                            and _subjects_in_summary
+                            and (_tk or "").upper() not in _summary_uc
+                        ):
+                            logger.info(
+                                "Affiliate atlandı (tek-konulu kategori): %s — asıl konu=%s",
+                                _tk, ",".join(_subjects_in_summary),
+                            )
+                            continue
+                        # Varsayılan: primary'nin paylaşılan değerleri
+                        _tk_score = ai_score
+                        _tk_summary = ai_summary
+                        _tk_sentiment = ka_sentiment
+                        if _multi_opposed:
+                            try:
+                                from app.services.ai_news_scorer import analyze_news as _an_pt
+                                _anchor = (
+                                    f"[ÖNEMLİ: Bu bildirimi YALNIZCA {_tk} hissesi açısından "
+                                    f"değerlendir. Bildirimde geçen diğer hisseler yalnızca "
+                                    f"bağlamdır; puan ve özet {_tk} için olmalı.]\n{text}"
+                                )
+                                _rr = await _an_pt(_tk, _anchor, matriks_id=kap_id)
+                                if _rr and _rr.get("score") is not None:
+                                    _tk_score = _rr["score"]
+                                    if _rr.get("summary"):
+                                        _tk_summary = _rr["summary"]
+                                    try:
+                                        from app.utils.ai_score_label import score_to_label as _s2l_pt
+                                        _tk_sentiment = _s2l_pt(_tk_score) or ka_sentiment
+                                    except Exception:
+                                        pass
+                                    logger.info(
+                                        "Per-ticker analiz: %s skor=%.1f (primary=%s skor=%s)",
+                                        _tk, _tk_score, ticker, ai_score,
+                                    )
+                            except Exception as _pte:
+                                logger.debug("Per-ticker analiz hata (%s): %s", _tk, _pte)
+
                         is_duplicate = False
                         if kap_url:
                             existing_check = await session.execute(
@@ -1359,15 +1580,15 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         kap_disc = KapAllDisclosure(
                             company_code=_tk,
                             title=ka_title,
-                            body=ai_summary,
+                            body=_tk_summary,
                             category=ka_category,
                             is_bilanco=ka_is_bilanco,
                             kap_url=kap_url,
                             source="telegram",
                             published_at=msg_date,
-                            ai_sentiment=ka_sentiment,
-                            ai_impact_score=ai_score,
-                            ai_summary=ai_summary,
+                            ai_sentiment=_tk_sentiment,
+                            ai_impact_score=_tk_score,
+                            ai_summary=_tk_summary,
                             ai_analyzed_at=datetime.now(timezone.utc),
                         )
                         # Savepoint — beklenmedik hata olursa session korunur
@@ -1408,9 +1629,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                     logger.warning("Favori/watchlist bildirim hatasi (%s): %s", _tk, _wl_err)
 
                             # ── ROUTER: 6 ozel takvime dagit ──
+                            _route_override = None
                             try:
                                 async with session.begin_nested():
-                                    await _route_to_calendars(
+                                    _route_override = await _route_to_calendars(
                                         session,
                                         disclosure_id=kap_disc.id,
                                         ticker=_tk,
@@ -1424,6 +1646,23 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 logger.warning(
                                     "KAP router hata (%s): %s", _tk, _route_err,
                                 )
+                            # PRIMARY ticker için dividend GK-nötr override'ını tweet/push
+                            # KARARINA yansıt: GK onayı (dağıtım 5.5 / dağıtmama 4.5) ve ödeme
+                            # nötr olduğundan should_notify (>=6) ve negatif-tweet (<4.1)
+                            # eşiklerine TAKILMAZ → tweetlenmez/push edilmez (simetrik kural).
+                            if (
+                                _tk == ticker
+                                and _route_override
+                                and _route_override.get("score") is not None
+                            ):
+                                if ai_score != _route_override["score"]:
+                                    logger.info(
+                                        "Dividend override → tweet/push skoru: %s %s -> %s",
+                                        ticker, ai_score, _route_override["score"],
+                                    )
+                                ai_score = _route_override["score"]
+                                if _route_override.get("summary"):
+                                    ai_summary = _route_override["summary"]
 
                             # ── BILANCO PIPELINE ──
                             if ka_is_bilanco:
