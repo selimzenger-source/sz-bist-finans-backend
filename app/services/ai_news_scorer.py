@@ -1042,6 +1042,29 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
         text_lower = lower_tr(content)
     except Exception:
         text_lower = content.lower()
+
+    # ★ KAP "Yapılan Açıklama Güncelleme mi? EVET" → bu bir GÜNCELLEME/takip bildirimidir.
+    # Karar-tipi (bedelli/bedelsiz/sermaye artırımı/temettü) bildirimlerinde ASIL karar +
+    # oran ZATEN orijinal bildirimde (Güncelleme: Hayır) ilan edildi. Güncelleme yeni
+    # bilgi katmaz → NÖTR. (Kullanıcı kuralı: sadece ESAS/ilk haber pozitif, güncellemeler
+    # nötr. MEGMT 1612679 update vs 1601501 orijinal vakası.)
+    if re.search(r"g[üu]ncelleme\s*mi\s*\??\s*\|?\s*evet", text_lower):
+        _decision_kw = (
+            "bedelsiz", "bedelli", "sermaye art", "kar pay", "kâr pay",
+            "temett", "kar dağ", "kar dag", "kâr dağ",
+        )
+        if any(k in text_lower for k in _decision_kw):
+            return {
+                "category": "Güncelleme/Takip Bildirimi",
+                "summary": (
+                    "Bu bildirim, daha önce açıklanan bir kararın GÜNCELLEMESİDİR "
+                    "(KAP formunda 'Açıklama Güncelleme mi?: Evet'). Asıl karar ve oran "
+                    "orijinal bildirimde ilan edildiği için bu güncelleme yeni bir fiyat "
+                    "etkisi taşımaz."
+                ),
+                "hashtags": [],
+            }
+
     for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
         if re.search(pattern, text_lower):
             # Ticker'i summary'nin basina ekle (kullanici ne hisse oldugunu bilsin)
