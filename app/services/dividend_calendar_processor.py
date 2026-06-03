@@ -117,6 +117,15 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
         return False
     t = lower_tr(title)
 
+    # ★ MKK "Pay Mali Hak Kullanım İşlemi - Nakit Ödeme" — Merkezi Kayıt Kuruluşu'nun
+    # ödeme SONRASI registry teyididir (ertesi gün gelir). Asıl ödeme zaten ilk gün
+    # BIST/BISTECH "Pay Piyasası" bildirimiyle işlenir. Bu ikincil MKK bildirimi
+    # REDUNDANT'tır VE %-tablosunu (Temettü Brüt Oran %188) yanlış parse edip hisse
+    # başı TL sanıyordu (AYES 0,35 → 35,29 bug + Dağıtım Kararları'na düşme).
+    # → Temettü olarak İŞLEME (calendar'a yazma).
+    if "mali hak kullanım işlem" in t or "mali hak kullanim islem" in t:
+        return False
+
     # Title "Merkezi Kayıt Kuruluşu" / "Hak Kullanım İşlemleri" → büyük olasılıkla bedelsiz
     # Bunlar temettü değil eğer body bedelsiz sermaye artırımı diyorsa
     title_generic_kkk = any(s in t for s in [
