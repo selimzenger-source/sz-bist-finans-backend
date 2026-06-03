@@ -2331,10 +2331,21 @@ NOTLAR:
                         # Hicbir cumle kalmazsa orijinalin ilk cumlesini al
                         if not _stripped_summary and _sentences:
                             _stripped_summary = _sentences[0].strip()
+                        # Düzgün TÜRKÇE takip-bildirimi notu (eski ASCII köşeli-parantez
+                        # prefix kullanıcıya çirkin görünüyordu — snake_case + ı/ş/ç eksik).
+                        _topic_tr = {
+                            "bedelsiz_sermaye_artirimi": "bedelsiz sermaye artırımı",
+                            "bedelli_sermaye_artirimi": "bedelli sermaye artırımı",
+                            "spk_onay": "SPK onay süreci",
+                            "halka_arz": "halka arz",
+                            "pay_geri_alimi": "pay geri alım programı",
+                        }.get(prior_topic or "", "ilgili karar")
                         summary = (
-                            f"[Onceden duyurulmus {prior_topic} kararinin takip/prosedur bildirimi — "
-                            f"ilk karar fiyatlandi, ek pozitif etki beklenmez] {_stripped_summary}"
-                        )
+                            f"{_stripped_summary} "
+                            f"Bu bildirim, şirketin daha önce kamuya açıkladığı {_topic_tr} "
+                            "kararının takip/güncelleme adımıdır; asıl karar duyurulduğunda "
+                            "fiyata yansıdığı için ek bir fiyat etkisi beklenmez."
+                        ).strip()
             except Exception as _follow_err:
                 logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
 
