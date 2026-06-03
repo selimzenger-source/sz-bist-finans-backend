@@ -299,6 +299,14 @@ _init_attempted = False
 _tweet_sent_cache: dict[str, float] = {}
 _TWEET_DEDUP_HOURS = 24
 
+# ── PER-SEMBOL TWEET COOLDOWN ──
+# Bir sembole 5 dk içinde 2. tweet ASLA atılmaz (içerik/duplicate fark etmez).
+# _is_duplicate_tweet metin hash'ine bakar ama rastgele açılış cümlesi yüzünden
+# aynı haber farklı hash üretip 2 kez tweetlenebiliyordu (SASA vakası).
+# Format: { "TICKER": unix_timestamp_son_tweet }
+_last_tweet_per_ticker: dict[str, float] = {}
+_TWEET_TICKER_COOLDOWN_SEC = 300  # 5 dakika
+
 # Son atilan tweet ID — reply/thread için (restartta sıfırlanır, sadece kısa vadeli)
 _last_tweet_id: str = ""
 
@@ -2038,6 +2046,21 @@ def tweet_kap_news(
     Blue Tick hesap — 4000 karakter limiti.
     """
     try:
+        # ── PER-SEMBOL TWEET COOLDOWN: aynı sembole 5 dk içinde 2. tweet atma ──
+        # İçerik aynı/farklı fark etmez; bir hisse için 5 dakikada yalnızca 1 tweet.
+        # (Manuel tweet — admin Haber Havuzu'ndan bilerek atınca — bu kuraldan muaf.)
+        import time as _t_cd
+        _now_cd = _t_cd.time()
+        _tk_cd = (ticker or "").upper()
+        if not is_manual and _tk_cd:
+            _last_cd = _last_tweet_per_ticker.get(_tk_cd)
+            if _last_cd and (_now_cd - _last_cd) < _TWEET_TICKER_COOLDOWN_SEC:
+                logger.warning(
+                    "[KAP-TWEET] %s — son tweet %.0fs önce (<%ds cooldown), 2. tweet ATLANDI (duplicate koruması)",
+                    ticker, _now_cd - _last_cd, _TWEET_TICKER_COOLDOWN_SEC,
+                )
+                return False
+
         # Görsel yolu — sentiment'e gore TEK FORMAT:
         # - negative: kap_bildirim_negatif.png (kirmizi banner)
         # - positive: kap_bildirim.png (yesil/standart "POZITIF KAP BILDIRIMI")
@@ -2199,6 +2222,11 @@ def tweet_kap_news(
             _ok = _safe_tweet_with_media(text, img_path, source="tweet_kap_news", force_send=True)
         else:
             _ok = _safe_tweet(text, source="tweet_kap_news", force_send=True)
+
+        # Başarılı tweet → per-sembol cooldown zaman damgası (manuel dahil her başarılı
+        # gönderimde kaydet ki sonraki AUTO tweet 5 dk içinde engellensin).
+        if _ok and _tk_cd:
+            _last_tweet_per_ticker[_tk_cd] = _now_cd
 
         # Tweet basarili oldu → KAP link'i REPLY olarak at (algoritma boost icin)
         # ★ TEDBIR ISTISNASI: Tedbirli hisseler tweet'lerinde KAP link reply ATILMAZ.
