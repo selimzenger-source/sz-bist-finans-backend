@@ -484,15 +484,15 @@ async def process_block_trade(
         await db.flush()
         logger.info("BlockTrade: yeni (%s, %s)", _tk, tx_type)
         last_row = new_row
-        # ── Telegram alert: kritik alanlardan biri eksikse ──
+        # ── Telegram alert: yalnızca KRİTİK alan eksikse ──
+        # broker (aracı kurum) ve counterparties (alıcı/satıcı karşı taraflar) toptan
+        # işlemlerde çoğunlukla EKLERDE (Ek.1/Ek.2) yer alır, bildirim METNİNDE olmaz —
+        # bunların eksikliği veri kaybı değildir, alarm gürültüsüdür. Sadece işlem
+        # büyüklüğü (lot_amount) VE fiyat (cost_price) ikisi de yoksa = gerçek parse
+        # sorunu → alarm. broker/counterparties artık alarm tetiklemez.
         _missing = []
-        if new_row.lot_amount is None:
-            _missing.append("lot_amount")
-        if new_row.broker is None:
-            _missing.append("broker")
-        if new_row.counterparties is None:
-            _missing.append("counterparties")
-        if _missing:
+        if new_row.lot_amount is None and new_row.cost_price is None:
+            _missing.append("lot_amount+cost_price")
             try:
                 from app.services.admin_telegram import notify_kap_parse_issue
                 await notify_kap_parse_issue(
