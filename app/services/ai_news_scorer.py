@@ -1044,12 +1044,6 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
         text_lower = content.lower()
     for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
         if re.search(pattern, text_lower):
-            # ★ BEDELSIZ İSTİSNASI: "İhraç Belgesi SPK Onayı" routine'i normalde nötr,
-            # ama BEDELSIZ (bonus) sermaye artırımında SPK başvuru/onay adımları BIST
-            # retail için güçlü pozitif sinyaldir → routine-nötr UYGULAMA, AI pozitif
-            # puanlasın. (Bedelli/dilutive olanlar nötr kalır.)
-            if category == "Ihrac Belgesi SPK Onayi" and "bedelsiz" in text_lower:
-                continue
             # Ticker'i summary'nin basina ekle (kullanici ne hisse oldugunu bilsin)
             full_summary = summary
             return {
@@ -1183,16 +1177,16 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
       - "Temettu dagitim tamamlandi"               → NOTR 5.0
       - "Ex-temettu tarihi"                         → NOTR 5.0
 
-  BEDELSIZ SERMAYE ARTIRIMI (retail-pozitif olay — SÜREÇ ADIMLARI MATERYALDIR):
-    Ilk YK karari "%X bedelsiz onayland"          → POZITIF (gerçek değer)
-    "%X bedelsiz icin SPK'ya BASVURU yapildi"      → POZITIF (somut ilerleme, dağıtım yaklaşıyor)
-    "Bedelsiz icin SPK ihraç belgesi ONAYI alindi" → POZITIF (regülatör onayı, dağıtım kesinleşiyor)
-    NOT: Bedelsiz, temettü GK onayından FARKLIDIR — başvuru/onay adımları retail için
-    güçlü pozitif sinyaldir, nötrleştirme. SADECE aşağıdaki TEKNİK UYGULAMA nötr:
-    Sonra gelen teknik uygulama (ZATEN fiyatlandı):
+  BEDELSIZ SERMAYE ARTIRIMI (SADECE ESAS/İLK haber pozitif, sonrakiler nötr):
+    ESAS bildirim = oranı (%X) DUYURAN ilk/ana karar VEYA SPK başvurusu → POZITIF (gerçek değer)
+      ("%X bedelsiz YK kararı"  /  "%X bedelsiz için SPK'ya başvuru yapıldı")
+      → Bu, retail için en kıymetli bedelsiz haberidir; oran burada ilan edilir.
+    Sonra gelen TAKİP/PROSEDÜR adımlarının HEPSİ → NOTR 5.0:
+      - "SPK ihraç belgesi onayi alindi"            → NOTR 5.0
       - "Bedelsiz pay dagitim tarihinin tescili"    → NOTR 5.0
       - "Bedelsiz pay dagitimi gerceklesti"         → NOTR 5.0
       - "Sermaye artirimi Ticaret Sicili tescili"   → NOTR 5.0
+    KURAL: yalnızca oranı duyuran ESAS haber pozitif; aynı kararın sonraki adımları nötr.
 
   BEDELLI SERMAYE ARTIRIMI:
     Ilk YK karari "%X bedelli onayland"           → NEGATIF (gerçek seyreltme sinyali)
