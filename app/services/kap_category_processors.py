@@ -239,8 +239,19 @@ def _parse_block_trade_regex(body: str) -> dict:
         elif "alış" in tl or "alis" in tl or "alım" in tl or "alim" in tl:
             out["transaction_type"] = "alis"
 
-    # broker
+    # broker — önce "ARACI KURUM:" etiketli form, yoksa düz metin kalıbı
     broker = _find("ARACI KURUM", "ARACI KURUMLAR")
+    if not broker:
+        # Düz metin (prose) bildirim: "... Ünlü Menkul Değerler A.Ş. (...) aracılığıyla"
+        # Aracı kurum adları "Menkul Değerler / Yatırım Menkul / Menkul Kıymetler A.Ş."
+        # ile biter. "aracılığıyla" ifadesi varsa en yakın bu kalıbı yakala.
+        mb = re.search(
+            r"([A-ZÇĞİÖŞÜ][\wÇĞİÖŞÜçğıöşü.&'\- ]{1,55}?"
+            r"(?:Menkul\s+De[ğg]erler|Yat[ıi]r[ıi]m\s+Menkul|Menkul\s+K[ıi]ymetler)\s+A\.[ŞS]\.?)",
+            b,
+        )
+        if mb:
+            broker = mb.group(1).strip()
     if broker:
         out["broker"] = broker[:255]
 
@@ -457,8 +468,9 @@ async def process_block_trade(
     # SKYLP, TMPOL, YBTAS), HER biri icin ayri kayit ac. Tek ticker varsa sadece o.
     _ticker_list = sorted(related_tickers) if len(related_tickers) > 1 else [ticker.upper()]
     last_row = None
+    _lot_val = int(parsed["lot_amount"]) if isinstance(parsed.get("lot_amount"), (int, float)) else None
     for _tk in _ticker_list:
-        # Duplicate guard: ayni ticker + ayni kap_url varsa atla
+        # Duplicate guard 1: ayni ticker + ayni kap_url varsa atla
         if kap_url:
             _dup = (await db.execute(
                 select(BlockTrade).where(
@@ -467,6 +479,29 @@ async def process_block_trade(
                 ).limit(1)
             )).scalar_one_or_none()
             if _dup:
+                continue
+        # Duplicate guard 2: AYNI İŞLEM farklı kap_url ile tekrar yayınlanmış olabilir
+        # (KAP düzeltme/yeniden duyuru — ESEN Margün satışı 1612237 + 1612698 bug'ı).
+        # ticker + tarih + tip + lot eşleşirse aynı işlemdir → yeni kayıt açma.
+        if _lot_val:
+            _content_dup = (await db.execute(
+                select(BlockTrade).where(
+                    BlockTrade.ticker == _tk,
+                    BlockTrade.transaction_date == tx_date,
+                    BlockTrade.transaction_type == tx_type,
+                    BlockTrade.lot_amount == _lot_val,
+                ).limit(1)
+            )).scalar_one_or_none()
+            if _content_dup:
+                # Mevcut kayıtta broker/counterparties eksikse bu bildirimden zenginleştir
+                if not _content_dup.broker and parsed.get("broker"):
+                    _content_dup.broker = parsed["broker"]
+                if not _content_dup.counterparties and parsed.get("counterparties"):
+                    _content_dup.counterparties = parsed["counterparties"]
+                logger.info(
+                    "BlockTrade içerik-duplicate atlandı: %s tarih=%s lot=%s (mevcut id=%s)",
+                    _tk, tx_date, _lot_val, _content_dup.id,
+                )
                 continue
         new_row = BlockTrade(
             ticker=_tk,
