@@ -684,9 +684,15 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["bilgilendirme"],
     ),
     (
-        r"bagimsiz\s*denetim\s*kurulusu\s*sec|denetim\s*sirketi\s*sec|denetci\s*sec",
+        # Bağımsız denetçi/denetim kuruluşu SEÇİMİ/BELİRLENMESİ/ATANMASI — standart yıllık
+        # kurumsal yönetim işlemi. Başlık "Belirlenmesi", body "seçilmesine karar verildi"
+        # gibi varyantlar + "bağ" (ğ) düzgün yakalanır. "Sürdürülebilirlik denetimi" ESG
+        # açısı AI'yı pozitife çekiyordu (SELVA/TKNSA) — bu DETERMİNİSTİK NÖTR.
+        r"ba[ğg][ıi]ms[ıi]z\s*denet[^|\n]{0,60}?(?:se[çc]il|se[çc]im|belirlen|atan|tayin|g[öo]revlendir)|"
+        r"denetim\s*kurulu[şs][^|\n]{0,45}?(?:se[çc]|belirlen)|"
+        r"denet[çc]i\s*(?:se[çc]|belirlen|atan)",
         "Bagimsiz Denetim Secimi",
-        "Bağımsız denetim kuruluşu seçimi/atama bildirimi. Standart yıllık mevzuat gereği olup şirket fundamentals'ina etkisi yoktur.",
+        "Bağımsız denetim kuruluşunun seçimi/belirlenmesi bildirimi. Her şirketin yıllık olarak yaptığı standart, mevzuat gereği bir kurumsal yönetim işlemidir; hisse fiyatına doğrudan etkisi beklenmez.",
         ["bilgilendirme"],
     ),
     (
