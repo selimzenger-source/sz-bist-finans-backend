@@ -5684,21 +5684,39 @@ def _setup_scheduler_impl():
                     {"today": today}
                 )
                 count = res.scalar() or 0
+                # ★ Veri VAR ama TWEET atılmış mı? (veri 18:45'te kaydedilip task tweet
+                # öncesi kesilirse — Render restart — veri var sanılıp tweet hiç atılmıyordu.)
+                tw = await session.execute(
+                    sa_text("SELECT COUNT(*) FROM pending_tweets WHERE source LIKE :pfx AND created_at::date = :today"),
+                    {"pfx": "market_close%", "today": today}
+                )
+                tweet_count = tw.scalar() or 0
+            from app.services.admin_telegram import send_admin_message
             if count == 0:
-                logger.warning("Tavan/taban yedek tetikleme: bugün verisi yok, tekrar deneniyor...")
-                # Admin'e haber ver — yedek tetikleme devrede
+                logger.warning("Tavan/taban yedek: bugün verisi yok, tekrar deneniyor...")
                 try:
-                    from app.services.admin_telegram import send_admin_message
                     await send_admin_message(
-                        f"🔄 <b>Tavan/Taban Yedek Tetikleme</b>\n"
-                        f"Bugunun verisi yok (ana job basarisiz olmus), yeniden deneniyor...",
+                        "🔄 <b>Tavan/Taban Yedek Tetikleme</b>\n"
+                        "Bugunun verisi yok (ana job basarisiz), yeniden deneniyor...",
                         silent=True,
                     )
                 except Exception:
                     pass
                 await scrape_and_analyze_market_close()
+            elif tweet_count == 0:
+                logger.warning("Tavan/taban yedek: VERİ var (%d) ama TWEET atılmamış — tweet yeniden tetikleniyor.", count)
+                try:
+                    await send_admin_message(
+                        f"🔄 <b>Tavan/Taban — Veri OK ama TWEET YOK</b>\n"
+                        f"Bugun {count} kayıt var fakat tweet atılmamış (task tweet öncesi kesilmiş olabilir). "
+                        f"Tweet yeniden tetikleniyor..."
+                    )
+                except Exception:
+                    pass
+                # Veri zaten DB'de → scrape_and_analyze save'i atlar, doğrudan tweet aşamasına geçer
+                await scrape_and_analyze_market_close()
             else:
-                logger.debug("Tavan/taban yedek: bugün %d kayıt var, atlanıyor.", count)
+                logger.debug("Tavan/taban yedek: bugün %d kayıt + tweet var, atlanıyor.", count)
         except Exception as e:
             logger.error("Tavan/taban yedek tetikleme hatası: %s", e)
             # Admin'e hatayi bildir — aksi halde sessizce kaybolur
@@ -5753,8 +5771,28 @@ def _setup_scheduler_impl():
                     {"today": today},
                 )
                 count = res.scalar() or 0
-            if count > 0:
-                logger.info("Tavan/taban watchdog: bugun %d kayit var, alarm yok", count)
+                tw = await session.execute(
+                    sa_text("SELECT COUNT(*) FROM pending_tweets WHERE source LIKE :pfx AND created_at::date = :today"),
+                    {"pfx": "market_close%", "today": today},
+                )
+                tweet_count = tw.scalar() or 0
+            if count > 0 and tweet_count > 0:
+                logger.info("Tavan/taban watchdog: bugun %d kayit + tweet var, alarm yok", count)
+                return
+            if count > 0 and tweet_count == 0:
+                # Veri var ama tweet atılmamış — son şans olarak tweet'i tetikle + uyar
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"🔄 <b>Watchdog: Veri OK ama TWEET YOK</b>\n"
+                    f"Bugun {count} kayıt var, tweet atılmamış. Son kez tweet tetikleniyor..."
+                )
+                try:
+                    from app.services.market_close_analyzer import scrape_and_analyze_market_close
+                    await scrape_and_analyze_market_close()
+                except Exception as _e:
+                    await send_admin_message(
+                        f"❌ <b>Watchdog tweet tetikleme başarısız</b>\n<code>{str(_e)[:400]}</code>"
+                    )
                 return
             # Hic kayit yok — ALARM + yeniden deneme
             msg = (
