@@ -696,6 +696,16 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["bilgilendirme"],
     ),
     (
+        # Sürdürülebilirlik / ESG raporu yayını veya güvence denetimi — şeffaflık/raporlama
+        # amaçlı STANDART uygulama. AI 'ESG'ye önem' diye hafif-olumlu veriyordu (TKNSA);
+        # finansallara/fiyata doğrudan etkisi yok → DETERMİNİSTİK NÖTR.
+        r"s[üu]rd[üu]r[üu]lebilirlik\s*(?:raporu|g[üu]vence\s*denetim|raporlama)|"
+        r"tsrs\s*uyumlu|esg\s*raporu|entegre\s*(?:faaliyet\s*)?rapor",
+        "Surdurulebilirlik Raporu",
+        "Sürdürülebilirlik / ESG raporu ya da güvence denetimi bildirimi. Şeffaflık ve raporlama amaçlı standart bir kurumsal uygulamadır; şirketin finansallarına veya hisse fiyatına doğrudan etkisi beklenmez.",
+        ["bilgilendirme"],
+    ),
+    (
         r"finansal\s*raporlar?in?\s*sunumu|finansal\s*tablolar?in?\s*sunumu",
         "Finansal Rapor Sunumu",
         "Periyodik finansal raporların SPK formatında sunumuna ilişkin bildirimi. Rakamlar önceden açıklanmış ana finansal verileri tekrar eder; yeni bilgi katmaz.",
