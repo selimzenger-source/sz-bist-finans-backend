@@ -610,6 +610,24 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         "Bu bildirim, hissenin Borsa İstanbul'da ilk kez işlem görmeye başladığına dair teknik bir BISTECH sistemi duyurusudur. Baz fiyat ve maksimum emir değeri belirlenerek işleme açılır; hisse için analiz edilecek yeni bir temel gelişme içermez.",
         ["halkaarz", "bistech", "borsaistanbul"],
     ),
+    # --- HALKA ARZ FİYAT VARSAYIMLARI GERÇEKLEŞME / DEĞERLENDİRME RAPORU ---
+    # SPK Pay Tebliği (VII-128.1) md. 29/5 gereği, halka arzdan sonra periyodik olarak
+    # yayımlanan "fiyat tespit varsayımları gerçekleşti mi" raporu. İçerik karışık olur
+    # (bazı varsayım tuttu, bazısı sapma) ve YÖN ancak ekteki PDF okunarak anlaşılır.
+    # AI başlıktan (örn 'varsayım', 'sapma') yanlışlıkla NEGATİF üretiyordu (SMRVA 3.8
+    # halüsinasyonu — PDF okunmadan). Deterministik NÖTR (5.0) yapıyoruz; detay KAP ekinde.
+    (
+        r"halka\s*arz\s*fiyat[ıi]n[ıi]n\s*belirlenmesinde\s*esas\s*al[ıi]nan\s*varsay[ıi]m"
+        r"|varsay[ıi]mlar[ıaeu]*\s*ili[şs]kin\s*(?:ger[çc]ekle[şs]me\s*(?:ve\s*)?)?de[ğg]erlendirme\s*raporu"
+        r"|fiyat\s*tespit\s*raporu.{0,40}?(?:ger[çc]ekle[şs]me|de[ğg]erlendirme)",
+        "Fiyat Tespit Varsayımları Değerlendirme Raporu",
+        "Bu bildirim, şirketin halka arz fiyatını belirlerken kullandığı varsayımların "
+        "gerçekleşip gerçekleşmediğini değerlendiren, SPK Pay Tebliği (VII-128.1 md. 29/5) "
+        "gereği hazırlanan periyodik/rutin bir rapordur. İçerik genelde karışıktır (kimi "
+        "varsayım tuttu, kimi saptı); olumlu/olumsuz yön ancak rapor detayında (KAP ekindeki "
+        "belge) görülebilir, başlık tek başına yön taşımaz. Detay için KAP bildirimini inceleyin.",
+        ["halkaarz", "fiyattespit"],
+    ),
     # --- ENDEKSLERİNDE DEĞİŞİKLİK — Yeni listelenme (IPO günü index dahil) ---
     # Not: Mevcut hisse index'e giriyorsa gerçek pozitif haberdir (filtre etme).
     # Yalnızca "BISTECH Pay Piyasası" ile aynı gün gelen index değişikliğini yakalamak
