@@ -168,6 +168,50 @@ def _parse_json(text: str) -> Optional[dict]:
         return None
 
 
+async def _fetch_attachment_text(kap_url: Optional[str]) -> str:
+    """Detayı EKTE olan 'Pay Alım Satım Bildirimi'nde ek PDF'i indirip metin çıkarır.
+
+    KAP body'si çoğu zaman sadece kapak notudur ("...açıklama ekte yer almaktadır");
+    asıl işlem (alış/satış, nominal, fiyat, oran) ekteki PDF'dedir. Bu fonksiyon:
+      - pdf_links'i (kap_disclosure_extractor zaten yakalıyor) indirir,
+      - KAP ek dosyaları Java-serialization wrapper içinde gelebilir → %PDF offset'iyle atlar,
+      - indirme /tr/api + Referer gerektirir,
+      - pdfplumber ile metin çıkarır.
+    """
+    if not kap_url:
+        return ""
+    try:
+        import io
+        import httpx
+        import pdfplumber
+        from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+        d = await fetch_kap_disclosure(kap_url)
+        links = (d or {}).get("pdf_links") or []
+        if not links:
+            return ""
+        hdr = {"User-Agent": "Mozilla/5.0", "Referer": kap_url}
+        out: list[str] = []
+        async with httpx.AsyncClient(timeout=30, headers=hdr, follow_redirects=True) as c:
+            for url in links:
+                u = url.replace("://www.kap.org.tr/api/", "://www.kap.org.tr/tr/api/")
+                try:
+                    r = await c.get(u)
+                    b = r.content or b""
+                    pi = b.find(b"%PDF")
+                    if pi < 0:
+                        continue
+                    with pdfplumber.open(io.BytesIO(b[pi:])) as pdf:
+                        t = "\n".join((p.extract_text() or "") for p in pdf.pages)
+                    if t and len(t.strip()) > 50:
+                        out.append(t)
+                except Exception:
+                    continue
+        return "\n".join(out)
+    except Exception as e:
+        logger.warning("ShareTx ek PDF metin hata (%s): %s", kap_url, e)
+        return ""
+
+
 async def process_kap_disclosure(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],
@@ -181,14 +225,34 @@ async def process_kap_disclosure(
         if (await db.execute(stmt)).scalar_one_or_none():
             return None
 
-    parsed = await ai_parse(ticker, title, body or "")
+    # ── DETAY EKTE Mİ? ── KAP body kapak notuysa (işlem detayı ekteki PDF'de) ek PDF'i
+    # indirip metnini kullan. Aksi halde alış/satış/nominal/fiyat çıkarılamaz (KGYO/Orhun
+    # Kartal vakası: body "açıklama ekte yer almaktadır" der, gerçek satış ekte).
+    eff_body = body or ""
+    _bl = lower_tr(eff_body)
+    _refers_ek = ("ekte yer al" in _bl or "ekte yer aldı" in _bl or "ekte yer aldigi" in _bl)
+    _has_detail = any(k in _bl for k in (
+        "nominal", "işlem fiyat", "islem fiyat", "satış işlem", "satis islem",
+        "alış işlem", "alis islem", "pay oran", "oy hakk",
+    ))
+    if _refers_ek and not _has_detail and kap_url:
+        _ek = await _fetch_attachment_text(kap_url)
+        if _ek and len(_ek) > len(eff_body):
+            logger.info("ShareTx: detay ekteydi, ek PDF metni çekildi (%s): %d kar", ticker, len(_ek))
+            eff_body = _ek
+
+    parsed = await ai_parse(ticker, title, eff_body)
 
     # transaction_type: AI > body keyword > heuristik (pay_orani_change_pct işareti)
     transaction_type = parsed.get("transaction_type")
     if transaction_type not in ("alici", "satici"):
-        # Body içinde "Alıcı"/"Satıcı" geçiyor mu? (KAP form alanı)
-        bl = lower_tr(body or "")
-        if "alıcı" in bl or "alici" in bl or "alimi" in bl or "alımı" in bl:
+        # Ek PDF/body içinde işlem yönü ifadesi (SPK formu: "satış işlemi gerçekleştirilmiştir")
+        bl = lower_tr(eff_body)
+        if "satış işlem" in bl or "satis islem" in bl or "satışı hk" in bl or "elden çıkar" in bl or "elden cikar" in bl:
+            transaction_type = "satici"
+        elif "alış işlem" in bl or "alis islem" in bl or "alımı hk" in bl or "edinim" in bl or "iktisap" in bl:
+            transaction_type = "alici"
+        elif "alıcı" in bl or "alici" in bl or "alimi" in bl or "alımı" in bl:
             transaction_type = "alici"
         elif "satıcı" in bl or "satici" in bl or "satışı" in bl or "satisi" in bl:
             transaction_type = "satici"
@@ -226,4 +290,45 @@ async def process_kap_disclosure(
     db.add(new_row)
     await db.flush()
     logger.info("ShareTx: yeni (%s, %s, %s)", ticker, transaction_type, party_name[:30])
+
+    # ── FEED SKORU: içeriden alım/satım → hafif sinyal ──
+    # Detay ekteyken feed skoru kapak notundan nötr (5.0) kalıyordu. Yön belliyse:
+    # içeriden SATIŞ → hafif olumsuz (~4.0), içeriden ALIŞ → hafif olumlu (~6.3).
+    # SADECE garanti-nötr (5.0) skoru override eder.
+    if disclosure_id:
+        try:
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            disc = await db.get(KapAllDisclosure, disclosure_id)
+            _cur = float(disc.ai_impact_score) if (disc and disc.ai_impact_score is not None) else None
+            if disc is not None and _cur is not None and 4.8 <= _cur <= 5.2:
+                _who = party_name if party_name and party_name != "?" else "Ortak/yönetici"
+                _role = parsed.get("party_role")
+                _who_full = f"{_who}" + (f" ({_role})" if _role else "")
+                _nom = parsed.get("nominal_lot")
+                _oran = parsed.get("pay_orani_pct")
+                _det = []
+                if _nom:
+                    _det.append(f"{_nom:,.0f} TL nominal".replace(",", "."))
+                if _oran is not None:
+                    _det.append(f"pay oranı %{_oran}")
+                _det_s = (" — " + ", ".join(_det)) if _det else ""
+                if transaction_type == "satici":
+                    disc.ai_impact_score = 4.0
+                    disc.ai_sentiment = "Hafif Olumsuz"
+                    disc.ai_summary = (
+                        f"{ticker} — İçeriden pay SATIŞI: {_who_full} hisse sattı{_det_s}. "
+                        "İçeriden satış, yatırımcı açısından zayıf/temkinli bir sinyaldir."
+                    )
+                else:
+                    disc.ai_impact_score = 6.3
+                    disc.ai_sentiment = "Hafif Olumlu"
+                    disc.ai_summary = (
+                        f"{ticker} — İçeriden pay ALIMI: {_who_full} hisse aldı{_det_s}. "
+                        "İçeriden alım, şirkete güven sinyali olarak olumlu değerlendirilir."
+                    )
+                logger.info("ShareTx feed skor senkron (%s): 5.0 -> %.1f (%s)",
+                            ticker, disc.ai_impact_score, transaction_type)
+        except Exception as _fe:
+            logger.debug("ShareTx feed skor senkron hata (%s): %s", ticker, _fe)
+
     return new_row
