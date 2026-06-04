@@ -17060,7 +17060,14 @@ async def get_temettu_akisi(
             continue
         # Dağıtım döngüsü — mevcut her stage için ayrı kart
         emitted_any = False
-        if r.ykk_kap_disclosure_id or r.ykk_date:
+        # YKK kartı: ykk verisi varsa. AMA ykk disclosure'ı GK disclosure'ı ile AYNI ise
+        # (orijinal YKK yakalanmamış, GK kararı her ikisine bağlanmış) → YKK kartı ÜRETME,
+        # sadece GK kartı çıksın (BVSAN çift-kart bug'ı: ykkId==gaId==13169).
+        _ykk_same_as_ga = (
+            r.ykk_kap_disclosure_id is not None
+            and r.ykk_kap_disclosure_id == r.general_assembly_kap_disclosure_id
+        )
+        if (r.ykk_kap_disclosure_id or r.ykk_date) and not _ykk_same_as_ga:
             evt_dt = r.ykk_date or (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("published_at") or r.created_at
             cards.append(_build_card(r, "karar", "ykk", r.ykk_kap_disclosure_id, r.ykk_kap_url, evt_dt))
             emitted_any = True

@@ -126,6 +126,12 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     if "mali hak kullanım işlem" in t or "mali hak kullanim islem" in t:
         return False
 
+    # ★ "Kâr/Kar (Payı) Dağıtım Politikası" — şirketin temettü POLİTİKASI dokümanı/güncellemesi.
+    # Bu bir dağıtım KARARI veya ödeme DEĞİL; kurumsal yönetim/politika metnidir (oran/tutar
+    # içermez). Temettü takvimine (Dağıtım/Dağıtmama/Ödeme) hiçbir kategoriye uymaz → İŞLEME.
+    if "dağıtım politikası" in t or "dagitim politikasi" in t or "dağıtım politika" in t or "dagitim politika" in t:
+        return False
+
     # Title "Merkezi Kayıt Kuruluşu" / "Hak Kullanım İşlemleri" → büyük olasılıkla bedelsiz
     # Bunlar temettü değil eğer body bedelsiz sermaye artırımı diyorsa
     title_generic_kkk = any(s in t for s in [
