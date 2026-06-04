@@ -17064,6 +17064,12 @@ async def get_temettu_akisi(
             "_evt_date": _to_date(evt_dt),
         }
 
+    # Ödeme/ex-temettü bildirimi sinyalleri — bu başlıklar DAĞITIM KARARI değil,
+    # ÖDEME bildirimidir (Hak Kullanımı = ex-temettü, BISTECH pay piyasası duyurusu).
+    _PAYMENT_TITLE_SIGNALS = (
+        "pay piyasas", "bistech", "bıstech", "hak kullan", "ödeme tarihi", "odeme tarihi",
+    )
+
     cards: list[dict] = []
     for r in rows:
         st = r.status or ""
@@ -17104,18 +17110,28 @@ async def get_temettu_akisi(
             (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("title")
             or getattr(r, "source_title", "") or ""
         ).lower()
-        _ykk_is_payment = any(s in _ykk_title for s in (
-            "pay piyasas", "bistech", "bıstech", "hak kullan", "ödeme tarihi", "odeme tarihi",
-        ))
+        _ykk_is_payment = any(s in _ykk_title for s in _PAYMENT_TITLE_SIGNALS)
         if (r.ykk_kap_disclosure_id or r.ykk_date) and not _ykk_same_as_ga and not _ykk_is_payment:
             evt_dt = r.ykk_date or (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("published_at") or r.created_at
             cards.append(_build_card(r, "karar", "ykk", r.ykk_kap_disclosure_id, r.ykk_kap_url, evt_dt))
             emitted_any = True
+
+        # GA (genel kurul) kartı — AMA disclosure aslında bir ÖDEME/Hak Kullanımı
+        # bildirimiyse (AVPGY "Hak Kullanımı" yanlışlıkla GA alanına yazılmış) Dağıtım
+        # Kararı DEĞİL → ÖDEME kartı olarak üret (Ödeme Bildirimleri sekmesi).
+        _payment_emitted = False
         if r.general_assembly_kap_disclosure_id or r.general_assembly_date:
-            evt_dt = r.general_assembly_date or (ai_map.get(r.general_assembly_kap_disclosure_id) or {}).get("published_at") or r.created_at
-            cards.append(_build_card(r, "karar", "ga_approval", r.general_assembly_kap_disclosure_id, r.general_assembly_kap_url, evt_dt))
+            _ga_disc = ai_map.get(r.general_assembly_kap_disclosure_id) or {}
+            _ga_title = (_ga_disc.get("title") or "").lower()
+            _ga_is_payment = any(s in _ga_title for s in _PAYMENT_TITLE_SIGNALS)
+            evt_dt = r.general_assembly_date or _ga_disc.get("published_at") or r.created_at
+            if _ga_is_payment:
+                cards.append(_build_card(r, "odendi", "payment", r.general_assembly_kap_disclosure_id, r.general_assembly_kap_url, evt_dt))
+                _payment_emitted = True
+            else:
+                cards.append(_build_card(r, "karar", "ga_approval", r.general_assembly_kap_disclosure_id, r.general_assembly_kap_url, evt_dt))
             emitted_any = True
-        if r.payment_date or st in ("odeniyor", "tamamlandi"):
+        if (r.payment_date or st in ("odeniyor", "tamamlandi")) and not _payment_emitted:
             evt_dt = r.payment_date or (ai_map.get(r.payment_kap_disclosure_id) or {}).get("published_at") or r.created_at
             cards.append(_build_card(r, "odendi", "payment", r.payment_kap_disclosure_id, r.payment_kap_url, evt_dt))
             emitted_any = True
