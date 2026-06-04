@@ -317,82 +317,6 @@ async def _get_equity_tickers(session) -> set[str]:
     return _EQUITY_TICKERS
 
 
-# Endeks likidite siralamasi (yuksek puan = daha likit/BIST'te daha onde)
-_INDEX_LIQ_RANK = (("XU030", 6), ("XU050", 5), ("XU100", 4), ("XU500", 3), ("XUTUM", 1))
-
-
-def _company_root(name: str) -> str:
-    """Sirket adini sinif son-ekinden arindirip normalize eder.
-
-    'IS BANKASI (C)' / 'IS BANKASI (A)' -> 'isbankasi' (ayni sirket = ayni kok).
-    """
-    import re as _re
-    n = (name or "").upper()
-    n = _re.sub(r"\(\s*[A-Z]\s*\)", "", n)        # (A)/(B)/(C) sinif son-eki
-    n = _re.sub(r"[^A-Z0-9]", "", n)               # bosluk/noktalama at
-    return n.lower()
-
-
-async def _collapse_tickers_by_liquidity(session, tickers: list[str]) -> tuple[list[str], list[str]]:
-    """Cok-sembollu eslesmede ayni sirketin paylarini EN LIKIT olana indirir +
-    BIST endeks evreninde (stock_markets) OLMAYAN kodlari (likit sibling varsa) atar.
-
-    Kaynak: stock_markets (hisse_endeks_ds.csv) — uye endeksler (XU030/XU100/XU500..).
-    Ornek: ISKUR(listede yok) + ISATR(A) + ISBTR(B) + ISCTR(C) -> [ISCTR]
-           (tek feed kaydi + tek tweet, en likit BIST hissesi).
-    Farkli sirketler ise her birinin temsilcisi korunur (BSOKE + BTCIM gibi).
-
-    Döner: (temsilci_tickerlar, elenen_BIST_listeli_sibling'ler)
-      İkincisi tweet'te HASHTAG olarak kullanilir (ISATR/ISBTR gibi diger sinif kodlar).
-    """
-    if not tickers or len(tickers) < 2:
-        return tickers, []
-    try:
-        from sqlalchemy import text as _st, bindparam as _bp
-        ups = [t.upper() for t in tickers]
-        # IN (expanding) — asyncpg/psycopg2 her ikisinde de calisir (ANY binding sorunluydu)
-        _stmt = _st(
-            "SELECT UPPER(ticker), COALESCE(company_name,''), "
-            "COALESCE(indexes,'') FROM stock_markets WHERE UPPER(ticker) IN :tk"
-        ).bindparams(_bp("tk", expanding=True))
-        rows = (await session.execute(_stmt, {"tk": ups})).all()
-        # Pozisyonel: row[0]=ticker, row[1]=company_name, row[2]=indexes
-        # (alias 'AS t' SQLAlchemy Row attribute'uyle cakisiyordu → tum row donuyordu)
-        info = {row[0]: (row[1], row[2]) for row in rows}   # sadece BIST-listed (CSV) kodlar
-        listed = set(info.keys())
-
-        def _liq(t: str) -> int:
-            ix = info.get(t.upper(), ("", ""))[1].upper()
-            for name, sc in _INDEX_LIQ_RANK:
-                if name in ix:
-                    return sc
-            return 0
-
-        # BIST'te en az 1 listed varsa, listede OLMAYAN kodlari at (mismatch/non-traded).
-        # Hicbiri listede degilse dokunma (yanlislikla hepsini elemeyi onler).
-        pool = [t for t in tickers if t.upper() in listed] if listed else list(tickers)
-        if not pool:
-            return tickers, []
-
-        # Sirket koku bazinda grupla; her gruptan EN LIKIT pay temsilci olur.
-        groups: dict[str, list[str]] = {}
-        for t in pool:
-            cn = info.get(t.upper(), ("", ""))[0]
-            key = _company_root(cn) or t.upper()
-            groups.setdefault(key, []).append(t)
-        reps = [max(grp, key=_liq) for grp in groups.values()]
-        reps = sorted(set(reps), key=_liq, reverse=True)  # en likit basta = birincil
-        # Elenen BIST-listeli sibling'ler (ISATR/ISBTR gibi) → tweet hashtag'i icin
-        _rep_uc = {r.upper() for r in reps}
-        extra = [t for t in pool if t.upper() not in _rep_uc]
-        if len(reps) < len(tickers):
-            logger.info("Ticker collapse (likidite): %s -> %s (hashtag: %s)", tickers, reps, extra)
-        return reps, extra
-    except Exception as e:
-        logger.warning("Ticker collapse hata: %s", e)
-        return tickers, []
-
-
 # Forex / emtia / kripto kodlari (hisse degil)
 _FOREX_COMMODITY = {
     "BTCTRY", "BTCUSD", "ETHTRY", "ETHUSD", "USDTRY", "EURTRY", "GBPTRY",
@@ -1226,16 +1150,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ",".join(_pre_eq), telegram_message_id,
                 )
 
-            # ── ÇOK-SEMBOL LİKİDİTE İNDİRGEMESİ ──────────────────────────────
-            # Aynı şirketin pay sınıfları (İŞ BANKASI A/B/C = ISATR/ISBTR/ISCTR) tek
-            # EN LİKİT koda iner; BIST endeks evreninde (stock_markets/CSV) olmayan
-            # yanlış eşleşmeler (ISKUR) atılır. Böylece çoklu-sembol haberinde tek
-            # feed kaydı + tek tweet ve doğru/likit ticker (ISCTR) kullanılır.
-            _extra_ticker_tags: list[str] = []  # collapse'la elenen sibling'ler → tweet hashtag
-            if len(all_tickers) > 1:
-                all_tickers, _extra_ticker_tags = await _collapse_tickers_by_liquidity(session, all_tickers)
-
-            # Birincil ticker — AI/router/push icin kullanilir (artik EN LİKİT olan)
+            # Birincil ticker — AI/router/push icin kullanilir
             ticker = all_tickers[0] if all_tickers else None
 
             if not ticker:
@@ -2053,7 +1968,6 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             ai_summary=ai_summary,
                             kap_url=kap_url,
                             ai_hashtags=ai_hashtags,
-                            extra_tickers=_extra_ticker_tags,
                         )
                         logger.info(
                             "[TWEET-FLOW] KAP tweet sonuc: %s (basarili=%s, ai_score=%s)",
@@ -2134,7 +2048,6 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         ai_summary=ai_summary,
                         kap_url=kap_url,
                         ai_hashtags=ai_hashtags,
-                        extra_tickers=_extra_ticker_tags,
                     )
                     logger.info(
                         "[TWEET-FLOW-NEG] Negatif KAP tweet sonuc: %s (basarili=%s, skor=%.1f)",

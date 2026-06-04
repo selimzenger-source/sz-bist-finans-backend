@@ -2038,7 +2038,6 @@ def tweet_kap_news(
     kap_url: str | None = None,
     ai_hashtags: list | None = None,
     is_manual: bool = False,
-    extra_tickers: list | None = None,
 ) -> bool:
     """KAP haberi tweeti — tum hisseler (her 3 haberden 1'i tweetlenir).
 
@@ -2148,20 +2147,6 @@ def tweet_kap_news(
             if _clean_tags:
                 extra_hashtags = f" {' '.join(_clean_tags)}"
 
-        # ── ÇOK-SEMBOL: aynı şirketin diğer pay sınıfları (ISATR/ISBTR gibi) hashtag olarak ──
-        # Ana ticker likit olan (ISCTR) ama diğer kodlar da keşfedilebilir olsun.
-        extra_ticker_tags = ""
-        if extra_tickers:
-            _seen_t = {(ticker or "").upper()}
-            _tt = []
-            for _et in extra_tickers:
-                _u = str(_et).upper().strip()
-                if _u and _u not in _seen_t and _u.isalnum() and 2 <= len(_u) <= 6:
-                    _seen_t.add(_u)
-                    _tt.append(f"#{_u}")
-            if _tt:
-                extra_ticker_tags = " " + " ".join(_tt)
-
         # CTA: kullanici karari ile uygulama indir + oran satirlari TAMAMEN kaldirildi.
         cta_text = ""
 
@@ -2190,7 +2175,7 @@ def tweet_kap_news(
             f"{kap_section}\n"
             f"{cta_text}\n"
             f"\n"
-            f"#{ticker}{extra_ticker_tags} #KAP #BorsaIstanbul{extra_hashtags}"
+            f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
         )
 
         # Blue Tick 4000 karakter limiti — AI ozeti ile birlikte sigmazsa kirp
@@ -2209,7 +2194,7 @@ def tweet_kap_news(
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
-                f"#{ticker}{extra_ticker_tags} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # Hala cok uzunsa: sadece skor, ozet yok
@@ -2224,7 +2209,7 @@ def tweet_kap_news(
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
-                f"#{ticker}{extra_ticker_tags} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
