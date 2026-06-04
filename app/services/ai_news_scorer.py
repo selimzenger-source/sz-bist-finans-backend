@@ -617,9 +617,14 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
     # AI bu durumu zaten DÜŞÜK SKORLASIN diye system prompt'a kural ekledik (aşağıda).
     # --- BISTECH / MKK / TAKASBANK — Rutin teknik bildirimler (ex-div, tescil vb.) ---
     (
-        r"bistech.*pay\s*piyasa|merkezi\s*kayit\s*kurulu[sş]u\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
+        # NOT: lower_tr "BISTECH" → "bıstech" (dotsuz ı) yapar → "bistech" (i) eşleşmiyordu;
+        # bu yüzden BISTECH duyuruları AI'ya düşüp yanlışlıkla POZİTİF puanlanıyordu
+        # (MAGEN toptan SATIŞ → 6.8). b[ıi]stech ile iki yazım da yakalanır.
+        # Kapsam: hem temettü ödeme (ex-div) hem TOPTAN ALIM-SATIM işlem duyurusu.
+        r"b[ıi]stech.*pay\s*piyasa|pay\s*piyasas[ıi]\s*al[ıi]m\s*sat[ıi]m\s*sistemi|"
+        r"merkezi\s*kayit\s*kurulu[sş]u\s*duyurusu|takasbank\s*duyurusu|mkk\s*duyurusu",
         "BISTECH/MKK/Takasbank Duyurusu",
-        "Bu duyuru Borsa İstanbul/MKK'nin teknik bir bildirimi olup, temettü/bedelsiz/bölünme miktarı zaten önceden ilan edilmiştir. Sadece ex-div günü veya kayıt tescili niteliğinde olup hisse fiyatına ek pozitif etki beklenmez.",
+        "Bu, Borsa İstanbul/MKK'nin teknik bir sistem duyurusudur (temettü ödemesi veya toptan alım-satım işleminin sisteme düşmesi gibi). İşlemin kendisi/oranı önceden bellidir; şirketin temel faaliyetlerine doğrudan etkisi olmayan teknik bir bildirimdir, fiyata ek pozitif etki beklenmez.",
         ["bistech"],
     ),
     # --- IDARI / USUL BILDIRIMLERI (sirket icin sifir mali etki) ---

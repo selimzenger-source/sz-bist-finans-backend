@@ -161,6 +161,13 @@ def is_block_trade(title: str, body: str = "") -> bool:
             return False
         if "onemli nitelikte" in t or "önemli nitelikte" in t:
             return False
+        # BISTECH/MKK sistem duyurusu (toptan işlemin BIST sistemine düştüğü teknik
+        # duyuru) şirketin kendi "Toptan Alım Satım" formu DEĞİLDİR — şirket kendi
+        # formunu ayrıca yayınlar (asıl block_trade odur). Bu sistem duyurusunu işlemek
+        # duplicate + gereksiz alarm üretir (MAGEN 1612967). → block_trade değil.
+        if ("bistech pay piyasas" in t or "bıstech pay piyasas" in t
+                or "pay piyasası alım satım sistemi" in t or "pay piyasasi alim satim sistemi" in t):
+            return False
         # Standart Toptan Alım Satım pattern'ları
         if any(p in t for p in _BT_TITLE_PATTERNS):
             return True
