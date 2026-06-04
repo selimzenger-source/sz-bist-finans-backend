@@ -4771,6 +4771,18 @@ async def news_pool_tweet(
     if not row:
         return RedirectResponse(url="/admin/news-pool?status=notfound", status_code=303)
 
+    # ── MANUEL DÜZENLEME: admin panelden içerik + hashtag override ──
+    # summary  → tweet gövdesini (💬) değiştirir; boşsa DB'deki ai_summary kullanılır
+    # hashtags → boşluk/virgülle ayrılmış ekstra hashtag (örn "ISATR ISBTR finans")
+    form = await request.form()
+    custom_summary = (form.get("summary") or "").strip() or None
+    hashtags_raw = (form.get("hashtags") or "").strip()
+    custom_hashtags = None
+    if hashtags_raw:
+        import re as _re_ht
+        _parts = [p.strip().lstrip("#") for p in _re_ht.split(r"[\s,]+", hashtags_raw) if p.strip()]
+        custom_hashtags = [p for p in _parts if p] or None
+
     # Sentiment string: skora gore positive/negative
     if row.ai_impact_score and row.ai_impact_score >= 6.0:
         sentiment_str = "positive"
@@ -4792,9 +4804,9 @@ async def news_pool_tweet(
                 matched_keyword=matched_kw,
                 sentiment=sentiment_str,
                 ai_score=row.ai_impact_score,
-                ai_summary=row.ai_summary,
+                ai_summary=custom_summary or row.ai_summary,  # admin düzenlemesi öncelikli
                 kap_url=row.kap_url,
-                ai_hashtags=None,  # Manuel paylasimda extra hashtag yok
+                ai_hashtags=custom_hashtags,  # admin'in elle eklediği hashtag'ler
                 is_manual=True,
             ),
         )
