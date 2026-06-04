@@ -2464,6 +2464,46 @@ async def toggle_tweets_kill(
     return RedirectResponse(url=redirect_to, status_code=303)
 
 
+@router.post("/toggle-auto-kap-tweet")
+async def toggle_auto_kap_tweet(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Otomatik KAP tweet toggle — AÇIK ise oran-bazlı otomatik tweet, KAPALI ise
+    sadece admin manuel gönderir. Manuel tweet (is_manual) etkilenmez."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.app_setting import AppSetting
+    from app.services.twitter_service import clear_settings_cache, is_auto_kap_tweet_enabled
+
+    current = is_auto_kap_tweet_enabled()
+    new_val = "false" if current else "true"  # toggle
+
+    result = await db.execute(
+        select(AppSetting).where(AppSetting.key == "AUTO_KAP_TWEET_ENABLED")
+    )
+    setting = result.scalar_one_or_none()
+    if setting:
+        setting.value = new_val
+    else:
+        db.add(AppSetting(key="AUTO_KAP_TWEET_ENABLED", value=new_val))
+    await db.commit()
+    clear_settings_cache()
+
+    status_text = "AÇIK (otomatik)" if new_val == "true" else "KAPALI (manuel)"
+    logger.info("[ADMIN] AUTO_KAP_TWEET_ENABLED -> %s (%s)", new_val, status_text)
+    try:
+        from app.services.admin_telegram import send_admin_message
+        await send_admin_message(
+            f"{'🟢' if new_val == 'true' else '🟠'} Otomatik KAP tweet: {status_text}"
+        )
+    except Exception:
+        pass
+
+    return RedirectResponse(url="/admin/news-pool?status=auto_tweet_toggled", status_code=303)
+
+
 # -------------------------------------------------------
 # TWEET ONIZLEME — Sadece goruntuleme
 # -------------------------------------------------------
@@ -4547,6 +4587,7 @@ async def news_pool(
         except (ValueError, TypeError):
             tweet_rates[_cat] = TWEET_RATE_DEFAULTS[_cat]
 
+    from app.services.twitter_service import is_auto_kap_tweet_enabled
     return templates.TemplateResponse("admin/news_pool.html", {
         "request": request,
         "all_items": all_items,
@@ -4554,6 +4595,7 @@ async def news_pool(
         "cutoff_hours": 12,
         "tweeted_count": len(tweeted_tickers),
         "tweet_rates": tweet_rates,
+        "auto_kap_tweet_enabled": is_auto_kap_tweet_enabled(),
     })
 
 

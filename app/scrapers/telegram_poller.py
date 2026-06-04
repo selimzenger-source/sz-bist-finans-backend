@@ -1908,11 +1908,20 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 message_type, ticker or "???", title,
             )
 
+            # OTOMATİK KAP TWEET AÇIK MI? (admin Haber Havuzu toggle)
+            # Kapalıysa otomatik tweet atılmaz — admin manuel seçip gönderir.
+            # Manuel tweet (is_manual=True) bu ayardan ETKİLENMEZ.
+            try:
+                from app.services.twitter_service import is_auto_kap_tweet_enabled
+                _auto_tweet_on = is_auto_kap_tweet_enabled()
+            except Exception:
+                _auto_tweet_on = True
+
             # ----------------------------------------------------------------
             # TWITTER ENTEGRASYONU (Tum haberler — her 5 haberden 1'i)
             # AI skoru dusukse tweet de atilmaz (notr/olumsuz haber)
             # ----------------------------------------------------------------
-            if should_notify and message_type != "seans_disi_acilis":  # seans_disi_acilis = sadece acilis gap, tweet atilmaz
+            if _auto_tweet_on and should_notify and message_type != "seans_disi_acilis":  # seans_disi_acilis = sadece acilis gap, tweet atilmaz
                 try:
                     from app.services.twitter_service import tweet_kap_news, _kap_tweet_counter
 
@@ -1998,7 +2007,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             _should_negative_tweet = False
             _negative_category = ""  # log icin
             if (
-                not should_notify
+                _auto_tweet_on
+                and not should_notify
                 and message_type != "seans_disi_acilis"
                 and ai_score is not None
                 and ticker

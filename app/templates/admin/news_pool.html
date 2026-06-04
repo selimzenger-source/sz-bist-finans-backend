@@ -2,8 +2,7 @@
 {% block title %}Haber Havuzu — Manuel Tweet{% endblock %}
 {% block content %}
 
-<!-- 10 saniyede otomatik refresh + mobile responsive style -->
-<meta http-equiv="refresh" content="10">
+<!-- Akıllı otomatik yenileme (düzenlerken duraklar — meta refresh KALDIRILDI) + mobile style -->
 <style>
   @media (max-width: 640px) {
     main, .max-w-7xl { padding-left: 8px !important; padding-right: 8px !important; }
@@ -69,12 +68,22 @@
   }
 </style>
 <script>
+  // AKILLI YENİLEME: 10sn'de bir yeniler AMA bir tweet editörü açıksa ya da
+  // bir alana yazıyorsan (focus) yenilemeyi ATLAR — düzenlemen silinmesin.
   let __ticks = 10;
   setInterval(() => {
-    __ticks -= 1;
-    if (__ticks < 0) __ticks = 10;
     const el = document.getElementById('refresh-countdown');
-    if (el) el.textContent = '(' + __ticks + 'sn)';
+    const editing = document.querySelector('[id^="tw-"]:not(.hidden)') !== null;
+    const ae = document.activeElement;
+    const typing = ae && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT');
+    if (editing || typing) {
+      __ticks = 10;
+      if (el) el.textContent = '(düzenleniyor — yenileme durdu)';
+      return;
+    }
+    __ticks -= 1;
+    if (el) el.textContent = '(' + Math.max(__ticks, 0) + 'sn)';
+    if (__ticks <= 0) { location.reload(); }
   }, 1000);
 </script>
 
@@ -85,15 +94,27 @@
   </h1>
   <p class="text-gray-400 text-sm">
     Sadece pozitif (skor ≥ 6.0) ve negatif (skor ≤ 4.0) haberler — Nötr/Hafif olanlar gizli.
-    Tweetle butonu MANUEL paylaşır (otomatik oran kuralı UYGULANMAZ).
-    Sayfa her 10 saniyede bir otomatik yenilenir.
+    "🐦 Tweetle ✏️" butonu içeriği + hashtag'i düzenleyip MANUEL paylaşır (oran kuralı UYGULANMAZ).
+    Sayfa 10 saniyede bir yenilenir; <b>düzenleme açıkken yenileme durur</b> (yazın silinmez).
   </p>
 
   {% if tweet_rates %}
   <div class="mt-4 bg-gray-800/60 border border-gray-700 rounded-lg p-4">
-    <div class="flex items-center justify-between mb-2">
+    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
       <span class="font-semibold text-sm">🐦 Otomatik Tweet Oranları <span class="text-gray-400 font-normal">(her N haberden 1 · 1=hepsi)</span></span>
+      <form method="post" action="/admin/toggle-auto-kap-tweet">
+        <button type="submit"
+                class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold border transition
+                       {% if auto_kap_tweet_enabled %}bg-green-700/40 border-green-500 text-green-200 hover:bg-green-700/60{% else %}bg-gray-700/60 border-gray-500 text-gray-300 hover:bg-gray-600{% endif %}">
+          <span>{% if auto_kap_tweet_enabled %}🟢{% else %}⚪{% endif %}</span>
+          Otomatik Tweet: <b>{% if auto_kap_tweet_enabled %}AÇIK{% else %}KAPALI{% endif %}</b>
+          <span class="text-[10px] font-normal opacity-70">(tıkla → {% if auto_kap_tweet_enabled %}kapat{% else %}aç{% endif %})</span>
+        </button>
+      </form>
     </div>
+    {% if not auto_kap_tweet_enabled %}
+    <p class="text-xs text-orange-300 mb-2">⚠️ Otomatik tweet KAPALI — KAP haberleri kendiliğinden atılmaz. Aşağıdan seçtiğin haberleri <b>manuel</b> gönderirsin. (Oranlar sadece AÇIK'ken çalışır.)</p>
+    {% endif %}
     <form method="post" action="/admin/tweet-rates" class="flex flex-wrap items-end gap-4">
       <label class="text-xs text-gray-300">Seans İçi · Pozitif
         <input type="number" name="ici_poz" min="1" max="5" value="{{ tweet_rates.ici_poz }}" class="block mt-1 w-16 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white">

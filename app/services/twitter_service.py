@@ -1078,6 +1078,20 @@ def is_tweets_killed() -> bool:
     return val.lower() in ("true", "1", "yes")
 
 
+def is_auto_kap_tweet_enabled() -> bool:
+    """Otomatik KAP tweet (oran-bazlı, telegram_poller) AÇIK mı?
+
+    True  → KAP haberleri ayarlı oranlarda kendiliğinden tweetlenir.
+    False → Otomatik tweet ATILMAZ; admin Haber Havuzu'ndan MANUEL seçip atar.
+    Ayar yoksa varsayılan AÇIK (mevcut davranış korunur). Manuel tweet (is_manual)
+    bu ayardan ETKİLENMEZ — her zaman gönderilir.
+    """
+    val = _get_setting("AUTO_KAP_TWEET_ENABLED")
+    if not val:
+        return True
+    return val.lower() in ("true", "1", "yes")
+
+
 # Backward-compatible property'ler
 class _DynSetting:
     """Lazy ayar okuyucu — APP_LINK gibi kullanildiginda DB'den guncel degeri doner."""
