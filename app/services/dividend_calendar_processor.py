@@ -64,6 +64,10 @@ _PATTERN_PAYMENT = [
     "hak kullanım", "hak kullanim",
     "dağıtım tarihi", "dagitim tarihi",
     "kupon kesim",
+    # BISTECH Pay Piyasası duyurusu = temettünün BIST sistemine düştüğü ÖDEME bildirimi
+    # (karar/ykk DEĞİL). Bulk redirect kaçarsa bile payment olarak sınıflansın.
+    "pay piyasası alım satım sistemi", "pay piyasasi alim satim sistemi",
+    "bistech pay piyasas", "bıstech pay piyasas",
 ]
 _PATTERN_YKK = [
     "yönetim kurulu kararı", "yonetim kurulu karari",

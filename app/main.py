@@ -17067,7 +17067,17 @@ async def get_temettu_akisi(
             r.ykk_kap_disclosure_id is not None
             and r.ykk_kap_disclosure_id == r.general_assembly_kap_disclosure_id
         )
-        if (r.ykk_kap_disclosure_id or r.ykk_date) and not _ykk_same_as_ga:
+        # YKK disclosure'ı aslında bir ÖDEME bildirimiyse (BISTECH Pay Piyasası / hak
+        # kullanım / ödeme tarihi) YKK kartı (Dağıtım Kararı) ÜRETME — bu bir ödeme
+        # bildirimidir, Ödeme Bildirimleri'ne ait (AKCNS/SISE BISTECH bug'ı).
+        _ykk_title = (
+            (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("title")
+            or getattr(r, "source_title", "") or ""
+        ).lower()
+        _ykk_is_payment = any(s in _ykk_title for s in (
+            "pay piyasas", "bistech", "bıstech", "hak kullan", "ödeme tarihi", "odeme tarihi",
+        ))
+        if (r.ykk_kap_disclosure_id or r.ykk_date) and not _ykk_same_as_ga and not _ykk_is_payment:
             evt_dt = r.ykk_date or (ai_map.get(r.ykk_kap_disclosure_id) or {}).get("published_at") or r.created_at
             cards.append(_build_card(r, "karar", "ykk", r.ykk_kap_disclosure_id, r.ykk_kap_url, evt_dt))
             emitted_any = True
