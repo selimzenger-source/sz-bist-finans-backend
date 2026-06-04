@@ -635,9 +635,21 @@ async def global_exception_handler(request: Request, exc: Exception):
 @limiter.limit("30/minute")
 async def report_client_error(request: Request, payload: dict = Body(default={})):
     """Mobil uygulamadan gelen yükleme/ağ hatalarını admin Telegram'a bildirir.
-    Frontend api client başarısız istekte (5xx/ağ) bunu çağırır → biz haberdar oluruz.
-    notify_backend_error'ın 1 saat dedup'ı spam'i engeller. '📱' prefix = mobil kaynaklı."""
+    Frontend api client başarısız istekte bunu çağırır → biz haberdar oluruz.
+
+    GÜRÜLTÜ FİLTRESİ: SADECE gerçek sunucu hatası (5xx) admin'e iletilir.
+    status 0 = istek İPTAL/ağ kopması ("Aborted") → CLIENT-side (uygulama arkaya
+    alındı, ağ düştü, sunucu kısa süre restart oldu). 4xx = client hatası. Bunlar
+    backend bug'ı DEĞİL → admin'e atılmaz (sessizce kabul edilir). Aksi halde her
+    ağ kopmasında "🚨 Backend Hatası" spam'i oluşuyordu."""
     try:
+        try:
+            _status = int(payload.get("status") or 0)
+        except (ValueError, TypeError):
+            _status = 0
+        if _status < 500:
+            # status 0 (Aborted/ağ) veya 4xx → client tarafı, admin'e iletme
+            return {"ok": True, "skipped": "client_side"}
         from app.services.admin_telegram import notify_backend_error
         await notify_backend_error(
             method=f"📱{(payload.get('method') or '?')}",
