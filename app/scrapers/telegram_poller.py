@@ -1435,6 +1435,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # icin de gecerli (channel ayrimi yok, ticker bazli).
             import time as _time_mod
             _now_ts = _time_mod.time()
+            # Çok-ticker skor birleştirme/pozitif-liste için (gate atlansa bile tanımlı kalsın)
+            _pt_objs: dict = {}
             _is_positive_dup = False
             if ticker and ai_score is not None and ai_score >= 6 and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 _last_push = _last_kap_push_per_ticker.get(ticker.upper())
@@ -1517,6 +1519,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     _summary_uc = (ai_summary or "").upper()
                     _subjects_in_summary = [t for t in all_tickers if t and t.upper() in _summary_uc]
 
+                    # Yazılan kap_disc objeleri (çok-ticker skor birleştirme + per-ticker
+                    # chatbox/push için loop sonrası kullanılır)
+                    _pt_objs: dict = {}
+
                     for _tk in all_tickers:
                         # Affiliate drop: tek-konulu kategori + özette asıl konu belli +
                         # bu ticker özette yoksa → kart açma.
@@ -1598,8 +1604,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 await session.flush()
                             logger.info(
                                 "Telegram → kap_all_disclosures yazildi: %s — '%s' (%s, skor=%s)",
-                                _tk, ka_title[:50], ka_sentiment, ai_score,
+                                _tk, ka_title[:50], _tk_sentiment, _tk_score,
                             )
+                            _pt_objs[_tk] = kap_disc
 
                             # ── FAVORI/WATCHLIST BILDIRIMI + notify-bot raporu ──
                             # Bu hisseyi favorisine/portfoyune ekleyen kullanicilara
@@ -1732,8 +1739,46 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # bildirim gitmez, tweet atilmaz. AI Pozitif Haber sekmesinde gorünmez.
             # NOT: kap_all_disclosures'a yukarida ZATEN yazildi — Tum KAP Haber
             # sekmesinde gorünur (sentiment ne olursa olsun).
+            # ── ÇOK-TICKER: aynı yön → AYNI skor + pozitif liste + temsili ticker ──
+            # Per-ticker analiz LLM gürültüsüyle aynı yöndeki sembollere hafif farklı
+            # skor verebiliyordu (BSOKE 7.1 / BTCIM 6.8). Hepsi AYNI yöndeyse (hepsi
+            # pozitif / hepsi negatif / hepsi nötr) tek ortak skora eşitlenir. ZIT
+            # yönlüyse (FADE+ / TRILC−) dokunulmaz. Ayrıca push/chatbox kapısı (should_notify)
+            # eski tek 'ai_score' yerine pozitif sembollerin varlığına bakar (BSOKE/BTCIM
+            # vakası: Tüm Haber'de 7.1 ama chatbox/push'a gitmiyordu).
+            _pos_tickers = []
+            if _pt_objs:
+                _sc = {tk: float(d.ai_impact_score) for tk, d in _pt_objs.items()
+                       if d.ai_impact_score is not None}
+                if len(_sc) > 1:
+                    _all_pos = all(s >= 6.0 for s in _sc.values())
+                    _all_neg = all(s < 4.1 for s in _sc.values())
+                    _all_neu = all(4.1 <= s < 6.0 for s in _sc.values())
+                    if _all_pos or _all_neg or _all_neu:
+                        _rep = (max(_sc.values()) if _all_pos
+                                else min(_sc.values()) if _all_neg
+                                else round(sum(_sc.values()) / len(_sc), 1))
+                        for _d in _pt_objs.values():
+                            _d.ai_impact_score = _rep
+                            try:
+                                from app.utils.ai_score_label import score_to_label as _s2l_u
+                                _d.ai_sentiment = _s2l_u(_rep) or _d.ai_sentiment
+                            except Exception:
+                                pass
+                        logger.info("Multi-ticker skor birleştirildi (aynı yön): %s -> %.1f",
+                                    list(_sc.items()), _rep)
+                _pos_tickers = [tk for tk, d in _pt_objs.items()
+                                if d.ai_impact_score is not None and float(d.ai_impact_score) >= 6.0]
+                if _pos_tickers:
+                    # Temsili pozitif ticker → telegram_news(chatbox) + genel push bunu kullanır
+                    _rep_tk = max(_pos_tickers, key=lambda k: float(_pt_objs[k].ai_impact_score))
+                    ticker = _rep_tk
+                    ai_score = float(_pt_objs[_rep_tk].ai_impact_score)
+                    if _pt_objs[_rep_tk].ai_summary:
+                        ai_summary = _pt_objs[_rep_tk].ai_summary
+
             # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
-            should_notify = (ai_score is None) or (ai_score >= 6)
+            should_notify = (ai_score is None) or (ai_score >= 6) or bool(_pos_tickers)
 
             if not should_notify:
                 logger.info(
