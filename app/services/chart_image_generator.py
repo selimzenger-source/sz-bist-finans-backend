@@ -102,6 +102,39 @@ def _draw_bg_watermark(img: Image.Image, width: int, height: int):
         logger.warning("Watermark eklenemedi: %s", e)
 
 
+def draw_brand_footer(draw, img, width: int, height: int, *, source: str = None, foot_h: int = 70):
+    """EK-1 tarzı alt şerit: sağda küçük logo + 'Borsa Cebimde | borsacebimde.com',
+    solda opsiyonel kaynak yazısı. Haftalık temettü/KAP görsellerinde ortak footer.
+    """
+    try:
+        fy = height - foot_h
+        draw.rectangle([(0, fy), (width, height)], fill=HEADER_BG)
+        draw.rectangle([(0, fy), (width, fy + 3)], fill=GOLD)
+
+        f_brand = _load_font(24, bold=True)
+        f_src = _load_font(20, bold=False)
+        brand = "Borsa Cebimde | borsacebimde.com"
+        bw = draw.textlength(brand, font=f_brand)
+
+        _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        for ln in ("logo.png", "logo.jpg"):
+            lp = os.path.join(_IMG_DIR, ln)
+            if os.path.exists(lp):
+                try:
+                    logo = Image.open(lp).convert("RGBA").resize((40, 40), Image.LANCZOS)
+                    lx = int(width - 32 - bw - 12 - 40)
+                    img.paste(logo, (lx, fy + (foot_h - 40) // 2), logo)
+                except Exception:
+                    pass
+                break
+
+        draw.text((width - 32 - bw, fy + (foot_h - 28) // 2), brand, font=f_brand, fill=GOLD)
+        if source:
+            draw.text((32, fy + (foot_h - 24) // 2), source, font=f_src, fill=GRAY)
+    except Exception as e:
+        logger.warning("Brand footer eklenemedi: %s", e)
+
+
 def generate_25day_image(
     ipo,
     days_data: list,

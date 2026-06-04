@@ -1373,6 +1373,16 @@ Investor perception bonus (TR retail davranis layer):
 
 ═══ SPECIAL CASES ═══
 
+SKOR-OZET TUTARLILIGI (ZORUNLU — celiskili ozet YASAK):
+Verdigin skor ile ozet tonu CELISEMEZ.
+- Skor >= 6.0 (pozitif) verdiysen, ozet "ek etki beklenmez", "fiyat etkisi
+  yaratmaz", "notr/teknik bir takip gelismesidir", "reaksiyon beklenmez" gibi
+  NOTRLESTIRICI/olumsuz ifade KULLANAMAZ. Haberi hafif olumlu/olumlu betimle.
+- IHALE KAZANIMI sonrasi SOZLESME IMZALANMASI: kazanimin baglayici hale gelmesi/
+  kesinlesmesi = HAFIF OLUMLU teyit (6.0-6.5). Ozette "sozlesmenin imzalanmasiyla
+  kazanim kesinlesti, sinirli da olsa olumlu" gibi yaz — "ek pozitif etki
+  beklenmez" DEME (bu skor 5.0 Notr icin gecerlidir, 6.0+ icin DEGIL).
+
 NEW BUSINESS RELATIONSHIP (Yeni Tedarikci/Musteri/Is Ortakligi) — DUAL SCORING:
 
 KRITIK KURAL: AI Asla 6.0-6.5 araliginda topraklamayin. Yeni is iliskisi
@@ -2370,6 +2380,16 @@ NOTLAR:
             except Exception as _follow_err:
                 logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
 
+        # ─── SKOR-ÖZET TUTARLILIK GUARDRAIL ───
+        # Skor pozitif (>=6.0) ama özet "ek etki beklenmez / teknik takip
+        # gelişmesidir" gibi NÖTRLEŞTİRİCİ cümle içeriyorsa o cümle çıkarılır ve
+        # skor bandına uygun hafif-olumlu kapanış eklenir. (FORTE: ihale→sözleşme
+        # imzası 6.2 puanlandı ama özet "ek pozitif etki beklenmez" diyordu.)
+        # NOT: takip-damper skoru 5.0'a çektiğinde bu guardrail devreye girmez
+        # (>=6.0 şartı), yani nötr bildirimlerin "etki beklenmez" özeti korunur.
+        if score is not None and summary:
+            summary = _enforce_summary_score_consistency(score, summary)
+
         logger.info(
             "AI News Scorer [%s]: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
             provider_used, ticker, score,
@@ -2386,6 +2406,58 @@ NOTLAR:
     except Exception as e:
         logger.error("AI News Scorer: Beklenmeyen hata (%s) — %s", ticker, e)
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
+
+
+# -------------------------------------------------------
+# POST-PROCESSING: Skor-Özet Tutarlılık
+# -------------------------------------------------------
+
+# Pozitif skorla ÇELİŞEN (nötrleştirici) cümle kalıpları — skor>=6.0'da temizlenir
+_CONTRADICTION_PHRASES = (
+    "etki beklenm", "etkisi beklenm", "fiyat etkisi beklenm",
+    "reaksiyon beklenm", "tepki beklenm", "pozitif etki beklenm",
+    "etki yaratmaz", "etki yaratması beklenm", "etki yaratmamak",
+    "pozitif etki yaratm", "ek bir fiyat etkisi", "yeni etki yaratmaz",
+    "teknik bir takip gelism", "teknik takip gelism",
+    "nötr bir gelism", "notr bir gelism",
+)
+
+
+def _enforce_summary_score_consistency(score, summary: str) -> str:
+    """Skor>=6.0 (pozitif) iken özetteki nötrleştirici/çelişkili cümleyi çıkarır.
+
+    'ek pozitif etki beklenmez', 'teknik bir takip gelişmesidir' gibi ifadeler
+    pozitif puanla çelişir; bunlar atılır ve skor bandına uygun hafif-olumlu bir
+    kapanış eklenir. Skor < 6.0 ise (nötr/negatif) özet OLDUĞU GİBİ korunur.
+    """
+    try:
+        if not summary or score is None or float(score) < 6.0:
+            return summary
+        import re as _re
+        sentences = _re.split(r'(?<=[.!?])\s+', summary.strip())
+        kept, dropped = [], False
+        for s in sentences:
+            sl = s.lower()
+            if any(p in sl for p in _CONTRADICTION_PHRASES):
+                dropped = True
+                continue
+            if s.strip():
+                kept.append(s.strip())
+        if not dropped:
+            return summary
+        body = " ".join(kept).strip()
+        if not body and sentences:
+            body = sentences[0].strip()
+        if body and not body.endswith(('.', '!', '?')):
+            body += '.'
+        closing = (
+            "Bu gelişme hisse için olumlu değerlendirilir."
+            if float(score) >= 7.0 else
+            "Sözleşmenin/kararın kesinleşmesi açısından sınırlı da olsa olumlu bir gelişmedir."
+        )
+        return (body + " " + closing).strip()
+    except Exception:
+        return summary
 
 
 # -------------------------------------------------------

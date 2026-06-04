@@ -4255,6 +4255,36 @@ async def admin_trigger_temettu_refresh(
         raise HTTPException(status_code=500, detail=f"Refresh hatasi: {e}")
 
 
+@app.post("/api/v1/admin/trigger-weekly-dividend-calendar")
+@limiter.limit("3/minute")
+async def admin_trigger_weekly_dividend_calendar(
+    request: Request,
+    payload: dict,
+):
+    """Admin: Haftalık Temettü Takvimi akışını manuel tetikle.
+
+    Önümüzdeki haftanın (Pzt–Cuma, BIST işlem günleri) temettü ödemelerini
+    görsele döker. Normalde her Pazar 18:00 TR otomatik çalışır.
+
+    body:
+      admin_password: zorunlu
+      dry_run: true ise tweet ATMAZ, sadece görsel + metin döndürür (önizleme)
+      force:   true ise hisse sayısı < 3 olsa bile devam eder (test)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    dry_run = bool(payload.get("dry_run", False))
+    force = bool(payload.get("force", False))
+    try:
+        from app.services.dividend_weekly_calendar import run_weekly_dividend_calendar
+        r = await run_weekly_dividend_calendar(force=force, dry_run=dry_run)
+        return {"success": True, "result": r}
+    except Exception as e:
+        logger.exception("Manuel haftalık temettü takvimi hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Hata: {e}")
+
+
 @app.post("/api/v1/admin/cleanup-isyatirim-dividends")
 @limiter.limit("3/minute")
 async def admin_cleanup_isyatirim_dividends(

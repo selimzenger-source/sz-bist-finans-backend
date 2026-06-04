@@ -2792,6 +2792,115 @@ async def app_version_save(
     )
 
 
+@router.get("/weekly-kap", response_class=HTMLResponse)
+async def weekly_kap_page(
+    request: Request,
+    success: Optional[str] = None,
+    error: Optional[str] = None,
+):
+    """Haftalık KAP özeti — geçen haftanın olumlu/olumsuz/SPK gelişmeleri (seç & gönder)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.services import weekly_kap_summary as W
+    start, end = W.last_week_range()
+    data = await W.get_week_kap_news(start, end)
+
+    def _view(kind, items):
+        out = []
+        for it in items:
+            v = dict(it)
+            v["key"] = W.item_key(kind, it)
+            out.append(v)
+        return out
+
+    positive = _view("positive", data["positive"])
+    negative = _view("negative", data["negative"])
+    spk = _view("spk", data["spk"])
+    selected = W.default_selection(data)
+    total = len(positive) + len(negative) + len(spk)
+
+    return templates.TemplateResponse("admin/weekly_kap.html", {
+        "request": request,
+        "success": success, "error": error,
+        "label": W.week_label(start, end),
+        "week_start": start.isoformat(), "week_end": end.isoformat(),
+        "positive": positive, "negative": negative, "spk": spk,
+        "selected": selected, "total": total,
+        "max_total": W.MAX_TOTAL_ITEMS,
+    })
+
+
+@router.post("/weekly-kap/preview")
+async def weekly_kap_preview(request: Request):
+    """Seçili haberlerden görsel önizleme (base64) + tweet metni döndürür (AJAX)."""
+    from fastapi.responses import JSONResponse
+    if not get_current_admin(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    form = await request.form()
+    from datetime import date as _date
+    try:
+        start = _date.fromisoformat(form.get("week_start"))
+        end = _date.fromisoformat(form.get("week_end"))
+    except Exception:
+        return JSONResponse({"error": "Geçersiz hafta"}, status_code=400)
+    selected = set(form.getlist("selected"))
+    if not selected:
+        return JSONResponse({"error": "Hiç haber seçilmedi"}, status_code=400)
+
+    from app.services import weekly_kap_summary as W
+    if len(selected) > W.MAX_TOTAL_ITEMS:
+        return JSONResponse({"error": f"En fazla {W.MAX_TOTAL_ITEMS} haber"}, status_code=400)
+
+    r = await W.send_weekly_kap(start, end, selected, dry_run=True)
+    images = r.get("images") or []
+    if not images:
+        return JSONResponse({"error": r.get("reason", "Görsel üretilemedi")}, status_code=500)
+    try:
+        import base64
+        data_uris = []
+        for p in images:
+            with open(p, "rb") as f:
+                data_uris.append("data:image/png;base64," + base64.b64encode(f.read()).decode())
+        return JSONResponse({"images": data_uris, "frames": len(data_uris), "text": r.get("text", "")})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/weekly-kap/send")
+async def weekly_kap_send(request: Request):
+    """Seçili haberlerden tweet at (görsel + metin)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    form = await request.form()
+    from datetime import date as _date
+    try:
+        start = _date.fromisoformat(form.get("week_start"))
+        end = _date.fromisoformat(form.get("week_end"))
+    except Exception:
+        return RedirectResponse(url="/admin/weekly-kap?error=Geçersiz hafta", status_code=303)
+    selected = set(form.getlist("selected"))
+    if not selected:
+        return RedirectResponse(url="/admin/weekly-kap?error=Hiç haber seçilmedi", status_code=303)
+
+    from app.services import weekly_kap_summary as W
+    if len(selected) > W.MAX_TOTAL_ITEMS:
+        return RedirectResponse(
+            url=f"/admin/weekly-kap?error=En fazla {W.MAX_TOTAL_ITEMS} haber seçilebilir",
+            status_code=303)
+
+    r = await W.send_weekly_kap(start, end, selected)
+    if r.get("sent"):
+        return RedirectResponse(
+            url=f"/admin/weekly-kap?success=Tweet gönderildi ({r.get('total')} haber)",
+            status_code=303)
+    return RedirectResponse(
+        url=f"/admin/weekly-kap?error=Gönderilemedi: {r.get('reason','bilinmiyor')}",
+        status_code=303)
+
+
 @router.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(
     request: Request,

@@ -4654,8 +4654,28 @@ def _setup_scheduler_impl():
             from app.scrapers.temettuhisseleri_scraper import scrape_temettuhisseleri
             stats = await scrape_temettuhisseleri()
             logger.info("Temettu refresh tamamlandi: %s", stats)
+            # SAĞLIK: scrape bozuksa admin'e Telegram uyarısı (sessiz başarısızlık olmasın)
+            try:
+                processed = int((stats or {}).get("processed") or 0)
+                errors = int((stats or {}).get("errors") or 0)
+                total = int((stats or {}).get("stocks_total") or 0)
+                denom = max(total, processed + errors, 1)
+                hard = bool((stats or {}).get("error")) or processed == 0
+                degraded = errors > 0 and (errors / denom) >= 0.40
+                if hard or degraded:
+                    from app.services.dividend_weekly_calendar import _alert_scrape_problem
+                    reason = "scrape_error" if (stats or {}).get("error") else (
+                        "processed_zero" if processed == 0 else "degraded")
+                    await _alert_scrape_problem(reason, stats or {}, hard=hard, context="refresh_2h")
+            except Exception as _he:
+                logger.debug("Temettu refresh saglik kontrol hatasi: %s", _he)
         except Exception as e:
             logger.error("Temettu refresh hatasi: %s", e)
+            try:
+                from app.services.dividend_weekly_calendar import _alert_scrape_problem
+                await _alert_scrape_problem("exception", {"error": str(e)[:300]}, hard=True, context="refresh_2h")
+            except Exception:
+                pass
 
     scheduler.add_job(
         _temettu_refresh,
@@ -4668,6 +4688,59 @@ def _setup_scheduler_impl():
         misfire_grace_time=1800,
     )
     logger.info("temettuhisseleri scraper: AKTIF (2 saatte bir)")
+
+    # 7f-ter. HAFTALIK TEMETTÜ TAKVİMİ tweet — her Pazar 18:00 TR (UTC 15:00)
+    # Önümüzdeki haftanın (Pzt–Cuma, BIST işlem günleri) temettü ödemelerini
+    # marka konseptinde görsele döker ve tweet atar. KOŞUL: o hafta >= 3 hisse
+    # temettü ödeyecekse atılır. Tatil günleri takvimde gösterilmez; ödeme
+    # olmayan işlem günleri boş gösterilir. Tweet öncesi veri tazelenir.
+    # Manuel tetikleme: POST /api/v1/admin/trigger-weekly-dividend-calendar
+    async def _weekly_dividend_calendar_job():
+        try:
+            from app.services.dividend_weekly_calendar import run_weekly_dividend_calendar
+            r = await run_weekly_dividend_calendar()
+            logger.info(
+                "Haftalık temettü takvimi job: sent=%s total=%s label=%s reason=%s",
+                r.get("sent"), r.get("total"), r.get("label"), r.get("reason"),
+            )
+        except Exception as e:
+            logger.error("Haftalık temettü takvimi job hatasi: %s", e)
+
+    scheduler.add_job(
+        _weekly_dividend_calendar_job,
+        CronTrigger(day_of_week="sun", hour=15, minute=0),  # UTC 15:00 = TR 18:00 Pazar
+        id="weekly_dividend_calendar",
+        name="Haftalık Temettü Takvimi Tweet (Pazar 18:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Haftalık temettü takvimi tweet: AKTIF (Pazar 18:00 TR)")
+
+    # 7f-quater. HAFTALIK KAP ÖZETİ HAZIRLA — her Cumartesi 15:30 TR (UTC 12:30)
+    # Geçen haftanın (Pzt–Cuma) günlük AI haber bülteninde biriken olumlu/olumsuz/
+    # SPK gelişmelerini derler ve admin'e Telegram bildirimi atar ("hazır, seç & gönder").
+    # YAYIN YAPMAZ — admin panel (/admin/weekly-kap) üzerinden seçilip tweet edilir.
+    async def _weekly_kap_prepare_job():
+        try:
+            from app.services.weekly_kap_summary import prepare_and_notify
+            r = await prepare_and_notify()
+            logger.info("Haftalık KAP özeti hazırlandı: %s", r)
+        except Exception as e:
+            logger.error("Haftalık KAP hazırlama job hatasi: %s", e)
+
+    scheduler.add_job(
+        _weekly_kap_prepare_job,
+        CronTrigger(day_of_week="sat", hour=12, minute=30),  # UTC 12:30 = TR 15:30 Cumartesi
+        id="weekly_kap_prepare",
+        name="Haftalık KAP Özeti Hazırla + Bildir (Cumartesi 15:30 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Haftalık KAP özeti hazırlama: AKTIF (Cumartesi 15:30 TR)")
 
     # 7f-bis. BIST resmi tedbirli CSV sync — her 30 dakikada bir
     # Kaynak: https://www.borsaistanbul.com/erd/menkul_tedbir_listesi.csv

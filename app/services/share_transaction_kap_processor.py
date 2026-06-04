@@ -212,6 +212,235 @@ async def _fetch_attachment_text(kap_url: Optional[str]) -> str:
         return ""
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  MKK "Özel Durumlar Tebliği 12-(4)" TOPLU pay sahipliği bildirimi
+# ────────────────────────────────────────────────────────────────────────────
+#  Bu bildirim TEK disclosure içinde BİRDEN FAZLA şirketin (issuer) pay
+#  sahipliği değişimini tablo halinde verir. Detay sadece ek PDF'tedir.
+#  Tablo: Ortak (taraf) | İhraççı Şirket (=ticker) | T-1 nominal | T nominal | %.
+#  Yön nominal değişiminden çıkar (T > T-1 → alıcı, küçük → satıcı).
+#
+#  Neden ayrı dal:
+#   - Tekil "Pay Alım Satım Bildirimi" akışı tek ticker varsayar.
+#   - Buradaki bazı işlemler SADECE bu toplu bildirimde geçer (tekil bildirim
+#     yapılmamış) → atlanırsa KAÇIRILIR.
+#   - Bazıları tekil bildirimle de gelir → DUPLICATE olmamalı (dedup şart).
+#   - Haber tipi STANDART kalır: feed skoru override edilmez, sadece Pay Alım
+#     Satım listesine yapısal kayıt düşülür.
+# ════════════════════════════════════════════════════════════════════════════
+
+_MKK_124_SIGNALS = (
+    "12-(4)", "12 - (4)", "12-(4).", "ozel durumlar tebligi", "özel durumlar tebliği",
+)
+
+
+def is_mkk_share_disclosure(title: str, body: str = "") -> bool:
+    """MKK Özel Durumlar Tebliği 12-(4) toplu pay sahipliği bildirimi mi?
+
+    Başlık/özet: "...Özel Durumlar Tebliği'nin 12-(4). maddesi gereğince yapılan
+    açıklama". MKK tarafından yayınlanır, detay ekte tablo olarak gelir.
+    """
+    blob = lower_tr((title or "") + " " + (body or ""))
+    has_124 = ("12-(4)" in blob) or ("12 - (4)" in blob) or ("12-(4)." in blob)
+    has_teblig = "ozel durumlar tebligi" in blob or "özel durumlar tebliği" in blob
+    return has_124 and has_teblig
+
+
+def _extract_related_tickers(text: str) -> list[str]:
+    """Body/PDF metninden 'İlgili Şirketler [CELHA, GUNDG, ...]' ticker listesini çıkar."""
+    if not text:
+        return []
+    out: list[str] = []
+    for m in re.finditer(r"\[([A-Z0-9]{2,6}(?:\s*,\s*[A-Z0-9]{2,6})*)\]", text):
+        for tk in m.group(1).split(","):
+            tk = tk.strip().upper()
+            if 2 <= len(tk) <= 6 and tk.isalnum() and tk not in out:
+                out.append(tk)
+    return out
+
+
+_MKK_PROMPT = """Asagida bir MKK 'Ozel Durumlar Tebligi 12-(4)' pay sahipligi degisim tablosunun metni var.
+Her satir: Ortagin Adi/Unvani (taraf) | Ihracci Sirket (issuer) | T-1 gunu nominal (TL) | T gunu nominal (TL) | T-1 pay % | T pay %.
+
+Ilgili ticker listesi (issuer sirket adini buna eslestir): {tickers}
+
+Her ISLEM icin (T-1 nominal != T nominal olanlar) JSON satiri uret. Nominal DEGISMEYEN
+(sadece sermaye artisi/sulanma kaynakli pay% degisimi) satirlari ATLA.
+
+Donen JSON: {{"transactions": [
+  {{"ticker": "<issuer ticker, SADECE listeden>", "party_name": "<ortak/taraf adi>",
+    "transaction_type": "alici" | "satici",
+    "transaction_date": "YYYY-MM-DD",
+    "t1_nominal": <sayi>, "t_nominal": <sayi>,
+    "nominal_lot": <abs(t_nominal - t1_nominal) tamsayi>,
+    "pay_orani_pct": <T gunu pay %>}}
+]}}
+
+KURALLAR:
+- transaction_type: T nominal > T-1 nominal ise "alici", kucukse "satici".
+- issuer ticker'i SADECE verilen listeden sec. Eslestiremezsen o satiri ATLA.
+- Taraf (ortak) adini ticker'a karistirma; ticker = IHRACCI sirket.
+- Nominal ayni ise atla. SADECE JSON dondur.
+
+TABLO METNI:
+{body}
+"""
+
+
+async def _ai_parse_mkk_table(text: str, tickers: list[str]) -> list[dict[str, Any]]:
+    """MKK 12(4) tablosunu AI ile satir satir yapilandir."""
+    key = _get_gemini_key()
+    if not key or not text:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=_AI_TIMEOUT + 15) as c:
+            r = await c.post(
+                _GEMINI_URL,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={
+                    "model": _GEMINI_MODEL,
+                    "messages": [
+                        {"role": "system", "content": "Yapilandirilmis JSON dondur. SADECE JSON."},
+                        {"role": "user", "content": _MKK_PROMPT.format(tickers=tickers, body=(text or "")[:6500])},
+                    ],
+                    "temperature": 0.1, "max_tokens": 8192, "reasoning_effort": "none",
+                },
+            )
+            if r.status_code != 200:
+                logger.warning("MKK 12(4) AI status %s", r.status_code)
+                return []
+            txt = r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            p = _parse_json(txt)
+            if not p:
+                return []
+            rows = p.get("transactions") if isinstance(p, dict) else None
+            return rows if isinstance(rows, list) else []
+    except Exception as e:
+        logger.warning("MKK 12(4) AI parse hata: %s", e)
+        return []
+
+
+def _norm_party(s: Optional[str]) -> str:
+    """Taraf adini dedup icin normalize: harf/rakam disini at, kucult, ilk 14 kar."""
+    if not s:
+        return ""
+    return re.sub(r"[^a-z0-9]", "", lower_tr(s))[:14]
+
+
+async def process_mkk_share_batch(
+    db: AsyncSession, *, disclosure_id: int, title: str, body: Optional[str],
+    kap_url: Optional[str], published_at: Optional[datetime],
+) -> int:
+    """MKK 12(4) toplu bildirimini parse et → Pay Alım Satım'a dedup'li kaydet.
+
+    Döner: eklenen yeni kayıt sayısı.
+    """
+    from datetime import timedelta
+
+    # ── Bu disclosure daha önce işlendi mi? (tüm satırlar aynı kap_disclosure_id) ──
+    if disclosure_id:
+        seen = await db.execute(
+            select(ShareTransactionDetail.id)
+            .where(ShareTransactionDetail.kap_disclosure_id == disclosure_id)
+            .where(ShareTransactionDetail.source == "kap_mkk_12_4")
+            .limit(1)
+        )
+        if seen.scalar_one_or_none():
+            logger.info("MKK 12(4) zaten işlenmiş (disclosure=%s), skip", disclosure_id)
+            return 0
+
+    # ── Tablo ekte: ek PDF metnini çek ──
+    text = await _fetch_attachment_text(kap_url)
+    if not text or len(text) < 100:
+        # Bazı durumlarda body'nin kendisi tabloyu içerebilir
+        text = (body or "") + "\n" + (text or "")
+    if len(text.strip()) < 100:
+        logger.info("MKK 12(4): tablo metni yok (%s)", kap_url)
+        return 0
+
+    tickers = _extract_related_tickers(text) or _extract_related_tickers(body or "")
+    rows = await _ai_parse_mkk_table(text, tickers)
+    if not rows:
+        logger.info("MKK 12(4): AI satır çıkaramadı (%s)", kap_url)
+        return 0
+
+    added = 0
+    for row in rows:
+        try:
+            tk = (row.get("ticker") or "").strip().upper()
+            if not tk or (tickers and tk not in tickers):
+                continue
+            ttype = row.get("transaction_type")
+            if ttype not in ("alici", "satici"):
+                continue
+            # transaction_date
+            tx_date = None
+            ds = row.get("transaction_date")
+            if isinstance(ds, str):
+                try:
+                    tx_date = date.fromisoformat(ds)
+                except ValueError:
+                    tx_date = None
+            if tx_date is None:
+                tx_date = published_at.date() if published_at else date.today()
+            party = (row.get("party_name") or "?")[:255]
+            nom = row.get("nominal_lot")
+            nom = int(nom) if isinstance(nom, (int, float)) else None
+            # nominal değişimi yoksa (işlem yok) atla
+            if nom is not None and nom == 0:
+                continue
+            pay_pct = row.get("pay_orani_pct")
+            pay_pct = float(pay_pct) if isinstance(pay_pct, (int, float)) else None
+
+            # ── DEDUP ── aynı ticker + aynı taraf-prefix + tarih(±3g) varsa atla
+            lo = tx_date - timedelta(days=3)
+            hi = tx_date + timedelta(days=3)
+            existing = await db.execute(
+                select(ShareTransactionDetail)
+                .where(ShareTransactionDetail.ticker == tk)
+                .where(ShareTransactionDetail.transaction_date >= lo)
+                .where(ShareTransactionDetail.transaction_date <= hi)
+            )
+            dup = False
+            np = _norm_party(party)
+            for ex in existing.scalars():
+                if np and _norm_party(ex.party_name) and (
+                    np[:8] == _norm_party(ex.party_name)[:8]
+                ):
+                    dup = True
+                    break
+            if dup:
+                logger.info("MKK 12(4) dedup skip: %s / %s / %s", tk, party[:24], tx_date)
+                continue
+
+            db.add(ShareTransactionDetail(
+                ticker=tk,
+                company_name=None,
+                transaction_date=tx_date,
+                transaction_type=ttype,
+                party_name=party,
+                party_role=None,
+                price_low=None, price_high=None,
+                nominal_lot=nom,
+                oy_hakki_pct=None, oy_hakki_change_pct=None,
+                pay_orani_pct=pay_pct, pay_orani_change_pct=None,
+                kap_disclosure_id=disclosure_id,
+                kap_url=kap_url,
+                source="kap_mkk_12_4",
+                raw_excerpt=f"MKK 12(4) toplu bildirim · {ttype} · {nom} TL nominal",
+            ))
+            added += 1
+            logger.info("MKK 12(4) yeni: %s / %s / %s / %s TL", tk, ttype, party[:24], nom)
+        except Exception as _re:
+            logger.debug("MKK 12(4) satır hata: %s", _re)
+            continue
+
+    if added:
+        await db.flush()
+    logger.info("MKK 12(4) tamam (%s): %d yeni, %d satır", kap_url, added, len(rows))
+    return added
+
+
 async def process_kap_disclosure(
     db: AsyncSession, *, disclosure_id: int, ticker: str, company_name: Optional[str],
     title: str, body: Optional[str], kap_url: Optional[str], published_at: Optional[datetime],

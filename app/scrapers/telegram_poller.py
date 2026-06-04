@@ -620,6 +620,7 @@ async def _route_to_calendars(
     )
     from app.services.share_transaction_kap_processor import (
         is_share_transaction, process_kap_disclosure as shtx_process,
+        is_mkk_share_disclosure, process_mkk_share_batch,
     )
     from app.services.kap_category_processors import (
         is_block_trade, process_block_trade,
@@ -773,9 +774,26 @@ async def _route_to_calendars(
         except Exception as e:
             await _router_err("block_trade", e, ticker)
 
-    # share_transaction sadece block_trade VE buyback DEĞİL ise çalışır
+    # ── MKK "Özel Durumlar Tebliği 12-(4)" TOPLU pay sahipliği bildirimi ──
+    # Tek disclosure'da çok şirket; detay ekte tablo. Tekil pay alım satım
+    # akışından AYRI işlenir (multi-ticker + dedup). Haber tipi STANDART kalır
+    # (feed skoru override edilmez). Bazı işlemler SADECE burada → kaçırmamak için.
+    is_mkk = is_mkk_share_disclosure(title or "", body or "")
+    if is_mkk:
+        try:
+            async with session.begin_nested():
+                _n = await process_mkk_share_batch(
+                    session, disclosure_id=disclosure_id, title=title or "",
+                    body=body, kap_url=kap_url, published_at=published_at,
+                )
+                if _n:
+                    logger.info("Router→MKK 12(4) %s: %d yeni pay alım satım", ticker, _n)
+        except Exception as e:
+            await _router_err("mkk_share_batch", e, ticker)
+
+    # share_transaction sadece block_trade VE buyback VE MKK DEĞİL ise çalışır
     # ("geri alın" share_transaction VE buyback pattern'ında ortak → çakışma)
-    if not is_bt and not is_bb and is_share_transaction(title, body or ""):
+    if not is_bt and not is_bb and not is_mkk and is_share_transaction(title, body or ""):
         # Multi-symbol bulk duyurularda ardışık fetch KAP rate limit'e takılır.
         # Her fetch öncesi 1.5sn bekle (KAP standart rate limit toleransı).
         try:
