@@ -10339,6 +10339,15 @@ async def get_daily_news_summary(
                 grouped[sd] = {"summary_date": sd, "positive": [], "negative": [], "spk_bulten": []}
                 seen_ids_per_day[sd] = set()
 
+            # Bülten numarasını yakala (örn "2026/34") → frontend başlığı:
+            # "SPK 2026/34 Kararları"
+            try:
+                _blt_m = _re.search(r"(\d{4}\s*/\s*\d{1,3})", st.text)
+                if _blt_m and not grouped[sd].get("spk_bulten_no"):
+                    grouped[sd]["spk_bulten_no"] = _blt_m.group(1).replace(" ", "")
+            except Exception:
+                pass
+
             current_section = None
             tweet_hhmm = tw_tr.strftime("%H:%M")
             # Satır satır parse
@@ -10362,7 +10371,9 @@ async def get_daily_news_summary(
                     _gen = line.lstrip("•▪▫◦·*– -").strip()
                     if (line.lstrip()[:1] in ("•", "▪", "▫", "◦", "·")
                             and len(_gen) >= 40 and _gen != (current_section or "")):
-                        ticker = "SPK"
+                        # Piyasa-geneli (hissesiz) SPK kararı → "Genel" etiketi
+                        # (kullanıcı isteği: her satırda "SPK" yazmasın)
+                        ticker = "Genel"
                         spk_desc = _gen
                     else:
                         continue
@@ -10476,7 +10487,8 @@ async def get_daily_news_summary(
         sd = sd_date.isoformat()
 
         if sd not in grouped:
-            grouped[sd] = {"summary_date": sd, "positive": [], "negative": [], "spk_bulten": []}
+            grouped[sd] = {"summary_date": sd, "positive": [], "negative": [], "spk_bulten": [],
+                           "dividends": [], "capital_increases": [], "spk_bulten_no": None}
             seen_ids_per_day[sd] = set()
 
         if r.id in seen_ids_per_day[sd]:
@@ -10507,16 +10519,92 @@ async def get_daily_news_summary(
         else:
             grouped[sd]["negative"].append(item)
 
+    # ── BUGÜNÜN TEMETTÜ DAĞITIMLARI + SERMAYE ARTIRIMLARI ──────────────
+    # Günlük bültenin EN ÜSTÜNDE gösterilir. Sadece günlük (haftalık değil).
+    # Temettü: dividend_history.payment_date == o özet günü.
+    # Sermaye artırımı: capital_increases.distribution_date == o özet günü.
+    from sqlalchemy import text as _sa_txt2
+
+    def _ensure_group(_sd: str) -> dict:
+        if _sd not in grouped:
+            grouped[_sd] = {"summary_date": _sd, "positive": [], "negative": [],
+                            "spk_bulten": [], "dividends": [], "capital_increases": [],
+                            "spk_bulten_no": None}
+            seen_ids_per_day[_sd] = set()
+        # Eski grupta yeni anahtar yoksa ekle (geri uyum)
+        grouped[_sd].setdefault("dividends", [])
+        grouped[_sd].setdefault("capital_increases", [])
+        grouped[_sd].setdefault("spk_bulten_no", None)
+        return grouped[_sd]
+
+    _win_start = (now_tr.date() - timedelta(days=days + 1))
+    _win_end = now_tr.date()
+    try:
+        _div_res = await db.execute(_sa_txt2("""
+            SELECT payment_date, UPPER(ticker) AS ticker,
+                   MAX(gross_dividend_per_share) AS gross
+            FROM dividend_history
+            WHERE payment_date BETWEEN :s AND :e
+              AND gross_dividend_per_share IS NOT NULL
+              AND gross_dividend_per_share > 0
+            GROUP BY payment_date, UPPER(ticker)
+            ORDER BY payment_date DESC, ticker
+        """), {"s": _win_start, "e": _win_end})
+        for _pd, _tk, _gross in _div_res.all():
+            if not _pd or not _tk:
+                continue
+            _g = _ensure_group(_pd.isoformat())
+            _g["dividends"].append({
+                "ticker": _tk,
+                "gross": float(_gross) if _gross is not None else None,
+            })
+    except Exception as _de:
+        logger.warning("daily-summary temettü ekleme hatası: %s", _de)
+
+    try:
+        _ci_res = await db.execute(_sa_txt2("""
+            SELECT distribution_date, UPPER(ticker) AS ticker, company_name,
+                   type, percentage, bedelli_pct, bedelsiz_pct
+            FROM capital_increases
+            WHERE distribution_date BETWEEN :s AND :e
+            ORDER BY distribution_date DESC, ticker
+        """), {"s": _win_start, "e": _win_end})
+        for _row in _ci_res.all():
+            _dd, _tk, _cn, _typ, _pct, _bpct, _bzpct = _row
+            if not _dd or not _tk:
+                continue
+            _g = _ensure_group(_dd.isoformat())
+            # Yüzde: bedelli/bedelsiz ayrı varsa onları, yoksa toplam percentage
+            _disp_pct = _pct
+            if _bpct or _bzpct:
+                _disp_pct = (float(_bpct or 0) + float(_bzpct or 0)) or _pct
+            _g["capital_increases"].append({
+                "ticker": _tk,
+                "company_name": _cn,
+                "type": _typ,  # "bedelli" | "bedelsiz"
+                "percentage": float(_disp_pct) if _disp_pct is not None else None,
+                "bedelli_pct": float(_bpct) if _bpct is not None else None,
+                "bedelsiz_pct": float(_bzpct) if _bzpct is not None else None,
+            })
+    except Exception as _ce:
+        logger.warning("daily-summary sermaye artırımı ekleme hatası: %s", _ce)
+
     # Son N işlem günü ile sınırla (takvim günü değil, iş günü)
     days_list = sorted(grouped.values(), key=lambda x: x["summary_date"], reverse=True)
 
     # Bölüm bazlı limit
     MAX_PER_SECTION = 25
     for g in days_list:
+        g.setdefault("dividends", [])
+        g.setdefault("capital_increases", [])
+        g.setdefault("spk_bulten_no", None)
         g["positive"] = g["positive"][:MAX_PER_SECTION]
         g["negative"] = g["negative"][:MAX_PER_SECTION]
         g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
-        g["total"] = len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
+        g["dividends"] = g["dividends"][:60]
+        g["capital_increases"] = g["capital_increases"][:30]
+        g["total"] = (len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
+                      + len(g["dividends"]) + len(g["capital_increases"]))
 
     # HENÜZ YAYINLANMAMIŞ ÖZETLERİ ÇIKAR:
     # Bir özet yayınlanmış sayılır = o günün 07:00 TR'i geçilmiş olmalı.
