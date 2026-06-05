@@ -42,8 +42,13 @@ def _parse_ticker_and_company(cell_text: str) -> tuple[Optional[str], Optional[s
     if not cell_text:
         return None, None
     cell_text = cell_text.strip()
-    # İlk 6 karakter içinde BIST kodu ara (büyük harf serisi)
-    m = re.match(r"^([A-Z][A-Z0-9]{2,5})([A-Z][a-zA-ZçğıöşüÇĞİÖŞÜ].*)$", cell_text)
+    # İlk 6 karakter içinde BIST kodu ara (büyük harf serisi).
+    # ŞİRKET ADI grubunun ilk harfi Türkçe büyük harf de olabilir (İhlas, Şok,
+    # Ülker, Çimsa...). Önceden grup-2 yalnız ASCII [A-Z] ile başlayabiliyordu;
+    # "IHLASİhlas Holding A.Ş." gibi İ ile başlayan adlarda regex ticker'dan
+    # son harfi (S) çalıp şirket adının başına koyuyordu → "IHLA" + "Sİhlas...".
+    # ÇĞİÖŞÜ eklenince doğru bölünür: "IHLAS" + "İhlas Holding A.Ş.".
+    m = re.match(r"^([A-Z][A-Z0-9]{2,5})([A-ZÇĞİÖŞÜ][a-zA-ZçğıöşüÇĞİÖŞÜ].*)$", cell_text)
     if m:
         return m.group(1), m.group(2).strip()
     # Tüm cell zaten BIST kodu olabilir
