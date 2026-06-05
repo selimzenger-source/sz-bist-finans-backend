@@ -3058,21 +3058,59 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 ticker, old,
             )
 
-    # ─── KURUMSAL YONETIM DERECELENDIRME — HARD CAP (max 6.5) ──────
+    # ─── KURUMSAL YONETIM DERECELENDIRME — VARSAYILAN NOTR ──────
     # Bu notlar (SAHA, JCR-Eurasia vs.) sirketin yatirimci iliskileri/raporlama
-    # kalitesini olcer — fiyat etkisi minimaldir. AI bunlara 7.0+ verirse fazla
-    # yuksek olur. Maximum Hafif Olumlu (6.4) seviyesine cek.
+    # kalitesini olcer — fiyat etkisi YOKTUR. Yuksek not / korunan not / donemsel
+    # revizyon RUTINDIR, fiyati hareket ettirmez. Kullanici istegi:
+    #   - Ciddi DUSUS/bozulma yoksa ve ciddi YUKSELIS yoksa  → NOTR (pozitif olmasin)
+    #   - Cok ciddi bozulma (not dusurme/iptal/negatif gorunum) → NEGATIF
+    #   - Sadece anlamli/ciddi terfi (kategori yukseltme) → en fazla Hafif Olumlu
     is_governance_rating = (
         ("kurumsal yonetim" in content_lower or "kurumsal yönetim" in content_lower)
         and ("derecelendirme" in content_lower or "rating" in content_lower or "not" in content_lower)
     )
-    if is_governance_rating and score > 6.4:
-        logger.info(
-            "AI News Scorer [GOVERNANCE-CAP] %s: %.1f -> 6.4 "
-            "(kurumsal yonetim derecelendirme max Hafif Olumlu)",
-            ticker, score,
-        )
-        score = 6.4
+    if is_governance_rating:
+        gov_downgrade = any(kw in content_lower for kw in [
+            "not düşür", "not dusur", "notu düşür", "notu dusur",
+            "derecelendirme düşür", "derecelendirme dusur",
+            "indirildi", "geri çekildi", "geri cekildi",
+            "iptal edildi", "askıya alındı", "askiya alindi",
+            "negatif görünüm", "negatif gorunum", "görünüm negatif", "gorunum negatif",
+            "olumsuz görünüm", "olumsuz gorunum",
+        ])
+        gov_upgrade = any(kw in content_lower for kw in [
+            "kademe yüksel", "kademe yuksel", "kademe terfi",
+            "kategori yüksel", "kategori yuksel",
+            "ilk kez derecelendir", "ilk defa derecelendir",
+            "terfi ettir", "terfi etti",
+        ])
+        if gov_downgrade:
+            # Ciddi bozulma → NEGATIF (floor 3.0)
+            if score > 3.5:
+                logger.info(
+                    "AI News Scorer [GOVERNANCE-DOWNGRADE] %s: %.1f -> 3.0 "
+                    "(kurumsal yonetim notu dusurme/iptal/negatif gorunum)",
+                    ticker, score,
+                )
+                score = 3.0
+        elif gov_upgrade:
+            # Ciddi terfi → en fazla Hafif Olumlu (cap 6.4)
+            if score > 6.4:
+                logger.info(
+                    "AI News Scorer [GOVERNANCE-UPGRADE-CAP] %s: %.1f -> 6.4",
+                    ticker, score,
+                )
+                score = 6.4
+        else:
+            # Rutin: yuksek not / korunan not / donemsel revizyon → ZORLA NOTR (5.0)
+            if not (4.6 <= score <= 5.4):
+                old_score = score
+                score = 5.0
+                logger.info(
+                    "AI News Scorer [GOVERNANCE-NEUTRAL] %s: %.1f -> 5.0 "
+                    "(kurumsal yonetim derecelendirme rutin — ciddi degisim yok = Notr)",
+                    ticker, old_score,
+                )
 
     # ─── KREDI DERECELENDIRME — NOTR'a CEK (çok büyük artırım yoksa) ──────
     # Fitch, Moody's, S&P, JCR gibi kuruluşların kredi notu açıklamaları
