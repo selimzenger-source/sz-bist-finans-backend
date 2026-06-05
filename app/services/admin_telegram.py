@@ -258,6 +258,125 @@ async def send_kap_positive_to_admin_group(
 
 # Anti-spam icin son gonderim zamanlari (ticker+score bazli)
 _kap_positive_last_send: dict[str, float] = {}
+_kap_negative_last_send: dict[str, float] = {}
+
+
+def _score_to_tier_neg(score: float) -> tuple[str, str]:
+    """AI skoru -> (etiket, emoji) negatif kategoriler icin."""
+    if score <= 2.0:
+        return ("Çok Olumsuz", "🔴")
+    if score <= 3.5:
+        return ("Olumsuz", "🔴")
+    return ("Hafif Olumsuz", "🟠")
+
+
+def _first_sentence(text: str, max_len: int = 260) -> str:
+    """AI ozetinin ILK cumlesini dondurur. Kisaltma/ondalik (A.Ş., 3.000)
+    noktalarinda yanlis kesmemek icin cumle sonunu (.!?) 40. karakterden
+    sonra arar; bulamazsa max_len'de kirpar."""
+    if not text:
+        return ""
+    import re as _re
+    t = " ".join(text.strip().split())
+    m = _re.search(r"[.!?](\s|$)", t[40:]) if len(t) > 40 else None
+    if m:
+        s = t[: 40 + m.start() + 1].strip()
+    else:
+        s = t
+    if len(s) > max_len:
+        s = s[: max_len - 1].rstrip() + "…"
+    return s
+
+
+async def send_kap_negative_to_admin_group(
+    ticker: str,
+    title: Optional[str],
+    ai_score: float,
+    ai_summary: Optional[str],
+    kap_url: Optional[str],
+    message_type: str,
+) -> bool:
+    """KAP NEGATIF bildirimini admin kanalina gonder (haber havuzuna dustu).
+
+    Sadece ai_score <= 4.0 (havuzdaki negatif kart). Pozitiflerle AYNI kanala
+    gider (KAP_POSITIVE_CHAT_ID / ADMIN fallback) — kullanici pozitiflerden
+    haberi oluyordu, negatiflerden de olsun diye.
+
+    Format:
+        🔴 Negatif Haber (Havuzda)
+
+        TICKER
+        📁 {baslik}
+
+        📊 AI Puanı: 3.8/10
+        🔴 Olumsuz
+
+        {AI ozetinin ilk cumlesi}
+
+        🔗 KAP: https://...
+    """
+    if ai_score is None or ai_score > 4.0:
+        return False
+
+    if message_type == "seans_ici_negatif":
+        header = "🔴 Seans İçi Negatif Haber (Havuzda)"
+    elif message_type in ("borsa_kapali", "seans_disi_negatif"):
+        header = "🔴 Seans Dışı Negatif Haber (Havuzda)"
+    else:
+        header = "🔴 Negatif Haber (Havuzda)"
+
+    tier_label, tier_emoji = _score_to_tier_neg(ai_score)
+
+    parts = [header, "", ticker.upper()]
+    if title and title.strip():
+        parts.append(f"📁 {title.strip()}")
+    parts += ["", f"📊 AI Puanı: {ai_score:.1f}/10", f"{tier_emoji} {tier_label}", ""]
+
+    first = _first_sentence(ai_summary or "")
+    if first:
+        parts.append(first)
+        parts.append("")
+
+    if kap_url:
+        parts.append(f"🔗 KAP: {kap_url}")
+
+    text = "\n".join(parts)
+
+    # Anti-spam: ayni ticker+score icin son 2 dk
+    _dedup_key = f"kap_negative_{ticker.upper()}_{int(ai_score)}"
+    _now = time.monotonic()
+    if _now - _kap_negative_last_send.get(_dedup_key, 0) < 120:
+        logger.info("Admin KAP negatif: %s — son 2 dk icinde gonderilmis, atlandi", ticker)
+        return False
+    _kap_negative_last_send[_dedup_key] = _now
+
+    bot_token, chat_id = _get_kap_positive_config()  # pozitiflerle AYNI kanal
+    if not bot_token or not chat_id:
+        logger.debug("KAP negatif Telegram yapilandirilmamis, atlaniyor")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": False,
+            })
+            if resp.status_code != 200:
+                logger.warning(
+                    "Admin KAP negatif gonderilemedi: %s — %s",
+                    resp.status_code, resp.text[:200],
+                )
+                return False
+            logger.info(
+                "Admin KAP negatif gonderildi: %s — %.1f/10 (%s)",
+                ticker, ai_score, tier_label,
+            )
+            return True
+    except Exception as e:
+        logger.error("Admin KAP negatif hata: %s — %s", ticker, e)
+        return False
 
 
 async def notify_ipo_status_change(

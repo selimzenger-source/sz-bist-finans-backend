@@ -1756,6 +1756,28 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                     logger.warning(
                                         "Admin grup pozitif gonderim hata (%s): %s", _tk, _adm_err,
                                     )
+
+                            # ── ADMIN: NEGATIF KAP BILDIRIMI (havuza dustu) ──
+                            # Negatiflerden de haberin olmasi icin (pozitiflerle AYNI
+                            # kanal). ai_score <= 4.0 = havuzdaki negatif kart.
+                            if ai_score is not None and ai_score <= 4.0:
+                                try:
+                                    from app.services.admin_telegram import send_kap_negative_to_admin_group
+                                    import asyncio as _asyncio3
+                                    _asyncio3.create_task(
+                                        send_kap_negative_to_admin_group(
+                                            ticker=_tk,
+                                            title=ka_title,
+                                            ai_score=ai_score,
+                                            ai_summary=ai_summary,
+                                            kap_url=kap_url,
+                                            message_type=message_type,
+                                        )
+                                    )
+                                except Exception as _admn_err:
+                                    logger.warning(
+                                        "Admin grup negatif gonderim hata (%s): %s", _tk, _admn_err,
+                                    )
                         except Exception as _flush_err:
                             logger.warning(
                                 "kap_all_disclosures yazma hatasi: %s — %s",
