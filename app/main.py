@@ -10466,6 +10466,10 @@ async def get_daily_news_summary(
         # # karakteri opsiyonel, satır başında bullet ve/veya boşluk olabilir
         BULLET_RE = _re.compile(r"^\s*[•▪▫◦·*\-]?\s*#?([A-ZÇŞĞÜÖİ]{3,6})\s*[-–—]\s*(.+)$")
 
+        # Piyasa-geneli (hissesiz) SPK kararlari icin gun bazli sayac:
+        # "Genel" yerine "Karar 1", "Karar 2", ... seklinde numaralandirilir.
+        _spk_gen_counter: dict[str, int] = {}
+
         for st in spk_tweets:
             if not st.text:
                 continue
@@ -10512,9 +10516,10 @@ async def get_daily_news_summary(
                     _gen = line.lstrip("•▪▫◦·*– -").strip()
                     if (line.lstrip()[:1] in ("•", "▪", "▫", "◦", "·")
                             and len(_gen) >= 40 and _gen != (current_section or "")):
-                        # Piyasa-geneli (hissesiz) SPK kararı → "Genel" etiketi
-                        # (kullanıcı isteği: her satırda "SPK" yazmasın)
-                        ticker = "Genel"
+                        # Piyasa-geneli (hissesiz) SPK kararı → "Karar 1/2/3..."
+                        # (kullanıcı isteği: "Genel" yerine sıralı numara)
+                        _spk_gen_counter[sd] = _spk_gen_counter.get(sd, 0) + 1
+                        ticker = f"Karar {_spk_gen_counter[sd]}"
                         spk_desc = _gen
                     else:
                         continue
@@ -10670,11 +10675,13 @@ async def get_daily_news_summary(
         if _sd not in grouped:
             grouped[_sd] = {"summary_date": _sd, "positive": [], "negative": [],
                             "spk_bulten": [], "dividends": [], "capital_increases": [],
-                            "spk_bulten_no": None}
+                            "tedbir_added": [], "tedbir_ended": [], "spk_bulten_no": None}
             seen_ids_per_day[_sd] = set()
         # Eski grupta yeni anahtar yoksa ekle (geri uyum)
         grouped[_sd].setdefault("dividends", [])
         grouped[_sd].setdefault("capital_increases", [])
+        grouped[_sd].setdefault("tedbir_added", [])
+        grouped[_sd].setdefault("tedbir_ended", [])
         grouped[_sd].setdefault("spk_bulten_no", None)
         return grouped[_sd]
 
@@ -10730,6 +10737,65 @@ async def get_daily_news_summary(
     except Exception as _ce:
         logger.warning("daily-summary sermaye artırımı ekleme hatası: %s", _ce)
 
+    # ── TEDBİR ALAN / TEDBİRİ BİTEN HİSSELER (VBTS — cautious_stocks) ────
+    # Tedbir ALAN: start_date == o özet günü (o gün tedbire alındı)
+    # Tedbiri BİTEN: end_date == o özet günü (o gün tedbiri bitiyor)
+    _TEDBIR_LABELS = {
+        "ACS": "Açığa Satış Yasağı", "KRD": "Kredili İşlem Yasağı",
+        "BRT": "Brüt Takas", "EMR": "Emir İptali/Miktar Azaltımı Kısıtı",
+        "PEM": "Piyasa Emri Kısıtı", "VEY": "Veri Yayını Kısıtı",
+        "TEK": "Tek Fiyat", "SUP": "Sürekli İşlem Yasağı", "VOL": "Volatilite Tedbiri",
+    }
+
+    def _tedbir_labels(tags_str):
+        codes = [c.strip().upper() for c in (tags_str or "").split(",") if c.strip()]
+        seen, out = set(), []
+        for c in codes:
+            if c in seen:
+                continue
+            seen.add(c)
+            out.append({"code": c, "label": _TEDBIR_LABELS.get(c, c)})
+        return out
+
+    try:
+        _ta_res = await db.execute(_sa_txt2("""
+            SELECT UPPER(ticker) AS ticker, tags, start_date, end_date
+            FROM cautious_stocks
+            WHERE start_date BETWEEN :s AND :e
+            ORDER BY start_date DESC, ticker
+        """), {"s": _win_start, "e": _win_end})
+        for _tk, _tags, _sd_, _ed_ in _ta_res.all():
+            if not _tk or not _sd_:
+                continue
+            _g = _ensure_group(_sd_.isoformat())
+            _g["tedbir_added"].append({
+                "ticker": _tk,
+                "tedbirler": _tedbir_labels(_tags),
+                "start_date": _sd_.isoformat(),
+                "end_date": _ed_.isoformat() if _ed_ else None,
+            })
+    except Exception as _te:
+        logger.warning("daily-summary tedbir alan ekleme hatası: %s", _te)
+
+    try:
+        _te_res = await db.execute(_sa_txt2("""
+            SELECT UPPER(ticker) AS ticker, tags, start_date, end_date
+            FROM cautious_stocks
+            WHERE end_date BETWEEN :s AND :e
+            ORDER BY end_date DESC, ticker
+        """), {"s": _win_start, "e": _win_end})
+        for _tk, _tags, _sd_, _ed_ in _te_res.all():
+            if not _tk or not _ed_:
+                continue
+            _g = _ensure_group(_ed_.isoformat())
+            _g["tedbir_ended"].append({
+                "ticker": _tk,
+                "tedbirler": _tedbir_labels(_tags),
+                "end_date": _ed_.isoformat(),
+            })
+    except Exception as _te2:
+        logger.warning("daily-summary tedbir biten ekleme hatası: %s", _te2)
+
     # Son N işlem günü ile sınırla (takvim günü değil, iş günü)
     days_list = sorted(grouped.values(), key=lambda x: x["summary_date"], reverse=True)
 
@@ -10738,14 +10804,19 @@ async def get_daily_news_summary(
     for g in days_list:
         g.setdefault("dividends", [])
         g.setdefault("capital_increases", [])
+        g.setdefault("tedbir_added", [])
+        g.setdefault("tedbir_ended", [])
         g.setdefault("spk_bulten_no", None)
         g["positive"] = g["positive"][:MAX_PER_SECTION]
         g["negative"] = g["negative"][:MAX_PER_SECTION]
         g["spk_bulten"] = g["spk_bulten"][:MAX_PER_SECTION]
         g["dividends"] = g["dividends"][:60]
         g["capital_increases"] = g["capital_increases"][:30]
+        g["tedbir_added"] = g["tedbir_added"][:40]
+        g["tedbir_ended"] = g["tedbir_ended"][:40]
         g["total"] = (len(g["positive"]) + len(g["negative"]) + len(g["spk_bulten"])
-                      + len(g["dividends"]) + len(g["capital_increases"]))
+                      + len(g["dividends"]) + len(g["capital_increases"])
+                      + len(g["tedbir_added"]) + len(g["tedbir_ended"]))
 
     # HENÜZ YAYINLANMAMIŞ ÖZETLERİ ÇIKAR:
     # Bir özet yayınlanmış sayılır = o günün 07:00 TR'i geçilmiş olmalı.
