@@ -1562,9 +1562,19 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             try:
                                 from app.services.ai_news_scorer import analyze_news as _an_pt
                                 _anchor = (
-                                    f"[ÖNEMLİ: Bu bildirimi YALNIZCA {_tk} hissesi açısından "
-                                    f"değerlendir. Bildirimde geçen diğer hisseler yalnızca "
-                                    f"bağlamdır; puan ve özet {_tk} için olmalı.]\n{text}"
+                                    f"[ÖNEMLİ — ÖZNE KONTROLÜ: Bu bildirimi YALNIZCA {_tk} hissesi "
+                                    f"açısından değerlendir.\n"
+                                    f"ÖNCE belirle: Haberdeki eylemin/işlemin ASIL ÖZNESİ "
+                                    f"(yapan/kazanan/satan/açıklayan şirket) {_tk} mi, yoksa {_tk} haberde "
+                                    f"sadece KARŞI TARAF / işlemi DÜZENLEYEN / müşteri / bağlam olarak mı geçiyor?\n"
+                                    f"• Eğer asıl özne {_tk} DEĞİLSE (örn: ihaleyi {_tk} DÜZENLEDİ ama KAZANAN "
+                                    f"başka şirket; ya da satışı {_tk} açtı ama ALAN başka şirket): bu haber {_tk} "
+                                    f"İÇİN doğrudan gelişme DEĞİLDİR → score=5.0 NÖTR ver; özette 'Bu bildirim başka "
+                                    f"bir şirketin işlemine ilişkindir; {_tk} yalnızca karşı taraf/düzenleyen olarak "
+                                    f"geçmektedir, {_tk} için doğrudan etki taşımaz' de. Başka şirketin yaptığı işlemi "
+                                    f"{_tk} yapmış gibi YAZMA; 'şirketimiz' ifadesini {_tk} sanma.\n"
+                                    f"• Asıl özne gerçekten {_tk} ise normal değerlendir.\n"
+                                    f"Puan ve özet {_tk} için olmalı.]\n{text}"
                                 )
                                 _rr = await _an_pt(_tk, _anchor, matriks_id=kap_id)
                                 if _rr and _rr.get("score") is not None:
