@@ -182,8 +182,8 @@ async def login_submit(request: Request, password: str = Form(...)):
             key=SESSION_COOKIE_NAME,
             value=token,
             httponly=True,
-            max_age=86400,  # 1 gun (7 gunden dusuruldu)
-            samesite="strict",  # lax → strict (CSRF korumasini guclendir)
+            max_age=60 * 60 * 24 * 30,  # 30 gun — stateless imzali token, restart'tan etkilenmez
+            samesite="lax",  # strict → lax: bazı tarayıcı/yönlendirmelerde cookie düşmesini önler
             secure=_settings.is_production,  # HTTPS-only in production
         )
         return response
