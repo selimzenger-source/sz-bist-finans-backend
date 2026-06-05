@@ -2019,6 +2019,26 @@ async def score_news(
     if not content.strip():
         return {"score": None, "summary": None, "kap_url": kap_url, "hashtags": []}
 
+    # ── PAY ALIM SATIM: detay EKTE ise ek PDF'i AI'a BESLE ──
+    # "Pay Alım Satım Bildirimi"nde kim/ne kadar/hangi fiyatta aldı-sattı bilgisi
+    # genelde EKTEKİ PDF'dedir (kapak notu sadece "açıklama ektedir" der). AI bunu
+    # görmeyip "alım mı satım mı belli değil → 5.0 Nötr" diyordu. Halbuki kategori
+    # tarafında o PDF'i zaten parse ediyoruz. Burada da ek PDF metnini çekip içeriğe
+    # ekliyoruz → AI gerçek işlemi (içeriden alım/satım, lot, oran) yorumlar ve doğru
+    # puan verir. SADECE detay görünmüyorsa (kapak notu) çekilir; gereksiz indirme yok.
+    _clow = content.lower()
+    _is_pay_alim_satim = ("pay al" in _clow and "sat" in _clow) or "pay alım satım" in _clow or "pay alim satim" in _clow
+    _has_detail = any(s in _clow for s in ("nominal", " lot", "adet", "fiyat aral", "oy hakk", "pay oran"))
+    if kap_url and _is_pay_alim_satim and not _has_detail:
+        try:
+            from app.services.share_transaction_kap_processor import _fetch_attachment_text
+            _ek = await _fetch_attachment_text(kap_url)
+            if _ek and len(_ek.strip()) > 80:
+                content = (content + "\n\n[EK BELGE — İŞLEM DETAYI (alım/satım, taraf, lot, fiyat, oran)]:\n" + _ek)[:6500]
+                logger.info("Pay Alım Satım: ek PDF AI'a beslendi (%s): %d kar", ticker, len(_ek))
+        except Exception as _ee:
+            logger.debug("Pay Alım Satım ek PDF besleme hata (%s): %s", ticker, _ee)
+
     # ─── PRE-FILTER: Rutin/idari bildirimleri AI'ya gonderme ───
     # Sabit Notr 5.0 + standart aciklama don. AI kredisi tasarrufu icin kritik.
     # Bu pattern'lar fiyat hareketine sebep olmayan teknik/idari duyurular.
