@@ -7287,6 +7287,147 @@ async def trigger_market_close_tweet(
     return {"status": "ok", "message": f"{mode} arka planda başlatıldı (force={force}). Sonuç Telegram'dan gelecek."}
 
 
+@app.post("/api/v1/admin/trigger-tavan-taban-followup")
+@limiter.limit("3/minute")
+async def trigger_tavan_taban_followup(request: Request, payload: dict = Body(...)):
+    """Tavan/taban PUSH bildirimini (ve istege bagli SADECE taban tweetini)
+    tekrar gonderir. TAVAN TWEET'INE ASLA DOKUNMAZ.
+
+    Process restart (210sn bekleme sirasinda OOM) yuzunden taban tweet + push
+    atlandiginda kullanilir. Veri DB'de hazir (daily_stock_market_stats) —
+    yeniden scrape/AI YAPMAZ, 15:55 snapshot'iyla birebir.
+
+    Body: { admin_password, tweet_taban?: bool, date?: "YYYY-MM-DD" }
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    import asyncio as _aio
+    from zoneinfo import ZoneInfo as _ZI
+    from datetime import date as _date_t
+    from sqlalchemy import select as _sel, text as _txt
+    from app.database import async_session as _asess
+    from app.models.daily_stock_market_stat import DailyStockMarketStat as _DS
+
+    tweet_taban = bool(payload.get("tweet_taban", False))
+    _tr = _ZI("Europe/Istanbul")
+    if payload.get("date"):
+        try:
+            target_day = _date_t.fromisoformat(payload["date"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="date formati YYYY-MM-DD olmali")
+    else:
+        target_day = datetime.now(_tr).date()
+
+    out = {"date": target_day.isoformat()}
+
+    async with _asess() as session:
+        c_stats = (await session.execute(
+            _sel(_DS).where(_DS.date == target_day, _DS.is_ceiling == True)  # noqa: E712
+            .order_by(_DS.consecutive_ceiling_count.desc())
+        )).scalars().all()
+        fl_stats = (await session.execute(
+            _sel(_DS).where(_DS.date == target_day, _DS.is_floor == True)  # noqa: E712
+            .order_by(_DS.consecutive_floor_count.desc())
+        )).scalars().all()
+        c_count, f_count = len(c_stats), len(fl_stats)
+        out["tavan"] = c_count
+        out["taban"] = f_count
+        if c_count == 0 and f_count == 0:
+            return {"status": "error", "message": f"{target_day} icin tavan/taban verisi yok", **out}
+
+        # Tarih etiketi (TR)
+        _TR_DAYS = {0: "Pazartesi", 1: "Salı", 2: "Çarşamba", 3: "Perşembe", 4: "Cuma", 5: "Cumartesi", 6: "Pazar"}
+        _TR_MONTHS = {1: "Ocak", 2: "Şubat", 3: "Mart", 4: "Nisan", 5: "Mayıs", 6: "Haziran",
+                      7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık"}
+        date_label = f"{target_day.day} {_TR_MONTHS[target_day.month]} {_TR_DAYS[target_day.weekday()]}"
+
+        # 1) PUSH BILDIRIM (her zaman) — daha once gitmediyse
+        try:
+            from app.services.notification import NotificationService
+            notif_svc = NotificationService(session)
+            sent = await notif_svc.notify_tavan_taban(c_count, f_count, date_label)
+            await session.commit()
+            out["notification_sent"] = sent
+        except Exception as e:
+            logger.error("followup push hatasi: %s", e)
+            out["notification_sent"] = f"hata: {e}"
+
+        # 2) SADECE TABAN TWEET (opsiyonel) — TAVAN'A DOKUNMAZ
+        if tweet_taban:
+            from app.models.pending_tweet import PendingTweet
+            _start = datetime.combine(target_day, datetime.min.time())
+            _end = _start + timedelta(days=1)
+            already = (await session.execute(
+                _sel(PendingTweet.id).where(
+                    PendingTweet.source == "market_close_taban",
+                    PendingTweet.created_at >= _start,
+                    PendingTweet.created_at < _end,
+                )
+            )).first()
+            if already:
+                out["taban_tweet"] = "zaten atilmis — atlandi (mukerrer onlendi)"
+            else:
+                try:
+                    from app.services.chart_image_generator import generate_ceiling_floor_images
+                    from app.services.market_close_analyzer import scrape_uzmanpara_supplementary
+                    import app.services.twitter_service as _tw_svc
+
+                    taban_supp = []
+                    if f_count <= 6:
+                        try:
+                            _supp_raw = await scrape_uzmanpara_supplementary(
+                                is_ceiling=False, exclude_tickers=[s.ticker for s in fl_stats]
+                            )
+                            from types import SimpleNamespace as _SN
+                            taban_supp = [_SN(ticker=s["ticker"], close_price=s["price"], percent_change=s["change"]) for s in _supp_raw]
+                        except Exception as _se:
+                            logger.warning("followup taban supplementary hata: %s", _se)
+
+                    taban_images = await _aio.to_thread(
+                        generate_ceiling_floor_images, fl_stats, False, taban_supp
+                    )
+                    if fl_stats:
+                        _tk_str = " ".join([f"#{s.ticker}" for s in fl_stats])
+                        tweet_text = (
+                            f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
+                            f"Bugün {f_count} hisse taban yaptı! Şirketler neden kan kaybetti? "
+                            f"Yapay zeka modelimizin derlediği analizler görsellerde! 📊👇\n\n"
+                            f"📌 {_tk_str}\n\n"
+                            f"⚠️ Günsonu analizidir.\n"
+                        )
+                    else:
+                        tweet_text = (
+                            "📉 Bugün TABAN yapan hisse yok!\n\n"
+                            "En çok düşen hisseler görselde! 📊👇\n\n"
+                            "⚠️ Günsonu analizidir.\n"
+                        )
+                    await _aio.to_thread(
+                        _tw_svc._safe_tweet_with_multi_media,
+                        tweet_text, taban_images, "market_close_taban",
+                    )
+                    out["taban_tweet"] = "gonderildi"
+                    # Disclaimer reply
+                    try:
+                        _tid = getattr(_tw_svc, "_last_tweet_id", None)
+                        if _tid and _tid != "?":
+                            _disc = (
+                                "📌 Dipnot / Uyarı: Görsellerdeki veriler özel eğitimli yapay zeka "
+                                "modelleri tarafından oluşturulmuştur. Lütfen işlem yapmadan önce kendi "
+                                "araştırmanızı yapın. Bu veriler yatırım tavsiyesi (YTD) niteliği taşımaz."
+                            )
+                            await _aio.to_thread(_tw_svc._safe_reply_tweet, _disc, _tid)
+                    except Exception as _de:
+                        logger.warning("followup taban disclaimer reply hata: %s", _de)
+                except Exception as e:
+                    logger.error("followup taban tweet hatasi: %s", e)
+                    out["taban_tweet"] = f"hata: {e}"
+        else:
+            out["taban_tweet"] = "istenmedi (tweet_taban=false)"
+
+    return {"status": "ok", **out}
+
+
 @app.post("/api/v1/admin/debug-market-close")
 @limiter.limit("5/minute")
 async def debug_market_close(
