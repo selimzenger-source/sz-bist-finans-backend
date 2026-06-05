@@ -3185,17 +3185,63 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 logger.info("AI News Scorer [CREDIT-DOWNGRADE-FLOOR] %s: %.1f -> 3.0", ticker, score)
                 score = 3.0
 
+    # ─── ON GORUSME / MUZAKERE — pozitif DEGIL, NOTR ──────────────────
+    # "Gorusmelere baslanmistir", niyet mektubu, on protokol, mutabakat =
+    # henuz KESINLESMIS anlasma YOK. Spor kulubu sponsorluk gorusmesi vs.
+    # Kullanici istegi: bunlar NOTR olsun (pozitif verme).
+    is_preliminary_talk = any(kw in content_lower for kw in [
+        "görüşmelere başlan", "gorusmelere baslan",
+        "görüşmeye başlan", "gorusmeye baslan",
+        "görüşme başla", "gorusme basla",
+        "görüşmelere devam", "gorusmelere devam",
+        "müzakerelere başlan", "muzakerelere baslan",
+        "müzakere edil", "muzakere edil",
+        "niyet mektubu", "niyet beyan",
+        "ön protokol", "on protokol",
+        "mutabakat zapt", "mutabakat muht",
+        "letter of intent", "memorandum of understanding",
+        # Planlanan/gelecek imza = henuz imzalanmadi
+        "imzalanacak", "imzalanmasi planlan", "imzalanması planlan",
+        "imzalanmasi beklen", "imzalanması beklen",
+        "imzalanmasi ongor", "imzalanması öngör",
+        "imzalanmasi hedef", "imzalanması hedef",
+    ])
+    # Imzalanmis KESIN anlasma varsa "on gorusme" sayilmaz.
+    # SADECE tamamlanmis (gecmis) imza bicimleri — "imzalanmasi planlan" gibi
+    # gelecek/planlanan ifadeleri YAKALAMAZ.
+    is_signed_deal = any(kw in content_lower for kw in [
+        "imzaladı", "imzaladi", "imzalandı", "imzalandi",
+        "imzalanmıştır", "imzalanmistir", "imzalanmış", "imzalanmis",
+        "akdedil", "yürürlüğe gir", "yururluge gir",
+        "sözleşme akded", "sozlesme akded",
+    ])
+    if is_preliminary_talk and not is_signed_deal:
+        if not (4.6 <= score <= 5.4):
+            old_score = score
+            score = 5.0
+            logger.info(
+                "AI News Scorer [PRELIMINARY-TALK→NOTR] %s: %.1f -> 5.0 "
+                "(on gorusme/muzakere — kesinlesmis anlasma yok = Notr)",
+                ticker, old_score,
+            )
+
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
     # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
-    is_yeni_is = any(kw in content_lower for kw in [
+    is_yeni_is = (not (is_preliminary_talk and not is_signed_deal)) and any(kw in content_lower for kw in [
         "yeni is iliskisi", "yeni iş ilişkisi",
-        "sozlesme imzaland", "sözleşme imzalan",
-        "anlasma imzaland", "anlaşma imzalan",
+        "sozlesme imzal", "sözleşme imzal",
+        "anlasma imzal", "anlaşma imzal",
+        "anlasmasi imzal", "anlaşması imzal",
+        "lisans anlasm", "lisans anlaşm",
+        "lisans sozles", "lisans sözleş",
+        "lisans verdi", "lisans ver",
+        "protokol imzal",
         "ihale kazan", "ihale al",
         "siparis ald", "sipariş aldı",
         "tedarik anlasm", "tedarik anlaşm",
         "yeni musteri", "yeni müşteri",
         "is ortakligi", "iş ortaklığı",
+        "is birligi", "iş birliği", "isbirligi", "işbirliği",
     ])
     if is_yeni_is:
         # TL tutari cikar — milyon/milyar bazli
@@ -3250,6 +3296,18 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 return 6.7
             elif amount_tl_m >= 10 and score < 6.5:
                 return 6.5
+        else:
+            # Tutar tespit edilemedi (degisken bedel / lisans / oran bazli) ama
+            # KESIN imzali is iliskisi var. CWENE lisans anlasmasi gibi.
+            # Kullanici istegi: yeni is iliskisi EN KOTU Hafif Olumlu (notr olmasin).
+            # AI gercekten olumsuz (<4.5) bulduysa dokunma; notr kumesini (4.5-6.0) yukselt.
+            if 4.5 <= score < 6.0:
+                logger.info(
+                    "AI News Scorer [YENI-IS-NO-AMOUNT→HAFIF] %s: %.1f -> 6.0 "
+                    "(imzali is iliskisi, tutar yok — en kotu Hafif Olumlu)",
+                    ticker, score,
+                )
+                score = 6.0
 
     # ─── Kurumsal block alim — HARD FLOOR ──────────────────────────────
     # Yatirim/portfoy fonu %5 esigi asar veya buyuk net alim yaparsa → 7.0+ zorunlu
