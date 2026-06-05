@@ -4566,7 +4566,12 @@ async def news_pool(
         if not text or not sent_at:
             continue
         sa = _naive(sent_at)
-        for m in _re_tk.finditer(r'#([A-ZÇŞĞÜÖİ]{3,6})\b', text):
+        # SADECE ilk (#) ticker = tweetin OZNESI. Sonraki hashtag'ler "ilgili /
+        # bahsedilen" hisse olabilir (orn 06:03 IEYHO tweetinde #DERHL ikincil
+        # hashtag olarak geciyordu) — onlar o hisseyi "atildi" SAYMAMALI, yoksa
+        # hic tweetlenmemis hisse "atildi" gorunup manuel gonderimi engelliyor.
+        m = _re_tk.search(r'#([A-ZÇŞĞÜÖİ]{3,6})\b', text)
+        if m:
             tk = m.group(1).upper()
             sent_tweets.append((tk, sa))
             tweeted_tickers.add(tk)
