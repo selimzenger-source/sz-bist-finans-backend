@@ -257,17 +257,23 @@ class NotificationService:
             return False
 
     async def _clear_expo_token(self, expo_token: str):
-        """Gecersiz Expo push token'i DB'den temizler."""
+        """Gecersiz Expo push token'i DB'den temizler.
+
+        BAĞIMSIZ session — paylaşılan poller session'ında commit, begin_nested
+        savepoint'i bozup batch'teki kalan gönderimleri patlatıyordu (watchlist bug).
+        """
         try:
             from app.models.user import User
-            result = await self.db.execute(
-                select(User).where(User.expo_push_token == expo_token)
-            )
-            user = result.scalar_one_or_none()
-            if user:
-                logger.warning(f"Stale Expo token temizleniyor — user_id={user.id}")
-                user.expo_push_token = None
-                await self.db.commit()
+            from app.database import async_session as _async_session
+            async with _async_session() as _s:
+                result = await _s.execute(
+                    select(User).where(User.expo_push_token == expo_token)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    logger.warning(f"Stale Expo token temizleniyor — user_id={user.id}")
+                    user.expo_push_token = None
+                    await _s.commit()
         except Exception as e:
             logger.error(f"Expo token temizleme hatasi: {e}")
 
@@ -379,53 +385,70 @@ class NotificationService:
         category: str = "system",
         data: Optional[dict] = None,
     ):
-        """Gonderilen bildirimi notification_logs tablosuna kaydeder."""
+        """Gonderilen bildirimi notification_logs tablosuna kaydeder.
+
+        KRİTİK: BAĞIMSIZ session kullanır. Eskiden self.db (poller'ın PAYLAŞILAN
+        session'ı) + commit() çağırıyordu; poller bunu `begin_nested()` savepoint
+        içinde çağırdığında commit savepoint'i bozuyor ve kayıt SESSİZCE düşüyordu
+        (kap_watchlist bildirimleri Bildirim Merkezi'ne yazılmıyordu). Kendi
+        session'ında yazınca caller'ın transaction'ından tamamen bağımsız → garanti.
+        """
         try:
             from app.models.notification_log import NotificationLog
-            log = NotificationLog(
-                device_id=device_id,
-                title=title,
-                body=body,
-                category=category,
-                data_json=json.dumps(data, ensure_ascii=False) if data else None,
-            )
-            self.db.add(log)
-            await self.db.commit()
+            from app.database import async_session as _async_session
+            async with _async_session() as _s:
+                _s.add(NotificationLog(
+                    device_id=device_id,
+                    title=title,
+                    body=body,
+                    category=category,
+                    data_json=json.dumps(data, ensure_ascii=False) if data else None,
+                ))
+                await _s.commit()
         except Exception as e:
-            logger.debug("NotificationLog insert hatasi: %s", e)
+            logger.warning("NotificationLog insert hatasi (%s/%s): %s", category, device_id[:8] if device_id else "?", e)
 
     async def _clear_stale_token(self, fcm_token: str):
         """UnregisteredError alan FCM token'i DB'den temizler.
 
         Token gecersiz/stale olunca Firebase hata veriyor.
         Kullanici uygulamayi tekrar actiginda yeni token alinir.
+
+        KRİTİK: BAĞIMSIZ session kullanır. Eskiden self.db (paylaşılan poller
+        session'ı) + commit() yapıyordu; poller'ın begin_nested() savepoint'i
+        içinde çağrılınca "Can't operate on closed transaction" hatası verip
+        AYNI BATCH'TEKİ kalan kullanıcıların gönderimlerini bozuyordu (watchlist
+        bildirimleri %73 kullanıcıya gitmiyordu). Bağımsız session ile izole.
         """
         try:
             from app.models.user import User
+            from app.database import async_session as _async_session
 
-            result = await self.db.execute(
-                select(User).where(User.fcm_token == fcm_token)
-            )
-            user = result.scalar_one_or_none()
-            if user:
+            async with _async_session() as _s:
+                result = await _s.execute(
+                    select(User).where(User.fcm_token == fcm_token)
+                )
+                user = result.scalar_one_or_none()
+                if not user:
+                    return
                 logger.warning(
                     f"Stale FCM token temizleniyor — user_id={user.id}, "
                     f"device_id={user.device_id[:8]}..."
                 )
                 user.fcm_token = None
-                # Expo token da stale ise onu da temizle
                 if user.expo_push_token and not user.expo_push_token.startswith("ExponentPushToken"):
                     user.expo_push_token = None
-                await self.db.commit()
+                _uid, _did = user.id, user.device_id
+                await _s.commit()
 
-                # Telegram admin bildirimi — aynı user için sadece 1 kez
-                if user.id not in _stale_token_notified:
-                    _stale_token_notified.add(user.id)
-                    try:
-                        from app.services.admin_telegram import notify_stale_token_cleaned
-                        await notify_stale_token_cleaned(user.id, user.device_id)
-                    except Exception:
-                        pass
+            # Telegram admin bildirimi — aynı user için sadece 1 kez (session disinda)
+            if _uid not in _stale_token_notified:
+                _stale_token_notified.add(_uid)
+                try:
+                    from app.services.admin_telegram import notify_stale_token_cleaned
+                    await notify_stale_token_cleaned(_uid, _did)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Stale token temizleme hatasi: {e}")
 
@@ -1590,6 +1613,18 @@ class NotificationService:
         # ── Admin özet: takip / filtre / gönderim breakdown (AYRI satirlar) ──
         # SADECE en az 1 kisiye GERCEKTEN gonderildiyse rapor at (0-sent spam'i onlenir).
         total_watching = len(watchlist_rows)
+
+        # ── TANI FUNNEL LOG (Render) — her watchlist haberinde nerede düştüğü net görünsün ──
+        # takipci -> cooldown -> pref -> aday -> gonderilebilir -> GONDERILDI + drop sebepleri
+        _pref_skip = max(0, total_watching - len(filtered_device_ids) - skipped_spam)
+        logger.info(
+            "KAP Watchlist funnel #%s [%s]: takipci=%d | cooldown_skip=%d | pref_skip=%d | "
+            "aday=%d | gonderilebilir=%d | GONDERILDI=%d || notif_off=%d wl_off=%d no_token=%d send_fail=%d | dedup=%s",
+            ticker, sentiment_tag, total_watching, skipped_spam, _pref_skip,
+            len(candidates), len(sendable), sent_count,
+            notif_off, watchlist_off, no_token, send_failed, str(_dedup_tok)[:60],
+        )
+
         if sent_count > 0:
             try:
                 from app.services.admin_telegram import send_admin_message
