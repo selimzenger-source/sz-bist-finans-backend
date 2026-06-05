@@ -1615,6 +1615,30 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                             )
                             continue
 
+                        # ── SKOR-OZET TUTARLILIK (feed icin de uygula) ──────
+                        # Notification guardrail bazi message_type'larda atlaniyor;
+                        # kap_all feed skoru ham AI skoruyla yazilip ozetle celisiyordu
+                        # (KAYSE: ozet "hafif olumsuz" ama skor 5.0 Notr feed'de). Her
+                        # durumda dogrula — content+ozet birlikte verilir.
+                        try:
+                            from app.services.ai_news_scorer import _validate_score_against_content as _vsc_feed
+                            if _tk_score is not None and _tk_summary:
+                                _vc_in = ((text or "") + "\n" + (_tk_summary or "")).strip()
+                                _tk_adj = _vsc_feed(float(_tk_score), _vc_in, _tk or "", ai_summary=_tk_summary)
+                                if _tk_adj is not None and abs(float(_tk_adj) - float(_tk_score)) >= 0.1:
+                                    try:
+                                        from app.utils.ai_score_label import score_to_label as _s2l_feed
+                                        _tk_sentiment = _s2l_feed(float(_tk_adj)) or _tk_sentiment
+                                    except Exception:
+                                        pass
+                                    logger.info(
+                                        "kap_all skor-ozet tutarlilik (%s): %.1f -> %.1f",
+                                        _tk, float(_tk_score), float(_tk_adj),
+                                    )
+                                    _tk_score = round(float(_tk_adj), 1)
+                        except Exception as _vfe:
+                            logger.debug("kap_all tutarlilik hata (%s): %s", _tk, _vfe)
+
                         kap_disc = KapAllDisclosure(
                             company_code=_tk,
                             title=ka_title,

@@ -2918,6 +2918,28 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 ticker, old,
             )
 
+        # Negatif framing + skor Notr/pozitifte kalmis → Olumsuz tarafa CEK.
+        # Onceden sadece POZITIF framing yukari cekiliyordu; negatif icin
+        # asagi-cekme yoktu. AI ozeti net "hafif olumsuz / olumsuz sinyal /
+        # olumsuz algi / deger kaybi" diyorsa skor 5.0 Notr'de kalamaz.
+        # KAYSE ornegi: ortaklik gorusmeleri sonlandirildi, ozet "hafif olumsuz"
+        # ama skor 5.0 idi. (Pozitif metrik varsa dokunma — celiskili olabilir.)
+        elif has_strong_neg and not has_pos_framing and score > 4.4:
+            import re as _re_nm
+            _has_pos_metric = bool(_re_nm.search(
+                r"(?:%\s*\d+|\d+\s*%|\d+(?:[\.,]\d+)?\s*(?:milyon|milyar|mn|mr))\b[^.;]{0,40}"
+                r"(?:kar|kâr|gelir|büyüme|artış|arttı|yüksel)",
+                summary_lower,
+            ))
+            if not _has_pos_metric:
+                old = score
+                score = 4.0  # Hafif Olumsuz
+                logger.info(
+                    "AI News Scorer [NEG-FRAMING-PULL] %s: %.1f -> 4.0 "
+                    "(ozet olumsuz framing — skor Notr/pozitifte kalamaz)",
+                    ticker, old,
+                )
+
         # ─── M&A / ŞİRKET ALIMI / BİRLEŞME / SPK ONAYI — HARD FLOOR 6.8 ───
         # Bu haberler şirketin değer açısından büyük milestone'lardır.
         # AI bazen "süreç devam ediyor" diye Nötr veriyor — yanlış. Eşleşirse
@@ -3052,7 +3074,11 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         # Pos framing pos_framing'i tetiklediyse neutral cap'i devreye sokma
         # (ECZYT örneği: "olumlu bir adım" var ama "etki" gibi kelimeler de geçince
         # yanlış neutral'a çekilmesin)
-        if has_neutral_framing and not has_pos_framing and not (4.6 <= score <= 5.4):
+        # STRONG-NEG varsa da cap'leme: AI ozeti net "hafif olumsuz / olumsuz
+        # sinyal" derken, sirketin "olumsuz etkisi bulunmadigini belirtti" gibi
+        # beyani NOTR'a cekmemeli. KAYSE: iptal edilen ortaklik gorusmesi ->
+        # ozet "hafif olumsuz" iken sirket "etki yok" deyince 5.0'a doniyordu.
+        if has_neutral_framing and not has_pos_framing and not has_strong_neg and not (4.6 <= score <= 5.4):
             old = score
             score = 5.0
             logger.info(
@@ -3200,7 +3226,21 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "devam ed", "sürüyor", "suruyor", "sürdür", "surdur",
         "yürüt", "yurut", "yapılmakta", "yapilmakta", "süren", "suren",
     ))
-    is_preliminary_talk = (
+    # Gorusme/anlasma IPTAL / SONLANDIRMA / FESIH / imzalanMADI = "on gorusme"
+    # DEGIL — bitmis (genelde olumsuz) bir surec. Boyle haberler NOTR'a
+    # zorlanmamali (ozet ne diyorsa o) ve "yeni is iliskisi" floor'u (6.0)
+    # ASLA uygulanmamali. KAYSE: "yuruttugu ortaklik gorusmeleri SONLANDIRILDI"
+    # -> ozet "hafif olumsuz" ama preliminary 5.0'a, yeni_is 6.0'a cekiyordu.
+    _deal_cancelled = any(s in content_lower for s in (
+        "sonlandırıld", "sonlandirild", "feshedil", "fesih edil",
+        "iptal edil", "iptal etti", "iptal edild",
+        "gerçekleşmedi", "gerceklesmedi", "gerçekleşmemes", "gerceklesmemes",
+        "imzalanmad", "imzalanmam", "imzalanmay",
+        "sağlanamad", "saglanamad", "anlaşmaya varılamad", "anlasmaya varilamad",
+        "vazgeçil", "vazgecil", "vazgeçti", "vazgecti",
+        "sona erdi", "sona erdir",
+    ))
+    is_preliminary_talk = (not _deal_cancelled) and (
         (_has_gorusme and _gorusme_ongoing)
         or any(kw in content_lower for kw in [
             "müzakere", "muzakere",
@@ -3236,7 +3276,7 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
 
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
     # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
-    is_yeni_is = (not (is_preliminary_talk and not is_signed_deal)) and any(kw in content_lower for kw in [
+    is_yeni_is = (not _deal_cancelled) and (not (is_preliminary_talk and not is_signed_deal)) and any(kw in content_lower for kw in [
         "yeni is iliskisi", "yeni iş ilişkisi",
         "sozlesme imzal", "sözleşme imzal",
         "anlasma imzal", "anlaşma imzal",
