@@ -2685,8 +2685,11 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     skor-yorum tutarsizligi duzeltilir (orn: ozet 'stratejik adim' diyor
     ama skor 5.0 — yorumla tutarli olmasi icin min 6.2'ye cikar).
     """
-    content_lower = content.lower()
-    summary_lower = (ai_summary or "").lower()
+    # Python .lower() Turkce İ -> "i̇" (i + U+0307 combining dot) uretir; bu da
+    # "yeni iş ilişkisi" gibi keyword eslesmelerini bozar. U+0307'yi temizle
+    # (yalnizca İ.lower()'dan gelir, baska keyword'u etkilemez).
+    content_lower = content.lower().replace("̇", "")
+    summary_lower = (ai_summary or "").lower().replace("̇", "")
 
     # ─── 🛑 NÖTR OVERRIDE (MUTLAK ÖNCELİK) ──────────────────────────
     # AI ozet KENDI ICINDE "etki yok / rutin / yeni bilgi yok / icermemektedir"

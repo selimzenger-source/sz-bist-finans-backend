@@ -1383,8 +1383,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if ai_summary and ai_score is not None and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import _validate_score_against_content
+                    # Baslik da icerige eklenir: "Yeni Is Iliskisi" gibi olay tipi
+                    # basligi icerikte gecmese bile floor/kategori kurallari tetiklensin
+                    # (CWENE: baslik "Yeni Is Iliskisi" -> asla notr olmamali).
+                    _vc_text = ((news_title or "") + "\n" + (text or "")).strip()
                     _adj = _validate_score_against_content(
-                        float(ai_score), text or "", ticker or "", ai_summary=ai_summary
+                        float(ai_score), _vc_text, ticker or "", ai_summary=ai_summary
                     )
                     if _adj is not None and abs(float(_adj) - float(ai_score)) >= 0.1:
                         logger.info(
