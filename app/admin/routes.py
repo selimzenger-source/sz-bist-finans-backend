@@ -4542,20 +4542,34 @@ async def news_pool(
     # PendingTweet.text icinde #TICKER araniyor (kap_haber kaynaklari)
     from app.models.pending_tweet import PendingTweet
     tweet_q = (
-        select(PendingTweet.text)
+        select(PendingTweet.text, PendingTweet.sent_at)
         .where(PendingTweet.status == "sent")
         .where(PendingTweet.source.in_(["kap_haber", "kap_haber_negatif", "tweet_kap_news"]))
         .where(PendingTweet.sent_at >= cutoff)
     )
     tweet_rows = (await db.execute(tweet_q)).all()
     import re as _re_tk
+
+    def _naive(dt):
+        if dt is None:
+            return None
+        return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+    # Her tweet: (ticker, sent_at). Rozet artik ticker DEGIL, ticker+zaman penceresi
+    # ile eslesir. Cunku ayni ticker ayni gun BIRDEN COK farkli disclosure atabilir
+    # (orn AKFIS: sabah ihale KAZANIMI, ogleden sonra ihale KAYBI — ikisi de ayni
+    # baslik "Ihale Sureci / Sonucu"). Ticker bazli rozet 2. haberi yanlislikla
+    # "atildi" gosterip MANUEL gonderimi engelliyordu.
+    sent_tweets: list[tuple[str, object]] = []
     tweeted_tickers: set[str] = set()
-    for (text,) in tweet_rows:
-        if not text:
+    for (text, sent_at) in tweet_rows:
+        if not text or not sent_at:
             continue
-        # #TICKER pattern — 3-5 buyuk harf
+        sa = _naive(sent_at)
         for m in _re_tk.finditer(r'#([A-ZÇŞĞÜÖİ]{3,6})\b', text):
-            tweeted_tickers.add(m.group(1).upper())
+            tk = m.group(1).upper()
+            sent_tweets.append((tk, sa))
+            tweeted_tickers.add(tk)
 
     # Tek liste — kart rengi sentiment'a gore (yesil >=6.0, kirmizi <=4.0)
     all_items = sorted(
@@ -4564,10 +4578,22 @@ async def news_pool(
         reverse=True,
     )
 
-    # tweeted bilgisi attach et (ticker ile eslesirse True)
+    # tweeted bilgisi attach et — ticker AYNI + tweet, disclosure yayin saatine
+    # YAKIN atildiysa (−10dk .. +60dk penceresi) o disclosure tweetlenmis say.
+    # Boylece ayni ticker'in farkli saatlerdeki ayri haberleri karismaz.
     fresh_cutoff = now_utc - _td(minutes=5)
     for it in all_items:
-        it.already_tweeted = (it.company_code or "").upper() in tweeted_tickers
+        tk = (it.company_code or "").upper()
+        dt = _naive(it.published_at or it.created_at)
+        matched = False
+        if dt and tk:
+            for (stk, sa) in sent_tweets:
+                if stk == tk and sa is not None:
+                    _delta = (sa - dt).total_seconds()
+                    if -600 <= _delta <= 3600:  # tweet, haberden 10dk once .. 60dk sonra
+                        matched = True
+                        break
+        it.already_tweeted = matched
         # Son 5 dakika icinde mi geldi? (cok belirgin gosterim icin)
         _ts = it.published_at or it.created_at
         it.is_fresh = bool(_ts and _ts >= fresh_cutoff)

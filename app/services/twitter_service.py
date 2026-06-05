@@ -1083,13 +1083,16 @@ def is_auto_kap_tweet_enabled() -> bool:
 
     True  → KAP haberleri ayarlı oranlarda kendiliğinden tweetlenir.
     False → Otomatik tweet ATILMAZ; admin Haber Havuzu'ndan MANUEL seçip atar.
-    Ayar yoksa varsayılan AÇIK (mevcut davranış korunur). Manuel tweet (is_manual)
-    bu ayardan ETKİLENMEZ — her zaman gönderilir.
+    Manuel tweet (is_manual) bu ayardan ETKİLENMEZ — her zaman gönderilir.
+
+    ★ FAIL-SAFE: Ayar okunamazsa/boşsa (Render restart sonrası settings cache
+    yuklenemedi, DB hiccup vs.) varsayilan KAPALI. Onceden default ACIK'ti ve
+    bu yuzden kullanici toggle'i kapatmis olsa bile cache bos donunce otomatik
+    tweet atiyordu ("gondermedigim halde gonderdi" bug). Istenmeyen public tweet
+    atmaktansa atmamak guvenli — kullanici her zaman manuel gonderebilir.
     """
     val = _get_setting("AUTO_KAP_TWEET_ENABLED")
-    if not val:
-        return True
-    return val.lower() in ("true", "1", "yes")
+    return (val or "").strip().lower() in ("true", "1", "yes")
 
 
 # Backward-compatible property'ler

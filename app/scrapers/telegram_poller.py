@@ -1929,7 +1929,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 from app.services.twitter_service import is_auto_kap_tweet_enabled
                 _auto_tweet_on = is_auto_kap_tweet_enabled()
             except Exception:
-                _auto_tweet_on = True
+                # FAIL-SAFE: ayar okunamazsa otomatik tweet ATMA (eskiden True idi →
+                # istenmeyen tweet atiyordu). Kullanici manuel gonderebilir.
+                _auto_tweet_on = False
 
             # ----------------------------------------------------------------
             # TWITTER ENTEGRASYONU (Tum haberler — her 5 haberden 1'i)
