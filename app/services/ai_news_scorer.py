@@ -3189,23 +3189,29 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # "Gorusmelere baslanmistir", niyet mektubu, on protokol, mutabakat =
     # henuz KESINLESMIS anlasma YOK. Spor kulubu sponsorluk gorusmesi vs.
     # Kullanici istegi: bunlar NOTR olsun (pozitif verme).
-    is_preliminary_talk = any(kw in content_lower for kw in [
-        "görüşmelere başlan", "gorusmelere baslan",
-        "görüşmeye başlan", "gorusmeye baslan",
-        "görüşme başla", "gorusme basla",
-        "görüşmelere devam", "gorusmelere devam",
-        "müzakerelere başlan", "muzakerelere baslan",
-        "müzakere edil", "muzakere edil",
-        "niyet mektubu", "niyet beyan",
-        "ön protokol", "on protokol",
-        "mutabakat zapt", "mutabakat muht",
-        "letter of intent", "memorandum of understanding",
-        # Planlanan/gelecek imza = henuz imzalanmadi
-        "imzalanacak", "imzalanmasi planlan", "imzalanması planlan",
-        "imzalanmasi beklen", "imzalanması beklen",
-        "imzalanmasi ongor", "imzalanması öngör",
-        "imzalanmasi hedef", "imzalanması hedef",
-    ])
+    # "gorusme" stem'i + devam/baslama fiili = on gorusme (iyelik ekleri dahil:
+    # "gorusmelerine baslanmistir", "gorusmelere baslandi" vs.)
+    _has_gorusme = any(s in content_lower for s in ("görüşme", "gorusme"))
+    _gorusme_ongoing = any(s in content_lower for s in (
+        "başlan", "baslan", "başlamış", "baslamis", "başlat", "baslat",
+        "devam ed", "sürüyor", "suruyor", "sürdür", "surdur",
+        "yürüt", "yurut", "yapılmakta", "yapilmakta", "süren", "suren",
+    ))
+    is_preliminary_talk = (
+        (_has_gorusme and _gorusme_ongoing)
+        or any(kw in content_lower for kw in [
+            "müzakere", "muzakere",
+            "niyet mektubu", "niyet beyan",
+            "ön protokol", "on protokol",
+            "mutabakat zapt", "mutabakat muht",
+            "letter of intent", "memorandum of understanding",
+            # Planlanan/gelecek imza = henuz imzalanmadi
+            "imzalanacak", "imzalanmasi planlan", "imzalanması planlan",
+            "imzalanmasi beklen", "imzalanması beklen",
+            "imzalanmasi ongor", "imzalanması öngör",
+            "imzalanmasi hedef", "imzalanması hedef",
+        ])
+    )
     # Imzalanmis KESIN anlasma varsa "on gorusme" sayilmaz.
     # SADECE tamamlanmis (gecmis) imza bicimleri — "imzalanmasi planlan" gibi
     # gelecek/planlanan ifadeleri YAKALAMAZ.
@@ -3298,13 +3304,14 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 return 6.5
         else:
             # Tutar tespit edilemedi (degisken bedel / lisans / oran bazli) ama
-            # KESIN imzali is iliskisi var. CWENE lisans anlasmasi gibi.
-            # Kullanici istegi: yeni is iliskisi EN KOTU Hafif Olumlu (notr olmasin).
-            # AI gercekten olumsuz (<4.5) bulduysa dokunma; notr kumesini (4.5-6.0) yukselt.
-            if 4.5 <= score < 6.0:
+            # gercek bir is iliskisi var (lisans/siparis/ihale/tedarik/is birligi).
+            # Kullanici istegi NET: yeni is iliskisinin NOTR olma sansi YOK ->
+            # her zaman EN AZ Hafif Olumlu (6.0). Bunlar dogasi geregi pozitif
+            # olaylardir; AI 6.0 alti verdiyse (notr/dusuk) zorla 6.0'a cek.
+            if score < 6.0:
                 logger.info(
                     "AI News Scorer [YENI-IS-NO-AMOUNT→HAFIF] %s: %.1f -> 6.0 "
-                    "(imzali is iliskisi, tutar yok — en kotu Hafif Olumlu)",
+                    "(yeni is iliskisi notr olamaz — en az Hafif Olumlu)",
                     ticker, score,
                 )
                 score = 6.0
