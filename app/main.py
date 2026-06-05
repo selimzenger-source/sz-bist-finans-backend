@@ -2148,11 +2148,24 @@ async def list_telegram_news(
                             select(UserSubscription).where(UserSubscription.user_id == user.id)
                         )
                         s = existing_sub.scalar_one_or_none()
+                        # KRİTİK: frontend iddiasıyla KALICI premium YAZMA. Sadece kısa
+                        # GRACE (3 gün) ver — gerçek RevenueCat sync doğru expires_at'i
+                        # set eder; gelmezse (abonelik gerçekte yok/bitti) 3 günde
+                        # "Abonelik Süresi Dolma" job'u deaktif eder. Eskiden expires_at
+                        # SET EDİLMEDEN yazılıyordu → satır asla dolmuyor, kullanıcı
+                        # üyeliği bittiği halde SONSUZA DEK premium kalıyordu.
+                        _grace = datetime.utcnow() + timedelta(days=3)
                         if s:
                             s.package = package
                             s.is_active = True
+                            # Geçerli (gelecek) expires_at varsa DOKUNMA (legit aboneliği kısaltma)
+                            if s.expires_at is None or s.expires_at < datetime.utcnow():
+                                s.expires_at = _grace
                         else:
-                            db.add(UserSubscription(user_id=user.id, package=package, is_active=True))
+                            db.add(UserSubscription(
+                                user_id=user.id, package=package,
+                                is_active=True, expires_at=_grace,
+                            ))
                         await db.commit()
                     except Exception:
                         pass  # Sessizce devam — haber gösterilsin

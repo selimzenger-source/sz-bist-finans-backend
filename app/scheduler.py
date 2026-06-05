@@ -3847,6 +3847,7 @@ async def expire_subscriptions():
     expired_news = 0
     expired_notif = 0
     expired_stale_wallet = 0
+    expired_orphan = 0
 
     try:
         from app.models.user import UserSubscription, StockNotificationSubscription
@@ -3886,6 +3887,25 @@ async def expire_subscriptions():
             )
             expired_stale_wallet = result_stale.rowcount
 
+            # 1c. ORPHAN/BOZUK ÜCRETLİ abonelik — paket ücretli ama expires_at NULL.
+            # Gerçek RevenueCat aboneliği HER ZAMAN expires_at taşır; NULL ise
+            # race-condition fallback'tan kalmış geçersiz/malformed kayıttır
+            # (kullanıcı üyeliği bittiği halde sonsuza dek premium kalıyordu).
+            # 'free' ve NULL paketler hariç → sadece gerçek ücretli paketler.
+            result_orphan = await db.execute(
+                update(UserSubscription)
+                .where(
+                    and_(
+                        UserSubscription.is_active == True,
+                        UserSubscription.expires_at.is_(None),
+                        UserSubscription.package.isnot(None),
+                        UserSubscription.package.notin_(("free",)),
+                    )
+                )
+                .values(is_active=False)
+            )
+            expired_orphan = result_orphan.rowcount
+
             # 2. Bildirim abonelikleri (StockNotificationSubscription)
             result2 = await db.execute(
                 update(StockNotificationSubscription)
@@ -3902,11 +3922,11 @@ async def expire_subscriptions():
 
             await db.commit()
 
-        total_expired = expired_news + expired_notif + expired_stale_wallet
+        total_expired = expired_news + expired_notif + expired_stale_wallet + expired_orphan
         if total_expired > 0:
             logger.warning(
-                "⏰ Abonelik expire: %d haber, %d bildirim, %d eski-wallet deaktif edildi",
-                expired_news, expired_notif, expired_stale_wallet,
+                "⏰ Abonelik expire: %d haber, %d bildirim, %d eski-wallet, %d orphan-ucretli deaktif edildi",
+                expired_news, expired_notif, expired_stale_wallet, expired_orphan,
             )
             try:
                 from app.services.admin_telegram import send_admin_telegram
@@ -3917,6 +3937,8 @@ async def expire_subscriptions():
                     parts.append(f"Bildirim: {expired_notif}")
                 if expired_stale_wallet > 0:
                     parts.append(f"Eski Puan (NULL expires): {expired_stale_wallet}")
+                if expired_orphan > 0:
+                    parts.append(f"Orphan ücretli (NULL expires): {expired_orphan}")
                 await send_admin_telegram(
                     f"⏰ Abonelik Expire\n"
                     f"{chr(10).join(parts)}\n"
