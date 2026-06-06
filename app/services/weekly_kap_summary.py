@@ -157,10 +157,12 @@ async def get_week_extras(start: date, end: date) -> dict:
     out = {"tedbir_added": [], "tedbir_ended": [], "dividends": []}
     try:
         async with async_session() as s:
+            # tedbir gelen — türü (tags) ile birlikte; ticker bazında tekilleştir
             r1 = await s.execute(sa_text(
-                "SELECT DISTINCT UPPER(ticker) FROM cautious_stocks "
-                "WHERE start_date BETWEEN :s AND :e ORDER BY 1"), {"s": start, "e": end})
-            out["tedbir_added"] = [x[0] for x in r1.all() if x[0]]
+                "SELECT UPPER(ticker), string_agg(DISTINCT tags, ',') AS tags "
+                "FROM cautious_stocks WHERE start_date BETWEEN :s AND :e "
+                "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
+            out["tedbir_added"] = [(x[0], x[1] or "") for x in r1.all() if x[0]]
             r2 = await s.execute(sa_text(
                 "SELECT DISTINCT UPPER(ticker) FROM cautious_stocks "
                 "WHERE end_date BETWEEN :s AND :e ORDER BY 1"), {"s": start, "e": end})
@@ -369,55 +371,138 @@ def _measure_sections(sections) -> None:
             _wrap_item(_md, it)
 
 
-# ── KOMPAKT EXTRAS (tedbir gelen/biten + temettü dağıtan) — ilk sayfada 2 sütun ──
-_EX_CAT_H = 30   # kategori başlık yüksekliği
-_EX_ROW_H = 26   # chip satır yüksekliği
+# ── KOMPAKT EXTRAS (tedbir gelen/biten + temettü dağıtan) — küçük font + akışkan sarma ──
+# Tedbir türünü (tags) tedbir-türüne göre GRUPLAYIP gösterir; tickerlar tek satıra
+# akışkan sığar (çok hisse/satır). Üst blok yarımdan az yer kaplar.
+_EX_F_CAT = 21    # kategori başlığı
+_EX_F_GRP = 16    # tedbir türü etiketi
+_EX_F_ITEM = 18   # ticker/chip
+_EX_H_CAT = 33
+_EX_H_GRP = 24
+_EX_H_ITEM = 25
+_C_ADD = (255, 112, 67)
+_C_END = (38, 198, 218)
+_C_DIV = (0, 200, 83)
+_C_GRP = (170, 178, 190)
+
+# Tedbir kodu → kısa Türkçe etiket (görselde sığsın)
+_TEDBIR_SHORT = {
+    "ACS": "Açığa Satış", "KRD": "Kredili", "BRT": "Brüt Takas",
+    "EMR": "Emir Kısıtı", "PEM": "Piyasa Emri", "VEY": "Veri Yayını",
+    "TEK": "Tek Fiyat", "SUP": "Sürekli İşlem Y.", "VOL": "Volatilite",
+}
+_TEDBIR_ORDER = ["TEK", "BRT", "ACS", "KRD", "EMR", "PEM", "VEY", "SUP", "VOL"]
 
 
-def _extras_cats(extras: dict):
-    """(başlık, [chip metni...], renk) listesi — boş olanlar atlanır."""
+def _tedbir_label(codes) -> str:
+    cs = [c for c in _TEDBIR_ORDER if c in codes] + [c for c in codes if c not in _TEDBIR_ORDER]
+    return " + ".join(_TEDBIR_SHORT.get(c, c) for c in cs) or "Tedbir"
+
+
+def _prepare_extras(extras: dict):
+    """Extras bloğunun satırlarını + toplam yüksekliğini önceden hesaplar (cache).
+    Döner: (lines, height). lines: [(x, text, kind, color)]; kind: cat|grp|item.
+    """
     if not extras:
-        return []
+        return [], 0
+    if extras.get("_lines") is not None:
+        return extras["_lines"], extras["_h"]
+
+    from PIL import Image, ImageDraw
+    from app.services.chart_image_generator import _load_font, WHITE
+    f = {"cat": _load_font(_EX_F_CAT, bold=True),
+         "grp": _load_font(_EX_F_GRP, bold=True),
+         "item": _load_font(_EX_F_ITEM, bold=False)}
+    d = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+    W, PAD = _IMG_W, _IMG_PAD
+
+    def flow(chips, font, x0):
+        """Chip'leri genişliğe sığacak şekilde satırlara akıt (çok chip/satır)."""
+        out, cur = [], ""
+        for c in chips:
+            cand = (cur + "    " + c) if cur else c
+            if d.textlength(cand, font=font) <= (W - PAD - x0):
+                cur = cand
+            else:
+                if cur:
+                    out.append(cur)
+                cur = c
+        if cur:
+            out.append(cur)
+        return out
+
+    def wrap(text, font, x0):
+        out, cur = [], ""
+        for w in text.split(" "):
+            cand = (cur + " " + w) if cur else w
+            if d.textlength(cand, font=font) <= (W - PAD - x0):
+                cur = cand
+            else:
+                if cur:
+                    out.append(cur)
+                cur = w
+        if cur:
+            out.append(cur)
+        return out
+
     def _tl(v):
         return f"{v:.2f}".replace(".", ",") + " TL"
-    cats = [
-        ("⛔ BU HAFTA TEDBİR GELEN", [f"#{t}" for t in extras.get("tedbir_added", [])], (255, 112, 67)),
-        ("🔓 TEDBİRİ BİTEN", [f"#{t}" for t in extras.get("tedbir_ended", [])], (38, 198, 218)),
-        ("💰 TEMETTÜ DAĞITAN", [f"#{t} {_tl(g)}" for t, g in extras.get("dividends", [])], (0, 200, 83)),
-    ]
-    return [c for c in cats if c[1]]
+
+    lines: list = []
+    add = extras.get("tedbir_added") or []
+    end = extras.get("tedbir_ended") or []
+    div = extras.get("dividends") or []
+
+    # 1) TEDBİR GELEN — tedbir türüne göre grupla
+    if add:
+        lines.append((PAD, f"⛔ BU HAFTA TEDBİR GELEN  ({len(add)})", "cat", _C_ADD))
+        groups: dict = {}
+        for tk, tags in add:
+            codes = tuple(sorted({c.strip().upper() for c in (tags or "").split(",") if c.strip()}))
+            groups.setdefault(codes, []).append(tk)
+        for codes, tks in sorted(groups.items(), key=lambda kv: -len(kv[1])):
+            for ln in wrap(_tedbir_label(codes) + ":", f["grp"], PAD + 6):
+                lines.append((PAD + 6, ln, "grp", _C_GRP))
+            for ln in flow([f"#{t}" for t in sorted(tks)], f["item"], PAD + 18):
+                lines.append((PAD + 18, ln, "item", WHITE))
+
+    # 2) TEDBİRİ BİTEN — akışkan tek/iki satır
+    if end:
+        lines.append((PAD, f"🔓 TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
+        for ln in flow([f"#{t}" for t in end], f["item"], PAD + 6):
+            lines.append((PAD + 6, ln, "item", WHITE))
+
+    # 3) TEMETTÜ DAĞITAN — akışkan
+    if div:
+        lines.append((PAD, f"💰 TEMETTÜ DAĞITAN  ({len(div)})", "cat", _C_DIV))
+        for ln in flow([f"#{t} {_tl(g)}" for t, g in div], f["item"], PAD + 6):
+            lines.append((PAD + 6, ln, "item", WHITE))
+
+    h = 10
+    for _x, _t, kind, _c in lines:
+        h += {"cat": _EX_H_CAT, "grp": _EX_H_GRP, "item": _EX_H_ITEM}[kind]
+    h += 8
+    extras["_lines"] = lines
+    extras["_h"] = h
+    return lines, h
 
 
 def _extras_height(extras: dict) -> int:
-    cats = _extras_cats(extras)
-    if not cats:
-        return 0
-    h = 10
-    for _, items, _c in cats:
-        rows = (len(items) + 1) // 2
-        h += _EX_CAT_H + rows * _EX_ROW_H + 10
-    return h + 6
+    return _prepare_extras(extras)[1]
 
 
 def _render_extras(d, extras: dict, y0: int) -> int:
-    """Kompakt 2 sütunlu extras bloğunu çizer; bittiği y'yi döner."""
-    from app.services.chart_image_generator import _load_font, WHITE
-    f_cat = _load_font(24, bold=True)
-    f_chip = _load_font(21, bold=False)
-    W, PAD = _IMG_W, _IMG_PAD
-    col_w = (W - 2 * PAD) // 2
+    """Kompakt extras bloğunu çizer; bittiği y'yi döner."""
+    from app.services.chart_image_generator import _load_font
+    fonts = {"cat": _load_font(_EX_F_CAT, bold=True),
+             "grp": _load_font(_EX_F_GRP, bold=True),
+             "item": _load_font(_EX_F_ITEM, bold=False)}
+    heights = {"cat": _EX_H_CAT, "grp": _EX_H_GRP, "item": _EX_H_ITEM}
+    lines, _h = _prepare_extras(extras)
     y = y0 + 6
-    for title, items, color in _extras_cats(extras):
-        d.text((PAD, y), f"{title}  ({len(items)})", font=f_cat, fill=color)
-        y += _EX_CAT_H
-        rows = (len(items) + 1) // 2
-        for r in range(rows):
-            d.text((PAD + 6, y), items[r], font=f_chip, fill=WHITE)
-            ri = r + rows
-            if ri < len(items):
-                d.text((PAD + col_w + 6, y), items[ri], font=f_chip, fill=WHITE)
-            y += _EX_ROW_H
-        y += 10
+    for x, text, kind, color in lines:
+        d.text((x, y), text, font=fonts[kind], fill=color)
+        y += heights[kind]
     return y + 6
 
 
