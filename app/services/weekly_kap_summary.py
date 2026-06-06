@@ -319,7 +319,7 @@ _SEC_GAP = 14
 _FOOTER_H = 70
 _HEADER_MAIN_H = 188
 _HEADER_CONT_H = 120
-_SQUARE_MAX = 1120  # tek kare bu yüksekliği aşarsa böl
+_SQUARE_MAX = 1650  # tek kare bu yüksekliği aşarsa böl (uzun/büyük kareler; 40 öğe TEK TWEET 4 kareye sığar)
 # Dinamik öğe yüksekliği — özet kaç satırsa o kadar (YARIM KESME YOK)
 _LINE_H = 30          # özet satır yüksekliği (font 22)
 _ITEM_PAD_TOP = 11
@@ -554,7 +554,7 @@ def _paginate(sections, extras_h: int = 0) -> list[list]:
             cur += _SEC_GAP
         return pages
 
-    N = max(2, min(5, greedy_count()))  # ihtiyaca göre max 5 kare
+    N = max(2, min(4, greedy_count()))  # TEK TWEET → max 4 kare (Twitter tek tweette 4 görsel)
     target = base / N  # sayfa başına dengeli hedef
 
     pages: list[list] = [[]]
@@ -697,8 +697,10 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
         _measure_sections(sections)  # dinamik satır/yükseklik (tam cümle)
         _ex_h = _extras_height(extras) if extras else 0
         pages = _paginate(sections, _ex_h)
-        if len(pages) > 5:
-            pages = pages[:5]  # max 5 kare (Twitter thread: 4 + 1 yanıt)
+        if len(pages) > 4:
+            logger.warning("Haftalık KAP: %d sayfa üretildi, TEK TWEET için 4'e kırpılıyor "
+                           "(fazla öğeler düştü)", len(pages))
+            pages = pages[:4]  # TEK TWEET → max 4 kare (thread YOK)
         total = len(pages)
         # Çok sayfada kareleri EŞİT yükseklikte tut (en dolu sayfaya göre)
         shared_h = None
@@ -780,32 +782,31 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         parts.append(f"{len(spk)} SPK")
     ozet = " · ".join(parts) if parts else "—"
 
-    # Öne çıkan öğeleri kısa satır olarak ekle (AI'in en önemli bulduklari).
-    # Listeler zaten impact'e göre sıralı → ilk öğeler en önemlisi.
-    def _short(it, maxc: int = 70) -> str:
+    def _short(it, maxc: int = 95) -> str:
         tk = (it.get("ticker") or "").strip()
         s = _shrink(it.get("summary", "") or "", maxc, ticker=tk)
         tag = tk if tk.lower().startswith("karar") else f"#{tk}"
-        return f"• {tag} {s}".rstrip()
+        return f"{tag} {s}".rstrip()
+
+    # ★ AI'NIN SEÇTİĞİ EN ÖNEMLİ GELİŞMELER — olumlu+olumsuz impact'e göre birleşik sıralı.
+    #   En yüksek etkili 5 gelişme vurgulanır (haftalık öne çıkanlar).
+    scored = ([(it.get("impact") or 0.0, "🟢", it) for it in positive]
+              + [(it.get("impact") or 0.0, "🔴", it) for it in negative])
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:5]
 
     lines = [
         "📰 Geride Bırakılan Haftanın Önemli KAP Gelişmeleri",
         label,
         "",
-        f"Bu hafta: {ozet}",
+        "🤖 AI'nın seçtiği en önemli gelişmeler:",
     ]
-    if positive:
-        lines.append("")
-        lines.append("🟢 Öne çıkan olumlu:")
-        lines += [_short(it) for it in positive[:3]]
-    if negative:
-        lines.append("")
-        lines.append("🔴 Öne çıkan olumsuz:")
-        lines += [_short(it) for it in negative[:3]]
+    for _imp, emo, it in top:
+        lines.append(f"{emo} {_short(it)}")
     if spk:
-        lines.append("")
-        lines.append("📋 SPK bülteninden:")
-        lines += [_short(it) for it in spk[:2]]
+        lines.append(f"📋 {_short(spk[0])}")
+    lines.append("")
+    lines.append(f"📊 Bu hafta: {ozet}")
     lines.append("")
     lines.append("Tüm gelişmeler görselde 👇")
     lines.append("")
@@ -838,18 +839,8 @@ async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *, dr
 
     try:
         from app.services.twitter_service import _safe_tweet_with_multi_media
-        if len(images) <= 4:
-            ok = bool(_safe_tweet_with_multi_media(text, images, source="weekly_kap_summary"))
-        else:
-            # Twitter tek tweette max 4 görsel → thread: ilk 4 + kalanlar yanıt olarak
-            tid = _safe_tweet_with_multi_media(text, images[:4], source="weekly_kap_summary", return_id=True)
-            ok = bool(tid)
-            if tid:
-                rest = images[4:]
-                _safe_tweet_with_multi_media(
-                    "📰 Haftalık KAP özeti — devamı 👇\n#KAP #BIST100 #borsa",
-                    rest, source="weekly_kap_summary", in_reply_to=tid, force_send=True,
-                )
+        # TEK TWEET — resimler tek tweette (parça/thread YOK). Twitter max 4 görsel.
+        ok = bool(_safe_tweet_with_multi_media(text, images[:4], source="weekly_kap_summary"))
     except Exception as e:
         logger.exception("Haftalık KAP tweet hatası: %s", e)
         ok = False

@@ -143,7 +143,7 @@ document.getElementById('previewBtn')?.addEventListener('click',async()=>{
         im.style.maxWidth=(j.frames>1?'48%':'90%'); im.style.height='auto';
         wrap.appendChild(im);
       });
-      document.getElementById('frameInfo').textContent=j.frames>4?`(${j.frames} kare — 4+${j.frames-4} thread)`:(j.frames>1?`(${j.frames} kare — tek tweette)`:'(1 kare)');
+      document.getElementById('frameInfo').textContent=j.frames>1?`(${j.frames} kare — tek tweet)`:'(1 kare)';
       document.getElementById('previewText').textContent=j.text||'';
       document.getElementById('previewWrap').classList.remove('hidden');
       document.getElementById('previewWrap').scrollIntoView({behavior:'smooth'});
