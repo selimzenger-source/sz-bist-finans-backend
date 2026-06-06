@@ -157,10 +157,14 @@ async def get_week_extras(start: date, end: date) -> dict:
     out = {"tedbir_added": [], "tedbir_ended": [], "dividends": []}
     try:
         async with async_session() as s:
-            # tedbir gelen — türü (tags) ile birlikte; ticker bazında tekilleştir
+            # tedbir gelen — türü (tags) ile. is_active=false (iptal edilen) HARİÇ.
+            # "geldi" = bu hafta ilan edildi (created_at) VEYA başladı (start_date).
+            # (BIST cuma ilan eder, pazartesi yürürlük → created_at ile yakalanır.)
             r1 = await s.execute(sa_text(
                 "SELECT UPPER(ticker), string_agg(DISTINCT tags, ',') AS tags "
-                "FROM cautious_stocks WHERE start_date BETWEEN :s AND :e "
+                "FROM cautious_stocks "
+                "WHERE is_active = true "
+                "  AND (start_date BETWEEN :s AND :e OR created_at::date BETWEEN :s AND :e) "
                 "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
             out["tedbir_added"] = [(x[0], x[1] or "") for x in r1.all() if x[0]]
             r2 = await s.execute(sa_text(
