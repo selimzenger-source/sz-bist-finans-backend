@@ -364,9 +364,23 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
         if ai_result:
             await _tweet_bilanco_analysis(ticker, kap_title, ai_result)
 
-        # 5. Bildirim gonder (premium kullanicilara)
+        # 5. Bildirim gonder (premium / topic aboneleri)
         if ai_result:
             await _send_bilanco_notification(ticker, ai_result)
+
+        # 5b. FAVORI/PORTFOY listesindekilere "Bilanco tablosu ozetlendi" bildirimi
+        #     -> tiklayinca o hissenin bilanco kartina/ozetine yonlendirir.
+        if ai_result:
+            try:
+                from app.services.notification import NotificationService
+                from app.database import async_session as _asess_notif
+                async with _asess_notif() as _ns:
+                    await NotificationService(_ns).notify_bilanco_summarized(
+                        ticker, str(ai_result.get("period", ""))
+                    )
+                    await _ns.commit()
+            except Exception as _ne:
+                logger.warning("Favori bilanco ozetlendi bildirim hata (%s): %s", ticker, _ne)
 
         logger.info("✅ Bilanco pipeline tamamlandi: %s", ticker)
 

@@ -1741,6 +1741,91 @@ class NotificationService:
             logger.info("Bilanco aciklandi bildirimi: %s — %d kullaniciya gonderildi", ticker, sent_count)
         return sent_count
 
+    async def notify_bilanco_summarized(self, ticker: str, period: str = "") -> int:
+        """Bilanco AI ozeti HAZIR olunca (pipeline sonu), favori/portfoy
+        listesinde bu hisse olan kullanicilara push: 'Bilanco tablosu Ozetlendi'
+        -> tiklayinca o hissenin bilanco kartina/ozetine yonlendirir.
+
+        notify_bilanco_announced (aciklandi) ile AYRI: bu, AI ozeti hazir
+        oldugunda gider. Dedup token farkli oldugundan ikisi de gidebilir ama
+        cooldown ayni hisse icin tekrari engeller.
+        """
+        from app.models.user import User
+        from app.models.user_watchlist import UserWatchlist
+
+        ticker = (ticker or "").upper()
+        if not ticker:
+            return 0
+
+        _dedup_tok = f"bilanco_summarized:{ticker}"
+        title = f"📊 {ticker} Bilanço tablosu özetlendi"
+        body = f"Favori listenizde {ticker} bilançosu özetlendi — incelemek için dokunun."
+        data = {
+            "type": "bilanco_summarized",
+            "ticker": ticker,
+            "screen": f"/bilanco-analizi?ticker={ticker}",
+        }
+
+        wl = await self.db.execute(
+            select(UserWatchlist.device_id).where(UserWatchlist.ticker == ticker)
+        )
+        device_ids = {r[0] for r in wl.all()}
+        pf = await self.db.execute(
+            select(User.device_id).where(
+                User.portfolio_tickers.isnot(None),
+                or_(
+                    User.portfolio_tickers == ticker,
+                    User.portfolio_tickers.like(f"{ticker},%"),
+                    User.portfolio_tickers.like(f"%,{ticker},%"),
+                    User.portfolio_tickers.like(f"%,{ticker}"),
+                ),
+            )
+        )
+        device_ids |= {r[0] for r in pf.all()}
+        if not device_ids:
+            return 0
+
+        _cleanup_watchlist_cache()
+        now = time.time()
+
+        cand = await self.db.execute(
+            select(User).where(
+                User.device_id.in_(device_ids),
+                or_(User.deleted == False, User.deleted.is_(None)),  # noqa: E712
+            )
+        )
+        candidates = list(cand.scalars().all())
+
+        sent_count = 0
+        for u in candidates:
+            if not getattr(u, "notifications_enabled", False):
+                continue
+            if not getattr(u, "notify_kap_watchlist", False):
+                continue
+            _has_token = bool(
+                (getattr(u, "fcm_token", None) and u.fcm_token.strip())
+                or (getattr(u, "expo_push_token", None) and u.expo_push_token.strip())
+            )
+            if not _has_token:
+                continue
+            cache_key = f"{u.device_id}:{_dedup_tok}"
+            if now - _watchlist_notif_cache.get(cache_key, 0) < _WATCHLIST_NOTIF_COOLDOWN:
+                continue
+            try:
+                success = await self._send_to_user(
+                    user=u, title=title, body=body, data=data,
+                    channel_id="kap_news_v2", category="bilanco_summarized",
+                )
+                if success:
+                    sent_count += 1
+                    _watchlist_notif_cache[cache_key] = time.time()
+            except Exception as e:
+                logger.warning("Bilanco ozetlendi bildirim hatasi (user=%s): %s", u.id, e)
+
+        if sent_count > 0:
+            logger.info("Bilanco ozetlendi bildirimi: %s — %d kullaniciya gonderildi", ticker, sent_count)
+        return sent_count
+
     # -------------------------------------------------------
     # Gunluk Takip (Daily Tracking) Bildirimleri
     # -------------------------------------------------------
