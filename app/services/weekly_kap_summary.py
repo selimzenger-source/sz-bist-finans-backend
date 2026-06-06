@@ -793,7 +793,16 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     scored = ([(it.get("impact") or 0.0, "🟢", it) for it in positive]
               + [(it.get("impact") or 0.0, "🔴", it) for it in negative])
     scored.sort(key=lambda x: x[0], reverse=True)
-    top = scored[:5]
+    # Top 5 — sembol başına 1 (aynı hisse tekrar etmesin, çeşitli olsun)
+    top, _seen_top = [], set()
+    for row in scored:
+        tk = row[2].get("ticker")
+        if tk in _seen_top:
+            continue
+        _seen_top.add(tk)
+        top.append(row)
+        if len(top) >= 5:
+            break
 
     lines = [
         f"📰 {label} arası en önemli gelişmeler",
@@ -808,6 +817,9 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     lines.append(f"📊 Bu hafta: {ozet}")
     lines.append("")
     lines.append("Tüm gelişmeler görselde 👇")
+    lines.append("")
+    lines.append("📲 Tüm detaylı haberleri ve analizleri Borsa Cebimde "
+                 "uygulamamızı indirerek takip edebilirsiniz.")
     lines.append("")
     lines.append(f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip())
     return "\n".join(lines)
