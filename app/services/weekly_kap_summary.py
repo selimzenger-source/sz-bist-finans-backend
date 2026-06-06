@@ -56,14 +56,14 @@ def _today_tr() -> date:
 
 
 def last_week_range(today: date | None = None) -> tuple[date, date]:
-    """Geride bırakılan haftanın Pazartesi–Cuma aralığı.
+    """Bu haftanın Pazartesi → BUGÜN (tweet'in atıldığı gün) aralığı.
 
-    Cumartesi çalıştığında 'geçen hafta' = o anki haftanın Pzt–Cuma'sı (yeni biten).
+    Cumartesi atıldığında Pzt–Cmt olur (hafta sonu gelen tedbir/haberler de girer).
+    Bitiş = bugün; böylece 'bugünü baz al' isteği karşılanır.
     """
     d = today or _today_tr()
     monday = d - timedelta(days=d.weekday())  # bu haftanın pazartesisi
-    friday = monday + timedelta(days=4)
-    return monday, friday
+    return monday, d
 
 
 def week_label(start: date, end: date) -> str:
@@ -498,7 +498,7 @@ def _prepare_extras(extras: dict):
         grid([(f"#{t}", None, WHITE) for t in end], with_type=False)
 
     if div:
-        tokens.append((PAD, dy, f"💰 TEMETTÜ DAĞITAN  ({len(div)})", "cat", _C_DIV))
+        tokens.append((PAD, dy, f"💰 TEMETTÜ DAĞITAN (brüt)  ({len(div)})", "cat", _C_DIV))
         dy += _EX_H_CAT
         grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in div], with_type=False)
 
@@ -786,46 +786,19 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         parts.append(f"{len(spk)} SPK")
     ozet = " · ".join(parts) if parts else "—"
 
-    def _short(it, maxc: int = 240) -> str:  # tam cümle (yarım kesme yok)
-        tk = (it.get("ticker") or "").strip()
-        s = _shrink(it.get("summary", "") or "", maxc, ticker=tk)
-        tag = tk if tk.lower().startswith("karar") else f"#{tk}"
-        return f"{tag} {s}".rstrip()
-
-    # ★ AI'NIN SEÇTİĞİ EN ÖNEMLİ GELİŞMELER — olumlu+olumsuz impact'e göre birleşik sıralı.
-    #   En yüksek etkili 5 gelişme vurgulanır (haftalık öne çıkanlar).
-    scored = ([(it.get("impact") or 0.0, "🟢", it) for it in positive]
-              + [(it.get("impact") or 0.0, "🔴", it) for it in negative])
-    scored.sort(key=lambda x: x[0], reverse=True)
-    # Top 5 — sembol başına 1 (aynı hisse tekrar etmesin, çeşitli olsun)
-    top, _seen_top = [], set()
-    for row in scored:
-        tk = row[2].get("ticker")
-        if tk in _seen_top:
-            continue
-        _seen_top.add(tk)
-        top.append(row)
-        if len(top) >= 5:
-            break
-
+    # Haber listesi GÖRSELDE — tweet metni kısa tutulur (detay görselde açıklanıyor).
     lines = [
         f"📰 {label} arası en önemli gelişmeler",
         "",
-        "🤖 AI'nın öne çıkardıkları:",
+        "🤖 AI tarafından seçilen önemli KAP gelişmeleri — detaylar görselde 👇",
+        "",
+        f"📊 Bu hafta: {ozet}",
+        "",
+        "📲 Tüm detaylı haberleri ve analizleri Borsa Cebimde "
+        "uygulamamızı indirerek takip edebilirsiniz.",
+        "",
+        f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip(),
     ]
-    for _imp, emo, it in top:
-        lines.append(f"{emo} {_short(it)}")
-    if spk:
-        lines.append(f"📋 {_short(spk[0])}")
-    lines.append("")
-    lines.append(f"📊 Bu hafta: {ozet}")
-    lines.append("")
-    lines.append("Tüm gelişmeler görselde 👇")
-    lines.append("")
-    lines.append("📲 Tüm detaylı haberleri ve analizleri Borsa Cebimde "
-                 "uygulamamızı indirerek takip edebilirsiniz.")
-    lines.append("")
-    lines.append(f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip())
     return "\n".join(lines)
 
 
