@@ -68,6 +68,56 @@ def week_label(start: date, end: date) -> str:
 #  VERİ
 # ════════════════════════════════════════════════════════════════════════════
 
+# Sonundaki nokta CÜMLE SONU OLMAYAN kısaltmalar (küçük harf, noktasız son segment).
+# "A.Ş.", "Ş.", "A.O." gibi noktalı kısaltmalarda son segment tek harf olduğu için
+# zaten tek-harf kuralıyla yakalanır; buraya çok-harfli kısaltmalar girer.
+_ABBREV = {
+    "vb", "vs", "vd", "bkz", "örn", "orn", "no", "nr", "sn", "dr", "av", "prof",
+    "doç", "doc", "san", "tic", "ltd", "şti", "sti", "max", "min", "yön", "müd",
+    "gen", "mah", "cad", "sok", "apt", "bld", "tl", "usd", "eur",
+}
+
+
+def _is_sentence_end(s: str, idx: int) -> bool:
+    """s[idx] bir '.', '!' veya '?' — gerçek cümle sonu mu?"""
+    ch = s[idx]
+    if ch in "!?":
+        return True
+    # Ondalık sayı: 70.81 → iki yanı rakam ise cümle sonu değil
+    if 0 < idx < len(s) - 1 and s[idx - 1].isdigit() and s[idx + 1].isdigit():
+        return False
+    # Noktadan önceki "kelimeyi" al (harf/nokta zinciri)
+    j = idx - 1
+    while j >= 0 and (s[j].isalpha() or s[j] == "."):
+        j -= 1
+    word = s[j + 1:idx].lower().strip(".")
+    # Tek harf inisyali (A., Ş., T. ...) → cümle sonu değil
+    if len(word) <= 1:
+        return False
+    # Bilinen kısaltma → cümle sonu değil
+    if word in _ABBREV:
+        return False
+    return True
+
+
+def _first_sentence(s: str, min_len: int = 40) -> str:
+    """Kısaltma/ondalık tuzaklarını atlayarak ilk GERÇEK cümleyi döndürür.
+    min_len'den kısa biten 'cümleyi' atlar (devamına bakar) — yarım kesilmeyi önler.
+    """
+    for m in re.finditer(r"[.!?]", s):
+        idx = m.start()
+        if not _is_sentence_end(s, idx):
+            continue
+        # Sonu kapanış tırnağı/parantez ise onu da dahil et
+        end = idx + 1
+        while end < len(s) and s[end] in '"”»)]':
+            end += 1
+        cand = s[:end].strip()
+        if len(cand) >= min_len:
+            return cand
+    return s
+
+
 def _shrink(text: str, max_chars: int, ticker: str | None = None) -> str:
     """Özeti tek satıra indir — ilk cümle veya kırp. Baştaki ticker tekrarını sil."""
     if not text:
@@ -76,10 +126,10 @@ def _shrink(text: str, max_chars: int, ticker: str | None = None) -> str:
     # Baştaki "TICKER" / "TICKER," / "TICKER -" tekrarını kaldır (görselde #TICKER zaten var)
     if ticker:
         s = re.sub(rf"^#?{re.escape(ticker)}\b[\s,:\-–—]*", "", s, flags=re.IGNORECASE).lstrip()
-    # İlk cümle
-    m = re.search(r"(.+?[.!?])(\s|$)", s)
-    if m and len(m.group(1)) <= max_chars + 20:
-        s = m.group(1)
+    # İlk gerçek cümle (kısaltma/ondalık tuzaklarını atlar)
+    first = _first_sentence(s)
+    if first and len(first) <= max_chars + 20:
+        s = first
     if len(s) > max_chars:
         s = s[:max_chars].rsplit(" ", 1)[0].rstrip(",;:") + "…"
     return s.strip()
