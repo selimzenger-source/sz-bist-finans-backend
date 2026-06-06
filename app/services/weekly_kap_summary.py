@@ -30,8 +30,16 @@ _TR_MONTHS = {
     7: "Temmuz", 8: "Ağustos", 9: "Eylül", 10: "Ekim", 11: "Kasım", 12: "Aralık",
 }
 
-_POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
-_NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
+# DİKKAT: DB Türkçe karakterle saklar ('Çok Olumlu', 'Güçlü Olumlu'). ASCII yazımlar
+# ('Cok Olumlu') EŞLEŞMEZ → en güçlü haberler sessizce elenir. Her iki form da listede.
+_POSITIVE_SENTIMENTS = (
+    "Güçlü Olumlu", "Çok Olumlu", "Olumlu", "Hafif Olumlu",
+    "Guclu Olumlu", "Cok Olumlu",  # ASCII fallback
+)
+_NEGATIVE_SENTIMENTS = (
+    "Güçlü Olumsuz", "Çok Olumsuz", "Olumsuz", "Hafif Olumsuz",
+    "Guclu Olumsuz", "Cok Olumsuz",  # ASCII fallback
+)
 
 # Görsel kareye-yakın kalsın diye toplam öğe tavanı (admin daha azını seçebilir)
 MAX_TOTAL_ITEMS = 40  # ihtiyaca göre max 5 kareye kadar dağıtılır
@@ -91,6 +99,10 @@ def _is_sentence_end(s: str, idx: int) -> bool:
     while j >= 0 and (s[j].isalpha() or s[j] == "."):
         j -= 1
     word = s[j + 1:idx].lower().strip(".")
+    # Noktalı kısaltma (A.Ş., T.A.Ş., B.V., T.C., A.O. ...) → kelime içi nokta varsa
+    # bu bir kısaltmadır, cümle sonu DEĞİL (uzunluktan bağımsız).
+    if "." in word:
+        return False
     # Tek harf inisyali (A., Ş., T. ...) → cümle sonu değil
     if len(word) <= 1:
         return False
