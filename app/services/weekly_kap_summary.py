@@ -488,7 +488,8 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     for grp in (positive, negative, spk):
         for it in grp:
             t = it.get("ticker")
-            if t and t not in tickers:
+            # "Karar N" gibi sahte ticker'lar hashtag olmaz
+            if t and t not in tickers and not t.lower().startswith("karar"):
                 tickers.append(t)
     ticker_tags = " ".join(f"#{t}" for t in tickers[:10])
 
@@ -501,15 +502,36 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         parts.append(f"{len(spk)} SPK")
     ozet = " · ".join(parts) if parts else "—"
 
+    # Öne çıkan öğeleri kısa satır olarak ekle (AI'in en önemli bulduklari).
+    # Listeler zaten impact'e göre sıralı → ilk öğeler en önemlisi.
+    def _short(it, maxc: int = 70) -> str:
+        tk = (it.get("ticker") or "").strip()
+        s = _shrink(it.get("summary", "") or "", maxc, ticker=tk)
+        tag = tk if tk.lower().startswith("karar") else f"#{tk}"
+        return f"• {tag} {s}".rstrip()
+
     lines = [
         "📰 Geride Bırakılan Haftanın Önemli KAP Gelişmeleri",
         label,
         "",
         f"Bu hafta: {ozet}",
-        "Detaylar görselde 👇",
-        "",
-        f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip(),
     ]
+    if positive:
+        lines.append("")
+        lines.append("🟢 Öne çıkan olumlu:")
+        lines += [_short(it) for it in positive[:3]]
+    if negative:
+        lines.append("")
+        lines.append("🔴 Öne çıkan olumsuz:")
+        lines += [_short(it) for it in negative[:3]]
+    if spk:
+        lines.append("")
+        lines.append("📋 SPK bülteninden:")
+        lines += [_short(it) for it in spk[:2]]
+    lines.append("")
+    lines.append("Tüm gelişmeler görselde 👇")
+    lines.append("")
+    lines.append(f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip())
     return "\n".join(lines)
 
 
