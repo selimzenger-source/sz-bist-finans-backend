@@ -606,8 +606,8 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None, e
     f_sub = _load_font(28, bold=False)
     f_ch = _load_font(30, bold=True)
     f_sec = _load_font(28, bold=True)
-    f_tk = _load_font(28, bold=True)
-    f_sum = _load_font(22, bold=False)  # biraz daha ufak — tam cümle sığsın
+    f_tk = _load_font(_TK_FONT_SZ, bold=True)
+    f_sum = _load_font(_SUM_FONT_SZ, bold=False)  # ÖLÇÜM ile AYNI font (taşma/kesilme olmasın)
 
     _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
 
