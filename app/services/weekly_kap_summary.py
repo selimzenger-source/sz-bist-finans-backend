@@ -766,16 +766,22 @@ def filter_selected(data: dict, selected: set[str]) -> tuple[list, list, list]:
 
 
 def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> str:
-    """Kısa tweet metni — detay görselde, metin başlık + sayı + hashtag."""
-    tickers: list[str] = []
-    for grp in (positive, negative, spk):
-        for it in grp:
-            t = it.get("ticker")
-            # "Karar N" gibi sahte ticker'lar hashtag olmaz
-            if t and t not in tickers and not t.lower().startswith("karar"):
-                tickers.append(t)
-    # Seçilen tüm hisselerin hashtag'i (kullanıcı isteği)
-    ticker_tags = " ".join(f"#{t}" for t in tickers)
+    """Tweet metni — detay görselde. Hisseler, alta YIĞIN hashtag yerine HER HİSSE
+    KENDİ GELİŞME SAYISIYLA ayrı satırda (bağlam + dağıtılmış hashtag → spam görünmez)."""
+    # Hisse bazında olumlu/olumsuz/SPK sayıları (Karar N gibi sahteler hariç)
+    agg: dict[str, list] = {}  # ticker -> [pos, neg, spk]
+    for it in positive:
+        t = it.get("ticker")
+        if t and not t.lower().startswith("karar"):
+            agg.setdefault(t, [0, 0, 0])[0] += 1
+    for it in negative:
+        t = it.get("ticker")
+        if t and not t.lower().startswith("karar"):
+            agg.setdefault(t, [0, 0, 0])[1] += 1
+    for it in spk:
+        t = it.get("ticker")
+        if t and not t.lower().startswith("karar"):
+            agg.setdefault(t, [0, 0, 0])[2] += 1
 
     parts = []
     if positive:
@@ -786,7 +792,19 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         parts.append(f"{len(spk)} SPK")
     ozet = " · ".join(parts) if parts else "—"
 
-    # Haber listesi GÖRSELDE — tweet metni kısa tutulur (detay görselde açıklanıyor).
+    # Hisse satırları — alfabetik; her biri #TICKER + gelişme dökümü
+    tk_lines = []
+    for tk in sorted(agg):
+        p, n, s = agg[tk]
+        seg = []
+        if p:
+            seg.append(f"{p} olumlu")
+        if n:
+            seg.append(f"{n} olumsuz")
+        if s:
+            seg.append(f"{s} SPK")
+        tk_lines.append(f"#{tk} → {' · '.join(seg)}")
+
     lines = [
         f"📰 {label} arası en önemli gelişmeler",
         "",
@@ -797,8 +815,11 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         "📲 Tüm detaylı haberleri ve analizleri Borsa Cebimde "
         "uygulamamızı indirerek takip edebilirsiniz.",
         "",
-        f"#KAP #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip(),
+        "📌 Hisse bazında gelişmeler:",
     ]
+    lines += tk_lines
+    lines.append("")
+    lines.append("#KAP #BIST100 #borsa #hisse #yatırım")
     return "\n".join(lines)
 
 
