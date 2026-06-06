@@ -747,6 +747,8 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False, sk
         False: tweet basarisiz (ama sistem etkilenmez)
     """
     try:
+        # Satır sonlarını normalize et (textarea \r\n -> \n; Twitter 400 önlenir)
+        text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
         # KILL SWITCH — admin panelden tüm tweetler durduruldu
         if not force_send and is_tweets_killed():
             logger.warning("[TWEET KILL SWITCH] Tweet durduruldu: %s", text[:60])
@@ -2468,6 +2470,7 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
     1. Twitter v1.1 media/upload ile gorseli yukle → media_id al
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     try:
         # KILL SWITCH — admin panelden tüm tweetler durduruldu
         if not force_send and is_tweets_killed():
@@ -2658,6 +2661,8 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
     gorsel icin). return_id=True ise basarida tweet ID (str), aksi halde "" doner.
     """
     _fail = "" if return_id else False
+    # Satır sonlarını normalize et — textarea \r\n gönderir, Twitter API 400 verebilir
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
     if not image_paths:
         return _safe_tweet(text, source=source, force_send=force_send)
     if len(image_paths) == 1 and not in_reply_to and not return_id:
