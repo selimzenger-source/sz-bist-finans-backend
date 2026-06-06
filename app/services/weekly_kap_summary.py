@@ -160,20 +160,48 @@ async def get_week_kap_news(start: date, end: date) -> dict:
             )
             bullet_re = re.compile(r"^\s*[•▪▫◦·*\-]?\s*#?([A-ZÇŞĞÜÖİ]{3,6})\s*[-–—]\s*(.+)$")
             seen_spk: set[str] = set()
+            _gen_counter = 0
             for (txt,) in spk_res.all():
                 if not txt:
                     continue
-                for line in txt.split("\n"):
-                    m = bullet_re.match(line.strip())
-                    if not m:
+                for raw in txt.split("\n"):
+                    line = raw.strip()
+                    if not line:
                         continue
-                    tk = m.group(1).upper()
-                    desc = _shrink(m.group(2), IMG_SUMMARY_CHARS)
-                    key = f"{tk}:{desc[:20]}"
-                    if key in seen_spk or not desc:
+                    m = bullet_re.match(line)
+                    if m:
+                        tk = m.group(1).upper()
+                        desc = _shrink(m.group(2), IMG_SUMMARY_CHARS)
+                        key = f"{tk}:{desc[:20]}"
+                        if key in seen_spk or not desc:
+                            continue
+                        seen_spk.add(key)
+                        spk_items.append({"ticker": tk, "summary": desc})
                         continue
-                    seen_spk.add(key)
-                    spk_items.append({"ticker": tk, "summary": desc})
+                    # ── Piyasa-geneli (hissesiz) SPK karari: "• <metin>" ──
+                    # SPK bulteni cogunlukla hisse koduyla DEGIL genel kararlarla gelir
+                    # (orn "• Borsa Istanbul'da ... pay orani hesaplama yontemi degisti").
+                    # bullet_re bunlari atliyordu -> 0 SPK. "Karar N" olarak ekle.
+                    if line[:1] in ("•", "▪", "▫", "◦", "·", "*", "-"):
+                        _gen = line.lstrip("•▪▫◦·*– -").strip()
+                        if len(_gen) >= 40:
+                            # "#TICKER ..." ile basliyorsa hisse kodunu etiket yap;
+                            # yoksa piyasa-geneli karar -> "Karar N"
+                            _tm = re.match(r"^#([A-ZÇŞĞÜÖİ]{3,6})\b", _gen)
+                            if _tm:
+                                _lbl = _tm.group(1).upper()
+                                key = f"{_lbl}:{_gen[:25]}"
+                            else:
+                                _gen_counter += 1
+                                _lbl = f"Karar {_gen_counter}"
+                                key = f"GEN:{_gen[:25]}"
+                            if key in seen_spk:
+                                continue
+                            seen_spk.add(key)
+                            spk_items.append({
+                                "ticker": _lbl,
+                                "summary": _shrink(_gen, IMG_SUMMARY_CHARS),
+                            })
         except Exception as e:
             logger.warning("Haftalık SPK derleme hatası: %s", e)
 
