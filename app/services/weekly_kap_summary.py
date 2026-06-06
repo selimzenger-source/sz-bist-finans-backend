@@ -782,7 +782,7 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
         parts.append(f"{len(spk)} SPK")
     ozet = " · ".join(parts) if parts else "—"
 
-    def _short(it, maxc: int = 95) -> str:
+    def _short(it, maxc: int = 240) -> str:  # tam cümle (yarım kesme yok)
         tk = (it.get("ticker") or "").strip()
         s = _shrink(it.get("summary", "") or "", maxc, ticker=tk)
         tag = tk if tk.lower().startswith("karar") else f"#{tk}"
@@ -829,8 +829,12 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
 #  ORKESTRASYON
 # ════════════════════════════════════════════════════════════════════════════
 
-async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *, dry_run: bool = False) -> dict:
-    """Seçili haberlerden görsel üret + (dry_run değilse) tweet at."""
+async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *,
+                          dry_run: bool = False, custom_text: str | None = None) -> dict:
+    """Seçili haberlerden görsel üret + (dry_run değilse) tweet at.
+
+    custom_text verilirse (admin panelde düzenlenmiş metin) onu kullanır.
+    """
     label = week_label(start, end)
     data = await get_week_kap_news(start, end)
     pos, neg, spk = filter_selected(data, selected_keys)
@@ -842,7 +846,8 @@ async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *, dr
     images = generate_weekly_kap_images(pos, neg, spk, label, extras=extras)
     if not images:
         return {"sent": False, "reason": "image_failed", "label": label}
-    text = build_tweet_text(pos, neg, spk, label)
+    # Admin düzenlemişse onun metni; yoksa otomatik üret
+    text = custom_text.strip() if (custom_text and custom_text.strip()) else build_tweet_text(pos, neg, spk, label)
 
     if dry_run:
         return {"sent": False, "reason": "dry_run", "label": label,

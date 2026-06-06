@@ -2931,7 +2931,8 @@ async def weekly_kap_send(request: Request):
             url=f"/admin/weekly-kap?error=En fazla {W.MAX_TOTAL_ITEMS} haber seçilebilir",
             status_code=303)
 
-    r = await W.send_weekly_kap(start, end, selected)
+    custom_text = (form.get("custom_text") or "").strip() or None
+    r = await W.send_weekly_kap(start, end, selected, custom_text=custom_text)
     if r.get("sent"):
         return RedirectResponse(
             url=f"/admin/weekly-kap?success=Tweet gönderildi ({r.get('total')} haber)",

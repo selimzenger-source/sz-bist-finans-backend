@@ -48,6 +48,7 @@
   <form id="kapForm" method="post" action="/admin/weekly-kap/send" class="space-y-6">
     <input type="hidden" name="week_start" value="{{ week_start }}">
     <input type="hidden" name="week_end" value="{{ week_end }}">
+    <input type="hidden" name="custom_text" id="customText">
 
     {% macro section(title, items, color, badge) %}
     {% if items %}
@@ -104,7 +105,11 @@
       <span class="text-xs text-gray-400">Tweet'e bu görsel(ler) + metin gider</span>
     </div>
     <div id="previewImgs" class="flex flex-wrap gap-3 justify-center"></div>
-    <pre id="previewText" class="mt-3 text-xs text-gray-300 whitespace-pre-wrap bg-gray-900 rounded-lg p-3"></pre>
+    <div class="mt-3">
+      <label class="text-xs text-gray-400 mb-1 block">✏️ Tweet metni (düzenleyebilirsin — gönderilecek metin budur):</label>
+      <textarea id="previewText" rows="16"
+                class="w-full text-xs text-gray-100 whitespace-pre-wrap bg-gray-900 border border-gray-600 rounded-lg p-3 font-mono focus:outline-none focus:border-indigo-500"></textarea>
+    </div>
   </div>
   {% endif %}
 </div>
@@ -144,7 +149,7 @@ document.getElementById('previewBtn')?.addEventListener('click',async()=>{
         wrap.appendChild(im);
       });
       document.getElementById('frameInfo').textContent=j.frames>1?`(${j.frames} kare — tek tweet)`:'(1 kare)';
-      document.getElementById('previewText').textContent=j.text||'';
+      document.getElementById('previewText').value=j.text||'';
       document.getElementById('previewWrap').classList.remove('hidden');
       document.getElementById('previewWrap').scrollIntoView({behavior:'smooth'});
     }else{ alert(j.error||'Önizleme üretilemedi'); }
@@ -168,6 +173,12 @@ if(_search){
     document.getElementById('searchHint').textContent=q?`${shown} sonuç (seçili olanlar da görünür)`:'';
   });
 }
+// Gönderirken düzenlenmiş tweet metnini forma aktar (boşsa backend otomatik üretir)
+document.getElementById('kapForm')?.addEventListener('submit',()=>{
+  const t=document.getElementById('previewText');
+  const h=document.getElementById('customText');
+  if(t && h) h.value = (t.value||'').trim();
+});
 refreshCount();
 </script>
 {% endblock %}
