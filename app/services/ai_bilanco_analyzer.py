@@ -584,7 +584,7 @@ async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
         return None
 
     from app.services.bilanco_kap_scraper import parse_kap_finansal_rapor
-    result = parse_kap_finansal_rapor(kap_content)
+    result = parse_kap_finansal_rapor(kap_content, ticker)
 
     # Period yoksa veya en kritik alanlardan hicbiri yoksa null don
     if not result.get("period") and not result.get("total_assets") and not result.get("revenue"):

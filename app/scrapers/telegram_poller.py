@@ -967,7 +967,7 @@ async def _route_to_calendars(
                 disc = await fetch_kap_disclosure(kap_url)
                 body_xbrl = disc.get("full_text", "") if disc else ""
                 if body_xbrl:
-                    parsed = parse_kap_finansal_rapor(body_xbrl)
+                    parsed = parse_kap_finansal_rapor(body_xbrl, ticker)
                     # Safeguard: sektor whitelist + confidence kontrol
                     sec = parsed.get("sector_type") if parsed else None
                     conf = parsed.get("confidence") if parsed else None

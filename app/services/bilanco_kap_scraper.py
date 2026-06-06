@@ -310,8 +310,10 @@ def _extract_value_after_tag(body: str, tag: str, col_count: int = 2, prev: bool
 
 # ─── Ana Parse Fonksiyonu ──────────────────────────────────────────────────────
 
-def parse_kap_finansal_rapor(body: str) -> dict:
+def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
     """KAP Finansal Rapor body'sinden Cari Dönem finansal verilerini çıkar.
+
+    ticker: FAVÖK hesabını sektöre göre dogru yapmak icin (GYO tespiti).
 
     Sektör tespiti yapar (industrial/bank/insurance), uygun etiket setini kullanır.
 
@@ -395,17 +397,24 @@ def parse_kap_finansal_rapor(body: str) -> dict:
             # total_debt artık financial debt olarak kaydedilir (kullanıcı tercihi)
             out["total_debt"] = fin_debt
 
-        # Gerçek EBITDA = Brüt Kar - SG&A + Amortisman (REIT için doğru)
-        # NOT: KAP body'sinde SG&A pozitif geliyor (label 'negatedLabel' ile).
-        # xlsx'te negatif. Bu yüzden her zaman ABS ile çıkar.
+        # FAVÖK — SEKTÖRE GÖRE (Fintables ile birebir):
+        #  • Sanayi/ticaret/holding → Esas Faaliyet Karı (operating_profit) + Amortisman
+        #    (Fintables tanimi; "esas faaliyetlerden diger gelir/gider" DAHIL.)
+        #  • GYO (REIT) → Brut Kar - SG&A + Amortisman
+        #    (operating_profit, yatirim amacli gayrimenkul DEGER ARTIS kazanc/zararini
+        #     icerir; FAVÖK'e katmak yaniltici olur → bu yontemle haric tutulur.)
+        # NOT: KAP body'sinde SG&A pozitif geliyor → her zaman ABS ile cikar.
+        _is_reit = "GYO" in (ticker or "").upper()
         gross = out.get("gross_profit")
-        if gross is not None:
+        op = out.get("operating_profit")
+        depr = abs(aux.get("_depreciation_amortization") or 0)
+        if (not _is_reit) and op is not None:
+            out["ebitda"] = op + depr
+        elif gross is not None:
             sga_total = (abs(aux.get("_sga_general") or 0)
                          + abs(aux.get("_sga_marketing") or 0)
                          + abs(aux.get("_sga_rd") or 0))
-            depr = abs(aux.get("_depreciation_amortization") or 0)
-            ebitda = gross - sga_total + depr
-            out["ebitda"] = ebitda
+            out["ebitda"] = gross - sga_total + depr
 
     elif sector == SECTOR_BANK:
         # Banka EBITDA — Faaliyet Brüt Karı yaklaşık
@@ -469,9 +478,14 @@ def parse_kap_finansal_rapor(body: str) -> dict:
         if _fd > 0:
             prev["net_debt"] = _fd - (prev.get("cash_and_equivalents") or 0)
         _g = prev.get("gross_profit")
-        if _g is not None:
+        _op = prev.get("operating_profit")
+        _dep = abs(aux_prev.get("_depreciation_amortization") or 0)
+        _is_reit_p = "GYO" in (ticker or "").upper()
+        if (not _is_reit_p) and _op is not None:
+            prev["ebitda"] = _op + _dep
+        elif _g is not None:
             _sga = abs(aux_prev.get("_sga_general") or 0) + abs(aux_prev.get("_sga_marketing") or 0) + abs(aux_prev.get("_sga_rd") or 0)
-            prev["ebitda"] = _g - _sga + abs(aux_prev.get("_depreciation_amortization") or 0)
+            prev["ebitda"] = _g - _sga + _dep
     elif sector == SECTOR_BANK:
         if prev.get("gross_profit") is not None:
             prev["ebitda"] = prev["gross_profit"]

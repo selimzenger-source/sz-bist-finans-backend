@@ -12431,7 +12431,7 @@ async def admin_test_bilanco_parse(request: Request, payload: dict = Body(...)):
     onceki_headers = _re.findall(r"[ÖO]nceki\s*D[öo]nem[^|]{0,200}", body)[:10]
 
     detected_period = _detect_period(body)
-    parsed = parse_kap_finansal_rapor(body)
+    parsed = parse_kap_finansal_rapor(body, payload.get("ticker", ""))
 
     return {
         "status": "ok",
