@@ -121,12 +121,17 @@
   .bilanco-card .row {
     display: grid;
     /* Sabit kolonlar: label esnek, value sabit, pct sabit */
-    grid-template-columns: 1fr 72px 72px 48px;
+    grid-template-columns: 1fr 62px 62px 44px;
     column-gap: 4px;
     align-items: center;
     padding: 4px 0; font-size: 12px;
   }
-  .bilanco-card .row .label { color: #94A3B8; text-align: left; }
+  /* Etiket tek satırda kalsın (Dönen/Duran Varlık 2 satıra sarmasın) — font biraz ufak */
+  .bilanco-card .row .label {
+    color: #94A3B8; text-align: left;
+    white-space: nowrap; font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis;
+  }
   .bilanco-card .row .value { color: #ECF1F8; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
   .bilanco-card .row .value.prev { color: #6B7A8D; font-weight: 500; }
   .bilanco-card .row.head { border-bottom: 1px dashed #1F2C3D; margin-bottom: 2px; padding-bottom: 4px; }
