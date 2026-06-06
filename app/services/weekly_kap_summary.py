@@ -371,15 +371,17 @@ def _measure_sections(sections) -> None:
             _wrap_item(_md, it)
 
 
-# ── KOMPAKT EXTRAS (tedbir gelen/biten + temettü dağıtan) — küçük font + akışkan sarma ──
-# Tedbir türünü (tags) tedbir-türüne göre GRUPLAYIP gösterir; tickerlar tek satıra
-# akışkan sığar (çok hisse/satır). Üst blok yarımdan az yer kaplar.
+# ── KOMPAKT EXTRAS (tedbir gelen/biten + temettü dağıtan) — 3 kolonlu hizalı tablo ──
+# Her hücre sabit konumda (üst üste binmez). Tedbir GELEN hücrelerinde ticker'ın altına
+# tedbir türü MİNİK yazılır; tür hücre genişliğine göre kırpılır (taşmaz).
 _EX_F_CAT = 21    # kategori başlığı
-_EX_F_GRP = 16    # tedbir türü etiketi
-_EX_F_ITEM = 18   # ticker/chip
-_EX_H_CAT = 33
-_EX_H_GRP = 24
-_EX_H_ITEM = 25
+_EX_F_ITEM = 18   # ticker
+_EX_F_TYPE = 12   # tedbir türü (minik)
+_EX_H_CAT = 34
+_EX_H_ROW_TED = 40   # ticker + tür satırı
+_EX_H_ROW_ONE = 27   # tek satırlık hücre (biten / temettü)
+_EX_COLS = 3
+_EX_COL_GAP = 14
 _C_ADD = (255, 112, 67)
 _C_END = (38, 198, 218)
 _C_DIV = (0, 200, 83)
@@ -400,8 +402,8 @@ def _tedbir_label(codes) -> str:
 
 
 def _prepare_extras(extras: dict):
-    """Extras bloğunun satırlarını + toplam yüksekliğini önceden hesaplar (cache).
-    Döner: (lines, height). lines: [(x, text, kind, color)]; kind: cat|grp|item.
+    """Extras bloğunu 3 kolonlu hizalı tabloya yerleştirir (mutlak konum → taşma yok).
+    Döner: (tokens, height). tokens: [(x, dy, text, kind, color)]; kind: cat|tk|type.
     """
     if not extras:
         return [], 0
@@ -410,81 +412,78 @@ def _prepare_extras(extras: dict):
 
     from PIL import Image, ImageDraw
     from app.services.chart_image_generator import _load_font, WHITE
-    f = {"cat": _load_font(_EX_F_CAT, bold=True),
-         "grp": _load_font(_EX_F_GRP, bold=True),
-         "item": _load_font(_EX_F_ITEM, bold=False)}
+    f_tk = _load_font(_EX_F_ITEM, bold=True)
+    f_type = _load_font(_EX_F_TYPE, bold=False)
     d = ImageDraw.Draw(Image.new("RGB", (8, 8)))
     W, PAD = _IMG_W, _IMG_PAD
+    cols, gap = _EX_COLS, _EX_COL_GAP
+    col_w = (W - 2 * PAD - (cols - 1) * gap) // cols
 
-    def flow(chips, font, x0):
-        """Chip'leri genişliğe sığacak şekilde satırlara akıt (çok chip/satır)."""
-        out, cur = [], ""
-        for c in chips:
-            cand = (cur + "    " + c) if cur else c
-            if d.textlength(cand, font=font) <= (W - PAD - x0):
-                cur = cand
-            else:
-                if cur:
-                    out.append(cur)
-                cur = c
-        if cur:
-            out.append(cur)
-        return out
+    def colx(c):
+        return PAD + c * (col_w + gap)
 
-    def wrap(text, font, x0):
-        out, cur = [], ""
-        for w in text.split(" "):
-            cand = (cur + " " + w) if cur else w
-            if d.textlength(cand, font=font) <= (W - PAD - x0):
-                cur = cand
-            else:
-                if cur:
-                    out.append(cur)
-                cur = w
-        if cur:
-            out.append(cur)
-        return out
+    def fit(text, font, maxw):
+        """Metni hücre genişliğine sığacak şekilde kırp (… ekle)."""
+        if not text:
+            return ""
+        if d.textlength(text, font=font) <= maxw:
+            return text
+        while text and d.textlength(text + "…", font=font) > maxw:
+            text = text[:-1]
+        return (text + "…") if text else ""
 
     def _tl(v):
         return f"{v:.2f}".replace(".", ",") + " TL"
 
-    lines: list = []
+    tokens: list = []
+    dy = 4
+
+    def grid(cells, with_type):
+        """cells: [(main, type_or_None, color)]. 3 kolonlu satırlara yerleştir."""
+        nonlocal dy
+        n = len(cells)
+        rh = _EX_H_ROW_TED if with_type else _EX_H_ROW_ONE
+        rows = (n + cols - 1) // cols
+        for r in range(rows):
+            for c in range(cols):
+                i = r * cols + c
+                if i >= n:
+                    break
+                x = colx(c)
+                main, typ, color = cells[i]
+                tokens.append((x, dy, fit(main, f_tk, col_w), "tk", color))
+                if with_type and typ:
+                    tokens.append((x, dy + 20, fit(typ, f_type, col_w - 2), "type", _C_GRP))
+            dy += rh
+        dy += 8
+
     add = extras.get("tedbir_added") or []
     end = extras.get("tedbir_ended") or []
     div = extras.get("dividends") or []
 
-    # 1) TEDBİR GELEN — tedbir türüne göre grupla
     if add:
-        lines.append((PAD, f"⛔ BU HAFTA TEDBİR GELEN  ({len(add)})", "cat", _C_ADD))
-        groups: dict = {}
+        tokens.append((PAD, dy, f"⛔ BU HAFTA TEDBİR GELEN  ({len(add)})", "cat", _C_ADD))
+        dy += _EX_H_CAT
+        cells = []
         for tk, tags in add:
             codes = tuple(sorted({c.strip().upper() for c in (tags or "").split(",") if c.strip()}))
-            groups.setdefault(codes, []).append(tk)
-        for codes, tks in sorted(groups.items(), key=lambda kv: -len(kv[1])):
-            for ln in wrap(_tedbir_label(codes) + ":", f["grp"], PAD + 6):
-                lines.append((PAD + 6, ln, "grp", _C_GRP))
-            for ln in flow([f"#{t}" for t in sorted(tks)], f["item"], PAD + 18):
-                lines.append((PAD + 18, ln, "item", WHITE))
+            cells.append((f"#{tk}", _tedbir_label(codes), WHITE))
+        grid(cells, with_type=True)
 
-    # 2) TEDBİRİ BİTEN — akışkan tek/iki satır
     if end:
-        lines.append((PAD, f"🔓 TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
-        for ln in flow([f"#{t}" for t in end], f["item"], PAD + 6):
-            lines.append((PAD + 6, ln, "item", WHITE))
+        tokens.append((PAD, dy, f"🔓 TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
+        dy += _EX_H_CAT
+        grid([(f"#{t}", None, WHITE) for t in end], with_type=False)
 
-    # 3) TEMETTÜ DAĞITAN — akışkan
     if div:
-        lines.append((PAD, f"💰 TEMETTÜ DAĞITAN  ({len(div)})", "cat", _C_DIV))
-        for ln in flow([f"#{t} {_tl(g)}" for t, g in div], f["item"], PAD + 6):
-            lines.append((PAD + 6, ln, "item", WHITE))
+        tokens.append((PAD, dy, f"💰 TEMETTÜ DAĞITAN  ({len(div)})", "cat", _C_DIV))
+        dy += _EX_H_CAT
+        grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in div], with_type=False)
 
-    h = 10
-    for _x, _t, kind, _c in lines:
-        h += {"cat": _EX_H_CAT, "grp": _EX_H_GRP, "item": _EX_H_ITEM}[kind]
-    h += 8
-    extras["_lines"] = lines
+    h = dy + 6
+    extras["_lines"] = tokens
     extras["_h"] = h
-    return lines, h
+    return tokens, h
 
 
 def _extras_height(extras: dict) -> int:
@@ -492,18 +491,15 @@ def _extras_height(extras: dict) -> int:
 
 
 def _render_extras(d, extras: dict, y0: int) -> int:
-    """Kompakt extras bloğunu çizer; bittiği y'yi döner."""
+    """3 kolonlu extras tablosunu çizer; bittiği y'yi döner."""
     from app.services.chart_image_generator import _load_font
     fonts = {"cat": _load_font(_EX_F_CAT, bold=True),
-             "grp": _load_font(_EX_F_GRP, bold=True),
-             "item": _load_font(_EX_F_ITEM, bold=False)}
-    heights = {"cat": _EX_H_CAT, "grp": _EX_H_GRP, "item": _EX_H_ITEM}
-    lines, _h = _prepare_extras(extras)
-    y = y0 + 6
-    for x, text, kind, color in lines:
-        d.text((x, y), text, font=fonts[kind], fill=color)
-        y += heights[kind]
-    return y + 6
+             "tk": _load_font(_EX_F_ITEM, bold=True),
+             "type": _load_font(_EX_F_TYPE, bold=False)}
+    tokens, h = _prepare_extras(extras)
+    for x, dy, text, kind, color in tokens:
+        d.text((x, y0 + dy), text, font=fonts[kind], fill=color)
+    return y0 + h + 6
 
 
 def _wk_sections(positive, negative, spk):
