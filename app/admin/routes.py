@@ -4741,6 +4741,8 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
         # Önceki dönem: gelir için YoY (aynı çeyrek bir yıl önce), bilanço için yıl sonu Q4
         prev_income = None
         prev_balance = None
+        yoy = None
+        year_end = None
         if current and current.period:
             try:
                 year, q = current.period.split("-")
@@ -4753,6 +4755,31 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
                         prev_balance = f
             except Exception:
                 pass
+
+        # ★ ÖNCELİK: raporun KENDİ "Önceki Dönem" (restated) kolonu = prev_period_data.
+        #   Enflasyon-düzeltilmiş + aynı konsolidasyon bazlı → uygulama/Fintables ile BİREBİR.
+        #   Ayrı tarihsel DB kaydı eski enflasyon bazında olabilir (farklı görünür). app/main.py
+        #   /api/v1/bilanco ile aynı mantık. Eksik alanlar (banka/sigorta) tarihsel kayda düşer.
+        if current and getattr(current, "prev_period_data", None):
+            try:
+                import json as _json_ppd
+                _ppd = _json_ppd.loads(current.prev_period_data) or {}
+            except Exception:
+                _ppd = {}
+            if _ppd:
+                _fld = (
+                    "revenue", "gross_profit", "ebitda", "net_income",
+                    "net_interest_income", "net_fees_commissions",
+                    "gross_premiums", "technical_balance",
+                    "current_assets", "non_current_assets", "total_assets",
+                    "net_debt", "total_equity", "loans", "deposits",
+                )
+
+                def _obj_fields(o):
+                    return {c: getattr(o, c, None) for c in _fld} if o else {}
+
+                prev_income = {**_obj_fields(prev_income), **_ppd, "period": yoy}
+                prev_balance = {**_obj_fields(prev_balance), **_ppd, "period": year_end}
 
         # Son 5 ceyreklik veri (en eski sondan ilk basa) — bar chart icin
         recent5 = list(reversed(fins[:5])) if fins else []
