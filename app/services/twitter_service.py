@@ -127,6 +127,52 @@ def _mirror_to_facebook_with_image(text: str, image_path: str | None = None):
         _mirror_to_facebook(text)
 
 
+def _mirror_to_facebook_with_images(text: str, image_paths: list[str] | None = None):
+    """Birden fazla görseli TEK Facebook gönderisinde paylaş (haftalık KAP 2-4 kare).
+
+    Her görseli unpublished yükler → hepsini attached_media[0..n] ile /feed'e atar.
+    1 görsel varsa tek-görsel fonksiyonuna düşer.
+    """
+    if not _FB_PAGE_ID or not _FB_PAGE_ACCESS_TOKEN:
+        return
+    paths = [p for p in (image_paths or []) if p and os.path.exists(p)]
+    if not paths:
+        return _mirror_to_facebook(text)
+    if len(paths) == 1:
+        return _mirror_to_facebook_with_image(text, paths[0])
+    try:
+        import json as _json
+        media_fbids: list[str] = []
+        for p in paths[:10]:  # FB tek gönderide çok foto destekler
+            with open(p, "rb") as f:
+                r = httpx.post(
+                    f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/photos",
+                    data={"published": "false", "access_token": _FB_PAGE_ACCESS_TOKEN},
+                    files={"source": (os.path.basename(p), f, "image/png")},
+                    timeout=30.0,
+                )
+            if r.status_code in (200, 201):
+                pid = r.json().get("id")
+                if pid:
+                    media_fbids.append(pid)
+            else:
+                logger.warning(f"[FB-MIRROR] Cok-gorsel yukleme hatasi HTTP {r.status_code}: {r.text[:150]}")
+        if not media_fbids:
+            return _mirror_to_facebook(text)
+        data = {"message": text, "access_token": _FB_PAGE_ACCESS_TOKEN}
+        for i, pid in enumerate(media_fbids):
+            data[f"attached_media[{i}]"] = _json.dumps({"media_fbid": pid})
+        resp = httpx.post(f"{_FB_GRAPH_URL}/{_FB_PAGE_ID}/feed", data=data, timeout=20.0)
+        if resp.status_code in (200, 201):
+            logger.info(f"[FB-MIRROR] Facebook {len(media_fbids)} gorselli post basarili")
+        else:
+            logger.warning(f"[FB-MIRROR] Cok-gorsel feed hatasi HTTP {resp.status_code}: {resp.text[:200]}")
+            _mirror_to_facebook(text)
+    except Exception as e:
+        logger.warning(f"[FB-MIRROR] Cok-gorsel post hatasi (Twitter etkilenmez): {e}")
+        _mirror_to_facebook(text)
+
+
 # ── Global Tweet Rate Limiter ──
 # Dakikada max 3 tweet — ban riskini önler (reply + normal tweet dahil)
 import threading
@@ -2790,9 +2836,9 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
             global _last_tweet_id
             _last_tweet_id = tweet_id
 
-            # Facebook'a da at — ilk gorselle (reply'larda tekrar atma)
+            # Facebook'a da at — TÜM görsellerle tek gönderi (reply'larda tekrar atma)
             if not in_reply_to:
-                _mirror_to_facebook_with_image(text, image_paths[0] if image_paths else None)
+                _mirror_to_facebook_with_images(text, image_paths[:4] if image_paths else None)
 
             return str(tweet_id) if return_id else True
         else:
