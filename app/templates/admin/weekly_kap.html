@@ -38,6 +38,13 @@
   </div>
   {% else %}
 
+  <!-- Arama — çok haber olduğunda hisse koduyla filtrele -->
+  <div class="bg-gray-800 rounded-xl p-3 border border-gray-700 sticky top-2 z-10">
+    <input type="text" id="kapSearch" placeholder="🔍 Hisse kodu ara (örn: ÇGCAM)"
+           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-yellow-500">
+    <span id="searchHint" class="text-xs text-gray-500 mt-1 inline-block"></span>
+  </div>
+
   <form id="kapForm" method="post" action="/admin/weekly-kap/send" class="space-y-6">
     <input type="hidden" name="week_start" value="{{ week_start }}">
     <input type="hidden" name="week_end" value="{{ week_end }}">
@@ -53,7 +60,8 @@
       </div>
       <div class="divide-y divide-gray-700/60">
         {% for it in items %}
-        <label class="flex items-start gap-3 px-4 py-3 hover:bg-gray-700/30 cursor-pointer">
+        <label class="selRow flex items-start gap-3 px-4 py-3 hover:bg-gray-700/30 cursor-pointer"
+               data-ticker="{{ it.ticker|upper }}" data-summary="{{ it.summary|lower }}">
           <input type="checkbox" name="selected" value="{{ it.key }}"
                  class="mt-1 selBox" data-grp="{{ title }}" {% if it.key in selected %}checked{% endif %}>
           <div class="flex-1 min-w-0">
@@ -135,7 +143,7 @@ document.getElementById('previewBtn')?.addEventListener('click',async()=>{
         im.style.maxWidth=(j.frames>1?'48%':'90%'); im.style.height='auto';
         wrap.appendChild(im);
       });
-      document.getElementById('frameInfo').textContent=j.frames>1?`(${j.frames} kare — tek tweette)`:'(1 kare)';
+      document.getElementById('frameInfo').textContent=j.frames>4?`(${j.frames} kare — 4+${j.frames-4} thread)`:(j.frames>1?`(${j.frames} kare — tek tweette)`:'(1 kare)');
       document.getElementById('previewText').textContent=j.text||'';
       document.getElementById('previewWrap').classList.remove('hidden');
       document.getElementById('previewWrap').scrollIntoView({behavior:'smooth'});
@@ -143,6 +151,23 @@ document.getElementById('previewBtn')?.addEventListener('click',async()=>{
   }catch(err){ alert('Hata: '+err); }
   btn.disabled=false; btn.textContent='🖼️ Önizle';
 });
+// Arama — hisse kodu / özet metniyle filtrele (seçim korunur)
+const _search=document.getElementById('kapSearch');
+if(_search){
+  _search.addEventListener('input',()=>{
+    const q=_search.value.trim().toLowerCase();
+    let shown=0;
+    document.querySelectorAll('.selRow').forEach(row=>{
+      const tk=(row.dataset.ticker||'').toLowerCase();
+      const sm=(row.dataset.summary||'');
+      const checked=row.querySelector('.selBox')?.checked;
+      const textMatch=!q||tk.includes(q)||sm.includes(q);
+      row.style.display=(textMatch||checked)?'':'none';
+      if(textMatch) shown++;
+    });
+    document.getElementById('searchHint').textContent=q?`${shown} sonuç (seçili olanlar da görünür)`:'';
+  });
+}
 refreshCount();
 </script>
 {% endblock %}

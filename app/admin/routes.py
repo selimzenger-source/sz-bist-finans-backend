@@ -2857,7 +2857,7 @@ async def weekly_kap_page(
     positive = _view("positive", data["positive"])
     negative = _view("negative", data["negative"])
     spk = _view("spk", data["spk"])
-    selected = W.default_selection(data)
+    selected = set()  # ilk girişte HİÇBİRİ seçili değil — admin manuel seçer
     total = len(positive) + len(negative) + len(spk)
 
     return templates.TemplateResponse("admin/weekly_kap.html", {

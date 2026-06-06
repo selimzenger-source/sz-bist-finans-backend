@@ -35,8 +35,8 @@ _NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsu
 
 # Görsel kareye-yakın kalsın diye toplam öğe tavanı (admin daha azını seçebilir)
 MAX_TOTAL_ITEMS = 40  # ihtiyaca göre max 5 kareye kadar dağıtılır
-# Görselde her öğe 2 satıra kadar sarılır — özet bu uzunlukta tutulur (tam cümle)
-IMG_SUMMARY_CHARS = 155
+# Görselde özet dinamik satıra sarılır (yarım kesilmez) — bu uzunluğa kadar tam cümle
+IMG_SUMMARY_CHARS = 300
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -222,12 +222,61 @@ async def get_week_kap_news(start: date, end: date) -> dict:
 _IMG_W = 1080
 _IMG_PAD = 44
 _SEC_HEAD_H = 56
-_ITEM_H = 84  # 2 satır özet sığsın (tam cümle)
+_ITEM_H = 84  # (eski sabit — dinamik yükseklik için fallback)
 _SEC_GAP = 14
 _FOOTER_H = 70
 _HEADER_MAIN_H = 188
 _HEADER_CONT_H = 120
-_SQUARE_MAX = 1120  # tek kare bu yüksekliği aşarsa 2 kareye böl
+_SQUARE_MAX = 1120  # tek kare bu yüksekliği aşarsa böl
+# Dinamik öğe yüksekliği — özet kaç satırsa o kadar (YARIM KESME YOK)
+_LINE_H = 30          # özet satır yüksekliği (font 22)
+_ITEM_PAD_TOP = 11
+_ITEM_PAD_BOT = 13
+_SUM_FONT_SZ = 22
+_TK_FONT_SZ = 28
+
+
+def _wrap_item(d, it: dict) -> None:
+    """Bir öğenin özetini tam satırlara sarar (kesmeden) ve yüksekliğini hesaplar.
+    it['_lines'], it['_sx'], it['_h'] doldurulur. d: ölçüm için ImageDraw.
+    """
+    from app.services.chart_image_generator import _load_font
+    f_tk = _load_font(_TK_FONT_SZ, bold=True)
+    f_sum = _load_font(_SUM_FONT_SZ, bold=False)
+    W, PAD = _IMG_W, _IMG_PAD
+    tk = f"#{it.get('ticker','')}"
+    tkw = d.textlength(tk, font=f_tk)
+    sx = PAD + 26 + int(tkw) + 16
+    avail1 = (W - PAD - 20) - sx           # 1. satır (ticker'dan sonra)
+    avail2 = (W - PAD - 20) - (PAD + 26)   # diğer satırlar (tam genişlik)
+    words = (it.get("summary", "") or "").split()
+    lines: list[str] = []
+    cur, avail, i = "", avail1, 0
+    while i < len(words):
+        cand = (cur + " " + words[i]).strip()
+        if d.textlength(cand, font=f_sum) <= avail:
+            cur = cand; i += 1
+        elif cur:
+            lines.append(cur); cur = ""; avail = avail2
+        else:  # tek kelime satırdan uzun — zorla ekle
+            lines.append(words[i]); i += 1; avail = avail2
+    if cur:
+        lines.append(cur)
+    if not lines:
+        lines = [""]
+    it["_lines"] = lines
+    it["_sx"] = sx
+    it["_h"] = _ITEM_PAD_TOP + len(lines) * _LINE_H + _ITEM_PAD_BOT
+
+
+def _measure_sections(sections) -> None:
+    """Tüm öğelerin satırlarını/yüksekliklerini önceden hesapla (dinamik layout)."""
+    from PIL import Image, ImageDraw
+    _mimg = Image.new("RGB", (_IMG_W, 10))
+    _md = ImageDraw.Draw(_mimg)
+    for s in sections:
+        for it in s["items"]:
+            _wrap_item(_md, it)
 
 
 def _wk_sections(positive, negative, spk):
@@ -253,7 +302,10 @@ def _paginate(sections) -> list[list]:
         head = _HEADER_MAIN_H if pi == 0 else _HEADER_CONT_H
         return _SQUARE_MAX - head - _FOOTER_H - 14
 
-    base = sum(_SEC_HEAD_H + _ITEM_H * len(s["items"]) + _SEC_GAP for s in sections)
+    def _ih(it):
+        return it.get("_h") or _ITEM_H
+
+    base = sum(_SEC_HEAD_H + sum(_ih(it) for it in s["items"]) + _SEC_GAP for s in sections)
     single_h = _HEADER_MAIN_H + base + _FOOTER_H + 14
     if single_h <= _SQUARE_MAX:
         ops = []
@@ -267,13 +319,13 @@ def _paginate(sections) -> list[list]:
     def greedy_count():
         pages, cur = 1, 0
         for s in sections:
-            if cur > 0 and cur + _SEC_HEAD_H + _ITEM_H > cap(pages - 1):
+            if cur > 0 and cur + _SEC_HEAD_H + (s["items"][0]["_h"] if s["items"] else 0) > cap(pages - 1):
                 pages += 1; cur = 0
             cur += _SEC_HEAD_H
-            for _ in s["items"]:
-                if cur + _ITEM_H > cap(pages - 1):
+            for it in s["items"]:
+                if cur + _ih(it) > cap(pages - 1):
                     pages += 1; cur = _SEC_HEAD_H
-                cur += _ITEM_H
+                cur += _ih(it)
             cur += _SEC_GAP
         return pages
 
@@ -284,26 +336,27 @@ def _paginate(sections) -> list[list]:
     cur_h = 0
     for s in sections:
         pi = len(pages) - 1
-        if cur_h > 0 and (cur_h + _SEC_HEAD_H + _ITEM_H > cap(pi)
+        first_ih = s["items"][0]["_h"] if s["items"] else 0
+        if cur_h > 0 and (cur_h + _SEC_HEAD_H + first_ih > cap(pi)
                           or (cur_h >= target and len(pages) < N)):
             pages.append([]); cur_h = 0; pi = len(pages) - 1
         pages[pi].append(("header", s, False))
         cur_h += _SEC_HEAD_H
         for i, it in enumerate(s["items"]):
             pi = len(pages) - 1
-            if cur_h + _ITEM_H > cap(pi) or (cur_h >= target and len(pages) < N):
+            if cur_h + _ih(it) > cap(pi) or (cur_h >= target and len(pages) < N):
                 pages.append([]); cur_h = 0; pi = len(pages) - 1
                 pages[pi].append(("header", s, True))
                 cur_h += _SEC_HEAD_H
             pages[pi].append(("item", s, it, i))
-            cur_h += _ITEM_H
+            cur_h += _ih(it)
         cur_h += _SEC_GAP
     return pages
 
 
 def _page_height(ops, page_idx) -> int:
     head_h = _HEADER_MAIN_H if page_idx == 0 else _HEADER_CONT_H
-    content_h = sum(_SEC_HEAD_H if o[0] == "header" else _ITEM_H for o in ops)
+    content_h = sum(_SEC_HEAD_H if o[0] == "header" else (o[2].get("_h") or _ITEM_H) for o in ops)
     return head_h + content_h + _SEC_GAP + _FOOTER_H + 14
 
 
@@ -372,38 +425,23 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
         else:
             sec = op[1]; it = op[2]; idx = op[3]
             color = sec["color"]
+            # Önceden hesaplanmış satırlar/yükseklik (dinamik — yarım kesme YOK)
+            lines = it.get("_lines")
+            if lines is None:
+                _wrap_item(d, it)
+                lines = it["_lines"]
+            ih = it.get("_h") or _ITEM_H
+            sx = it.get("_sx") or (PAD + 26)
             row_bg = (22, 22, 38) if idx % 2 == 0 else (26, 26, 46)
-            d.rectangle([(PAD, y), (W - PAD, y + _ITEM_H)], fill=row_bg)
+            d.rectangle([(PAD, y), (W - PAD, y + ih)], fill=row_bg)
             tk = f"#{it['ticker']}"
-            d.text((PAD + 26, y + 12), tk, font=f_tk, fill=color)
-            tkw = d.textlength(tk, font=f_tk)
-            sx = PAD + 26 + int(tkw) + 16
-            # 2 satıra kadar sar — cümle YARIM kesilmesin (tam yaz)
-            avail1 = (W - PAD - 20) - sx          # 1. satır: ticker'dan sonra
-            avail2 = (W - PAD - 20) - (PAD + 26)  # 2. satır: tam genişlik
-            words = (it.get("summary", "") or "").split()
-            line1, line2, i = "", "", 0
-            while i < len(words):
-                cand = (line1 + " " + words[i]).strip()
-                if d.textlength(cand, font=f_sum) <= avail1:
-                    line1 = cand; i += 1
-                else:
-                    break
-            while i < len(words):
-                cand = (line2 + " " + words[i]).strip()
-                if d.textlength(cand, font=f_sum) <= avail2:
-                    line2 = cand; i += 1
-                else:
-                    break
-            # Hâlâ kelime kaldıysa 2. satırı … ile bitir
-            if i < len(words) and line2:
-                while line2 and d.textlength(line2 + "…", font=f_sum) > avail2:
-                    line2 = line2.rsplit(" ", 1)[0] if " " in line2 else line2[:-1]
-                line2 = line2.rstrip() + "…"
-            d.text((sx, y + 14), line1, font=f_sum, fill=WHITE)
-            if line2:
-                d.text((PAD + 26, y + 46), line2, font=f_sum, fill=WHITE)
-            y += _ITEM_H
+            d.text((PAD + 26, y + _ITEM_PAD_TOP), tk, font=f_tk, fill=color)
+            ly = y + _ITEM_PAD_TOP
+            for li, ln in enumerate(lines):
+                lx = sx if li == 0 else (PAD + 26)
+                d.text((lx, ly), ln, font=f_sum, fill=WHITE)
+                ly += _LINE_H
+            y += ih
 
     _draw_bg_watermark(img, W, H)
     draw_brand_footer(d, img, W, H, source="Kaynak: KAP")
@@ -423,7 +461,10 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
         sections = _wk_sections(positive, negative, spk)
         if not sections:
             return []
+        _measure_sections(sections)  # dinamik satır/yükseklik (tam cümle)
         pages = _paginate(sections)
+        if len(pages) > 5:
+            pages = pages[:5]  # max 5 kare (Twitter thread: 4 + 1 yanıt)
         total = len(pages)
         # Çok sayfada kareleri EŞİT yükseklikte tut (en dolu sayfaya göre, kareyi aşmadan)
         shared_h = None
@@ -491,7 +532,8 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
             # "Karar N" gibi sahte ticker'lar hashtag olmaz
             if t and t not in tickers and not t.lower().startswith("karar"):
                 tickers.append(t)
-    ticker_tags = " ".join(f"#{t}" for t in tickers[:10])
+    # Seçilen tüm hisselerin hashtag'i (kullanıcı isteği)
+    ticker_tags = " ".join(f"#{t}" for t in tickers)
 
     parts = []
     if positive:
@@ -559,7 +601,18 @@ async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *, dr
 
     try:
         from app.services.twitter_service import _safe_tweet_with_multi_media
-        ok = _safe_tweet_with_multi_media(text, images, source="weekly_kap_summary")
+        if len(images) <= 4:
+            ok = bool(_safe_tweet_with_multi_media(text, images, source="weekly_kap_summary"))
+        else:
+            # Twitter tek tweette max 4 görsel → thread: ilk 4 + kalanlar yanıt olarak
+            tid = _safe_tweet_with_multi_media(text, images[:4], source="weekly_kap_summary", return_id=True)
+            ok = bool(tid)
+            if tid:
+                rest = images[4:]
+                _safe_tweet_with_multi_media(
+                    "📰 Haftalık KAP özeti — devamı 👇\n#KAP #BIST100 #borsa",
+                    rest, source="weekly_kap_summary", in_reply_to=tid, force_send=True,
+                )
     except Exception as e:
         logger.exception("Haftalık KAP tweet hatası: %s", e)
         ok = False

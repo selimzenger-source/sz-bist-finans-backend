@@ -2650,34 +2650,37 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
         return False
 
 
-def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str = "unknown", force_send: bool = False) -> bool:
+def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str = "unknown", force_send: bool = False, in_reply_to: str | None = None, return_id: bool = False):
     """Birden fazla gorsel ile tek tweet atar (Twitter max 4 gorsel destekler).
 
     Her gorseli ayri ayri upload eder, hepsinin media_id'sini tek tweette gonderir.
+    in_reply_to: verilirse bu tweet'e yanit olarak atilir (thread — 4'ten fazla
+    gorsel icin). return_id=True ise basarida tweet ID (str), aksi halde "" doner.
     """
+    _fail = "" if return_id else False
     if not image_paths:
         return _safe_tweet(text, source=source, force_send=force_send)
-    if len(image_paths) == 1:
+    if len(image_paths) == 1 and not in_reply_to and not return_id:
         return _safe_tweet_with_media(text, image_paths[0], source=source, force_send=force_send)
 
     try:
         # KILL SWITCH
         if not force_send and is_tweets_killed():
             logger.warning("[TWEET KILL SWITCH] Tweet+multi-media durduruldu: %s", text[:60])
-            return False
+            return _fail
 
-        # Onay modu — ilk gorselle kuyruğa ekle (multi-media kuyruk desteği yok)
-        if not force_send and not is_auto_send():
+        # Onay modu — ilk gorselle kuyruğa ekle (reply/thread ise kuyruğu atla)
+        if not force_send and not is_auto_send() and not in_reply_to:
             return _safe_tweet_with_media(text, image_paths[0], source=source, force_send=False)
 
-        # Duplicate kontrolu
-        if _is_duplicate_tweet(text):
-            return True
+        # Duplicate kontrolu (reply'larda atla — devam görseli aynı metni taşıyabilir)
+        if not in_reply_to and _is_duplicate_tweet(text):
+            return _fail
 
         creds = _load_credentials()
         if not creds:
             logger.info(f"[TWITTER-DRY-RUN-MULTI] {text[:60]}... (images={len(image_paths)})")
-            return False
+            return _fail
 
         # Rate limit
         wait = _wait_for_tweet_rate_limit()
@@ -2760,12 +2763,12 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
             text = text[:3997] + "..."
 
         tweet_auth = _build_oauth_header(creds)
+        _payload = {"text": text, "media": {"media_ids": media_ids}}
+        if in_reply_to:
+            _payload["reply"] = {"in_reply_to_tweet_id": str(in_reply_to)}
         tweet_resp = httpx.post(
             _TWITTER_TWEET_URL,
-            json={
-                "text": text,
-                "media": {"media_ids": media_ids},
-            },
+            json=_payload,
             headers={
                 "Authorization": tweet_auth,
                 "Content-Type": "application/json",
@@ -2782,20 +2785,21 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
             global _last_tweet_id
             _last_tweet_id = tweet_id
 
-            # Facebook'a da at — ilk gorselle
-            _mirror_to_facebook_with_image(text, image_paths[0] if image_paths else None)
+            # Facebook'a da at — ilk gorselle (reply'larda tekrar atma)
+            if not in_reply_to:
+                _mirror_to_facebook_with_image(text, image_paths[0] if image_paths else None)
 
-            return True
+            return str(tweet_id) if return_id else True
         else:
             error_msg = f"HTTP {tweet_resp.status_code}: {tweet_resp.text[:200]}"
             logger.error(f"Multi-media tweet hatasi: {error_msg}")
             _notify_tweet_failure(text, f"[MULTI-MEDIA] {error_msg}")
-            return False
+            return _fail
 
     except Exception as e:
         logger.error(f"Multi-media tweet hatasi: {e}")
         _notify_tweet_failure(text, f"[MULTI-MEDIA] {str(e)}")
-        return False
+        return _fail
 
 
 # ================================================================
