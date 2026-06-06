@@ -382,10 +382,16 @@
       </div>
     </div>
 
-    <!-- Share button (linksiz görsel paylaş) -->
-    <button class="share-btn" onclick="shareCard('{{ it.ticker }}')">
-      <span>📷</span> Görsel Olarak İndir
-    </button>
+    <!-- Share buttons -->
+    <div style="display:flex; gap:8px; margin-top:10px;">
+      <button class="share-btn" style="flex:1; margin-top:0;" onclick="shareCard('{{ it.ticker }}')">
+        <span>📷</span> Görsel İndir
+      </button>
+      <button class="share-btn x-btn" style="flex:1; margin-top:0; background:rgba(29,155,240,0.15); color:#1d9bf0; border-color:rgba(29,155,240,0.4);"
+              onclick="tweetCard('{{ it.ticker }}', '{{ fin.period if fin else '' }}')">
+        <span>𝕏</span> X'te Paylaş
+      </button>
+    </div>
   </div>
   {% endfor %}
 </div>
@@ -437,7 +443,58 @@ async function shareCard(ticker) {
     console.error('Share error:', e);
     btn.classList.remove('loading');
     btn.innerHTML = '<span>❌</span> Hata';
-    setTimeout(() => { btn.innerHTML = '<span>📷</span> Görsel Olarak İndir'; }, 2000);
+    setTimeout(() => { btn.innerHTML = '<span>📷</span> Görsel İndir'; }, 2000);
+  }
+}
+
+async function tweetCard(ticker, period) {
+  const card = document.getElementById('card-' + ticker);
+  if (!card) return;
+  const btn = card.parentElement.querySelector('.x-btn');
+
+  // Metni önceden göster + onayla (yanlışlıkla atılmayı önle)
+  let perTxt = '';
+  if (period) {
+    if (period.indexOf('-Q') > -1) { const p = period.split('-Q'); perTxt = p[0] + ' Q' + p[1] + ' '; }
+    else perTxt = period.replace('-', ' ') + ' ';
+  }
+  const preview =
+    '#' + ticker + ' ' + perTxt + 'sonuçlarını açıkladı 📊\n\n' +
+    'İşte finansal tablo özeti 👇\n\n' +
+    'Tüm bilançoları anlık takip etmek için uygulamamızı indirebilirsiniz 📲\n\n' +
+    '⚠️ Yatırım tavsiyesi değildir.\n\n' +
+    '#' + ticker + ' #bilanço #FAVÖK #BIST #borsaistanbul';
+  if (!confirm('Bu tweet X/Twitter\'a (herkese açık) görselle birlikte atılacak:\n\n' + preview + '\n\nGönderilsin mi?')) return;
+
+  btn.classList.add('loading');
+  btn.innerHTML = '<span>⏳</span> Görsel üretiliyor...';
+  try {
+    const canvas = await html2canvas(card, {
+      backgroundColor: '#0F1A2E', scale: 2, logging: false, useCORS: true,
+    });
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+    btn.innerHTML = '<span>⏳</span> Gönderiliyor...';
+    const fd = new FormData();
+    fd.append('ticker', ticker);
+    fd.append('period', period || '');
+    fd.append('image', blob, 'bilanco-' + ticker + '.png');
+    const r = await fetch('/admin/bilanco-havuzu/tweet', { method: 'POST', body: fd });
+    const j = await r.json();
+    btn.classList.remove('loading');
+    if (j.ok) {
+      btn.innerHTML = '<span>✓</span> Atıldı';
+      setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 4000);
+    } else {
+      alert('Tweet atılamadı: ' + (j.error || 'bilinmeyen hata'));
+      btn.innerHTML = '<span>❌</span> Hata';
+      setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 3000);
+    }
+  } catch (e) {
+    console.error('Tweet error:', e);
+    btn.classList.remove('loading');
+    alert('Hata: ' + e);
+    btn.innerHTML = '<span>❌</span> Hata';
+    setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 3000);
   }
 }
 </script>

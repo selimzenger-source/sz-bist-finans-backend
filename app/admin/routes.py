@@ -22,7 +22,7 @@ def _fire_and_forget(coro) -> asyncio.Task:
     task.add_done_callback(_bg_tasks.discard)
     return task
 
-from fastapi import APIRouter, Request, Depends, Form
+from fastapi import APIRouter, Request, Depends, Form, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, desc, and_, or_, func as sa_func
@@ -4818,6 +4818,100 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
         "items": merged,
         "count": len(merged),
     })
+
+
+def _build_bilanco_tweet_text(ticker: str, period: str | None) -> str:
+    """Bilanço havuzu kartı için X paylaşım metni.
+
+    Format (kullanıcı isteği):
+      #TICKER 2026 Q1 sonuçlarını açıkladı
+      <boş satır>
+      İşte finansal tablo özeti 👇
+      <boş satır>
+      Tüm bilançoları anlık takip etmek için uygulamamızı indirebilirsiniz
+      <boş satır>
+      ⚠️ Yatırım tavsiyesi değildir.
+      <boş satır>
+      #bilanço #FAVÖK #BIST #borsaistanbul
+    """
+    tk = (ticker or "").upper().strip()
+    # period "2026-Q1" -> "2026 Q1"
+    per_txt = ""
+    if period:
+        p = period.strip()
+        if "-Q" in p:
+            yr, q = p.split("-Q", 1)
+            per_txt = f"{yr} Q{q} "
+        elif "-" in p:
+            per_txt = p.replace("-", " ") + " "
+        else:
+            per_txt = p + " "
+    lines = [
+        f"#{tk} {per_txt}sonuçlarını açıkladı 📊",
+        "",
+        "İşte finansal tablo özeti 👇",
+        "",
+        "Tüm bilançoları anlık takip etmek için uygulamamızı indirebilirsiniz 📲",
+        "",
+        "⚠️ Yatırım tavsiyesi değildir.",
+        "",
+        f"#{tk} #bilanço #FAVÖK #BIST #borsaistanbul",
+    ]
+    return "\n".join(lines)
+
+
+@router.post("/bilanco-havuzu/tweet")
+async def bilanco_havuzu_tweet(
+    request: Request,
+    ticker: str = Form(...),
+    period: str = Form(""),
+    image: UploadFile = File(...),
+):
+    """Bilanço havuzundan kart görselini + sabit formatlı metni X'e gönderir.
+
+    Görsel client'ta html2canvas ile üretilir, buraya yüklenir.
+    force_send=True ile direkt yayınlanır (admin manuel onay = kullanıcının kendi tıklaması).
+    """
+    from fastapi.responses import JSONResponse
+    if not get_current_admin(request):
+        return JSONResponse({"error": "Yetkisiz"}, status_code=401)
+
+    import tempfile
+    from app.services.twitter_service import _safe_tweet_with_media, is_tweets_killed
+
+    if is_tweets_killed():
+        return JSONResponse({"error": "Tweet kill switch AÇIK — tweetler durdurulmuş."}, status_code=400)
+
+    tk = (ticker or "").upper().strip()
+    if not tk:
+        return JSONResponse({"error": "Ticker gerekli."}, status_code=400)
+
+    # Görseli geçici dosyaya yaz
+    tmp_path = None
+    try:
+        data = await image.read()
+        if not data:
+            return JSONResponse({"error": "Görsel boş."}, status_code=400)
+        fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix=f"bilanco_{tk}_")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+
+        text = _build_bilanco_tweet_text(tk, period)
+        ok = _safe_tweet_with_media(text, tmp_path, source="bilanco_havuzu_manual", force_send=True)
+
+        if ok:
+            logger.info("[ADMIN] Bilanço havuzu tweet gönderildi: %s (%s)", tk, period)
+            return JSONResponse({"ok": True, "ticker": tk, "text": text})
+        return JSONResponse({"ok": False, "error": "Tweet gönderilemedi (X API)."}, status_code=502)
+    except Exception as e:
+        logger.warning("[ADMIN] Bilanço havuzu tweet hatası (%s): %s", tk, e)
+        return JSONResponse({"ok": False, "error": str(e)[:300]}, status_code=500)
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 @router.post("/news-pool/{disclosure_id}/tweet")
