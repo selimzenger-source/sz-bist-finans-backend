@@ -42,7 +42,7 @@ _NEGATIVE_SENTIMENTS = (
 )
 
 # Görsel kareye-yakın kalsın diye toplam öğe tavanı (admin daha azını seçebilir)
-MAX_TOTAL_ITEMS = 40  # ihtiyaca göre max 5 kareye kadar dağıtılır
+MAX_TOTAL_ITEMS = 60  # 4 kareye greedy doldurma ile sığar (önceden 40, boşluk kalıyordu)
 # Görselde özet dinamik satıra sarılır (yarım kesilmez) — bu uzunluğa kadar tam cümle
 IMG_SUMMARY_CHARS = 240
 
@@ -554,36 +554,20 @@ def _paginate(sections, extras_h: int = 0) -> list[list]:
                 ops.append(("item", s, it, i))
         return [ops]
 
-    # Gerekli sayfa sayısı (greedy) → dengeli hedef yükseklik
-    def greedy_count():
-        pages, cur = 1, 0
-        for s in sections:
-            if cur > 0 and cur + _SEC_HEAD_H + (s["items"][0]["_h"] if s["items"] else 0) > cap(pages - 1):
-                pages += 1; cur = 0
-            cur += _SEC_HEAD_H
-            for it in s["items"]:
-                if cur + _ih(it) > cap(pages - 1):
-                    pages += 1; cur = _SEC_HEAD_H
-                cur += _ih(it)
-            cur += _SEC_GAP
-        return pages
-
-    N = max(2, min(4, greedy_count()))  # TEK TWEET → max 4 kare (Twitter tek tweette 4 görsel)
-    target = base / N  # sayfa başına dengeli hedef
-
+    # GREEDY DOLDURMA — her kareyi kapasitesine kadar DOLDUR (boşluk bırakma),
+    # sığmayınca yeni kare aç. Dengeli/hedef-yükseklik YOK → kareler dolu görünür.
     pages: list[list] = [[]]
     cur_h = 0
     for s in sections:
         pi = len(pages) - 1
         first_ih = s["items"][0]["_h"] if s["items"] else 0
-        if cur_h > 0 and (cur_h + _SEC_HEAD_H + first_ih > cap(pi)
-                          or (cur_h >= target and len(pages) < N)):
+        if cur_h > 0 and cur_h + _SEC_HEAD_H + first_ih > cap(pi):
             pages.append([]); cur_h = 0; pi = len(pages) - 1
         pages[pi].append(("header", s, False))
         cur_h += _SEC_HEAD_H
         for i, it in enumerate(s["items"]):
             pi = len(pages) - 1
-            if cur_h + _ih(it) > cap(pi) or (cur_h >= target and len(pages) < N):
+            if cur_h + _ih(it) > cap(pi):
                 pages.append([]); cur_h = 0; pi = len(pages) - 1
                 pages[pi].append(("header", s, True))
                 cur_h += _SEC_HEAD_H
@@ -716,12 +700,10 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
                            "(fazla öğeler düştü)", len(pages))
             pages = pages[:4]  # TEK TWEET → max 4 kare (thread YOK)
         total = len(pages)
-        # Çok sayfada kareleri EŞİT yükseklikte tut (en dolu sayfaya göre)
-        shared_h = None
-        if total > 1:
-            shared_h = min(_SQUARE_MAX, max(
-                _page_height(ops, i, _ex_h if i == 0 else 0) for i, ops in enumerate(pages)))
-        out = [_render_page(ops, i, total, label, height=shared_h,
+        # Her kareyi KENDİ içeriğine göre boyutla (eşit-yükseklik YOK → boşluk kalmaz).
+        # Greedy doldurma sayesinde son kare hariç hepsi zaten ~dolu; son kare içeriğine
+        # göre kısa kalır, alttaki dev boşluk biter.
+        out = [_render_page(ops, i, total, label, height=None,
                             extras=(extras if i == 0 else None)) for i, ops in enumerate(pages)]
         out = [p for p in out if p]
         logger.info("Haftalık KAP görsel(ler)i üretildi: %d kare", len(out))
