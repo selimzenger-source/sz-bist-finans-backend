@@ -44,7 +44,7 @@ _NEGATIVE_SENTIMENTS = (
 # Görsel kareye-yakın kalsın diye toplam öğe tavanı (admin daha azını seçebilir)
 MAX_TOTAL_ITEMS = 40  # ihtiyaca göre max 5 kareye kadar dağıtılır
 # Görselde özet dinamik satıra sarılır (yarım kesilmez) — bu uzunluğa kadar tam cümle
-IMG_SUMMARY_CHARS = 300
+IMG_SUMMARY_CHARS = 240
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -313,18 +313,18 @@ async def get_week_kap_news(start: date, end: date) -> dict:
 
 _IMG_W = 1080
 _IMG_PAD = 44
-_SEC_HEAD_H = 56
-_ITEM_H = 84  # (eski sabit — dinamik yükseklik için fallback)
+_SEC_HEAD_H = 50
+_ITEM_H = 72  # (eski sabit — dinamik yükseklik için fallback)
 _SEC_GAP = 14
 _FOOTER_H = 70
 _HEADER_MAIN_H = 188
 _HEADER_CONT_H = 120
 _SQUARE_MAX = 1650  # tek kare bu yüksekliği aşarsa böl (uzun/büyük kareler; 40 öğe TEK TWEET 4 kareye sığar)
 # Dinamik öğe yüksekliği — özet kaç satırsa o kadar (YARIM KESME YOK)
-_LINE_H = 30          # özet satır yüksekliği (font 22)
-_ITEM_PAD_TOP = 11
-_ITEM_PAD_BOT = 13
-_SUM_FONT_SZ = 22
+_LINE_H = 27          # özet satır yüksekliği (font 20) — sıkı ama okunur
+_ITEM_PAD_TOP = 9
+_ITEM_PAD_BOT = 10
+_SUM_FONT_SZ = 20
 _TK_FONT_SZ = 28
 
 
