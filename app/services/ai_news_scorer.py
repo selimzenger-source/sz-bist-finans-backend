@@ -2691,6 +2691,28 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     content_lower = content.lower().replace("̇", "")
     summary_lower = (ai_summary or "").lower().replace("̇", "")
 
+    # ─── ⚽ SPOR KULUBU TRANSFER HABERI → NOTR (MUTLAK ONCELIK) ──────
+    # Besiktas/Galatasaray/Trabzonspor/Fenerbahce transfer/futbolcu/teknik
+    # direktor/sozlesme haberlerinin FINANSAL etkisi belirsiz — pozitif
+    # puanlanmamali (kullanici istegi: "bilmiyoruz, notr versin"). yeni_is
+    # floor'u "sozlesme imzaladi" gorunce 6.0+ veriyordu; bu erken return ezer.
+    _SPOR_KULUP = {"BJKAS", "GSRAY", "TSPOR", "FENER"}
+    if (ticker or "").upper() in _SPOR_KULUP:
+        _spor_txt = content_lower + " " + summary_lower
+        if any(k in _spor_txt for k in (
+            "transfer", "bonservis", "kiralık", "kiralik", "futbolcu",
+            "profesyonel sözleşme", "profesyonel sozlesme",
+            "teknik direktör", "teknik direktor", "menajer",
+            "oyuncu", "sporcu", "kadrosuna", "imzayı att", "imzayi att",
+            "sezon sonuna kadar", "sezon sonu", "milli oyuncu",
+        )):
+            logger.info(
+                "AI News Scorer [SPOR-TRANSFER→NOTR] %s: %.1f -> 5.0 "
+                "(spor kulubu transfer/futbolcu haberi — finansal etki belirsiz)",
+                ticker, score,
+            )
+            return 5.0
+
     # ─── 🛑 NÖTR OVERRIDE (MUTLAK ÖNCELİK) ──────────────────────────
     # AI ozet KENDI ICINDE "etki yok / rutin / yeni bilgi yok / icermemektedir"
     # diyorsa skor 5.0'dan yuksek OLAMAZ — pozitif keyword'ler (stratejik karar,
