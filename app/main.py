@@ -10758,10 +10758,14 @@ async def get_daily_news_summary(
         return out
 
     try:
+        # GROUP BY ticker+start_date → ayni hisse 2 kez yazilmasin (cautious_stocks'ta
+        # bir hisse icin birden cok satir olabilir); tag'ler birlestirilir.
         _ta_res = await db.execute(_sa_txt2("""
-            SELECT UPPER(ticker) AS ticker, tags, start_date, end_date
+            SELECT UPPER(ticker) AS ticker, string_agg(DISTINCT tags, ',') AS tags,
+                   start_date, MAX(end_date) AS end_date
             FROM cautious_stocks
             WHERE start_date BETWEEN :s AND :e
+            GROUP BY UPPER(ticker), start_date
             ORDER BY start_date DESC, ticker
         """), {"s": _win_start, "e": _win_end})
         for _tk, _tags, _sd_, _ed_ in _ta_res.all():
@@ -10779,12 +10783,13 @@ async def get_daily_news_summary(
 
     try:
         _te_res = await db.execute(_sa_txt2("""
-            SELECT UPPER(ticker) AS ticker, tags, start_date, end_date
+            SELECT UPPER(ticker) AS ticker, string_agg(DISTINCT tags, ',') AS tags, end_date
             FROM cautious_stocks
             WHERE end_date BETWEEN :s AND :e
+            GROUP BY UPPER(ticker), end_date
             ORDER BY end_date DESC, ticker
         """), {"s": _win_start, "e": _win_end})
-        for _tk, _tags, _sd_, _ed_ in _te_res.all():
+        for _tk, _tags, _ed_ in _te_res.all():
             if not _tk or not _ed_:
                 continue
             _g = _ensure_group(_ed_.isoformat())
