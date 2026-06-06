@@ -796,10 +796,9 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     top = scored[:5]
 
     lines = [
-        "📰 Geride Bırakılan Haftanın Önemli KAP Gelişmeleri",
-        label,
+        f"📰 {label} arası en önemli gelişmeler",
         "",
-        "🤖 AI'nın seçtiği en önemli gelişmeler:",
+        "🤖 AI'nın öne çıkardıkları:",
     ]
     for _imp, emo, it in top:
         lines.append(f"{emo} {_short(it)}")
