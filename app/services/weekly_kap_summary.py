@@ -302,17 +302,21 @@ async def get_week_kap_news(start: date, end: date) -> dict:
         except Exception as e:
             logger.warning("Haftalık SPK derleme hatası: %s", e)
 
-    # Ticker başına en fazla _MAX_PER_TICKER (impact'e göre) tut, sonra düzleştir
+    # Ticker başına en fazla _MAX_PER_TICKER (impact'e göre) tut, sonra ALFABETİK sırala
+    # → aynı sembolün birden çok haberi PEŞPEŞE gelir (her bölüm kendi içinde).
     def _flatten(by_ticker: dict) -> list:
         out = []
         for items in by_ticker.values():
             items.sort(key=lambda x: x["impact"], reverse=True)
             out.extend(items[:_MAX_PER_TICKER])
-        out.sort(key=lambda x: x["impact"], reverse=True)
+        out.sort(key=lambda x: (x["ticker"], -x["impact"]))  # alfabetik; aynı sembol bitişik
         return out
 
     positive = _flatten(pos_by_ticker)
     negative = _flatten(neg_by_ticker)
+    # SPK: gerçek hisseler alfabetik önce, "Karar N" (piyasa-geneli) en sona
+    spk_items.sort(key=lambda x: ((x.get("ticker", "") or "").lower().startswith("karar"),
+                                  (x.get("ticker", "") or "").upper()))
     return {"positive": positive, "negative": negative, "spk": spk_items}
 
 
