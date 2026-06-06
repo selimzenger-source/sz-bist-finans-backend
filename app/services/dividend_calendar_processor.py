@@ -130,6 +130,13 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     if "mali hak kullanım işlem" in t or "mali hak kullanim islem" in t:
         return False
 
+    # ★ Bare "Hak Kullanımı" — Borsa İstanbul ex-date/hak kullanım TARİHİ duyurusu.
+    # Gerçek dağıtım KARARI değildir (o "Kâr Payı Dağıtım Bildirimi" ile gelir). Tutarı
+    # referans içerse de DAĞITIM kartı olarak gösterilmemeli (kullanıcı: SMRVA hak kullanımı).
+    _t_bare = re.sub(r"borsa\s*i̇?stanbul\s*a\.?\s*ş\.?", "", t).strip(" -.:•")
+    if _t_bare in ("hak kullanımı", "hak kullanim", "hak kullanımı tarihi", "hak kullanim tarihi"):
+        return False
+
     # ★ "Kâr/Kar (Payı) Dağıtım Politikası" — şirketin temettü POLİTİKASI dokümanı/güncellemesi.
     # Bu bir dağıtım KARARI veya ödeme DEĞİL; kurumsal yönetim/politika metnidir (oran/tutar
     # içermez). Temettü takvimine (Dağıtım/Dağıtmama/Ödeme) hiçbir kategoriye uymaz → İŞLEME.

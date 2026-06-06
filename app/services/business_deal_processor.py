@@ -45,6 +45,10 @@ def is_business_deal(title: str) -> bool:
     return any(p in t for p in _TITLE_PATTERNS)
 
 
+# Spor kulüpleri — transfer/oyuncu sözleşmeleri "yeni iş ilişkisi" SAYILMAZ
+_SPOR_KULUP = {"BJKAS", "GSRAY", "TSPOR", "FENER"}
+
+
 # ─── Gemini AI ───
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-flash"
@@ -533,6 +537,11 @@ async def process_kap_disclosure(
     if not is_business_deal(title):
         return None
 
+    # Spor kulüpleri (transfer/oyuncu sözleşmeleri) "yeni iş ilişkisi" değildir → atla
+    if (ticker or "").upper() in _SPOR_KULUP:
+        logger.info("BusinessDeal atlandi (spor kulubu): %s — %s", ticker, (title or "")[:50])
+        return None
+
     # Mevcut kayit — varsa amount_try doluysa skip, bossa re-parse + UPDATE
     existing = None
     if disclosure_id:
@@ -629,6 +638,12 @@ async def process_kap_disclosure(
         await db.flush()
         logger.info("BusinessDeal: UPDATE (%s, %s %s)", ticker, amount_original, currency)
         return existing
+
+    # ★ RAKAMSIZ kayıt OLUŞTURMA — tutarı/rakamı olmayan (ihale süreci, "alamadık"
+    #   gibi) bildirimler "yeni iş ilişkisi" listesine girmesin (kullanıcı isteği).
+    if amount_original is None:
+        logger.info("BusinessDeal atlandi (tutar/rakam yok): %s — %s", ticker, (title or "")[:50])
+        return None
 
     new_row = BusinessDeal(
         ticker=ticker,

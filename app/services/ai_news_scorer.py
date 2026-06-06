@@ -2705,6 +2705,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "teknik direktör", "teknik direktor", "menajer",
             "oyuncu", "sporcu", "kadrosuna", "imzayı att", "imzayi att",
             "sezon sonuna kadar", "sezon sonu", "milli oyuncu",
+            # Oyuncu transferleri çoğunlukla "Sözleşme İmzalanması" başlığıyla gelir
+            "sözleşme imzalan", "sozlesme imzalan", "sözleşme imzala", "sozlesme imzala",
         )):
             logger.info(
                 "AI News Scorer [SPOR-TRANSFER→NOTR] %s: %.1f -> 5.0 "

@@ -42,14 +42,77 @@ def _normalize_url(url: str) -> str:
 
 
 def _parse_tr_decimal(s: str) -> Optional[float]:
-    """'4.773.736,55' -> 4773736.55 / '%4,15' -> 4.15"""
+    """Türkçe/Avrupa sayı parser — nokta binlik mi ondalık mı akıllı ayırt eder.
+
+    '4.773.736,55' -> 4773736.55   (virgül ondalık, nokta binlik)
+    '%4,15' -> 4.15
+    '50.957.677' -> 50957677        (3'lü gruplar → binlik)
+    '20.017275' -> 20.017275        (3 haneden farklı → ONDALIK; %20 oranı)
+    '1.13' -> 1.13                  (ondalık)
+    Eski bug: '20.017275' (KAP yüzde) -> noktayı silip 20017275 yapıyordu.
+    """
     if not s:
         return None
     s = s.replace("%", "").replace(" TL", "").replace(" ", "").strip()
-    s = s.replace(".", "").replace(",", ".")
+    if not s:
+        return None
+    if "," in s:
+        # Türkçe full format: virgül = ondalık, nokta = binlik
+        int_part, dec_part = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec_part}")
+        except (ValueError, TypeError):
+            return None
+    if "." in s:
+        parts = s.split(".")
+        # Tüm "nokta sonrası" gruplar tam 3 hane ise → binlik ayraç ("50.957.677")
+        if len(parts) >= 2 and all(len(p) == 3 and p.isdigit() for p in parts[1:]):
+            try:
+                return float(s.replace(".", ""))
+            except (ValueError, TypeError):
+                return None
+        # Aksi halde nokta = ondalık ("20.017275", "1.13")
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
     try:
         return float(s)
-    except Exception:
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_tr_pct(s: str) -> Optional[float]:
+    """KAP YÜZDE hücresi parser — sahiplik oranı (0-100 aralığı).
+
+    KAP yüzdeyi '% 17.063.389' biçiminde verir = 17,063389% (İLK nokta ondalık,
+    KALAN noktalar ondalık-gruplama). Generic parser bunu 17.063.389 (17 milyon)
+    sanıyordu → %20017275 bug. Yüzde olduğu için: ilk nokta ondalık ayraç.
+
+    '% 17.063.389' -> 17.063389   '% 5.00' -> 5.0   '%5,00' -> 5.0   '%0,65' -> 0.65
+    """
+    if not s:
+        return None
+    s = s.replace("%", "").replace(" ", "").strip()
+    if not s:
+        return None
+    if "," in s:  # Türkçe ondalık virgül
+        int_part, dec = s.rsplit(",", 1)
+        int_part = int_part.replace(".", "")
+        try:
+            return float(f"{int_part}.{dec}")
+        except (ValueError, TypeError):
+            return None
+    if "." in s:  # İlk nokta ondalık, kalan noktalar ondalık-gruplama
+        parts = s.split(".")
+        try:
+            return float(f"{parts[0]}.{''.join(parts[1:])}")
+        except (ValueError, TypeError):
+            return None
+    try:
+        return float(s)
+    except (ValueError, TypeError):
         return None
 
 
@@ -126,10 +189,10 @@ def parse_kap_html(html: str) -> Optional[dict]:
         "net_nominal": _parse_tr_decimal(cells[3]) if cells[3] else None,
         "beginning_nominal": _parse_tr_decimal(cells[4]) if cells[4] else None,
         "end_nominal": _parse_tr_decimal(cells[5]) if cells[5] else None,
-        "beginning_pay_oran_pct": _parse_tr_decimal(cells[6]) if cells[6] else None,
-        "beginning_oy_hakki_pct": _parse_tr_decimal(cells[7]) if cells[7] else None,
-        "end_pay_oran_pct": _parse_tr_decimal(cells[8]) if cells[8] else None,
-        "end_oy_hakki_pct": _parse_tr_decimal(cells[9]) if cells[9] else None,
+        "beginning_pay_oran_pct": _parse_tr_pct(cells[6]) if cells[6] else None,
+        "beginning_oy_hakki_pct": _parse_tr_pct(cells[7]) if cells[7] else None,
+        "end_pay_oran_pct": _parse_tr_pct(cells[8]) if cells[8] else None,
+        "end_oy_hakki_pct": _parse_tr_pct(cells[9]) if cells[9] else None,
         "body_text": _extract_body_text(html),
     }
 
@@ -442,10 +505,10 @@ def parse_pdf_pay_alim_satim(text: str) -> Optional[dict]:
         out["net_nominal"] = _parse_tr_decimal(m.group(4))
         out["beginning_nominal"] = _parse_tr_decimal(m.group(5))
         out["end_nominal"] = _parse_tr_decimal(m.group(6))
-        out["beginning_pay_oran_pct"] = _parse_tr_decimal(m.group(7))
-        out["beginning_oy_hakki_pct"] = _parse_tr_decimal(m.group(8))
-        out["end_pay_oran_pct"] = _parse_tr_decimal(m.group(9))
-        out["end_oy_hakki_pct"] = _parse_tr_decimal(m.group(10))
+        out["beginning_pay_oran_pct"] = _parse_tr_pct(m.group(7))
+        out["beginning_oy_hakki_pct"] = _parse_tr_pct(m.group(8))
+        out["end_pay_oran_pct"] = _parse_tr_pct(m.group(9))
+        out["end_oy_hakki_pct"] = _parse_tr_pct(m.group(10))
     return out
 
 
@@ -592,7 +655,15 @@ async def upsert_pay_alim_satim_from_kap(
         elif hdr:
             party_name = hdr
     # 2) Ortagi/kurucu/araciliyla — KAP body'nin standart kalibi
-    body_clean = body.replace("\xa0", " ")
+    # ★ HTML entity COZ — "Tera&#160;Portföy" gibi nbsp entity'leri regex'i kopariyor,
+    #   ilk kelime (Tera/Bulls) dusuyordu -> "Portföy Yönetimi A.Ş." kaliyordu.
+    import html as _html_mod
+    try:
+        body_clean = _html_mod.unescape(body)
+    except Exception:
+        body_clean = body
+    body_clean = body_clean.replace("\xa0", " ").replace(" ", " ")
+    body_clean = _re.sub(r"[ \t]{2,}", " ", body_clean)
     for pat in [
         # "Pardus Portföy Yönetimi AŞ.nin kurucusu olduğu" -> Pardus Portföy Yönetimi
         r"([A-ZÇĞİÖŞÜ][A-Za-zÇĞİÖŞÜçğıöşü\s\.\-&]{4,80}?)\s*(?:A\.\s*Ş\.?|AŞ\.?)['’]?\s*(?:ni[nm]|in)\s+kurucusu",

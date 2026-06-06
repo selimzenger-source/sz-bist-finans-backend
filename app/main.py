@@ -11343,17 +11343,12 @@ async def list_business_deals(
     query = select(BusinessDeal).where(BusinessDeal.deal_date >= cutoff)
     if ticker:
         query = query.where(BusinessDeal.ticker == ticker.upper())
+    # Spor kulüpleri (transfer/oyuncu sözleşmeleri) bu listede gösterilmez
+    query = query.where(BusinessDeal.ticker.notin_(["BJKAS", "GSRAY", "TSPOR", "FENER"]))
     if quality_only:
-        # En az birinden bilgi olmalı: counterparty (karşı taraf) VEYA amount_try (tutar)
-        query = query.where(
-            _or_(
-                _and_(
-                    BusinessDeal.counterparty.isnot(None),
-                    BusinessDeal.counterparty != "",
-                ),
-                BusinessDeal.amount_try.isnot(None),
-            )
-        )
+        # RAKAM (tutar) ZORUNLU — tutarı olmayan (ihale süreci, "alamadık" vb.)
+        # kayıtlar listede gösterilmez (kullanıcı isteği: rakam yoksa işlenmesin).
+        query = query.where(BusinessDeal.amount_try.isnot(None))
     query = query.order_by(desc(BusinessDeal.amount_try), desc(BusinessDeal.deal_date)).limit(limit)
     rows = (await db.execute(query)).scalars().all()
     return [{
