@@ -34,9 +34,9 @@ _POSITIVE_SENTIMENTS = ("Guclu Olumlu", "Cok Olumlu", "Olumlu", "Hafif Olumlu")
 _NEGATIVE_SENTIMENTS = ("Guclu Olumsuz", "Cok Olumsuz", "Olumsuz", "Hafif Olumsuz")
 
 # Görsel kareye-yakın kalsın diye toplam öğe tavanı (admin daha azını seçebilir)
-MAX_TOTAL_ITEMS = 18
-# Görselde her öğe kısa tek satır — özet bu uzunlukta kırpılır
-IMG_SUMMARY_CHARS = 78
+MAX_TOTAL_ITEMS = 40  # ihtiyaca göre max 5 kareye kadar dağıtılır
+# Görselde her öğe 2 satıra kadar sarılır — özet bu uzunlukta tutulur (tam cümle)
+IMG_SUMMARY_CHARS = 155
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -222,7 +222,7 @@ async def get_week_kap_news(start: date, end: date) -> dict:
 _IMG_W = 1080
 _IMG_PAD = 44
 _SEC_HEAD_H = 56
-_ITEM_H = 50
+_ITEM_H = 84  # 2 satır özet sığsın (tam cümle)
 _SEC_GAP = 14
 _FOOTER_H = 70
 _HEADER_MAIN_H = 188
@@ -277,7 +277,7 @@ def _paginate(sections) -> list[list]:
             cur += _SEC_GAP
         return pages
 
-    N = max(2, greedy_count())
+    N = max(2, min(5, greedy_count()))  # ihtiyaca göre max 5 kare
     target = base / N  # sayfa başına dengeli hedef
 
     pages: list[list] = [[]]
@@ -326,7 +326,7 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
     f_ch = _load_font(30, bold=True)
     f_sec = _load_font(28, bold=True)
     f_tk = _load_font(28, bold=True)
-    f_sum = _load_font(25, bold=False)
+    f_sum = _load_font(22, bold=False)  # biraz daha ufak — tam cümle sığsın
 
     _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
 
@@ -375,17 +375,34 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
             row_bg = (22, 22, 38) if idx % 2 == 0 else (26, 26, 46)
             d.rectangle([(PAD, y), (W - PAD, y + _ITEM_H)], fill=row_bg)
             tk = f"#{it['ticker']}"
-            d.text((PAD + 26, y + 11), tk, font=f_tk, fill=color)
+            d.text((PAD + 26, y + 12), tk, font=f_tk, fill=color)
             tkw = d.textlength(tk, font=f_tk)
-            sx = PAD + 26 + int(tkw) + 18
-            avail = (W - PAD - 20) - sx
-            summ = it.get("summary", "")
-            full = summ
-            while summ and d.textlength(summ, font=f_sum) > avail:
-                summ = summ[:-2]
-            if summ != full and summ:
-                summ = summ.rstrip("…").rstrip() + "…"
-            d.text((sx, y + 13), summ, font=f_sum, fill=WHITE)
+            sx = PAD + 26 + int(tkw) + 16
+            # 2 satıra kadar sar — cümle YARIM kesilmesin (tam yaz)
+            avail1 = (W - PAD - 20) - sx          # 1. satır: ticker'dan sonra
+            avail2 = (W - PAD - 20) - (PAD + 26)  # 2. satır: tam genişlik
+            words = (it.get("summary", "") or "").split()
+            line1, line2, i = "", "", 0
+            while i < len(words):
+                cand = (line1 + " " + words[i]).strip()
+                if d.textlength(cand, font=f_sum) <= avail1:
+                    line1 = cand; i += 1
+                else:
+                    break
+            while i < len(words):
+                cand = (line2 + " " + words[i]).strip()
+                if d.textlength(cand, font=f_sum) <= avail2:
+                    line2 = cand; i += 1
+                else:
+                    break
+            # Hâlâ kelime kaldıysa 2. satırı … ile bitir
+            if i < len(words) and line2:
+                while line2 and d.textlength(line2 + "…", font=f_sum) > avail2:
+                    line2 = line2.rsplit(" ", 1)[0] if " " in line2 else line2[:-1]
+                line2 = line2.rstrip() + "…"
+            d.text((sx, y + 14), line1, font=f_sum, fill=WHITE)
+            if line2:
+                d.text((PAD + 26, y + 46), line2, font=f_sum, fill=WHITE)
             y += _ITEM_H
 
     _draw_bg_watermark(img, W, H)
@@ -429,15 +446,32 @@ def item_key(kind: str, item: dict) -> str:
 
 
 def default_selection(data: dict, max_total: int = MAX_TOTAL_ITEMS) -> set[str]:
-    """Kareye-yakın görsele sığacak şekilde varsayılan ön-seçim.
+    """Varsayılan ön-seçim — olumlu + olumsuz + SPK DENGELİ temsil edilir.
 
-    Öncelik: olumlu (impact) → olumsuz (impact) → SPK. max_total'a kadar seçer.
+    Eski sürüm tüm olumluları önce aldığı için (88 olumlu) olumsuz/SPK hiç
+    seçilmiyordu. Artık SPK'nın tamamı (makul sınırda) + kalan bütçe olumlu/
+    olumsuz arasında (~%40 olumsuza) bölünür; max_total'a kadar.
     """
-    keys: list[str] = []
-    for kind in ("positive", "negative", "spk"):
-        for it in data.get(kind, []):
-            keys.append(item_key(kind, it))
-    return set(keys[:max_total])
+    pos = [item_key("positive", it) for it in data.get("positive", [])]
+    neg = [item_key("negative", it) for it in data.get("negative", [])]
+    spk = [item_key("spk", it) for it in data.get("spk", [])]
+
+    sel: list[str] = []
+    sel += spk[:min(len(spk), max(1, max_total // 3))]  # SPK (varsa) — max ~1/3
+    rem = max_total - len(sel)
+    neg_quota = min(len(neg), max(0, int(rem * 0.4)))
+    pos_quota = rem - neg_quota
+    sel += pos[:pos_quota]
+    sel += neg[:neg_quota]
+    # Boşluk kaldıysa kalanlarla doldur (sıra: olumlu, olumsuz, spk)
+    if len(sel) < max_total:
+        chosen = set(sel)
+        for k in (pos + neg + spk):
+            if k not in chosen:
+                sel.append(k); chosen.add(k)
+                if len(sel) >= max_total:
+                    break
+    return set(sel)
 
 
 def filter_selected(data: dict, selected: set[str]) -> tuple[list, list, list]:
