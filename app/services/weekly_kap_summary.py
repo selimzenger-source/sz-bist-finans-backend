@@ -85,6 +85,34 @@ def _shrink(text: str, max_chars: int, ticker: str | None = None) -> str:
     return s.strip()
 
 
+async def get_week_extras(start: date, end: date) -> dict:
+    """Bu haftanın tedbir gelen / tedbiri biten / temettü dağıtan hisseleri.
+
+    Kompakt görsel bloğu için — hepsi OTOMATİK gösterilir (seçim yok).
+    Döner: {"tedbir_added":[tk...], "tedbir_ended":[tk...], "dividends":[(tk,gross)...]}
+    """
+    from app.database import async_session
+    out = {"tedbir_added": [], "tedbir_ended": [], "dividends": []}
+    try:
+        async with async_session() as s:
+            r1 = await s.execute(sa_text(
+                "SELECT DISTINCT UPPER(ticker) FROM cautious_stocks "
+                "WHERE start_date BETWEEN :s AND :e ORDER BY 1"), {"s": start, "e": end})
+            out["tedbir_added"] = [x[0] for x in r1.all() if x[0]]
+            r2 = await s.execute(sa_text(
+                "SELECT DISTINCT UPPER(ticker) FROM cautious_stocks "
+                "WHERE end_date BETWEEN :s AND :e ORDER BY 1"), {"s": start, "e": end})
+            out["tedbir_ended"] = [x[0] for x in r2.all() if x[0]]
+            r3 = await s.execute(sa_text(
+                "SELECT UPPER(ticker), MAX(gross_dividend_per_share) FROM dividend_history "
+                "WHERE payment_date BETWEEN :s AND :e AND gross_dividend_per_share > 0 "
+                "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
+            out["dividends"] = [(x[0], float(x[1])) for x in r3.all() if x[0] and x[1] is not None]
+    except Exception as e:
+        logger.warning("Haftalık extras (tedbir/temettü) derleme hatası: %s", e)
+    return out
+
+
 async def get_week_kap_news(start: date, end: date) -> dict:
     """Hafta için olumlu/olumsuz/spk öğelerini derler.
 
@@ -279,6 +307,58 @@ def _measure_sections(sections) -> None:
             _wrap_item(_md, it)
 
 
+# ── KOMPAKT EXTRAS (tedbir gelen/biten + temettü dağıtan) — ilk sayfada 2 sütun ──
+_EX_CAT_H = 30   # kategori başlık yüksekliği
+_EX_ROW_H = 26   # chip satır yüksekliği
+
+
+def _extras_cats(extras: dict):
+    """(başlık, [chip metni...], renk) listesi — boş olanlar atlanır."""
+    if not extras:
+        return []
+    def _tl(v):
+        return f"{v:.2f}".replace(".", ",") + " TL"
+    cats = [
+        ("⛔ BU HAFTA TEDBİR GELEN", [f"#{t}" for t in extras.get("tedbir_added", [])], (255, 112, 67)),
+        ("🔓 TEDBİRİ BİTEN", [f"#{t}" for t in extras.get("tedbir_ended", [])], (38, 198, 218)),
+        ("💰 TEMETTÜ DAĞITAN", [f"#{t} {_tl(g)}" for t, g in extras.get("dividends", [])], (0, 200, 83)),
+    ]
+    return [c for c in cats if c[1]]
+
+
+def _extras_height(extras: dict) -> int:
+    cats = _extras_cats(extras)
+    if not cats:
+        return 0
+    h = 10
+    for _, items, _c in cats:
+        rows = (len(items) + 1) // 2
+        h += _EX_CAT_H + rows * _EX_ROW_H + 10
+    return h + 6
+
+
+def _render_extras(d, extras: dict, y0: int) -> int:
+    """Kompakt 2 sütunlu extras bloğunu çizer; bittiği y'yi döner."""
+    from app.services.chart_image_generator import _load_font, WHITE
+    f_cat = _load_font(24, bold=True)
+    f_chip = _load_font(21, bold=False)
+    W, PAD = _IMG_W, _IMG_PAD
+    col_w = (W - 2 * PAD) // 2
+    y = y0 + 6
+    for title, items, color in _extras_cats(extras):
+        d.text((PAD, y), f"{title}  ({len(items)})", font=f_cat, fill=color)
+        y += _EX_CAT_H
+        rows = (len(items) + 1) // 2
+        for r in range(rows):
+            d.text((PAD + 6, y), items[r], font=f_chip, fill=WHITE)
+            ri = r + rows
+            if ri < len(items):
+                d.text((PAD + col_w + 6, y), items[ri], font=f_chip, fill=WHITE)
+            y += _EX_ROW_H
+        y += 10
+    return y + 6
+
+
 def _wk_sections(positive, negative, spk):
     from app.services.chart_image_generator import GREEN, RED, GOLD
     secs = []
@@ -291,22 +371,24 @@ def _wk_sections(positive, negative, spk):
     return secs
 
 
-def _paginate(sections) -> list[list]:
+def _paginate(sections, extras_h: int = 0) -> list[list]:
     """Bölümleri/öğeleri sayfalara böler — öğe/başlık YARIM KESİLMEZ.
+
+    extras_h: ilk sayfada üstte yer kaplayan kompakt extras bloğu (tedbir/temettü).
 
     Tek sayfaya sığarsa (≤ _SQUARE_MAX) → 1 sayfa. Aksi halde sayfalar
     DENGELİ doldurulur (boş kare kalmasın) ama cap aşılmaz; bölüm bölünürse
     yeni sayfada "(devam)" başlığı eklenir.
     """
     def cap(pi):
-        head = _HEADER_MAIN_H if pi == 0 else _HEADER_CONT_H
+        head = (_HEADER_MAIN_H + extras_h) if pi == 0 else _HEADER_CONT_H
         return _SQUARE_MAX - head - _FOOTER_H - 14
 
     def _ih(it):
         return it.get("_h") or _ITEM_H
 
     base = sum(_SEC_HEAD_H + sum(_ih(it) for it in s["items"]) + _SEC_GAP for s in sections)
-    single_h = _HEADER_MAIN_H + base + _FOOTER_H + 14
+    single_h = _HEADER_MAIN_H + extras_h + base + _FOOTER_H + 14
     if single_h <= _SQUARE_MAX:
         ops = []
         for s in sections:
@@ -354,13 +436,13 @@ def _paginate(sections) -> list[list]:
     return pages
 
 
-def _page_height(ops, page_idx) -> int:
-    head_h = _HEADER_MAIN_H if page_idx == 0 else _HEADER_CONT_H
+def _page_height(ops, page_idx, extras_h: int = 0) -> int:
+    head_h = (_HEADER_MAIN_H + extras_h) if page_idx == 0 else _HEADER_CONT_H
     content_h = sum(_SEC_HEAD_H if o[0] == "header" else (o[2].get("_h") or _ITEM_H) for o in ops)
     return head_h + content_h + _SEC_GAP + _FOOTER_H + 14
 
 
-def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -> str:
+def _render_page(ops, page_idx, total_pages, label, height: int | None = None, extras: dict | None = None) -> str:
     from PIL import Image, ImageDraw
     from app.services.chart_image_generator import (
         _load_font, _draw_bg_watermark, draw_brand_footer,
@@ -370,7 +452,8 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
     W, PAD = _IMG_W, _IMG_PAD
     is_first = page_idx == 0
     head_h = _HEADER_MAIN_H if is_first else _HEADER_CONT_H
-    H = height or _page_height(ops, page_idx)
+    _ex_h = _extras_height(extras) if (is_first and extras) else 0
+    H = height or _page_height(ops, page_idx, _ex_h)
 
     img = Image.new("RGB", (W, H), BG_COLOR)
     d = ImageDraw.Draw(img)
@@ -410,8 +493,11 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
         pw = d.textlength(pg, font=f_ch)
         d.text((W - PAD - pw, (head_h - 30) // 2), pg, font=f_ch, fill=GRAY)
 
-    # ── Gövde ──
-    y = head_h + 14
+    # ── Kompakt extras (sadece 1. sayfa) — tedbir gelen/biten + temettü dağıtan ──
+    if is_first and extras and _ex_h:
+        y = _render_extras(d, extras, head_h + 8)
+    else:
+        y = head_h + 14
     for op in ops:
         if op[0] == "header":
             sec = op[1]
@@ -455,22 +541,29 @@ def _render_page(ops, page_idx, total_pages, label, height: int | None = None) -
     return out_path
 
 
-def generate_weekly_kap_images(positive: list, negative: list, spk: list, label: str) -> list[str]:
-    """Haftalık KAP görsel(ler)i — 1 veya 2 kare PNG yolu listesi döner."""
+def generate_weekly_kap_images(positive: list, negative: list, spk: list, label: str, extras: dict | None = None) -> list[str]:
+    """Haftalık KAP görsel(ler)i — ihtiyaca göre max 5 kare PNG yolu listesi.
+
+    extras: 1. sayfada üstte kompakt 2 sütun gösterilen tedbir/temettü bloğu
+    (OTOMATİK — seçim gerektirmez).
+    """
     try:
         sections = _wk_sections(positive, negative, spk)
         if not sections:
             return []
         _measure_sections(sections)  # dinamik satır/yükseklik (tam cümle)
-        pages = _paginate(sections)
+        _ex_h = _extras_height(extras) if extras else 0
+        pages = _paginate(sections, _ex_h)
         if len(pages) > 5:
             pages = pages[:5]  # max 5 kare (Twitter thread: 4 + 1 yanıt)
         total = len(pages)
-        # Çok sayfada kareleri EŞİT yükseklikte tut (en dolu sayfaya göre, kareyi aşmadan)
+        # Çok sayfada kareleri EŞİT yükseklikte tut (en dolu sayfaya göre)
         shared_h = None
         if total > 1:
-            shared_h = min(_SQUARE_MAX, max(_page_height(ops, i) for i, ops in enumerate(pages)))
-        out = [_render_page(ops, i, total, label, height=shared_h) for i, ops in enumerate(pages)]
+            shared_h = min(_SQUARE_MAX, max(
+                _page_height(ops, i, _ex_h if i == 0 else 0) for i, ops in enumerate(pages)))
+        out = [_render_page(ops, i, total, label, height=shared_h,
+                            extras=(extras if i == 0 else None)) for i, ops in enumerate(pages)]
         out = [p for p in out if p]
         logger.info("Haftalık KAP görsel(ler)i üretildi: %d kare", len(out))
         return out
@@ -590,7 +683,8 @@ async def send_weekly_kap(start: date, end: date, selected_keys: set[str], *, dr
     if total == 0:
         return {"sent": False, "reason": "no_selection", "label": label}
 
-    images = generate_weekly_kap_images(pos, neg, spk, label)
+    extras = await get_week_extras(start, end)  # tedbir gelen/biten + temettü (otomatik)
+    images = generate_weekly_kap_images(pos, neg, spk, label, extras=extras)
     if not images:
         return {"sent": False, "reason": "image_failed", "label": label}
     text = build_tweet_text(pos, neg, spk, label)
