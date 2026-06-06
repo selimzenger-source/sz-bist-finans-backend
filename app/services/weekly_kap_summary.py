@@ -195,8 +195,10 @@ async def get_week_kap_news(start: date, end: date) -> dict:
     start_utc = start_dt.astimezone(timezone.utc)
     end_utc = end_dt.astimezone(timezone.utc)
 
-    pos_by_ticker: dict[str, dict] = {}
-    neg_by_ticker: dict[str, dict] = {}
+    # Ticker başına TEK değil, en fazla _MAX_PER_TICKER farklı haber (benzer özetler elenir)
+    _MAX_PER_TICKER = 3
+    pos_by_ticker: dict[str, list] = {}
+    neg_by_ticker: dict[str, list] = {}
     spk_items: list[dict] = []
 
     async with async_session() as session:
@@ -231,9 +233,12 @@ async def get_week_kap_news(start: date, end: date) -> dict:
                 "sentiment": sentiment,
             }
             bucket = pos_by_ticker if is_pos else neg_by_ticker
-            # Ticker bazında en yüksek impact'i tut
-            if ticker not in bucket or item["impact"] > bucket[ticker]["impact"]:
-                bucket[ticker] = item
+            lst = bucket.setdefault(ticker, [])
+            # Aynı/çok benzer özeti tekrar ekleme (ilk 40 karakter normalize)
+            _sig = re.sub(r"\s+", " ", short.lower())[:40]
+            if any(re.sub(r"\s+", " ", x["summary"].lower())[:40] == _sig for x in lst):
+                continue
+            lst.append(item)
 
         # ── SPK bülteni — analiz tweet'lerinden bullet satırları ──
         try:
@@ -297,8 +302,17 @@ async def get_week_kap_news(start: date, end: date) -> dict:
         except Exception as e:
             logger.warning("Haftalık SPK derleme hatası: %s", e)
 
-    positive = sorted(pos_by_ticker.values(), key=lambda x: x["impact"], reverse=True)
-    negative = sorted(neg_by_ticker.values(), key=lambda x: x["impact"], reverse=True)
+    # Ticker başına en fazla _MAX_PER_TICKER (impact'e göre) tut, sonra düzleştir
+    def _flatten(by_ticker: dict) -> list:
+        out = []
+        for items in by_ticker.values():
+            items.sort(key=lambda x: x["impact"], reverse=True)
+            out.extend(items[:_MAX_PER_TICKER])
+        out.sort(key=lambda x: x["impact"], reverse=True)
+        return out
+
+    positive = _flatten(pos_by_ticker)
+    negative = _flatten(neg_by_ticker)
     return {"positive": positive, "negative": negative, "spk": spk_items}
 
 
