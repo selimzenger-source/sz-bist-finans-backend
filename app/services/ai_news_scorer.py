@@ -3169,9 +3169,14 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # Fitch, Moody's, S&P, JCR gibi kuruluşların kredi notu açıklamaları
     # genelde önceden beklenmektedir, fiyat etkisi sınırlı. Kullanıcı isteği:
     # çok büyük not değişikliği yoksa → NOTR (5.0).
+    # DİKKAT: kısa/ortak kelime substring eşleşmesi YASAK — "saha" (kredi kuruluşu
+    # Saha Rating) FRIGO'nun "sahalardaki" (tarla) kelimesine takılıp haberi yanlışlıkla
+    # kredi-notu sanıp Nötr'e çekiyordu. Kısa isimler ("saha","scope") yalnızca
+    # rating/derecelendirme bağlamında geçerli (açık ifade).
     rating_agencies = (
         "fitch", "moody", "s&p", "standard & poor", "standard&poor",
-        "jcr", "saha", "scope", "kredi notu", "credit rating",
+        "jcr", "kredi notu", "credit rating", "kredi derecelendir",
+        "saha rating", "saha derecelendir", "scope rating",
     )
     is_credit_rating = (
         any(ag in content_lower for ag in rating_agencies)
