@@ -489,7 +489,8 @@ def _prepare_extras(extras: dict):
 
     add = extras.get("tedbir_added") or []
     end = extras.get("tedbir_ended") or []
-    div = extras.get("dividends") or []
+    # NOT: Temettü (dağıtan + önümüzdeki hafta) haftalık KAP tablosundan KALDIRILDI —
+    # ayrı "Haftalık Temettü Takvimi" tweet'i (Pazar 18:00) zaten kapsıyor (mükerrer).
 
     if add:
         tokens.append((PAD, dy, f"⛔ BU HAFTA TEDBİR GELEN  ({len(add)})", "cat", _C_ADD))
@@ -504,17 +505,6 @@ def _prepare_extras(extras: dict):
         tokens.append((PAD, dy, f"🔓 TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
         dy += _EX_H_CAT
         grid([(f"#{t}", None, WHITE) for t in end], with_type=False)
-
-    if div:
-        tokens.append((PAD, dy, f"💰 TEMETTÜ DAĞITAN (brüt)  ({len(div)})", "cat", _C_DIV))
-        dy += _EX_H_CAT
-        grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in div], with_type=False)
-
-    up = extras.get("dividends_upcoming") or []
-    if up:
-        tokens.append((PAD, dy, f"📅 ÖNÜMÜZDEKİ HAFTA TEMETTÜ ÖDEYECEKLER (brüt)  ({len(up)})", "cat", _C_DIV2))
-        dy += _EX_H_CAT
-        grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in up], with_type=False)
 
     h = dy + 6
     extras["_lines"] = tokens
