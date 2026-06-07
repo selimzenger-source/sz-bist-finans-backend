@@ -102,9 +102,12 @@ def _draw_bg_watermark(img: Image.Image, width: int, height: int):
         logger.warning("Watermark eklenemedi: %s", e)
 
 
-def draw_brand_footer(draw, img, width: int, height: int, *, source: str = None, foot_h: int = 70):
-    """EK-1 tarzı alt şerit: sağda küçük logo + 'Borsa Cebimde | borsacebimde.com',
-    solda opsiyonel kaynak yazısı. Haftalık temettü/KAP görsellerinde ortak footer.
+def draw_brand_footer(draw, img, width: int, height: int, *, source: str = None,
+                      foot_h: int = 70, center: bool = False):
+    """EK-1 tarzı alt şerit: logo + 'Borsa Cebimde | borsacebimde.com'.
+
+    center=False → sağda hizalı (varsayılan), solda opsiyonel kaynak yazısı.
+    center=True  → logo + marka yatayda ORTALANIR (kaynak yazısı gösterilmez).
     """
     try:
         fy = height - foot_h
@@ -117,20 +120,33 @@ def draw_brand_footer(draw, img, width: int, height: int, *, source: str = None,
         bw = draw.textlength(brand, font=f_brand)
 
         _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        logo_img = None
         for ln in ("logo.png", "logo.jpg"):
             lp = os.path.join(_IMG_DIR, ln)
             if os.path.exists(lp):
                 try:
-                    logo = Image.open(lp).convert("RGBA").resize((40, 40), Image.LANCZOS)
-                    lx = int(width - 32 - bw - 12 - 40)
-                    img.paste(logo, (lx, fy + (foot_h - 40) // 2), logo)
+                    logo_img = Image.open(lp).convert("RGBA").resize((40, 40), Image.LANCZOS)
                 except Exception:
-                    pass
+                    logo_img = None
                 break
 
-        draw.text((width - 32 - bw, fy + (foot_h - 28) // 2), brand, font=f_brand, fill=GOLD)
-        if source:
-            draw.text((32, fy + (foot_h - 24) // 2), source, font=f_src, fill=GRAY)
+        LOGO_W, GAP = 40, 12
+        if center:
+            group_w = (LOGO_W + GAP if logo_img else 0) + bw
+            gx = int((width - group_w) // 2)
+            if logo_img:
+                img.paste(logo_img, (gx, fy + (foot_h - 40) // 2), logo_img)
+                tx = gx + LOGO_W + GAP
+            else:
+                tx = gx
+            draw.text((tx, fy + (foot_h - 28) // 2), brand, font=f_brand, fill=GOLD)
+        else:
+            if logo_img:
+                lx = int(width - 32 - bw - GAP - LOGO_W)
+                img.paste(logo_img, (lx, fy + (foot_h - 40) // 2), logo_img)
+            draw.text((width - 32 - bw, fy + (foot_h - 28) // 2), brand, font=f_brand, fill=GOLD)
+            if source:
+                draw.text((32, fy + (foot_h - 24) // 2), source, font=f_src, fill=GRAY)
     except Exception as e:
         logger.warning("Brand footer eklenemedi: %s", e)
 

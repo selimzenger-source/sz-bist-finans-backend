@@ -420,10 +420,15 @@ def generate_weekly_calendar_cards_image(sections: list[dict], label: str,
             if c.get("verim") is not None:
                 vtxt = f"Verim: %{c['verim']:.2f}".replace(".", ",")
                 d.text((x + 22, y + 126), vtxt, font=f_amt2, fill=GOLD)
-            # Mini bar grafik — yıllık brüt (son 5 yıl)
-            hist = (c.get("history") or [])[-5:]
+            # Mini bar grafik — SABİT 6 yıllık eksen (örn 2021-2026).
+            # Veri olmayan yıllar BOŞ (0) gösterilir → tek/iki barlık çorak görünüm yok.
+            cur_year = datetime.now(_TR_TZ).year
+            years_axis = list(range(cur_year - 5, cur_year + 1))  # 6 yıl
+            hmap = {int(yy): float(gg) for yy, gg in (c.get("history") or [])}
+            hist = [(yy, hmap.get(yy, 0.0)) for yy in years_axis]
             cap_y = y + 168
-            d.text((x + 22, cap_y), f"Yıllık brüt temettü · son 5 yıl ({_currency_token()}/pay)",
+            d.text((x + 22, cap_y),
+                   f"Yıllık brüt temettü · {years_axis[0]}-{years_axis[-1]} ({_currency_token()}/pay)",
                    font=f_cap, fill=GRAY)
             ch_x0, ch_y0 = x + 22, cap_y + 30
             ch_w, ch_h = col_w - 44, 152
@@ -432,23 +437,27 @@ def generate_weekly_calendar_cards_image(sections: list[dict], label: str,
             TOP_PAD, BOT_PAD = 26, 26
             base_y = ch_y0 + ch_h - BOT_PAD          # bar tabanı (yıl yazısı bunun altında)
             bar_area = ch_h - TOP_PAD - BOT_PAD       # barların kullanabileceği yükseklik
-            if hist:
-                mx = max(g for _, g in hist) or 1.0
-                nb = len(hist)
-                bw = (ch_w - (nb - 1) * 12) / nb
-                for i, (yr, g) in enumerate(hist):
-                    bx = ch_x0 + i * (bw + 12)
+            mx = max((g for _, g in hist), default=0.0) or 1.0
+            nb = len(hist)
+            bw = (ch_w - (nb - 1) * 10) / nb
+            for i, (yr, g) in enumerate(hist):
+                bx = ch_x0 + i * (bw + 10)
+                last = (i == nb - 1)
+                if g > 0:
                     bh = max((g / mx) * bar_area, 3)
                     by = base_y - bh
-                    last = (i == nb - 1)
                     d.rectangle([(bx, by), (bx + bw, base_y)],
                                 fill=GREEN if last else (40, 90, 60))
                     vs = f"{g:.2f}".rstrip("0").rstrip(".").replace(".", ",")
                     vw = d.textlength(vs, font=f_bar)
-                    d.text((bx + bw / 2 - vw / 2, by - 21), vs, font=f_bar, fill=GOLD if last else GRAY)
-                    ys = "'" + str(yr)[2:]
-                    yw = d.textlength(ys, font=f_yr)
-                    d.text((bx + bw / 2 - yw / 2, base_y + 5), ys, font=f_yr, fill=GRAY)
+                    d.text((bx + bw / 2 - vw / 2, by - 21), vs, font=f_bar,
+                           fill=GOLD if last else GRAY)
+                else:
+                    # boş yıl — ince taban çizgisi (0)
+                    d.line([(bx, base_y), (bx + bw, base_y)], fill=DIVIDER, width=2)
+                ys = "'" + str(yr)[2:]
+                yw = d.textlength(ys, font=f_yr)
+                d.text((bx + bw / 2 - yw / 2, base_y + 5), ys, font=f_yr, fill=GRAY)
 
         y = header_h + 18
         for s in sections:
@@ -466,7 +475,7 @@ def generate_weekly_calendar_cards_image(sections: list[dict], label: str,
             y += rws * (card_h + GAP) + sec_gap
 
         _draw_bg_watermark(img, W, H)
-        draw_brand_footer(d, img, W, H)  # kaynak yazısı yok (sadece marka)
+        draw_brand_footer(d, img, W, H, center=True)  # logo + marka ortalı, kaynak yok
         out_path = os.path.join(
             tempfile.gettempdir(),
             f"temettu_takvim_kart_{datetime.now(_TR_TZ).strftime('%Y%m%d')}{('_' + suffix) if suffix else ''}.png",
