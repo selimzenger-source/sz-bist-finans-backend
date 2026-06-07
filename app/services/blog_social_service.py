@@ -159,44 +159,65 @@ def generate_blog_card(title: str, category: str | None = None) -> str | None:
             _load_font, _draw_bg_watermark, draw_brand_footer,
             BG_COLOR, GOLD, WHITE, GRAY,
         )
-        W = H = 1080
+        # YATAY 16:9 — boşluk az, Twitter kart oranıyla uyumlu
+        W, H = 1200, 675
+        PAD = 64
+        FOOT_H = 84
         img = Image.new("RGB", (W, H), BG_COLOR)
         d = ImageDraw.Draw(img)
         _draw_bg_watermark(img, W, H)
         # Üst altın bar + etiket
-        d.rectangle([(0, 0), (W, 8)], fill=GOLD)
-        f_label = _load_font(30, bold=True)
-        d.text((64, 60), "📚 BORSA CEBİMDE · REHBER", font=f_label, fill=GOLD)
-        # Kategori rozeti
+        d.rectangle([(0, 0), (W, 7)], fill=GOLD)
+        f_label = _load_font(28, bold=True)
+        d.text((PAD, 40), "📚 BORSA CEBİMDE · REHBER", font=f_label, fill=GOLD)
         cat_map = {
             "halka_arz": "Halka Arz", "kap": "KAP", "tavan_taban": "Tavan/Taban",
             "viop": "VİOP", "spk": "SPK", "borsa_rehberi": "Borsa Rehberi",
             "teknoloji": "Teknoloji", "temel_analiz": "Temel Analiz",
         }
         cat_txt = cat_map.get((category or "").lower(), "Borsa Rehberi")
-        f_cat = _load_font(26, bold=False)
-        d.text((64, 110), cat_txt, font=f_cat, fill=GRAY)
-        # Başlık — büyük, sar
-        f_title = _load_font(58, bold=True)
-        words = title.split()
-        lines, cur = [], ""
-        avail = W - 128
-        for w in words:
-            cand = (cur + " " + w).strip()
-            if d.textlength(cand, font=f_title) <= avail:
-                cur = cand
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = w
-        if cur:
-            lines.append(cur)
-        lines = lines[:7]
-        y = 320
+        f_cat = _load_font(24, bold=False)
+        d.text((PAD, 84), cat_txt, font=f_cat, fill=GRAY)
+
+        # Başlık — uzunluğa göre font seç, sar, header ile footer arasına ORTALA
+        top = 150               # başlık alanı başı (etiketlerin altı)
+        bot = H - FOOT_H - 24   # footer üstü
+        avail_w = W - 2 * PAD
+
+        def _wrap(font):
+            out, cur = [], ""
+            for w in title.split():
+                cand = (cur + " " + w).strip()
+                if d.textlength(cand, font=font) <= avail_w:
+                    cur = cand
+                else:
+                    if cur:
+                        out.append(cur)
+                    cur = w
+            if cur:
+                out.append(cur)
+            return out
+
+        # Boşluğu dolduracak en büyük fontu seç (alana sığana kadar küçült)
+        f_title = None
+        lines = []
+        for sz, lh in ((64, 80), (56, 72), (50, 64), (44, 58)):
+            f = _load_font(sz, bold=True)
+            ls = _wrap(f)
+            if len(ls) * lh <= (bot - top):
+                f_title, lines, line_h = f, ls, lh
+                break
+        if f_title is None:
+            f_title = _load_font(44, bold=True)
+            lines = _wrap(f_title)[:6]
+            line_h = 58
+
+        block_h = len(lines) * line_h
+        y = top + max(0, ((bot - top) - block_h) // 2)  # dikey ortala
         for ln in lines:
-            d.text((64, y), ln, font=f_title, fill=WHITE)
-            y += 78
-        draw_brand_footer(d, img, W, H, source="borsacebimde.com", foot_h=90)
+            d.text((PAD, y), ln, font=f_title, fill=WHITE)
+            y += line_h
+        draw_brand_footer(d, img, W, H, source="borsacebimde.com", foot_h=FOOT_H)
         fd, path = tempfile.mkstemp(suffix=".png", prefix="blog_card_")
         os.close(fd)
         img.save(path, "PNG", optimize=True)
