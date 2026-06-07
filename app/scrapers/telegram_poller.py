@@ -1856,7 +1856,15 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         ai_summary = _pt_objs[_rep_tk].ai_summary
 
             # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
-            should_notify = (ai_score is None) or (ai_score >= 6) or bool(_pos_tickers)
+            # ★ TUTARLILIK: kap_all feed per-ticker skorlari yazildiysa (_pt_objs),
+            # bildirim karari SADECE feed skorlarina (_pos_tickers) bakar. Eski 'ai_score'
+            # notification-guardrail ile 6.2'ye cikabiliyor ama feed re-validasyonu 5.0
+            # Notr yazabiliyordu → bildirim pozitif gidip DB/app 5.0 kaliyordu (FRIGO).
+            # _pt_objs varsa stale ai_score'a GUVENME; yoksa (feed yazilmadi) ai_score fallback.
+            if _pt_objs:
+                should_notify = (ai_score is None) or bool(_pos_tickers)
+            else:
+                should_notify = (ai_score is None) or (ai_score is not None and ai_score >= 6)
 
             if not should_notify:
                 logger.info(
