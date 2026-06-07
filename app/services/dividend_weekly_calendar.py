@@ -237,6 +237,158 @@ def generate_weekly_calendar_image(week: list[dict], label: str) -> str | None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  GRAFİKLİ KART VERSİYONU — her hisse: net/brüt/tarih + yıllık mini bar grafik
+# ════════════════════════════════════════════════════════════════════════════
+
+async def get_week_dividend_cards(start: date, end: date) -> list[dict]:
+    """Hafta içi temettü ödeyecek hisseler — net/brüt/tarih + yıllık geçmiş (mini chart).
+
+    Döner: [{"ticker","date","gross","net","history":[(year, gross_float)...]}...]
+    """
+    from app.database import async_session
+    cards: list[dict] = []
+    async with async_session() as session:
+        res = await session.execute(sa_text(
+            """
+            SELECT payment_date, UPPER(ticker) AS ticker,
+                   MAX(gross_dividend_per_share) AS g, MAX(net_dividend_per_share) AS n
+            FROM dividend_history
+            WHERE payment_date BETWEEN :s AND :e AND gross_dividend_per_share > 0
+            GROUP BY payment_date, UPPER(ticker)
+            ORDER BY payment_date, ticker
+            """
+        ), {"s": start, "e": end})
+        base = [(pd, tk, g, n) for pd, tk, g, n in res.all() if pd and tk]
+        for pd, tk, g, n in base:
+            hres = await session.execute(sa_text(
+                """
+                SELECT payment_year, MAX(gross_dividend_per_share) AS g
+                FROM dividend_history
+                WHERE UPPER(ticker) = :tk AND gross_dividend_per_share > 0
+                  AND payment_year IS NOT NULL
+                GROUP BY payment_year ORDER BY payment_year
+                """
+            ), {"tk": tk})
+            hist = [(int(y), float(gg)) for y, gg in hres.all() if gg is not None]
+            cards.append({
+                "ticker": tk, "date": pd,
+                "gross": float(g), "net": float(n) if n is not None else None,
+                "history": hist,
+            })
+    return cards
+
+
+def generate_weekly_calendar_cards_image(cards: list[dict], label: str) -> str | None:
+    """Her hisse için kart: #kod, ödeme tarihi, brüt/net + altında yıllık mini bar grafik."""
+    if not cards:
+        return None
+    try:
+        from PIL import Image, ImageDraw
+        from app.services.chart_image_generator import (
+            _load_font, _draw_bg_watermark, draw_brand_footer,
+            BG_COLOR, HEADER_BG, WHITE, GRAY, GOLD, GREEN, DIVIDER,
+        )
+        W, PAD, GAP, COLS = 1080, 44, 24, 2
+        col_w = (W - 2 * PAD - GAP * (COLS - 1)) // COLS
+        card_h = 372
+        header_h, footer_h = 196, 96
+        rows = (len(cards) + COLS - 1) // COLS
+        H = header_h + 18 + rows * (card_h + GAP) + footer_h
+
+        img = Image.new("RGB", (W, H), BG_COLOR)
+        d = ImageDraw.Draw(img)
+        f_title = _load_font(50, bold=True)
+        f_sub = _load_font(30, bold=False)
+        f_tk = _load_font(36, bold=True)
+        f_date = _load_font(26, bold=True)
+        f_amt = _load_font(28, bold=True)
+        f_amt2 = _load_font(25, bold=False)
+        f_bar = _load_font(17, bold=True)
+        f_yr = _load_font(16, bold=False)
+        f_cap = _load_font(18, bold=False)
+
+        # Header
+        d.rectangle([(0, 0), (W, header_h)], fill=HEADER_BG)
+        d.rectangle([(0, header_h - 5), (W, header_h)], fill=GOLD)
+        _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "img")
+        logo_x = PAD
+        try:
+            for ln in ("logo.png", "logo.jpg"):
+                lp = os.path.join(_IMG_DIR, ln)
+                if os.path.exists(lp):
+                    logo = Image.open(lp).convert("RGBA").resize((92, 92), Image.LANCZOS)
+                    img.paste(logo, (PAD, 32), logo)
+                    logo_x = PAD + 92 + 22
+                    break
+        except Exception:
+            pass
+        d.text((logo_x, 46), "HAFTALIK TEMETTÜ TAKVİMİ", font=f_title, fill=WHITE)
+        d.text((logo_x, 112), label, font=f_sub, fill=GOLD)
+
+        def _tl(v):
+            try:
+                return f"{float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " TL"
+            except Exception:
+                return f"{v} TL"
+
+        for idx, c in enumerate(cards):
+            r, col = idx // COLS, idx % COLS
+            x = PAD + col * (col_w + GAP)
+            y = header_h + 18 + r * (card_h + GAP)
+            d.rounded_rectangle([(x, y), (x + col_w, y + card_h)], radius=16,
+                                fill=(24, 24, 40), outline=DIVIDER, width=1)
+            # Başlık: #TICKER + tarih
+            d.text((x + 22, y + 20), f"#{c['ticker']}", font=f_tk, fill=GREEN)
+            ds = f"{c['date'].day} {_TR_MONTHS[c['date'].month]}"
+            dw = d.textlength(ds, font=f_date)
+            d.text((x + col_w - 22 - dw, y + 28), ds, font=f_date, fill=GOLD)
+            # Brüt / Net
+            d.text((x + 22, y + 70), f"Brüt/pay: {_tl(c['gross'])}", font=f_amt, fill=WHITE)
+            if c.get("net") is not None:
+                d.text((x + 22, y + 104), f"Net/pay:  {_tl(c['net'])}", font=f_amt2, fill=GRAY)
+            # Mini bar grafik — yıllık brüt (son 6 yıl)
+            hist = c.get("history") or []
+            hist = hist[-6:]
+            cap_y = y + 150
+            d.text((x + 22, cap_y), "Yıllık brüt temettü (TL/pay)", font=f_cap, fill=GRAY)
+            ch_x0, ch_y0 = x + 22, cap_y + 30
+            ch_w, ch_h = col_w - 44, 150
+            if hist:
+                mx = max(g for _, g in hist) or 1.0
+                n = len(hist)
+                bw = (ch_w - (n - 1) * 10) / n
+                for i, (yr, g) in enumerate(hist):
+                    bx = ch_x0 + i * (bw + 10)
+                    bh = max((g / mx) * (ch_h - 26), 3)
+                    by = ch_y0 + (ch_h - 26) - bh
+                    last = (i == n - 1)
+                    d.rectangle([(bx, by), (bx + bw, ch_y0 + ch_h - 26)],
+                                fill=GREEN if last else (40, 90, 60), )
+                    # değer (üstte)
+                    vs = f"{g:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+                    vw = d.textlength(vs, font=f_bar)
+                    d.text((bx + bw / 2 - vw / 2, by - 20), vs, font=f_bar,
+                           fill=GOLD if last else GRAY)
+                    # yıl (altta)
+                    ys = str(yr)[2:]
+                    yw = d.textlength(ys, font=f_yr)
+                    d.text((bx + bw / 2 - yw / 2, ch_y0 + ch_h - 22), "'" + ys, font=f_yr, fill=GRAY)
+
+        _draw_bg_watermark(img, W, H)
+        draw_brand_footer(d, img, W, H, source="Veri: temettühisseleri.com")
+        out_path = os.path.join(
+            tempfile.gettempdir(),
+            f"temettu_takvim_kart_{datetime.now(_TR_TZ).strftime('%Y%m%d')}.png",
+        )
+        img.save(out_path, "PNG", optimize=True)
+        logger.info("Haftalık temettü kart görseli üretildi: %s", out_path)
+        return out_path
+    except Exception as e:
+        logger.exception("Haftalık temettü kart görsel hatası: %s", e)
+        return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  TWEET METNİ
 # ════════════════════════════════════════════════════════════════════════════
 
