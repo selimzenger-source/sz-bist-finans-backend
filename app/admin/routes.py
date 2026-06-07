@@ -2942,6 +2942,69 @@ async def weekly_kap_send(request: Request):
         status_code=303)
 
 
+# ────────────────────────────────────────────────────────────────────────────
+#  HAFTALIK TEMETTÜ TAKVİMİ — tek tuşla önizle + at (weekly-kap sayfasında)
+# ────────────────────────────────────────────────────────────────────────────
+
+@router.post("/weekly-dividend/preview")
+async def weekly_dividend_preview(request: Request):
+    """Haftalık temettü takvimi görselleri (base64) + tweet metni döndürür (AJAX)."""
+    from fastapi.responses import JSONResponse
+    if not get_current_admin(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    from app.services.dividend_weekly_calendar import run_weekly_dividend_calendar
+    try:
+        r = await run_weekly_dividend_calendar(force=True, dry_run=True)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+    images = r.get("image_paths") or []
+    if not images:
+        return JSONResponse({"error": r.get("reason", "Görsel üretilemedi")}, status_code=500)
+    try:
+        import base64
+        data_uris = []
+        for p in images:
+            with open(p, "rb") as f:
+                data_uris.append("data:image/png;base64," + base64.b64encode(f.read()).decode())
+        return JSONResponse({
+            "images": data_uris, "frames": len(data_uris),
+            "text": r.get("text", ""), "label": r.get("label", ""),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@router.post("/weekly-dividend/send")
+async def weekly_dividend_send(request: Request):
+    """Haftalık temettü takvimi tweet'ini at (görseller + metin)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    form = await request.form()
+    custom_text = (form.get("custom_text") or "").strip() or None
+
+    from app.services.dividend_weekly_calendar import run_weekly_dividend_calendar
+    try:
+        # skip_refresh: admin manuel → mevcut DB verisiyle hızlı/garantili gönder
+        r = await run_weekly_dividend_calendar(
+            force=True, dry_run=False, skip_refresh=True, custom_text=custom_text)
+    except Exception as e:
+        return RedirectResponse(
+            url=f"/admin/weekly-kap?error=Temettü gönderilemedi: {str(e)[:120]}",
+            status_code=303)
+
+    if r.get("sent"):
+        n = (len(r.get("image_paths") or []))
+        return RedirectResponse(
+            url=f"/admin/weekly-kap?success=Temettü tweet'i gönderildi ({n} görsel)",
+            status_code=303)
+    return RedirectResponse(
+        url=f"/admin/weekly-kap?error=Temettü gönderilemedi: {r.get('reason','bilinmiyor')}",
+        status_code=303)
+
+
 @router.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(
     request: Request,

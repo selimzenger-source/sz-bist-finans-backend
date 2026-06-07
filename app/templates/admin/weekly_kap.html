@@ -32,6 +32,84 @@
       (~5 satır/haber). Fazlası kapatılır. Olumlu/olumsuz/SPK karışık seçebilirsin.</p>
   </div>
 
+  <!-- ════ HAFTALIK TEMETTÜ TAKVİMİ — tek tuşla önizle + at ════ -->
+  <div class="bg-gray-800 rounded-xl p-5 border border-yellow-700/60">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h2 class="text-xl font-bold text-white">💰 Haftalık Temettü Takvimi</h2>
+        <p class="text-gray-400 text-sm mt-1">Bu hafta ödeyenler + önümüzdeki hafta ödeyecekler · grafikli kartlar (max 6/görsel, 4 görsele kadar)</p>
+      </div>
+      <div class="flex gap-2">
+        <button type="button" id="divPreviewBtn"
+                class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg">
+          👁️ Önizle
+        </button>
+        <form method="post" action="/admin/weekly-dividend/send" id="divSendForm" class="inline">
+          <input type="hidden" name="custom_text" id="divCustomText">
+          <button type="submit" id="divSendBtn"
+                  onclick="return confirm('Haftalık temettü takvimi tweet olarak atılsın mı?');"
+                  class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2 rounded-lg">
+            🚀 Tweet At
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Önizleme alanı (gizli, önizle'ye basınca açılır) -->
+    <div id="divPreviewArea" class="hidden mt-4 space-y-3">
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Tweet metni (düzenleyebilirsin — boş bırakırsan otomatik metin atılır):</label>
+        <textarea id="divTweetText" rows="10"
+                  class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:border-yellow-500"></textarea>
+      </div>
+      <div id="divImages" class="grid grid-cols-2 md:grid-cols-4 gap-2"></div>
+    </div>
+    <div id="divPreviewMsg" class="text-sm mt-2"></div>
+  </div>
+
+  <script>
+    (function () {
+      const btn = document.getElementById('divPreviewBtn');
+      const area = document.getElementById('divPreviewArea');
+      const imgWrap = document.getElementById('divImages');
+      const txt = document.getElementById('divTweetText');
+      const msg = document.getElementById('divPreviewMsg');
+      const customHidden = document.getElementById('divCustomText');
+      const sendForm = document.getElementById('divSendForm');
+
+      btn.addEventListener('click', async function () {
+        btn.disabled = true; btn.textContent = '⏳ Üretiliyor...';
+        msg.textContent = ''; msg.className = 'text-sm mt-2';
+        try {
+          const res = await fetch('/admin/weekly-dividend/preview', { method: 'POST' });
+          const data = await res.json();
+          if (!res.ok) { throw new Error(data.error || 'Hata'); }
+          area.classList.remove('hidden');
+          txt.value = data.text || '';
+          imgWrap.innerHTML = '';
+          (data.images || []).forEach(function (uri, i) {
+            const im = document.createElement('img');
+            im.src = uri; im.className = 'rounded-lg border border-gray-700 w-full';
+            im.title = 'Görsel ' + (i + 1);
+            imgWrap.appendChild(im);
+          });
+          msg.textContent = '✅ ' + (data.frames || 0) + ' görsel hazır. Metni düzenleyip "Tweet At"a bas.';
+          msg.className = 'text-sm mt-2 text-green-400';
+        } catch (e) {
+          msg.textContent = '❌ ' + e.message;
+          msg.className = 'text-sm mt-2 text-red-400';
+        } finally {
+          btn.disabled = false; btn.textContent = '👁️ Önizle';
+        }
+      });
+
+      // Gönderirken düzenlenen metni hidden input'a kopyala
+      sendForm.addEventListener('submit', function () {
+        customHidden.value = (txt && txt.value) ? txt.value : '';
+      });
+    })();
+  </script>
+
   {% if total == 0 %}
   <div class="bg-yellow-900/40 border border-yellow-600 text-yellow-200 px-4 py-6 rounded-lg text-center">
     Bu hafta öne çıkan gelişme bulunamadı.
