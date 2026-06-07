@@ -4067,6 +4067,17 @@ async def _post_publish_actions(blog, logger_):
     except Exception as e:
         logger_.warning(f"Blog bildirim gonderilemedi: {e}")
 
+    # ── X (Twitter) THREAD — blog yayinlaninca otomatik (40sn arali, gorselli) ──
+    try:
+        import asyncio as _aio
+        from app.services.blog_social_service import post_blog_to_twitter
+        _aio.create_task(post_blog_to_twitter(
+            blog.title, blog.content, blog.slug, getattr(blog, "category", None),
+        ))
+        logger_.info(f"Blog X thread gorevi baslat: {blog.title}")
+    except Exception as e:
+        logger_.warning(f"Blog X thread baslatilamadi: {e}")
+
     import os
     deploy_hook = os.getenv("RENDER_WEB_DEPLOY_HOOK", "")
     if deploy_hook:

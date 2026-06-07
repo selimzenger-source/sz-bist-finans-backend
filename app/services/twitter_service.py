@@ -2709,9 +2709,11 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
     _fail = "" if return_id else False
     # Satır sonlarını normalize et — textarea \r\n gönderir, Twitter API 400 verebilir
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not image_paths:
+    # Görselsiz + reply/return_id YOKSA basit metin tweet'ine düş.
+    # reply (thread devamı) veya return_id isteniyorsa metin-tek yolu burada işlenir.
+    if not image_paths and not in_reply_to and not return_id:
         return _safe_tweet(text, source=source, force_send=force_send)
-    if len(image_paths) == 1 and not in_reply_to and not return_id:
+    if image_paths and len(image_paths) == 1 and not in_reply_to and not return_id:
         return _safe_tweet_with_media(text, image_paths[0], source=source, force_send=force_send)
 
     try:
@@ -2805,16 +2807,20 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
             else:
                 logger.warning(f"Multi-media upload hatasi ({upload_resp.status_code}): {upload_resp.text[:150]}")
 
-        if not media_ids:
+        # Görsel yoksa: reply/return_id isteniyorsa metin-tek devam et (thread reply);
+        # yoksa basit metin tweet'ine düş.
+        if not media_ids and not in_reply_to and not return_id:
             logger.warning("Hic gorsel yuklenemedi, sadece metin tweet atiliyor")
             return _safe_tweet(text, source=source, force_send=force_send)
 
-        # Tweet at — tum media_ids ile
+        # Tweet at — media varsa media_ids ile, yoksa metin-tek (+reply)
         if len(text) > 4000:
             text = text[:3997] + "..."
 
         tweet_auth = _build_oauth_header(creds)
-        _payload = {"text": text, "media": {"media_ids": media_ids}}
+        _payload = {"text": text}
+        if media_ids:
+            _payload["media"] = {"media_ids": media_ids}
         if in_reply_to:
             _payload["reply"] = {"in_reply_to_tweet_id": str(in_reply_to)}
         tweet_resp = httpx.post(
