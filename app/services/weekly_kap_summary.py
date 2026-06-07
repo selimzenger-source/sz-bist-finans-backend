@@ -576,20 +576,38 @@ def _paginate(sections, extras_h: int = 0) -> list[list]:
                 ops.append(("item", s, it, i))
         return [ops]
 
-    # GREEDY DOLDURMA — her kareyi kapasitesine kadar DOLDUR (boşluk bırakma),
-    # sığmayınca yeni kare aç. Dengeli/hedef-yükseklik YOK → kareler dolu görünür.
+    # DENGELİ DAĞITIM — önce gereken sayfa sayısı (cap'e göre), sonra hedef yükseklik
+    # (base/N). Öğeler sayfalara EŞİT dağılır → son sayfa seyrek kalmaz; tüm kareler
+    # benzer dolulukta olur. generate'te eşit-yükseklik ile birlikte 4 slayt AYNI boyut.
+    def _greedy_count() -> int:
+        pages_n, cur = 1, 0
+        for s in sections:
+            if cur > 0 and cur + _SEC_HEAD_H + (s["items"][0]["_h"] if s["items"] else 0) > cap(pages_n - 1):
+                pages_n += 1; cur = 0
+            cur += _SEC_HEAD_H
+            for it in s["items"]:
+                if cur + _ih(it) > cap(pages_n - 1):
+                    pages_n += 1; cur = _SEC_HEAD_H
+                cur += _ih(it)
+            cur += _SEC_GAP
+        return pages_n
+
+    N = max(2, min(4, _greedy_count()))  # TEK TWEET → max 4 kare
+    target = base / N  # sayfa başına dengeli hedef yükseklik
+
     pages: list[list] = [[]]
     cur_h = 0
     for s in sections:
         pi = len(pages) - 1
         first_ih = s["items"][0]["_h"] if s["items"] else 0
-        if cur_h > 0 and cur_h + _SEC_HEAD_H + first_ih > cap(pi):
+        if cur_h > 0 and (cur_h + _SEC_HEAD_H + first_ih > cap(pi)
+                          or (cur_h >= target and len(pages) < N)):
             pages.append([]); cur_h = 0; pi = len(pages) - 1
         pages[pi].append(("header", s, False))
         cur_h += _SEC_HEAD_H
         for i, it in enumerate(s["items"]):
             pi = len(pages) - 1
-            if cur_h + _ih(it) > cap(pi):
+            if cur_h + _ih(it) > cap(pi) or (cur_h >= target and len(pages) < N):
                 pages.append([]); cur_h = 0; pi = len(pages) - 1
                 pages[pi].append(("header", s, True))
                 cur_h += _SEC_HEAD_H
@@ -722,10 +740,14 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
                            "(fazla öğeler düştü)", len(pages))
             pages = pages[:4]  # TEK TWEET → max 4 kare (thread YOK)
         total = len(pages)
-        # Her kareyi KENDİ içeriğine göre boyutla (eşit-yükseklik YOK → boşluk kalmaz).
-        # Greedy doldurma sayesinde son kare hariç hepsi zaten ~dolu; son kare içeriğine
-        # göre kısa kalır, alttaki dev boşluk biter.
-        out = [_render_page(ops, i, total, label, height=None,
+        # TÜM kareler EŞİT yükseklikte (en dolu sayfaya göre, cap _SQUARE_MAX) → 4 slayt
+        # AYNI boyutta görünür ("son slayt iri" sorunu biter). Dengeli dağıtım sayesinde
+        # sayfalar benzer dolulukta olduğu için eşitlemede dev boşluk oluşmaz.
+        shared_h = None
+        if total > 1:
+            shared_h = min(_SQUARE_MAX, max(
+                _page_height(ops, i, _ex_h if i == 0 else 0) for i, ops in enumerate(pages)))
+        out = [_render_page(ops, i, total, label, height=shared_h,
                             extras=(extras if i == 0 else None)) for i, ops in enumerate(pages)]
         out = [p for p in out if p]
         logger.info("Haftalık KAP görsel(ler)i üretildi: %d kare", len(out))
