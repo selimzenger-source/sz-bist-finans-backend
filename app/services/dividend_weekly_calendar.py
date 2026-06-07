@@ -523,8 +523,16 @@ async def run_weekly_dividend_calendar(*, force: bool = False, dry_run: bool = F
             "total": total, "min": MIN_STOCKS_FOR_TWEET, "label": label,
         }
 
-    # 3) Görsel
-    image_path = generate_weekly_calendar_image(week, label)
+    # 3) Görsel — GRAFİKLİ kart versiyonu (her hisse: net/brüt/tarih + yıllık mini bar).
+    # Kart üretilemezse eski düz takvim görseline düş (fallback).
+    image_path = None
+    try:
+        cards = await get_week_dividend_cards(start, end)
+        image_path = generate_weekly_calendar_cards_image(cards, label)
+    except Exception as e:
+        logger.warning("Temettü kart görseli hatası, düz takvime düşülüyor: %s", e)
+    if not image_path:
+        image_path = generate_weekly_calendar_image(week, label)
     if not image_path:
         return {"sent": False, "reason": "image_failed", "total": total, "label": label}
 
