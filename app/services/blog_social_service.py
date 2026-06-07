@@ -87,8 +87,11 @@ bir X (Twitter) THREAD'ine dönüştür. Hesap premium (uzun tweet serbest) ama 
 ~250-450 karakter olsun.
 
 KURALLAR:
-- Her tweet bir alt-konu/paragraf. Bilgilendirici, akıcı, ÖLÇÜLÜ emoji (her tweette 1-3).
-- Tweet İÇİNDE cümleler arasında BOŞ SATIR bırak (okunabilirlik için \\n\\n).
+- Her tweet bir alt-konu. Bilgilendirici, akıcı, ÖLÇÜLÜ emoji (her tweette 1-3).
+- ★ BİÇİM (ÇOK ÖNEMLİ): HER tweette cümleleri ALT ALTA yaz; HER cümleden sonra BİR BOŞ
+  SATIR (\\n\\n) bırak. Cümleleri ASLA yan yana bitişik yazma. Şu biçimde olmalı:
+  "İlk cümle burada. 🚀\\n\\nİkinci cümle ayrı satırda.\\n\\nÜçüncü cümle de ayrı 👇"
+  (Yani tek paragraf bloğu DEĞİL — her cümle kendi satırında, aralarında boşluk.)
 - 1. tweet dikkat çekici giriş olsun ve 🧵 ile thread olduğunu belli et.
 - Metinde geçen BIST hisse kodlarını ilgili tweette #KOD biçiminde hashtag yap (örn #THYAO).
 - SON tweette: kısa kapanış + şu hashtag'ler: {hashtags} + "⚠️ Yatırım tavsiyesi değildir."
