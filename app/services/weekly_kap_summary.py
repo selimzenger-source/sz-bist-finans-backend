@@ -154,7 +154,7 @@ async def get_week_extras(start: date, end: date) -> dict:
     Döner: {"tedbir_added":[tk...], "tedbir_ended":[tk...], "dividends":[(tk,gross)...]}
     """
     from app.database import async_session
-    out = {"tedbir_added": [], "tedbir_ended": [], "dividends": []}
+    out = {"tedbir_added": [], "tedbir_ended": [], "dividends": [], "dividends_upcoming": []}
     try:
         async with async_session() as s:
             # tedbir gelen — türü (tags) ile. is_active=false (iptal edilen) HARİÇ.
@@ -176,6 +176,13 @@ async def get_week_extras(start: date, end: date) -> dict:
                 "WHERE payment_date BETWEEN :s AND :e AND gross_dividend_per_share > 0 "
                 "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
             out["dividends"] = [(x[0], float(x[1])) for x in r3.all() if x[0] and x[1] is not None]
+            # Önümüzdeki hafta temettü ödeyecekler (hafta bitişinden sonraki 7 gün)
+            r4 = await s.execute(sa_text(
+                "SELECT UPPER(ticker), MAX(gross_dividend_per_share) FROM dividend_history "
+                "WHERE payment_date BETWEEN :s2 AND :e2 AND gross_dividend_per_share > 0 "
+                "GROUP BY UPPER(ticker) ORDER BY 1"),
+                {"s2": end + timedelta(days=1), "e2": end + timedelta(days=7)})
+            out["dividends_upcoming"] = [(x[0], float(x[1])) for x in r4.all() if x[0] and x[1] is not None]
     except Exception as e:
         logger.warning("Haftalık extras (tedbir/temettü) derleme hatası: %s", e)
     return out
@@ -407,6 +414,7 @@ _EX_COL_GAP = 14
 _C_ADD = (255, 112, 67)
 _C_END = (38, 198, 218)
 _C_DIV = (0, 200, 83)
+_C_DIV2 = (66, 165, 245)  # önümüzdeki hafta temettü (mavi — "dağıtan"dan ayrışsın)
 _C_GRP = (170, 178, 190)
 
 # Tedbir kodu → kısa Türkçe etiket (görselde sığsın)
@@ -501,6 +509,12 @@ def _prepare_extras(extras: dict):
         tokens.append((PAD, dy, f"💰 TEMETTÜ DAĞITAN (brüt)  ({len(div)})", "cat", _C_DIV))
         dy += _EX_H_CAT
         grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in div], with_type=False)
+
+    up = extras.get("dividends_upcoming") or []
+    if up:
+        tokens.append((PAD, dy, f"📅 ÖNÜMÜZDEKİ HAFTA TEMETTÜ ÖDEYECEKLER (brüt)  ({len(up)})", "cat", _C_DIV2))
+        dy += _EX_H_CAT
+        grid([(f"#{t} {_tl(g)}", None, WHITE) for t, g in up], with_type=False)
 
     h = dy + 6
     extras["_lines"] = tokens
