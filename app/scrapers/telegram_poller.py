@@ -743,6 +743,34 @@ async def _route_to_calendars(
         except Exception:
             pass
 
+    # TİPE DÖNÜŞÜM BAŞVURUSU (Pay Satış Bilgi Formu) — gerçek içerik EKTE olabilir
+    # (generic "Özel Durum Açıklaması (Genel)" kapağı). Ortağın imtiyazlı payını
+    # borsada işlem gören niteliğe dönüştürme/satışa konu etme BAŞVURUSU = gelecek arz.
+    # share_type_conversions'a record_type='basvuru' yazılır (Başvurular sekmesi).
+    try:
+        from app.services.share_conversion_application_processor import (
+            is_conversion_application as _is_conv_app, process_conversion_application as _proc_conv_app,
+        )
+        _conv_body = body or ""
+        if not _is_conv_app(title, _conv_body) and kap_url:
+            _tl = (title or "").lower()
+            # Generic kapak / kısa body → EK'i çek, başvuru mu bak (gereksiz indirme yok)
+            if ("özel durum" in _tl or "genel" in _tl or "bilgi form" in _tl or len(_conv_body) < 400):
+                try:
+                    from app.scrapers.kap_disclosure_extractor import fetch_kap_disclosure
+                    _disc = await fetch_kap_disclosure(kap_url)
+                    if _disc and _disc.get("full_text"):
+                        _conv_body = _disc["full_text"]
+                except Exception:
+                    pass
+        if _is_conv_app(title, _conv_body):
+            await _proc_conv_app(
+                session, ticker=ticker, company_name=company_name,
+                title=title, body=_conv_body, kap_url=kap_url, published_at=published_at,
+            )
+    except Exception as e:
+        await _router_err("conversion_application", e, ticker)
+
     # ÖNCE block_trade kontrol — toptan/borsa dışı pay devri bildirimleri
     # bazen başlıkta sadece "Pay Alım Satım Bildirimi" der ama body'de
     # "toptan alış satış" geçer. Bu durumda share_transaction'a değil

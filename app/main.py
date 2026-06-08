@@ -11199,21 +11199,34 @@ async def list_share_type_conversions(
     days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=200),
     quality_only: bool = Query(True, description="True ise eksik kayitlar gizlenir"),
+    record_type: str = Query("gerceklesen", description="gerceklesen | basvuru"),
     db: AsyncSession = Depends(get_db),
 ):
     """Borsada İşlem Gören Tipe Dönüşüm — public list.
 
-    quality_only=True (default): investor_name'i NULL/bos/'?' olan veya
-    converted_lot null olan kayıtları gizler. Mobilde "—" görünmesin.
+    record_type:
+      'gerceklesen' (default) → borsada işlem görür hale gelmiş (kişi + lot)
+      'basvuru'               → SPK'ya pay satış bilgi formu başvurusu (oran/nominal, gelecek arz)
+
+    quality_only (sadece 'gerceklesen' için): investor_name'i NULL/bos/'?' olan veya
+    converted_lot null olan kayıtları gizler. Başvurularda lot olmadığı için uygulanmaz.
     """
     from app.models.share_type_conversion import ShareTypeConversion
     from datetime import timedelta as _td
     from sqlalchemy import and_ as _and_
-    cutoff = date.today() - _td(days=days)
-    query = select(ShareTypeConversion).where(ShareTypeConversion.transaction_date >= cutoff)
+    rt = (record_type or "gerceklesen").lower()
+    if rt not in ("gerceklesen", "basvuru"):
+        rt = "gerceklesen"
+    # Başvurular daha uzun görünür (60 gün), gerçekleşenler verilen days
+    eff_days = max(days, 60) if rt == "basvuru" else days
+    cutoff = date.today() - _td(days=eff_days)
+    query = select(ShareTypeConversion).where(
+        ShareTypeConversion.transaction_date >= cutoff,
+        ShareTypeConversion.record_type == rt,
+    )
     if ticker:
         query = query.where(ShareTypeConversion.ticker == ticker.upper())
-    if quality_only:
+    if quality_only and rt == "gerceklesen":
         query = query.where(
             _and_(
                 ShareTypeConversion.investor_name.isnot(None),
@@ -11229,6 +11242,10 @@ async def list_share_type_conversions(
         "transaction_date": r.transaction_date.isoformat() if r.transaction_date else None,
         "investor_name": r.investor_name, "converted_lot": r.converted_lot,
         "kap_url": r.kap_url, "source": r.source,
+        "record_type": r.record_type,
+        "ratio_pct": r.ratio_pct,
+        "nominal_tl": float(r.nominal_tl) if r.nominal_tl is not None else None,
+        "ai_summary": r.ai_summary,
     } for r in rows]
 
 
