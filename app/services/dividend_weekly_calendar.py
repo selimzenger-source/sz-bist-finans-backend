@@ -650,21 +650,24 @@ async def run_weekly_dividend_calendar(*, force: bool = False, dry_run: bool = F
     p_start, p_end = this_week_range()  # az önce biten hafta (ödeyenler)
 
     # 1) Veriyi tazele (en güncel temettühisseleri verisi) + SAĞLIK KONTROLÜ
-    # Scrape başarısız/bozuksa SESSİZCE eksik takvim atmak yerine ADMIN'E TELEGRAM
-    # uyarısı gönderilir. HARD FAIL (exception / error / processed=0) → tweet İPTAL.
+    # ÖNEMLİ: Render datacenter IP'si temettühisseleri.com tarafından zaman zaman
+    # ENGELLENİYOR (tüm hisseler fetch hatası → processed=0). Bu durumda SİTE/VERİ
+    # bozuk DEĞİL — DB'de zaten geçerli veri var. O yüzden scrape başarısızsa tweet'i
+    # İPTAL ETMEK YERİNE mevcut DB verisiyle DEVAM ET, sadece admin'e SOFT uyarı düş.
+    # (Tamamen boş/yetersiz veriyi aşağıdaki MIN_STOCKS eşiği zaten yakalar.)
+    data_stale = False
     if not dry_run and not skip_refresh:
         scrape_ok, scrape_reason, stats = await _refresh_with_healthcheck()
         if not scrape_ok:
-            await _alert_scrape_problem(scrape_reason, stats, hard=True)
-            return {
-                "sent": False, "reason": f"scrape_failed:{scrape_reason}",
-                "stats": stats, "label": label,
-            }
+            data_stale = True
+            await _alert_scrape_problem(scrape_reason, stats, hard=False)
+            logger.warning("Temettü scrape başarısız (%s) — mevcut DB verisiyle devam",
+                           scrape_reason)
 
     # 2) Hafta verisini derle
     week = await get_week_dividends(start, end)
     total = count_week_stocks(week)
-    logger.info("Haftalık temettü takvimi (%s): %d hisse", label, total)
+    logger.info("Haftalık temettü takvimi (%s): %d hisse (stale=%s)", label, total, data_stale)
 
     if total < MIN_STOCKS_FOR_TWEET and not force:
         return {
@@ -753,4 +756,4 @@ async def run_weekly_dividend_calendar(*, force: bool = False, dry_run: bool = F
         ok = False
 
     return {"sent": bool(ok), "total": total, "label": label,
-            "image_paths": image_paths, "text": text}
+            "image_paths": image_paths, "text": text, "data_stale": data_stale}
