@@ -778,6 +778,53 @@ def _safe_reply_tweet(reply_text: str, in_reply_to_tweet_id: str) -> bool:
         return False
 
 
+# ════════════════════════════════════════════════════════════════════════════
+#  TWEET SANITIZER — X/Twitter algoritma cezalarını önle (HER tweette uygulanır)
+#  1) Peş peşe MAX 3 hashtag/cashtag (4+ ardışık → ilk 3'e indir)
+#  2) Yasaklı/kısıtlayıcı ifadeleri çıkar (takip et, RT yap, yatırım tavsiyesi…)
+# ════════════════════════════════════════════════════════════════════════════
+import re as _re_sani
+
+_BANNED_TWEET_PHRASES = [
+    "yatırım tavsiyesi değildir", "yatirim tavsiyesi degildir",
+    "yatırım tavsiyesi", "yatirim tavsiyesi",
+    "takip edin", "takip et", "takipte kal",
+    "rt yapın", "rt yap", "rt'le", "retweet yap", "retweetle",
+    "telegram'a gel", "telegrama gel", "telegram grubu", "telegram kanal",
+    "kanala katıl", "kanala katil", "gruba katıl", "gruba katil",
+    "abone ol", "abone olun", "dm atın", "dm at",
+]
+
+# hashtag/cashtag token (Türkçe karakter dahil)
+_TAG_RE = r"[#$][0-9A-Za-zçğıöşüÇĞİÖŞÜ_]+"
+
+
+def _sanitize_tweet(text: str) -> str:
+    """Gönderim öncesi her tweet metnini X algoritma kurallarına uygun hale getirir."""
+    if not text:
+        return text
+    t = text
+
+    # 1) Ardışık 4+ hashtag/cashtag run'ını ilk 3'e indir (boşluk/satır ayrımı)
+    def _trim_run(m: "_re_sani.Match") -> str:
+        tags = m.group(0).split()
+        return " ".join(tags[:3])
+    t = _re_sani.sub(rf"(?:{_TAG_RE})(?:\s+(?:{_TAG_RE})){{3,}}", _trim_run, t)
+
+    # 2) Yasaklı ifade geçen CÜMLEYİ tamamen çıkar (artık "Bu bir ." kalmasın)
+    for ph in _BANNED_TWEET_PHRASES:
+        t = _re_sani.sub(
+            rf"[^.!?\n]*{_re_sani.escape(ph)}[^.!?\n]*[.!?]?",
+            "", t, flags=_re_sani.IGNORECASE,
+        )
+
+    # Fazla boşluk/satır temizliği
+    t = _re_sani.sub(r"[ \t]{2,}", " ", t)
+    t = _re_sani.sub(r" +\n", "\n", t)
+    t = _re_sani.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False, skip_mark_sent: bool = False) -> bool:
     """Tweet atar — ASLA hata firlatmaz, sadece log'a yazar.
     Basarisiz olursa Telegram'a bildirim gonderir.
@@ -795,6 +842,7 @@ def _safe_tweet(text: str, source: str = "unknown", force_send: bool = False, sk
     try:
         # Satır sonlarını normalize et (textarea \r\n -> \n; Twitter 400 önlenir)
         text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        text = _sanitize_tweet(text)  # peş peşe max 3 hashtag + yasaklı ifade temizliği
         # KILL SWITCH — admin panelden tüm tweetler durduruldu
         if not force_send and is_tweets_killed():
             logger.warning("[TWEET KILL SWITCH] Tweet durduruldu: %s", text[:60])
@@ -884,6 +932,7 @@ def _post_tweet_get_id(text: str, reply_to: str | None = None) -> str | None:
         Tweet ID string veya None (hata durumunda)
     """
     try:
+        text = _sanitize_tweet((text or "").replace("\r\n", "\n").replace("\r", "\n"))
         creds = _load_credentials()
         if not creds:
             logger.info("[TWITTER-DRY-RUN-THREAD] %s...", text[:60])
@@ -2517,6 +2566,7 @@ def _safe_tweet_with_media(text: str, image_path: str, source: str = "unknown", 
     2. Twitter v2 tweets ile tweet at (media_ids ekleyerek)
     """
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _sanitize_tweet(text)  # peş peşe max 3 hashtag + yasaklı ifade temizliği
     try:
         # KILL SWITCH — admin panelden tüm tweetler durduruldu
         if not force_send and is_tweets_killed():
@@ -2709,6 +2759,7 @@ def _safe_tweet_with_multi_media(text: str, image_paths: list[str], source: str 
     _fail = "" if return_id else False
     # Satır sonlarını normalize et — textarea \r\n gönderir, Twitter API 400 verebilir
     text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = _sanitize_tweet(text)  # peş peşe max 3 hashtag + yasaklı ifade temizliği
     # Görselsiz + reply/return_id YOKSA basit metin tweet'ine düş.
     # reply (thread devamı) veya return_id isteniyorsa metin-tek yolu burada işlenir.
     if not image_paths and not in_reply_to and not return_id:

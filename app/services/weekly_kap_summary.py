@@ -880,7 +880,7 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     ]
     lines += tk_lines
     lines.append("")
-    lines.append("#KAP #BIST100 #borsa #hisse #yatırım")
+    lines.append("#KAP #BIST100 #borsa")
     return "\n".join(lines)
 
 

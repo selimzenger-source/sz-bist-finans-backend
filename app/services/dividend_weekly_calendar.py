@@ -510,7 +510,7 @@ def build_tweet_text(week: list[dict], label: str, total: int) -> str:
         "",
         "Brüt/net pay, ödeme tarihi, verim ve yıllık temettü grafikleri görsellerde 👇",
         "",
-        f"#temettü #BIST100 #borsa #hisse #yatırım {ticker_tags}".strip(),
+        f"#temettü #BIST100 #borsa {ticker_tags}".strip(),
     ]
     return "\n".join(lines)
 
@@ -552,7 +552,7 @@ def build_tweet_text_cards(paid_cards: list[dict], upcoming_cards: list[dict],
         lines.append("")
     lines.append("📊 Tarih, verim ve yıllık temettü grafikleri görsellerde 👇")
     lines.append("")
-    lines.append("#temettü #BIST100 #borsa #hisse #yatırım")
+    lines.append("#temettü #BIST100 #borsa")
     return "\n".join(lines)
 
 
