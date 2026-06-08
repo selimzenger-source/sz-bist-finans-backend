@@ -1270,6 +1270,20 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
       - "Sermaye artirimi tescil edildi"            → NOTR 5.0
       - "Düzeltme / Güncelleme bildirimi"           → NOTR 5.0
 
+  TIPE DONUSUM / BORSADA SATISA KONU ETME (ARZ BASKISI → NEGATIF, ORANA GORE):
+    "B/A grubu (imtiyazli/borsada islem GORMEYEN) paylarin BORSADA ISLEM GOREN
+    nitelige donusturulmesi" VEYA "borsada satisa konu edilmesi" / "pay satis bilgi
+    formu onaylanmasi" → bu paylar ARTIK PIYASADA SATILABILIR hale gelir = EK ARZ
+    BASKISI, retail icin NEGATIF (mevcut ortak satis hazirligi sinyali).
+    Cikarilmis sermayeye oran (%) baz alinir (lot/nominal ve % EKTE verilir, OKU):
+      ≥ %5   → 3.5-4.0 (ciddi arz baskisi)
+      %1-5   → 4.0-4.5 (orta)
+      < %1   → 4.5-5.0 (kucuk/sinirli)
+    KRITIK: "Ek'te aciklama var, somut bilgi yok, rutin → 5.0" DEME. EK'teki orani/lot'u
+    oku ve ona gore puanla. Bu temettu/bedelsiz gibi POZITIF DEGILDIR.
+    Ornek: "%5'e tekabul eden 10M TL nominal B Grubu payin borsada islem goren nitelige
+    donusturulmesi/satisa konu edilmesi" → 3.5-4.0 (ciddi arz, negatif).
+
   PAY GERI ALIMI:
     Program duyurusu / ilk buyuk alim             → POZITIF (gerçek değer)
     Sonra gelen kucuk gunluk alimlar              → NOTR 5.0-5.4 (ZATEN BILINIYOR)
@@ -2044,15 +2058,34 @@ async def score_news(
     _clow = content.lower()
     _is_pay_alim_satim = ("pay al" in _clow and "sat" in _clow) or "pay alım satım" in _clow or "pay alim satim" in _clow
     _has_detail = any(s in _clow for s in ("nominal", " lot", "adet", "fiyat aral", "oy hakk", "pay oran"))
-    if kap_url and _is_pay_alim_satim and not _has_detail:
+    # GENERIC KAPAK / TİPE DÖNÜŞÜM: "Özel Durum Açıklaması (Genel)" tipi bildirimlerde
+    # gerçek içerik EKTE olur; kapak sadece "ekte/ilişikte gönderilen bir açıklama" der.
+    # AI bunu görüp "rutin, etki yok → 5.0 Nötr" diyordu (EGEGY tipe dönüşüm vakası:
+    # %5 / 10M TL nominal payın borsada satışa konu edilmesi = arz baskısı, EKTE).
+    # Böyle generic kapakta EK'i çek → AI gerçek içeriği (tipe dönüşüm, oran, lot) yorumlar.
+    _is_generic_cover = (
+        len(_clow) < 600
+        and any(s in _clow for s in (
+            "ekte yer ald", "ilişikte", "ilisikte", "ekte sunul", "ek'te",
+            "gönderilen bir açıklama", "gonderilen bir aciklama", "açıklamanın ekte",
+            "aciklamanin ekte", "ekteki açıklama", "ekteki aciklama",
+        ))
+    )
+    _is_tipe = any(s in _clow for s in (
+        "niteliğe dönüş", "niteli̇ğe dönüş", "nitelige donus", "tipe dönüş", "tipe donus",
+        "borsada satışa konu", "borsada satisa konu", "pay satış bilgi form",
+        "pay satis bilgi form", "borsada işlem gören nitel", "borsada islem goren nitel",
+    ))
+    if kap_url and ((_is_pay_alim_satim and not _has_detail) or _is_generic_cover or (_is_tipe and not _has_detail)):
         try:
             from app.services.share_transaction_kap_processor import _fetch_attachment_text
             _ek = await _fetch_attachment_text(kap_url)
             if _ek and len(_ek.strip()) > 80:
-                content = (content + "\n\n[EK BELGE — İŞLEM DETAYI (alım/satım, taraf, lot, fiyat, oran)]:\n" + _ek)[:6500]
-                logger.info("Pay Alım Satım: ek PDF AI'a beslendi (%s): %d kar", ticker, len(_ek))
+                content = (content + "\n\n[EK BELGE — BİLDİRİM DETAYI (tipe dönüşüm/satış, taraf, lot, nominal, oran)]:\n" + _ek)[:6500]
+                logger.info("EK PDF AI'a beslendi (%s): %d kar (generic=%s tipe=%s pas=%s)",
+                            ticker, len(_ek), _is_generic_cover, _is_tipe, _is_pay_alim_satim)
         except Exception as _ee:
-            logger.debug("Pay Alım Satım ek PDF besleme hata (%s): %s", ticker, _ee)
+            logger.debug("EK PDF besleme hata (%s): %s", ticker, _ee)
 
     # ─── PRE-FILTER: Rutin/idari bildirimleri AI'ya gonderme ───
     # Sabit Notr 5.0 + standart aciklama don. AI kredisi tasarrufu icin kritik.
