@@ -1600,16 +1600,30 @@ def generate_kap_news_image(
 
         body_maxw = W - 2 * PAD
         summary = (ai_summary or "").strip()
-        if len(summary) > 900:
-            summary = summary[:900].rsplit(" ", 1)[0] + "…"
-        # ÇOK PARAGRAF: \n\n ile ayrılan paragrafları koru (aralarına boş satır)
+        if len(summary) > 950:
+            summary = summary[:950].rsplit(" ", 1)[0] + "…"
+        # PARAGRAFLAMA: önce mevcut \n paragrafları al; metin TEK BLOK ise cümlelere
+        # böl ve HER 2 CÜMLEDE bir paragraf yap (aralarına boş satır) → okunaklı.
+        import re as _re_par
+        _paras = [p.strip() for p in summary.split("\n") if p.strip()]
+        if len(_paras) <= 1 and summary:
+            _sents = [s.strip() for s in
+                      _re_par.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9])', summary) if s.strip()]
+            # sayı içindeki nokta (97.042.071,00) yanlış bölmesin — kısa parçaları birleştir
+            _merged = []
+            for _s in _sents:
+                if _merged and _re_par.search(r'\d[.,]$', _merged[-1]):
+                    _merged[-1] = _merged[-1] + " " + _s
+                else:
+                    _merged.append(_s)
+            _paras = [" ".join(_merged[i:i + 2]) for i in range(0, len(_merged), 2)] or [summary]
         body_lines: list = []
-        for _para in [p.strip() for p in summary.split("\n") if p.strip()]:
+        for _para in _paras:
             body_lines.extend(_wrap(_para, f_body, body_maxw))
-            body_lines.append("")   # paragraf arası boşluk
+            body_lines.append("")   # paragraf arası boş satır
         if body_lines and body_lines[-1] == "":
             body_lines.pop()
-        body_lines = body_lines[:14]
+        body_lines = body_lines[:18]
         line_h = 42
 
         # Tier etiketi
@@ -1657,12 +1671,20 @@ def generate_kap_news_image(
             head_h = 150
 
         yy = content_top
-        # Ticker + saat
+        # Ticker + TARİH/SAAT CHIP (belirgin) — sağ üstte rozet
         d.text((PAD, yy), f"#{(ticker or '').upper()}", font=f_tk, fill=accent)
-        _now = _dt.now(_tz).strftime("%d.%m.%Y %H:%M") if _tz else ""
+        _now = _dt.now(_tz).strftime("%d.%m.%Y  %H:%M") if _tz else ""
         if _now:
-            tw = d.textlength(_now, font=f_time)
-            d.text((W - PAD - tw, yy + 22), _now, font=f_time, fill=GRAY)
+            f_date = _load_font(26, bold=True)
+            tw = d.textlength(_now, font=f_date)
+            ch_pad_x, ch_h = 18, 44
+            ch_w = tw + 2 * ch_pad_x
+            ch_x = W - PAD - ch_w
+            ch_y = yy + 4
+            # accent tonlu zemin + kenar
+            d.rounded_rectangle([(ch_x, ch_y), (ch_x + ch_w, ch_y + ch_h)], radius=12,
+                                fill=(28, 30, 46), outline=accent, width=2)
+            d.text((ch_x + ch_pad_x, ch_y + 9), _now, font=f_date, fill=WHITE)
         yy += 62
         if company_name:
             d.text((PAD, yy), company_name[:60], font=f_comp, fill=GRAY)
