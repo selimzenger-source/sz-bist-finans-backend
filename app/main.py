@@ -11303,7 +11303,11 @@ async def list_cautious_stocks(
     out = []
     for r in rows:
         st = cautious_status(r.end_date, r.is_active)
+        # Aktif sekmesi → sadece status=active; Bitenler sekmesi → sadece status=ended.
+        # (Eski app build'inde de net ayrım olsun, aynı hisse iki sekmede görünmesin.)
         if active_only and st["status"] != "active":
+            continue
+        if not active_only and st["status"] != "ended":
             continue
         out.append({
             "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
