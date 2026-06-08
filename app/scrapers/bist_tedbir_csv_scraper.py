@@ -185,29 +185,31 @@ async def sync_bist_tedbir() -> dict:
         return {"fetched": 0, "inserted": 0, "updated": 0, "deactivated": 0, "errors": 0,
                 "note": "CSV bos veya fetch basarisiz"}
 
-    csv_tickers = {row["ticker"] for row in csv_data}
+    # CSV'deki aktif tedbirlerin (ticker,start,end) anahtar kümesi
+    csv_keys = {(row["ticker"], row["start_date"], row["end_date"]) for row in csv_data}
     inserted = 0
     updated = 0
     errors = 0
 
     async with async_session() as db:
-        # Mevcut aktif kayitlari cek
-        existing_q = await db.execute(
-            select(CautiousStock).where(CautiousStock.is_active == True)
-        )
+        # TÜM kayitlari cek (aktif + inaktif) — DUPLICATE ÖNLEME: aktif/inaktif fark
+        # etmeden (ticker,start,end) ile eslestir. Eski kod sadece AKTIF + ticker
+        # bazinda esliyordu; tedbir bitip tekrar gelince yeni satir aciyordu (dup).
+        existing_q = await db.execute(select(CautiousStock))
         existing_rows = existing_q.scalars().all()
-        existing_by_ticker = {r.ticker: r for r in existing_rows}
+        existing_by_key = {
+            (r.ticker, r.start_date, r.end_date): r for r in existing_rows
+        }
 
-        # Insert/update
+        # Insert/update — anahtar: (ticker, start_date, end_date)
         for row in csv_data:
             ticker = row["ticker"]
+            key = (ticker, row["start_date"], row["end_date"])
             try:
-                if ticker in existing_by_ticker:
-                    rec = existing_by_ticker[ticker]
+                rec = existing_by_key.get(key)
+                if rec is not None:
                     rec.company_name = row["company_name"]
                     rec.tags = row["tags"]
-                    rec.start_date = row["start_date"]
-                    rec.end_date = row["end_date"]
                     rec.is_active = True
                     rec.source = "bist_csv"
                     updated += 1
@@ -222,17 +224,16 @@ async def sync_bist_tedbir() -> dict:
                         source="bist_csv",
                     )
                     db.add(new_rec)
+                    existing_by_key[key] = new_rec  # ayni sync icinde tekrar gelirse dup yok
                     inserted += 1
             except Exception as e:
                 errors += 1
                 logger.warning("BIST tedbir upsert hatasi (%s): %s", ticker, e)
 
-        # CSV'de olmayan aktif kayitlari is_active=False yap
+        # CSV'de OLMAYAN aktif kayitlari is_active=False yap (tedbiri bitenler → "Bitenler")
         deactivated = 0
-        for ticker, rec in existing_by_ticker.items():
-            if ticker not in csv_tickers:
-                # Sadece bist_csv kaynakli ya da end_date gecmis olanlari deactivate
-                # (manuel/halkarz import edilmis eski kayitlari korumamak icin)
+        for key, rec in existing_by_key.items():
+            if rec.is_active and key not in csv_keys:
                 if rec.source in ("bist_csv", "halkarz", "manual_import"):
                     rec.is_active = False
                     deactivated += 1

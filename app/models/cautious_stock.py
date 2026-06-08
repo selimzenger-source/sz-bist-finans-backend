@@ -24,6 +24,12 @@ from app.database import Base
 class CautiousStock(Base):
     __tablename__ = "cautious_stocks"
 
+    # DUPLICATE ÖNLEME: ayni hisse + ayni tedbir donemi (start,end) tek satir olmali.
+    # (NULL'lar Postgres'te distinct sayilir; bist_csv kayitlarinda tarihler dolu.)
+    __table_args__ = (
+        Index("ux_cautious_ticker_period", "ticker", "start_date", "end_date", unique=True),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     ticker: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
     company_name: Mapped[str | None] = mapped_column(String(255))
