@@ -854,17 +854,19 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         # (ornek format: "🛢️ İSRAİL SALDIRILARI SONRASI PETROL FİYATLARI YÜKSELDİ!")
         title_emoji = prefix.split(" ", 1)[0]
 
-        # Tweet metni — sade format: başlık + emoji bloklar (🔴/🔶/🏷️ AI özetinde) + hashtag
-        hashtags = _CATEGORY_HASHTAGS.get(category, "#Borsa #BIST100")
-        ticker_str = " ".join(ticker_tags[:6])
+        # Tweet metni — sade format: başlık + emoji bloklar + EN FAZLA 2 hashtag.
+        # X KURALI: 3+ hashtag = spam. İlgili tek hisse kodu (#TICKER) + 1 genel yeter.
+        _primary_cat = (_CATEGORY_HASHTAGS.get(category, "#Borsa") or "#Borsa").split()[0]
+        if ticker_tags:
+            bottom_tags = f"{ticker_tags[0]} {_primary_cat}"   # #TUPRS #Borsa
+        else:
+            bottom_tags = _primary_cat                           # sadece #Borsa
 
         tweet_text = (
             f"{title_emoji} {baslik}\n\n"
             f"{ozet}\n\n"
-            f"{hashtags}"
+            f"{bottom_tags}"
         )
-        if ticker_str:
-            tweet_text += f" {ticker_str}"
 
         # Kapak resmi
         cover_path = await generate_news_cover(

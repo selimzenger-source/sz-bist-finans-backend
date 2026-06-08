@@ -532,12 +532,15 @@ def build_tweet_text_cards(paid_cards: list[dict], upcoming_cards: list[dict],
     """
     sym = _currency_token()
 
+    # X KURALI: Çok sayıda #KOD = onlarca hashtag → spam, erişim ölür. Hisse kodu
+    # DÜZ yazılır (# YOK); X anlamsal araması "AYES"i # olmadan da bulur. Sadece
+    # sonda 1-2 genel hashtag kalır.
     def _line(c: dict) -> str:
         g = _fmt_money(c["gross"])  # "0,30 ₺"
         n = _net_num(c)
         if n is not None:
-            return f"#{c['ticker']} · Brüt {g} · Net {n} {sym}"
-        return f"#{c['ticker']} · Brüt {g}"
+            return f"{c['ticker']} · Brüt {g} · Net {n} {sym}"
+        return f"{c['ticker']} · Brüt {g}"
 
     lines: list[str] = ["📅 Haftalık Temettü Takvimi", ""]
     if paid_cards:
@@ -552,7 +555,7 @@ def build_tweet_text_cards(paid_cards: list[dict], upcoming_cards: list[dict],
         lines.append("")
     lines.append("📊 Tarih, verim ve yıllık temettü grafikleri görsellerde 👇")
     lines.append("")
-    lines.append("#temettü #BIST100 #borsa")
+    lines.append("#temettü #borsa")
     return "\n".join(lines)
 
 

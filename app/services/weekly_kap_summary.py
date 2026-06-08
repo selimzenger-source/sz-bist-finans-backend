@@ -864,7 +864,8 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
             seg.append(f"{n} olumsuz")
         if s:
             seg.append(f"{s} SPK")
-        tk_lines.append(f"#{tk} → {' · '.join(seg)}")
+        # X KURALI: çok sayıda #KOD = spam. Hisse kodu DÜZ (# yok) — arama yine bulur.
+        tk_lines.append(f"{tk} → {' · '.join(seg)}")
 
     lines = [
         f"📰 {label} arası en önemli gelişmeler",
@@ -880,7 +881,7 @@ def build_tweet_text(positive: list, negative: list, spk: list, label: str) -> s
     ]
     lines += tk_lines
     lines.append("")
-    lines.append("#KAP #BIST100 #borsa")
+    lines.append("#KAP #borsa")
     return "\n".join(lines)
 
 

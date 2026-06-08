@@ -195,7 +195,7 @@ def build_tweet_text(data: dict) -> str:
         lines.append("")
     lines.append("Detaylar (oran + YKK tarihi) görselde.")
     lines.append("")
-    lines.append("#sermayeartırımı #bedelli #BIST100")
+    lines.append("#sermayeartırımı #borsa")
     return "\n".join(lines)
 
 

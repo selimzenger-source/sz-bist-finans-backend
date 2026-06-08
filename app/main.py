@@ -6824,11 +6824,6 @@ async def bulk_ceiling_track(
     for idx, t in enumerate(tracks_raw):
         try:
             ticker = t["ticker"]
-            ipo = await ipo_service.get_ipo_by_ticker(ticker)
-            if not ipo:
-                errors.append({"index": idx, "ticker": ticker, "error": "IPO bulunamadi"})
-                continue
-
             trading_day = int(t["trading_day"])
             trade_date = t["trade_date"]
             if isinstance(trade_date, str):
@@ -6847,30 +6842,32 @@ async def bulk_ceiling_track(
             gunluk_adet = int(t["gunluk_adet"]) if t.get("gunluk_adet") else None
             senet_sayisi_val = int(t["senet_sayisi"]) if t.get("senet_sayisi") else None
 
-            track = await ipo_service.update_ceiling_track(
-                ipo_id=ipo.id,
-                trading_day=trading_day,
-                trade_date=trade_date,
-                open_price=open_price,
-                close_price=close_price,
-                high_price=high_price,
-                low_price=low_price,
-                hit_ceiling=hit_ceiling,
-                hit_floor=hit_floor,
-                alis_lot=alis_lot,
-                satis_lot=satis_lot,
-                pct_change=pct_change,
-                gunluk_adet=gunluk_adet,
-                senet_sayisi=senet_sayisi_val,
-            )
-
-            # trading_day_count GUNCELLENMEZ — sadece daily_ceiling_update scheduler yapar.
-            # Boylece live_sync gun ici calisirken trading_day_count artmaz ve
-            # kapanis modu yanlis gun olusturmaz.
-
-            # ceiling_tracking_active
-            if not ipo.ceiling_tracking_active:
-                ipo.ceiling_tracking_active = True
+            # KRİTİK: her kayıt AYRI SAVEPOINT (begin_nested). Biri DB hatası verirse
+            # sadece o savepoint geri alınır, session BOZULMAZ → sonraki kayıtlar
+            # PendingRollbackError almadan devam eder.
+            async with db.begin_nested():
+                ipo = await ipo_service.get_ipo_by_ticker(ticker)
+                if not ipo:
+                    raise ValueError("IPO bulunamadi")
+                track = await ipo_service.update_ceiling_track(
+                    ipo_id=ipo.id,
+                    trading_day=trading_day,
+                    trade_date=trade_date,
+                    open_price=open_price,
+                    close_price=close_price,
+                    high_price=high_price,
+                    low_price=low_price,
+                    hit_ceiling=hit_ceiling,
+                    hit_floor=hit_floor,
+                    alis_lot=alis_lot,
+                    satis_lot=satis_lot,
+                    pct_change=pct_change,
+                    gunluk_adet=gunluk_adet,
+                    senet_sayisi=senet_sayisi_val,
+                )
+                # ceiling_tracking_active (trading_day_count'a dokunma — scheduler yapar)
+                if not ipo.ceiling_tracking_active:
+                    ipo.ceiling_tracking_active = True
 
             results.append({
                 "ticker": ticker,
@@ -6882,7 +6879,12 @@ async def bulk_ceiling_track(
         except Exception as e:
             errors.append({"index": idx, "ticker": t.get("ticker", "?"), "error": str(e)})
 
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as _ce:
+        await db.rollback()
+        logger.error("bulk_ceiling_track commit hatasi: %s", _ce)
+        raise HTTPException(status_code=500, detail=f"Commit hatasi: {_ce}")
 
     # ── E.D.O Threshold Check — CANLI seans icinde (her sync'te) ──
     # Kapanış job'undan buraya taşındı. Her 15sn'de güncellenen EDO degerini

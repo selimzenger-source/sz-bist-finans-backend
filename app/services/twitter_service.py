@@ -819,11 +819,12 @@ def _sanitize_tweet(text: str) -> str:
         return tag
     t = _re_sani.sub(_TAG_RE, _dedup, t)
 
-    # 1) Ardışık 4+ hashtag/cashtag run'ını ilk 3'e indir (boşluk/satır ayrımı)
+    # 1) Ardışık 3+ hashtag/cashtag run'ını ilk 2'ye indir (X kuralı: profesyonel
+    # hesaplar 1-2 hashtag kullanır; 3+ ardışık = spam sinyali, erişim ölür).
     def _trim_run(m: "_re_sani.Match") -> str:
         tags = m.group(0).split()
-        return " ".join(tags[:3])
-    t = _re_sani.sub(rf"(?:{_TAG_RE})(?:\s+(?:{_TAG_RE})){{3,}}", _trim_run, t)
+        return " ".join(tags[:2])
+    t = _re_sani.sub(rf"(?:{_TAG_RE})(?:\s+(?:{_TAG_RE})){{2,}}", _trim_run, t)
 
     # 2) Yasaklı ifade geçen CÜMLEYİ tamamen çıkar (artık "Bu bir ." kalmasın)
     for ph in _BANNED_TWEET_PHRASES:
