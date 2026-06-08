@@ -1256,13 +1256,19 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
       - "Sermaye artirimi Ticaret Sicili tescili"   → NOTR 5.0
     KURAL: yalnızca oranı duyuran ESAS haber pozitif; aynı kararın sonraki adımları nötr.
 
-  BEDELLI SERMAYE ARTIRIMI:
-    Ilk YK karari "%X bedelli onayland"           → NEGATIF (gerçek seyreltme sinyali)
-    Sonra gelen:
+  BEDELLI SERMAYE ARTIRIMI (ilk/ESAS YK karari) — ORAN BAZINDA:
+    Bedelli ORANI = sermaye artis orani (ulasilacak/mevcut - 1) VEYA ruchan hakki
+    kullanim orani %. Orani metinden oku ("%X bedelli", "rüçhan kullanım oranı %X",
+    mevcut→ulaşılacak sermaye).
+      ORAN > %110  → NEGATIF (3.3-4.0) — büyük seyreltme + ciddi nakit çağrısı, retail icin agir
+      ORAN ≤ %110  → 4.5 (hafif olumsuz / nötre yakın) — çok büyük degil, sinirli seyreltme
+    Not: Bedelli SADECE oran cok buyukse (>%110) "olumsuz"; kucuk/orta bedelli ~4.5 notr-civari.
+    Takip adimlari (HEPSI → NOTR 5.0):
       - "SPK ihraç belgesi onayi"                   → NOTR 5.0
-      - "Ruçhan hakki kullanim suresi baslangici"   → NOTR 5.0
+      - "Ruçhan/Yeni pay alma hakki kullanim tarih/suresi" → NOTR 5.0
       - "Bedelli sermaye artirimi nakit girisi"     → NOTR 5.0
       - "Sermaye artirimi tescil edildi"            → NOTR 5.0
+      - "Düzeltme / Güncelleme bildirimi"           → NOTR 5.0
 
   PAY GERI ALIMI:
     Program duyurusu / ilk buyuk alim             → POZITIF (gerçek değer)
@@ -1930,10 +1936,15 @@ Body: "YK 2025 yili icin 0.50 TL brut temettu dagitimini onayladi"
 Context: "TEMETTU GECMISI: 2024: 2.50 TL, 2023: 2.30 TL — TREND: -%80 dusus"
 → {{"score": 3.2, "category": "finansal", "summary": "2025 temettu sadece 0.50 TL — gecen yil 2.50 TL idi (-%80 dramatik dusus). Sirket kar dagitma kapasitesinde ciddi azalma sinyali; kasanin daralma veya stratejik nakit korumayi tercih sinyali.", "hashtags": ["temettu"]}}
 
-Ex.20 (BEDELLI %200 — DEVASA NEGATIF):
+Ex.20 (BEDELLI %200 — BUYUK, >%110 OLUMSUZ):
 Title: "Bedelli Sermaye Artirimi Karari"
 Body: "YK %200 oraninda bedelli sermaye artirimi onayladi"
-→ {{"score": 2.2, "category": "finansal", "summary": "%200 bedelli sermaye artirimi — yatirimci icin devasa seyreltme + ek nakit yatirim yukumlulugu. Sirket kasasi 3 katina cikar AMA hisse fiyati ruçhan price indirimi ve dilution nedeniyle kuvvetli negatif reaksiyon verir.", "hashtags": ["bedelli"]}}
+→ {{"score": 3.3, "category": "finansal", "summary": "%200 bedelli sermaye artirimi (>%110) — buyuk seyreltme + ek nakit yatirim yukumlulugu, retail icin agir. Sirket kasasina nakit girer AMA ruçhan price indirimi ve dilution nedeniyle negatif reaksiyon beklenir.", "hashtags": ["bedelli"]}}
+
+Ex.20b (BEDELLI %100 — ≤%110, NOTRE YAKIN):
+Title: "Bedelli Sermaye Artirimi Karari"
+Body: "YK %100 oraninda bedelli sermaye artirimi onayladi"
+→ {{"score": 4.5, "category": "finansal", "summary": "%100 bedelli sermaye artirimi (≤%110) — sinirli seyreltme, cok buyuk degil. Ruçhan hakki ile mevcut ortaklara nakit cagrisi; etki olcekli degil, notre yakin hafif olumsuz.", "hashtags": ["bedelli"]}}
 
 Ex.21 (BEDELLI TAKIP):
 Title: "Sermaye Artirimi Tescil Edildi"
@@ -2536,15 +2547,9 @@ _STRONG_POSITIVE_PATTERNS = [
     (r"(?:%\s*5\s*esi[gğ]i?\s*a[sş]t|esik\s*a[sş][ıi]ld[ıi]|payi.*%\s*(?:[2-9]\d|\d{3,}).*y[üu]kseld)", 7.0),
 ]
 
-# Bedelli sermaye artirimi — negatif TAVAN sinirlamasi
-# (score asla bu degeri asmamali — bedelli her zaman negatif)
-_BEDELLI_NEGATIVE_CAPS = [
-    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[2-9]\d{2}|\d{4,})", 2.5),  # %200+ baya negatif
-    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d{2})", 3.0),  # %100-199
-    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[5-9]\d)", 3.5),  # %50-99 hafif negatif
-    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:[2-4]\d)", 4.0),  # %20-49
-    (r"bedelli\s*(?:sermaye\s*art[ıi]r[ıi]m[ıi])?\s*%\s*(?:1\d)", 4.3),  # %10-19
-]
+# NOT: Bedelli ORAN bazli tavan, _validate_score_against_content icinde dinamik
+# olarak uygulanir (oran her iki kelime sirasinda da yakalanir; eski regex listesi
+# kaldirildi cunku "%X bedelli" sirasini kaciriyordu).
 
 
 _FOLLOWUP_TOPICS = {
@@ -3482,15 +3487,36 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 )
                 return min_score
 
-    # Bedelli sermaye artirimi — skor asla tavanin uzerine cikamaz (her zaman negatif)
-    for pattern, max_score in _BEDELLI_NEGATIVE_CAPS:
-        if re.search(pattern, content_lower):
-            if score > max_score:
+    # Bedelli sermaye artirimi — ORAN bazli TAVAN (kullanici kurali):
+    #   ORAN > %110 → OLUMSUZ (cap 3.5-4.0) · ORAN ≤ %110 → ~4.5 (notre yakin)
+    # GUVENLIK: yalnizca AI bedelli'yi YANLISLIKLA pozitif verdiyse (score >= 5.5)
+    # devreye gir → takip/duzeltme bildirimlerinin Notr 5.0'i 4.5'e CEKILMESIN.
+    # Oran her iki kelime sirasinda da yakalanir ("%X ... bedelli" / "bedelli ... %X").
+    if "bedelli" in content_lower and score >= 5.5:
+        _ratios = []
+        for _m in re.finditer(r"%\s*(\d{1,4})(?:[.,]\d+)?", content_lower):
+            _s, _e = _m.span()
+            if "bedelli" in content_lower[max(0, _s - 45):_e + 45]:
+                try:
+                    _ratios.append(int(_m.group(1)))
+                except Exception:
+                    pass
+        if _ratios:
+            _r = max(_ratios)  # en buyuk bedelli orani belirleyicidir
+            if _r >= 200:
+                _cap = 3.5
+            elif _r > 110:
+                _cap = 4.0
+            elif _r >= 50:
+                _cap = 4.5
+            else:
+                _cap = 4.7
+            if score > _cap:
                 logger.info(
-                    "Skor dogrulama [BEDELLI]: %s skor %.1f → %.1f (oran patterni: %s)",
-                    ticker, score, max_score, pattern[:40],
+                    "Skor dogrulama [BEDELLI %%%d]: %s skor %.1f → %.1f",
+                    _r, ticker, score, _cap,
                 )
-                return max_score
+                return _cap
 
     return score
 
