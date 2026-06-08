@@ -907,14 +907,13 @@ KURAL:
 11. Dis site adi veya URL YAZMA — sadece borsacebimde.com kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
-HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
-- Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
-- IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
-- Yuksek etkili KAP haberlerindeki sirket kodlarini hashtag yap
-- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul
-- Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
-- MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
-- Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
+HASHTAG KURALI (X ALGORITMA — KRITIK, KESIN UY):
+- EN FAZLA 1-2 hashtag kullan. 3+ hashtag = X "spam/etkilesim avcisi" sayar,
+  tweeti kimseye gostermez (erisim olur). Hashtag YIGINI KESINLIKLE YASAK.
+- Hisse kodlarini hashtag YAPMA — cumle icinde DUZ yaz (THYAO, SASA, BESTE).
+  X'in anlamsal aramasi # olmadan da bu kodlari bulur; # gereksiz.
+- Sonda en fazla 1 genel hashtag yeter (orn #borsa). Onlarca mavi hashtag
+  "bot hesap" hissi verir, okuyucu kacar.
 
 GORSEL FORMAT KURALI (COK ONEMLI — RAPOR PNG GORSELE CEVRILIYOR):
 Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun gorunsun diye bu kurallara KESINLIKLE uy:
@@ -1019,7 +1018,7 @@ KURALLARI:
 ⚠️ Yatirim tavsiyesi degildir.
 
 
-#BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
+#borsa"""
 
 # ═══════════════════════════════════════════════════════════════════
 # Evening System Prompt Yönetimi
@@ -1084,13 +1083,13 @@ KURAL:
 11. Dis site adi veya URL YAZMA — sadece borsacebimde.com kullan
 12. Veri yoksa o konuyu ATLA — "veri yok", "degerlendirme yapilamadi" ASLA yazma
 
-HASHTAG KURALI (COK ONEMLI — ERISIMI ARTIRAN EN KRITIK KURAL):
-- Bahsettigin HER hisse kodunu hashtag yap: #THYAO #SASA #KCHOL #EREGL vb. — cumle icerisinde dogal
-- IPO hisselerini MUTLAKA hashtag yap: #BESTE #ATATR gibi (bunlar en cok ilgi cekenler!)
-- Tweet SONUNDA genel finansal hashtag yigini: #BIST100 #borsa #hisse #yatirim #BorsaIstanbul #HalkaArz #piyasa #finans
-- Her paragrafta bahsedilen hisse, konu veya sektore gore hashtag kullan
-- MINIMUM 8, IDEAL 12-15 hashtag hedefle — bunlar erisimi direk artiriyor
-- Rapora profesyonel ton koru ama hashtag'lerden KESINLIKLE cekinme
+HASHTAG KURALI (X ALGORITMA — KRITIK, KESIN UY):
+- EN FAZLA 1-2 hashtag kullan. 3+ hashtag = X "spam/etkilesim avcisi" sayar,
+  tweeti kimseye gostermez (erisim olur). Hashtag YIGINI KESINLIKLE YASAK.
+- Hisse kodlarini hashtag YAPMA — cumle icinde DUZ yaz (THYAO, SASA, BESTE).
+  X'in anlamsal aramasi # olmadan da bu kodlari bulur; # gereksiz.
+- Sonda en fazla 1 genel hashtag yeter (orn #borsa). Onlarca mavi hashtag
+  "bot hesap" hissi verir, okuyucu kacar.
 
 GORSEL FORMAT KURALI (COK ONEMLI — RAPOR PNG GORSELE CEVRILIYOR):
 Bu rapor otomatik olarak PNG gorsele donusturulecek. Gorsel tasmasin ve duzgun gorunsun diye bu kurallara KESINLIKLE uy:
@@ -1152,7 +1151,7 @@ FORMAT:
 ⚠️ Yatirim tavsiyesi degildir.
 
 
-#BIST100 #borsa #HalkaArz #hisse #yatirim #BorsaIstanbul"""
+#borsa"""
 
 
 def _format_full_context(

@@ -26,7 +26,7 @@ _GEMINI_MODEL = "gemini-2.5-flash"
 
 _THREAD_GAP_SECONDS = 40   # tweet'ler arası bekleme (kullanıcı isteği)
 _MAX_TWEETS = 5
-_GENEL_HASHTAGS = "#borsaistanbul #BIST #hisse #yatırım"
+_GENEL_HASHTAGS = "#borsa #BIST"  # X kuralı: max 2 hashtag (3+ = spam, erişim ölür)
 
 
 def _gemini_key() -> str | None:

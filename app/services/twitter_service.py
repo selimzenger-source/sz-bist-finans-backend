@@ -1098,7 +1098,7 @@ _DEFAULTS = {
     "SLOGAN": "\U0001F514 İlk bilen siz olun!",
     "DISCLAIMER": "\u26A0\uFE0F Yapay zek\u00e2 destekli otomatik bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
     "DISCLAIMER_SHORT": "\u26A0\uFE0F YZ destekli bildirimdir, yat\u0131r\u0131m tavsiyesi i\u00e7ermez.",
-    "HASHTAGS": "#HalkaArz #BIST100 #borsa #yatırım",
+    "HASHTAGS": "#halkaarz #borsa",
     # Tweet şablonları
     "T1_BASLIK": "\U0001F6A8 SPK Bülteni Yayımlandı!",
     "T1_ACIKLAMA": "için halka arz başvurusu SPK tarafından onaylandı.",
@@ -1284,7 +1284,7 @@ def tweet_new_ipo(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T1_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"#HalkaArz #BIST100 #borsa #yatırım"
+            f"#halkaarz #borsa"
         )
         # Özel görsel oluştur
         img_path = _build_ipo_approval_image([ipo], bulletin_no)
@@ -1325,7 +1325,7 @@ def tweet_new_ipos_batch(ipos: list, bulletin_no: str) -> bool:
             f"{bulletin_no} Bülteninde {len(ipos)} adet halka arz başvurusu SPK tarafından onaylandı.\n\n"
             + "\n".join(lines) + "\n\n"
             f"{_get_setting('T1_CTA')}\n"
-            f"#HalkaArz #BIST100 #borsa #yatırım"
+            f"#halkaarz #borsa"
         )
         # Özel görsel oluştur
         img_path = _build_ipo_approval_image(ipos, bulletin_no)
@@ -1410,7 +1410,7 @@ def tweet_distribution_start(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T2_ACIKLAMA')}"
             f"{price_text}{end_date}{lot_text}\n\n"
             f"{rejected_section}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
 
         # Kurum hashtag'leri sığarsa ekle (4000 char limiti — Blue Tick)
@@ -1509,7 +1509,7 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"{table_text}"
             f"{bireysel_text}"
             f"{applicant_text}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
 
         return _safe_tweet_with_media(text, BANNER_DAGITIM_SONUCLARI, source="tweet_allocation_results")
@@ -1546,7 +1546,7 @@ def tweet_last_4_hours(ipo) -> bool:
             f"{_get_setting('T4_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"⏳ Başvurular saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor.\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
         return _safe_tweet_with_media(text, BANNER_SON_4_SAAT, source="tweet_last_4_hours")
     except Exception as e:
@@ -1581,7 +1581,7 @@ def tweet_last_30_min(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T5_ACIKLAMA')}"
             f"{lot_text}\n\n"
             f"Saat {end_hour}{_saat_eki(end_hour, 'bulunma')} başvurular kapanıyor, acele edin!\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
         return _safe_tweet_with_media(text, BANNER_SON_30_DAKIKA, source="tweet_last_30_min")
     except Exception as e:
@@ -1607,7 +1607,7 @@ def tweet_first_trading_day(ipo) -> bool:
             f"{ipo.company_name}{ticker_text} {_get_setting('T6_ACIKLAMA')}"
             f"{price_text}\n\n"
             f"{_get_setting('T6_CTA')}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
         return _safe_tweet_with_media(text, BANNER_GONG_CALIYOR, source="tweet_first_trading_day")
     except Exception as e:
@@ -1646,7 +1646,7 @@ def tweet_trading_date_detected(ipo) -> bool:
             f"{tarih_line}"
             f"{pazar_line}\n\n"
             f"Borsada işlem görmeye başlıyor! \U0001F514\n"
-            f"#HalkaArz #BIST100 #borsa"
+            f"#halkaarz #borsa"
         )
         if ipo.ticker:
             text += f" #{ipo.ticker}"
@@ -1710,7 +1710,7 @@ def tweet_ticker_assigned(ipo) -> bool:
             f"{islem_line}"
             f"{pazar_line}\n\n"
             f"Borsa kodu #{ticker} olarak belirlendi \U0001F514\n"
-            f"#HalkaArz #BIST100 #borsa #{ticker}"
+            f"#{ticker} #halkaarz"
         )
 
         return _safe_tweet_with_media(text, BANNER_TICKER_TALEP, source="tweet_ticker_assigned")
@@ -1744,7 +1744,7 @@ def tweet_opening_price(ipo, open_price: float, pct_change: float) -> bool:
             f"\u2022 Halka arz fiyatı: {ipo_price:.2f} TL\n"
             f"\u2022 Açılış fiyatı: {open_price:.2f} TL\n"
             f"\u2022 {durum}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
         return _safe_tweet_with_media(text, BANNER_ACILIS_FIYATI, source="tweet_opening_price")
     except Exception as e:
@@ -1806,7 +1806,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n"
                 f"Kümülatif: %{cum_pct:+.1f}\n\n"
                 f"{edo_line}Tavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_d}\n\n"
-                f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
+                f"#{ipo.ticker or 'halkaarz'} #halkaarz"
             )
             banner = image_path
         else:
@@ -1836,7 +1836,7 @@ def tweet_daily_tracking(ipo, trading_day: int, close_price: float,
                 f"Kümülatif Toplam:\n"
                 f"{table_text}"
                 f"\n\n{daily_emoji} Kapanış: {close_price:.2f} TL | %{pct_change:+.2f} | {durum_text}\n\n"
-                f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #hisse"
+                f"#{ipo.ticker or 'halkaarz'} #halkaarz"
             )
             banner = BANNER_GUNLUK_TAKIP
 
@@ -1890,7 +1890,7 @@ def tweet_edo_threshold(ipo, threshold: int, edo_pct: float, trading_day: int) -
             f"{trading_day}. İşlem Günü\n"
             f"{desc}\n\n"
             f"Güncel el değiştirme oranları ve 8 farklı el değiştirme oranı bildirimi için uygulamamızı indirebilirsiniz! 📲\n"
-            f"#HalkaArz #{ticker} #BorsaIstanbul #ElDeğiştirme"
+            f"#{ticker} #halkaarz"
         )
 
         return _safe_tweet(text, source="tweet_edo_threshold")
@@ -1955,7 +1955,7 @@ def tweet_25_day_performance(
         text += lot_text
         text += (
             f"\n\nTavan: {ceiling_days} | Taban: {floor_days} | Normal İşlem Aralığı: {normal_days}\n\n"
-            f"#HalkaArz #BIST100 #{ticker} #hisse"
+            f"#{ticker} #halkaarz"
         )
 
         # Dinamik gorsel varsa onu kullan, yoksa statik banner
@@ -2056,7 +2056,7 @@ def tweet_yearly_summary(
                 f"• Medyan: %{median_return_pct:+.1f}\n"
                 f"{rank_sec}\n"
                 f"⚠️ İlk 25 işlem günü baz alınmıştır.\n\n"
-                f"#HalkaArz #BIST100 #borsa #yatırım{t_hashtags}"
+                f"#halkaarz #borsa"
             )
 
         text = _build_text(ranking_section, ticker_hashtags)
@@ -2434,7 +2434,7 @@ def tweet_last_day_morning(ipo) -> bool:
             f" bugün saat {end_hour}{_saat_eki(end_hour, 'yonelme')} kadar devam ediyor."
             f"{price_text}\n\n"
             f"{_get_setting('T12_CTA')}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
         return _safe_tweet_with_media(text, BANNER_SON_BASVURU_GUNU, source="tweet_last_day_morning")
     except Exception as e:
@@ -2541,7 +2541,7 @@ def tweet_company_intro(ipo) -> bool:
             f"{spk_text}{sector_text}{price_text}"
             f"{fund_usage_text}"
             f"{desc_text}\n\n"
-            f"#HalkaArz #BIST100 #{ipo.ticker or 'borsa'} #yatırım"
+            f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
 
         return _safe_tweet_with_media(text, BANNER_HALKA_ARZ_HAKKINDA, source="tweet_company_intro")
@@ -2563,7 +2563,7 @@ def tweet_spk_pending_with_image(pending_count: int, image_path: str = None) -> 
         text = (
             f"📊 SPK Onay Bekleyenler\n\n"
             f"Şu an {pending_count} şirket SPK onayı beklemektedir.\n\n"
-            f"#HalkaArz #SPK #BIST100 #borsa #yatırım"
+            f"#halkaarz #SPK"
         )
 
         if image_path:
@@ -2958,7 +2958,7 @@ def format_spk_approval_telegram(company_name: str, bulletin_no: str, price: str
         f"{price_line}\n\n"
         f"📋 Bülten No: {bulletin_no}\n\n"
         f"📲 Bilgiler geldikçe bildirim göndereceğiz.\n"
-        f"#HalkaArz #BIST100 #borsa #yatırım"
+        f"#halkaarz #borsa"
     )
 
 
@@ -2995,7 +2995,7 @@ def tweet_market_snapshot(snapshot_data: list, image_path: str) -> bool:
             f"{_get_setting('T15_BASLIK')} — {count} Hisse\n\n"
             f"{hisse_satiri}\n\n"
             f"Tavan: {tavan_count} | Taban: {taban_count} | Normal: {normal_count}\n\n"
-            f"#HalkaArz #BIST100 #borsa #hisse"
+            f"#halkaarz #borsa"
         )
 
         # Kuyruk modunda temp dosyayi silme
@@ -3071,7 +3071,7 @@ def tweet_opening_summary(stocks: list) -> bool:
         text = (
             f"{_get_setting('T16_BASLIK')}\n\n"
             + "\n".join(lines) + "\n\n"
-            f"#HalkaArz #BIST100 #borsa #hisse"
+            f"#halkaarz"  # ticker'lar zaten satırlarda; X kuralı: hashtag yığını YOK
         )
 
         # Kuyruk modunda temp dosyayi silme
@@ -3564,7 +3564,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                     f"{ai_text}\n\n"
-                    f"#SPK #BultenAnaliz #BIST100 #borsa"
+                    f"#SPK #BultenAnaliz"
                 )
                 if len(text) > 3950:
                     max_ai = 3950 - len(text) + len(ai_text) - 10
@@ -3572,7 +3572,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                     text = (
                         f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                         f"{ai_trimmed}\n\n"
-                        f"#SPK #BultenAnaliz #BIST100 #borsa"
+                        f"#SPK #BultenAnaliz"
                     )
             else:
                 logger.warning("SPK bulten gorsel uretilemedi — sade metinle devam")
@@ -3583,7 +3583,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
             text = (
                 f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                 f"{ai_text}\n\n"
-                f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
+                f"#SPK #BultenAnaliz"
             )
             if len(text) > 3950:
                 max_ai = 3950 - len(text) + len(ai_text) - 10
@@ -3591,7 +3591,7 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                 text = (
                     f"📋 {_tarih_str} Tarihli {bulletin_no} SPK Bülteninde:\n\n"
                     f"{ai_trimmed}\n\n"
-                    f"#SPK #BultenAnaliz #HalkaArz #BIST100 #borsa"
+                    f"#SPK #BultenAnaliz"
                 )
 
         # ────────────────────────────────────────────────────────
@@ -3717,7 +3717,7 @@ def tweet_izahname_analysis(ipo, analysis: dict, img_path: str) -> bool:
                 f"{details_line}\n"
                 f"{brief_str}\n\n"
                 f".\n"
-                f"#HalkaArz {ticker_hashtag} #borsa #BIST #yatırım #hisse"
+                f"{ticker_hashtag} #halkaarz"
             )
 
         text = _build_text(company_brief)
@@ -3987,7 +3987,7 @@ def tweet_spk_application(company_name: str) -> bool:
             )
 
         # Sadece hashtag ekle — linkler yok (daha temiz görünüm)
-        text = text + "\n\n#HalkaArz #SPK #Borsa"
+        text = text + "\n\n#halkaarz #SPK"
 
         # Banner gorseli varsa media'li tweet
         if os.path.exists(_SPK_APP_BANNER):
@@ -4058,7 +4058,7 @@ def tweet_resmi_gazete_decision(decision: dict, gazette_date) -> bool:
             text += f"📊 {impact}\n\n"
         if ticker_tags:
             text += f"{ticker_tags}\n"
-        text += "#ResmiGazete #Borsa #BIST100"
+        text += "#ResmiGazete #Borsa"
 
         # PDF linki — tweet'e sığıyorsa ekle
         if source_url and len(text) + len(source_url) + 5 < 3950:
@@ -4087,7 +4087,7 @@ def tweet_resmi_gazete_decision(decision: dict, gazette_date) -> bool:
                 text += f"📊 {impact}\n\n"
             if ticker_tags:
                 text += f"{ticker_tags}\n"
-            text += "#ResmiGazete #Borsa #BIST100"
+            text += "#ResmiGazete #Borsa"
 
         # Banner ile tweet at
         if os.path.exists(_RG_BANNER):

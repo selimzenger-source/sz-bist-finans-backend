@@ -5509,14 +5509,11 @@ def _setup_scheduler_impl():
         misfire_grace_time=7200,  # 2 saat grace
     )
 
-    # 21. SPK Bekleyenler Gorselli Tweet — her ayin 1'i 20:00 TR (UTC 17:00)
-    scheduler.add_job(
-        tweet_spk_pending_monthly_job,
-        CronTrigger(day=1, hour=17, minute=0),
-        id="spk_pending_monthly_tweet",
-        name="SPK Bekleyenler Aylik Tweet (Ayin 1'i 20:00 TR)",
-        replace_existing=True,
-    )
+    # 21. SPK Bekleyenler Aylık Tweet — KULLANICI İSTEĞİYLE KALDIRILDI.
+    # "Her ayın sonunda 131 şirket SPK onayı bekliyor" tarzı tweet gereksiz görüldü.
+    # (İçerik haftalık grafikli capital_increase_weekly tweet'inde zaten kapsanıyor.)
+    # scheduler.add_job(tweet_spk_pending_monthly_job, CronTrigger(day=1, hour=17, minute=0),
+    #     id="spk_pending_monthly_tweet", ...)  # DEVRE DIŞI
 
     # 22. Ogle Arasi Market Snapshot — her gun 14:00 TR (UTC 11:00) Pzt-Cuma
     # Islemdeki tum halka arz hisselerinin anlik durumunu gorsel tweet atar

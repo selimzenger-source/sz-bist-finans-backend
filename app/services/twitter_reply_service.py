@@ -839,10 +839,10 @@ Her analiz:
 - Teknik analiz — destek/direnç/indikatör/formasyon YASAK
 - "YT değildir" YAZMA
 
-═══ HASHTAG KURALI ═══
-- Her analizin sonuna yeni satırda 2-3 hashtag
-- Örnekler: #BIST100 #HalkaArz #BorseIstanbul #Hisse #Bankacılık #Enerji #Teknoloji #Ekonomi
-- Konuyla gerçekten alakalı hashtag seç — rastgele koyma
+═══ HASHTAG KURALI (X ALGORITMA — KESİN UY) ═══
+- EN FAZLA 1-2 hashtag. 3+ hashtag = spam sayılır, erişim ölür.
+- Hisse kodlarını hashtag YAPMA, düz yaz (X araması # olmadan bulur).
+- Sonda en fazla 1 genel hashtag (örn #borsa) yeter. Hashtag yığını YASAK.
 
 ═══ JSON ÇIKTI ═══
 {"is_safe": true, "analyses": ["birinci analiz 5 cümle\n#hashtag1 #hashtag2", "ikinci analiz 5 cümle\n#hashtag1 #hashtag2"]}
