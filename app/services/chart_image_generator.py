@@ -1533,21 +1533,28 @@ def generate_kap_news_image(
     try:
         is_pos = (sentiment or "").lower() != "negative"
 
-        # PUAN GRADIENT RENK — düştükçe kırmızı, yükseldikçe koyu/belirgin yeşil.
+        # PUAN GRADIENT RENK — uçlara gidildikçe DAHA KOYU/BELİRGİN:
+        # düştükçe koyu kırmızı (2.8 → koyu), yükseldikçe koyu/belirgin yeşil.
         def _score_color(sc: float) -> tuple:
+            if sc >= 9.0:
+                return (16, 122, 60)    # en koyu yeşil (devasa pozitif)
             if sc >= 8.0:
-                return (33, 191, 99)    # koyu belirgin yeşil (çok olumlu)
-            if sc >= 6.5:
-                return (76, 187, 100)   # yeşil (olumlu)
+                return (24, 148, 74)    # koyu belirgin yeşil
+            if sc >= 7.0:
+                return (40, 170, 92)    # yeşil
+            if sc >= 6.0:
+                return (76, 187, 104)   # orta yeşil
             if sc >= 5.5:
-                return (139, 195, 74)   # açık yeşil (hafif olumlu)
+                return (124, 190, 90)   # açık yeşil (hafif olumlu)
             if sc >= 4.5:
                 return (176, 184, 196)  # nötr gri
             if sc >= 3.5:
-                return (255, 138, 101)  # turuncu-kırmızı (hafif olumsuz)
+                return (224, 96, 72)    # turuncu-kırmızı (hafif olumsuz)
             if sc >= 2.5:
-                return (239, 83, 80)    # kırmızı (olumsuz)
-            return (211, 47, 47)        # koyu kırmızı (çok olumsuz)
+                return (200, 48, 44)    # koyu kırmızı (olumsuz)
+            if sc >= 1.5:
+                return (168, 30, 30)    # daha koyu kırmızı
+            return (140, 20, 20)        # en koyu kırmızı (çok olumsuz)
 
         _sc0 = ai_score if ai_score is not None else 5.0
         accent = _score_color(_sc0)
@@ -1650,7 +1657,7 @@ def generate_kap_news_image(
         y += 62          # ticker
         y += 30          # company
         y += 16
-        y += 70          # score+tier kutusu
+        y += 76          # score+tier kutusu
         y += 24
         if category:
             y += 38
@@ -1690,14 +1697,15 @@ def generate_kap_news_image(
             d.text((PAD, yy), company_name[:60], font=f_comp, fill=GRAY)
         yy += 30 + 16
 
-        # AI Puanı + tier kutusu
+        # AI Puanı + tier kutusu — accent tonlu zemin + KALIN kenar (belirgin)
         box_w = W - 2 * PAD
-        d.rounded_rectangle([(PAD, yy), (PAD + box_w, yy + 70)], radius=12,
-                            fill=(24, 24, 40), outline=tier_color, width=2)
-        d.text((PAD + 20, yy + 16), f"AI Puanı: {sc:.1f}/10", font=f_score, fill=WHITE)
+        _tint = tuple(int(c * 0.22 + 20) for c in tier_color)  # koyu accent tonu
+        d.rounded_rectangle([(PAD, yy), (PAD + box_w, yy + 76)], radius=14,
+                            fill=_tint, outline=tier_color, width=4)
+        d.text((PAD + 22, yy + 18), f"AI Puanı: {sc:.1f}/10", font=f_score, fill=WHITE)
         tlw = d.textlength(tier, font=f_tier)
-        d.text((PAD + box_w - 20 - tlw, yy + 22), tier, font=f_tier, fill=tier_color)
-        yy += 70 + 24
+        d.text((PAD + box_w - 22 - tlw, yy + 24), tier, font=f_tier, fill=WHITE)
+        yy += 76 + 24
 
         if category:
             # Emoji YOK (PIL'de kutu/tofu çıkıyor) — renkli nokta + kategori metni
