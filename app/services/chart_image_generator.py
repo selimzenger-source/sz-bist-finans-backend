@@ -1532,7 +1532,25 @@ def generate_kap_news_image(
         _tz = None
     try:
         is_pos = (sentiment or "").lower() != "negative"
-        accent = (102, 187, 106) if is_pos else (239, 83, 80)
+
+        # PUAN GRADIENT RENK — düştükçe kırmızı, yükseldikçe koyu/belirgin yeşil.
+        def _score_color(sc: float) -> tuple:
+            if sc >= 8.0:
+                return (33, 191, 99)    # koyu belirgin yeşil (çok olumlu)
+            if sc >= 6.5:
+                return (76, 187, 100)   # yeşil (olumlu)
+            if sc >= 5.5:
+                return (139, 195, 74)   # açık yeşil (hafif olumlu)
+            if sc >= 4.5:
+                return (176, 184, 196)  # nötr gri
+            if sc >= 3.5:
+                return (255, 138, 101)  # turuncu-kırmızı (hafif olumsuz)
+            if sc >= 2.5:
+                return (239, 83, 80)    # kırmızı (olumsuz)
+            return (211, 47, 47)        # koyu kırmızı (çok olumsuz)
+
+        _sc0 = ai_score if ai_score is not None else 5.0
+        accent = _score_color(_sc0)
         _IMG = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "static", "img")
         banner_file = "kap_bildirim.png" if is_pos else "kap_bildirim_negatif.png"
         banner_path = _os.path.join(_IMG, banner_file)
@@ -1582,9 +1600,16 @@ def generate_kap_news_image(
 
         body_maxw = W - 2 * PAD
         summary = (ai_summary or "").strip()
-        if len(summary) > 600:
-            summary = summary[:600].rsplit(" ", 1)[0] + "…"
-        body_lines = _wrap(summary, f_body, body_maxw)[:9]
+        if len(summary) > 900:
+            summary = summary[:900].rsplit(" ", 1)[0] + "…"
+        # ÇOK PARAGRAF: \n\n ile ayrılan paragrafları koru (aralarına boş satır)
+        body_lines: list = []
+        for _para in [p.strip() for p in summary.split("\n") if p.strip()]:
+            body_lines.extend(_wrap(_para, f_body, body_maxw))
+            body_lines.append("")   # paragraf arası boşluk
+        if body_lines and body_lines[-1] == "":
+            body_lines.pop()
+        body_lines = body_lines[:14]
         line_h = 42
 
         # Tier etiketi
@@ -1603,9 +1628,7 @@ def generate_kap_news_image(
             tier = "Olumsuz"
         else:
             tier = "Çok Olumsuz"
-        tier_color = accent if sc >= 4.5 else (239, 83, 80)
-        if 4.5 <= sc < 5.5:
-            tier_color = (170, 178, 190)  # nötr gri
+        tier_color = accent  # gradient renk (puana göre) zaten accent'te
 
         # Yükseklik hesabı
         content_top = head_h + 36
@@ -1655,11 +1678,14 @@ def generate_kap_news_image(
         yy += 70 + 24
 
         if category:
-            d.text((PAD, yy), f"📁 {category}", font=f_cat, fill=GOLD)
+            # Emoji YOK (PIL'de kutu/tofu çıkıyor) — renkli nokta + kategori metni
+            d.ellipse([(PAD, yy + 8), (PAD + 12, yy + 20)], fill=GOLD)
+            d.text((PAD + 22, yy), category, font=f_cat, fill=GOLD)
             yy += 38
 
         for ln in body_lines:
-            d.text((PAD, yy), ln, font=f_body, fill=(225, 228, 234))
+            if ln:
+                d.text((PAD, yy), ln, font=f_body, fill=(225, 228, 234))
             yy += line_h
 
         _draw_bg_watermark(img, W, H)

@@ -2324,16 +2324,18 @@ def tweet_kap_news(
         # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
         _category_line = f"📁 {clean_kw}" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
 
-        # ── TWEET METNİ — özet + cümle içi #TICKER & #KAP (X kuralı: 2 hashtag, yığın YOK).
-        # AI Puanı + yorum + banner ZATEN görselde. Metinde haberin ÖZETİ doğal cümleyle. ──
-        _summary_txt = (ai_summary or "").strip() or (
-            clean_kw if clean_kw and clean_kw != "Yeni KAP Bildirimi" else "Yeni KAP bildirimi."
-        )
-        if len(_summary_txt) > 3500:
-            _summary_txt = _summary_txt[:3500].rsplit(" ", 1)[0] + "…"
+        # ── TWEET METNİ — başlık (#TICKER · kategori) + özet + #KAP kapanış cümlesi.
+        # X kuralı: 2 hashtag (#TICKER ve #KAP), ikisi de cümle/başlık içinde; yığın YOK.
+        # AI Puanı + yorum + banner ZATEN görselde; metinde haberin ÖZETİ doğal cümleyle.
+        _has_cat = bool(clean_kw and clean_kw != "Yeni KAP Bildirimi")
+        _summary_txt = (ai_summary or "").strip() or (clean_kw if _has_cat else "Yeni KAP bildirimi.")
+        if len(_summary_txt) > 3400:
+            _summary_txt = _summary_txt[:3400].rsplit(" ", 1)[0] + "…"
+        _header = f"{emoji} #{ticker} · {clean_kw}" if _has_cat else f"{emoji} #{ticker}"
         text = (
-            f"{emoji} #{ticker} hissesinde #KAP'a iletilen bildirime göre 👇\n\n"
-            f"{_summary_txt}"
+            f"{_header}\n\n"
+            f"{_summary_txt}\n\n"
+            f"#KAP'a iletilen bildirimde paylaşıldı."
         )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
