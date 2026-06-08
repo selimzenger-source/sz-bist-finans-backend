@@ -19,9 +19,10 @@ try:
 except Exception:  # pragma: no cover
     _TR_TZ = None
 
-# BIST pay piyasası açılış (sürekli işlem) saati — tedbir bu seans açılışında kalkar.
-SESSION_OPEN_HOUR = 10
-SESSION_OPEN_MINUTE = 0
+# BIST pay piyasası AÇILIŞ SEANSI başlangıcı (09:40) — tedbir bu anda kalkar.
+# (Açılış seansı emir toplama 09:40'ta başlar; sürekli işlem 10:00.)
+SESSION_OPEN_HOUR = 9
+SESSION_OPEN_MINUTE = 40
 
 
 # 2026 — Borsa İstanbul'un kapalı olduğu TAM gün tarihleri
@@ -137,7 +138,8 @@ def cautious_status(end_date: date | None, is_active: bool,
     if lift_dt is None:
         # end_date yok → süresiz; sadece is_active belirler
         return {"status": "active" if is_active else "ended",
-                "lift_date": None, "ends_this_session": False, "days_to_lift": None}
+                "lift_date": None, "lift_at": None,
+                "ends_this_session": False, "days_to_lift": None, "mins_to_lift": None}
 
     if now >= lift_dt:
         status = "ended"
@@ -148,5 +150,7 @@ def cautious_status(end_date: date | None, is_active: bool,
 
     ends_this_session = (status == "active" and now.date() == lift)
     days_to_lift = (lift - now.date()).days
-    return {"status": status, "lift_date": lift,
-            "ends_this_session": ends_this_session, "days_to_lift": days_to_lift}
+    mins_to_lift = int((lift_dt - now).total_seconds() // 60) if status == "active" else None
+    return {"status": status, "lift_date": lift, "lift_at": lift_dt,
+            "ends_this_session": ends_this_session, "days_to_lift": days_to_lift,
+            "mins_to_lift": mins_to_lift}

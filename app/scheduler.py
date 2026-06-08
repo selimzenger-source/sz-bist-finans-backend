@@ -4778,9 +4778,9 @@ def _setup_scheduler_impl():
     )
     logger.info("BIST resmi tedbirli CSV scheduler: her 30dk aktif")
 
-    # 7f-bis2. Tedbir LIFT (kalkış) — TR 10:05 seans açılışından hemen sonra.
-    # end_date'ten sonraki ilk işlem günü 10:00'da engel kalkar; bu job o anda
-    # is_active=False yapıp "Bitenler"e taşır (AYCES vb. 10:00'da düşsün).
+    # 7f-bis2. Tedbir LIFT (kalkış) — TR 09:45 açılış seansından hemen sonra.
+    # end_date'ten sonraki ilk işlem günü 09:40 açılış seansında engel kalkar; bu job
+    # o anda is_active=False yapıp "Bitenler"e taşır (AYCES vb. 09:40'ta düşsün).
     async def _bist_tedbir_lift():
         try:
             from app.scrapers.bist_tedbir_csv_scraper import deactivate_lifted_cautious
@@ -4794,15 +4794,15 @@ def _setup_scheduler_impl():
 
     scheduler.add_job(
         _bist_tedbir_lift,
-        CronTrigger(hour=7, minute=5),  # UTC 07:05 = TR 10:05 (seans açılışı 10:00 sonrası)
+        CronTrigger(hour=6, minute=45),  # UTC 06:45 = TR 09:45 (açılış seansı 09:40 sonrası)
         id="bist_tedbir_lift",
-        name="Tedbir kalkış (lift) — TR 10:05",
+        name="Tedbir kalkış (lift) — TR 09:45",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=3600,
     )
-    logger.info("Tedbir lift job: TR 10:05 aktif")
+    logger.info("Tedbir lift job: TR 09:45 aktif")
 
     # 7f-tris. BIST hisse pazar segmenti CSV sync — gunde 1x, gece 02:00 TR
     # Kaynak: https://borsaistanbul.com/datum/hisse_endeks_ds.csv

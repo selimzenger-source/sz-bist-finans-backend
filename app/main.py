@@ -11319,8 +11319,10 @@ async def list_cautious_stocks(
             # ── Lift (kalkış) bilgileri ──
             "status": st["status"],                       # active | ended
             "lift_date": st["lift_date"].isoformat() if st["lift_date"] else None,
+            "lift_at": st["lift_at"].isoformat() if st.get("lift_at") else None,  # tam an (09:40 seans)
             "ends_this_session": st["ends_this_session"], # bugün açılışta kalkacak (BU SEANS)
             "days_to_lift": st["days_to_lift"],           # kalkışa kalan gün (0=bugün)
+            "mins_to_lift": st.get("mins_to_lift"),       # kalkışa kalan dakika (canlı geri sayım)
         })
         if len(out) >= limit:
             break
