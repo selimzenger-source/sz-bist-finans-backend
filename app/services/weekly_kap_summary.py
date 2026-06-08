@@ -148,18 +148,26 @@ def _shrink(text: str, max_chars: int, ticker: str | None = None) -> str:
 
 
 async def get_week_extras(start: date, end: date) -> dict:
-    """Bu haftanın tedbir gelen / tedbiri biten / temettü dağıtan hisseleri.
+    """Bu haftanın tedbir gelen / biten / önümüzdeki hafta bitecek hisseleri.
 
-    Kompakt görsel bloğu için — hepsi OTOMATİK gösterilir (seçim yok).
-    Döner: {"tedbir_added":[tk...], "tedbir_ended":[tk...], "dividends":[(tk,gross)...]}
+    LIFT MANTIĞI: end_date = SON yasaklı seans; engel bir sonraki İŞLEM GÜNÜ
+    (tatil/hafta sonu atlanır) seans açılışında kalkar. Bu yüzden "biten" tarihi
+    end_date değil, KALKIŞ günüdür (lift). Örn end_date=Cuma → lift=Pazartesi.
+
+    Döner:
+      tedbir_added:        [(tk, tags)...]   — bu hafta gelen
+      tedbir_ended:        [tk...]           — kalkışı (lift) BU hafta olan
+      tedbir_ending_next:  [(tk, lift_date)] — kalkışı ÖNÜMÜZDEKİ hafta (tarihli)
     """
     from app.database import async_session
-    out = {"tedbir_added": [], "tedbir_ended": [], "dividends": [], "dividends_upcoming": []}
+    from app.utils.bist_holidays import tedbir_lift_date
+    out = {"tedbir_added": [], "tedbir_ended": [], "tedbir_ending_next": [],
+           "dividends": [], "dividends_upcoming": []}
+    next_start = end + timedelta(days=1)
+    next_end = end + timedelta(days=7)
     try:
         async with async_session() as s:
             # tedbir gelen — türü (tags) ile. is_active=false (iptal edilen) HARİÇ.
-            # "geldi" = bu hafta ilan edildi (created_at) VEYA başladı (start_date).
-            # (BIST cuma ilan eder, pazartesi yürürlük → created_at ile yakalanır.)
             r1 = await s.execute(sa_text(
                 "SELECT UPPER(ticker), string_agg(DISTINCT tags, ',') AS tags "
                 "FROM cautious_stocks "
@@ -167,22 +175,33 @@ async def get_week_extras(start: date, end: date) -> dict:
                 "  AND (start_date BETWEEN :s AND :e OR created_at::date BETWEEN :s AND :e) "
                 "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
             out["tedbir_added"] = [(x[0], x[1] or "") for x in r1.all() if x[0]]
+
+            # Bitiş adayları: end_date'i bu hafta veya önümüzdeki hafta civarı olanlar.
+            # Lift'i Python'da hesaplayıp BU hafta / ÖNÜMÜZDEKİ hafta diye ayırıyoruz.
             r2 = await s.execute(sa_text(
-                "SELECT DISTINCT UPPER(ticker) FROM cautious_stocks "
-                "WHERE end_date BETWEEN :s AND :e ORDER BY 1"), {"s": start, "e": end})
-            out["tedbir_ended"] = [x[0] for x in r2.all() if x[0]]
+                "SELECT DISTINCT UPPER(ticker), end_date FROM cautious_stocks "
+                "WHERE end_date BETWEEN :s AND :e2 ORDER BY end_date, 1"),
+                {"s": start - timedelta(days=4), "e2": next_end})
+            ended_this, ending_next = [], []
+            seen_e, seen_n = set(), set()
+            for tk, ed in r2.all():
+                if not tk or ed is None:
+                    continue
+                lift = tedbir_lift_date(ed)
+                if lift is None:
+                    continue
+                if start <= lift <= end and tk not in seen_e:
+                    seen_e.add(tk); ended_this.append(tk)
+                elif next_start <= lift <= next_end and tk not in seen_n:
+                    seen_n.add(tk); ending_next.append((tk, lift))
+            out["tedbir_ended"] = ended_this
+            out["tedbir_ending_next"] = sorted(ending_next, key=lambda x: (x[1], x[0]))
+
             r3 = await s.execute(sa_text(
                 "SELECT UPPER(ticker), MAX(gross_dividend_per_share) FROM dividend_history "
                 "WHERE payment_date BETWEEN :s AND :e AND gross_dividend_per_share > 0 "
                 "GROUP BY UPPER(ticker) ORDER BY 1"), {"s": start, "e": end})
             out["dividends"] = [(x[0], float(x[1])) for x in r3.all() if x[0] and x[1] is not None]
-            # Önümüzdeki hafta temettü ödeyecekler (hafta bitişinden sonraki 7 gün)
-            r4 = await s.execute(sa_text(
-                "SELECT UPPER(ticker), MAX(gross_dividend_per_share) FROM dividend_history "
-                "WHERE payment_date BETWEEN :s2 AND :e2 AND gross_dividend_per_share > 0 "
-                "GROUP BY UPPER(ticker) ORDER BY 1"),
-                {"s2": end + timedelta(days=1), "e2": end + timedelta(days=7)})
-            out["dividends_upcoming"] = [(x[0], float(x[1])) for x in r4.all() if x[0] and x[1] is not None]
     except Exception as e:
         logger.warning("Haftalık extras (tedbir/temettü) derleme hatası: %s", e)
     return out
@@ -502,9 +521,25 @@ def _prepare_extras(extras: dict):
         grid(cells, with_type=True)
 
     if end:
-        tokens.append((PAD, dy, f"🔓 TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
+        tokens.append((PAD, dy, f"🔓 BU HAFTA TEDBİRİ BİTEN  ({len(end)})", "cat", _C_END))
         dy += _EX_H_CAT
         grid([(f"#{t}", None, WHITE) for t in end], with_type=False)
+
+    # ÖNÜMÜZDEKİ HAFTA TEDBİRİ BİTECEK — her hisse altında KALKIŞ tarihi (lift)
+    ending_next = extras.get("tedbir_ending_next") or []
+    if ending_next:
+        tokens.append((PAD, dy, f"⏳ ÖNÜMÜZDEKİ HAFTA TEDBİRİ BİTECEK  ({len(ending_next)})",
+                       "cat", _C_DIV2))
+        dy += _EX_H_CAT
+        _MN = ["", "Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara"]
+        cells = []
+        for tk, lift in ending_next:
+            try:
+                dlbl = f"{lift.day} {_MN[lift.month]}"
+            except Exception:
+                dlbl = ""
+            cells.append((f"#{tk}", dlbl, WHITE))
+        grid(cells, with_type=True)
 
     h = dy + 6
     extras["_lines"] = tokens
