@@ -491,9 +491,11 @@ def parse_pdf_pay_alim_satim(text: str) -> Optional[dict]:
     # Tablo: PDF text'te bir satirda 10 sayi (tarih + 9)
     # 04/05/2026 290.978 0 290.978 50.957.677 51.248.655 1,13 0,65 1,14 0,66
     # Tek satir veya cok satir olabilir
+    # NOT: NET nominal (group 4) NEGATİF olabilir ("-16.380.000" = net satış).
+    # Eksi işareti yakalanmazsa tüm satır eşleşmez (ENSRI vakası).
     table_pat = re.compile(
         r"(\d{2}[/.]\d{2}[/.]\d{4})\s+"
-        r"([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+"
+        r"([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+(-?[\d.]+(?:,\d+)?|0)\s+"
         r"([\d.]+(?:,\d+)?|0)\s+([\d.]+(?:,\d+)?|0)\s+"
         r"(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)\s+(\d+(?:,\d+)?)"
     )
