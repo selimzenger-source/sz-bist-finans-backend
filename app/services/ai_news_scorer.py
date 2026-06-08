@@ -2066,11 +2066,14 @@ async def score_news(
     # %5 / 10M TL nominal payın borsada satışa konu edilmesi = arz baskısı, EKTE).
     # Böyle generic kapakta EK'i çek → AI gerçek içeriği (tipe dönüşüm, oran, lot) yorumlar.
     _is_generic_cover = (
-        len(_clow) < 600
+        len(_clow) < 700
         and any(s in _clow for s in (
-            "ekte yer ald", "ilişikte", "ilisikte", "ekte sunul", "ek'te",
-            "gönderilen bir açıklama", "gonderilen bir aciklama", "açıklamanın ekte",
-            "aciklamanin ekte", "ekteki açıklama", "ekteki aciklama",
+            "ekte yer al",   # "ekte yer almaktadır" / "ekte yer aldığı" — ikisini de kapsar
+            "ilişikte", "ilisikte", "ekte sunul", "ek'te", "ekte mevcut",
+            "açıklama ekte", "aciklama ekte", "açıklamanın ekte", "aciklamanin ekte",
+            "gönderilen açıklama", "gonderilen aciklama",
+            "gönderilen bir açıklama", "gonderilen bir aciklama",
+            "ekteki açıklama", "ekteki aciklama",
         ))
     )
     _is_tipe = any(s in _clow for s in (
