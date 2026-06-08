@@ -818,10 +818,15 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         ["sermayeartirimi"],
     ),
     (
-        r"r[uü][cç]han\s*hakk[ıi]\s*kullan[ıi]m\s*(?:suresi|tarihi|baslang|bitis|baslad)|"
-        r"r[uü][cç]han\s*hakk[ıi]\s*(?:satis|alimi)\s*baslad",
+        # "rüçhan hakkı" = "yeni pay alma hakkı" (aynı şey) — ikisini de yakala.
+        # Bildirim "Bedelli Sermaye Artırımı İşleminde Yeni Pay Alma Hakkı Kullanım
+        # Tarihleri Hk." diyebiliyor → eski regex sadece 'rüçhan' yakalayıp kaçırıyordu.
+        r"r[uü][cç]han\s*hakk[ıi]\s*kullan[ıi]m\s*(?:s[uü]resi|tarih|ba[sş]lang|biti[sş]|ba[sş]lad|d[öo]nem)|"
+        r"r[uü][cç]han\s*hakk[ıi]\s*(?:sat[ıi][sş]|al[ıi]m[ıi]?)\s*ba[sş]lad|"
+        r"(?:yeni\s*)?pay\s*alma\s*hakk[ıi]\s*kullan[ıi]m\s*(?:s[uü]resi|tarih|ba[sş]lang|biti[sş]|ba[sş]lad|d[öo]nem)|"
+        r"(?:yeni\s*)?pay\s*alma\s*hakk[ıi]\s*kullan[ıi]m\s*tarih",
         "Ruchan Hakki Kullanim Donemi",
-        "Önceden ilan edilmiş bedelli sermaye artırımının rüçhan hakkı kullanım süresi bildirimi. İlk karar duyurusunda fiyat reaksiyon verdi (negatif), bu sadece kullanım periyodu tescili. Yatırımcı için yeni bilgi katmaz.",
+        "Önceden ilan edilmiş bedelli sermaye artırımının yeni pay alma (rüçhan) hakkı kullanım süresi/tarih bildirimi. İlk YK karar duyurusunda fiyat reaksiyon verdi (negatif/seyreltme); bu sadece kullanım periyodu tescili olup yeni bilgi katmaz. POZİTİF DEĞİLDİR.",
         ["bedelli"],
     ),
     (
@@ -1082,12 +1087,13 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
     except Exception:
         text_lower = content.lower()
 
-    # ★ KAP "Yapılan Açıklama Güncelleme mi? EVET" → bu bir GÜNCELLEME/takip bildirimidir.
-    # Karar-tipi (bedelli/bedelsiz/sermaye artırımı/temettü) bildirimlerinde ASIL karar +
-    # oran ZATEN orijinal bildirimde (Güncelleme: Hayır) ilan edildi. Güncelleme yeni
-    # bilgi katmaz → NÖTR. (Kullanıcı kuralı: sadece ESAS/ilk haber pozitif, güncellemeler
-    # nötr. MEGMT 1612679 update vs 1601501 orijinal vakası.)
-    if re.search(r"g[üu]ncelleme\s*mi\s*\??\s*\|?\s*evet", text_lower):
+    # ★ KAP "Yapılan Açıklama Güncelleme mi? EVET" VEYA "Düzeltme mi? EVET" → bu bir
+    # GÜNCELLEME/DÜZELTME/takip bildirimidir. Karar-tipi (bedelli/bedelsiz/sermaye
+    # artırımı/temettü) bildirimlerinde ASIL karar + oran ZATEN orijinal bildirimde ilan
+    # edildi. Güncelleme/düzeltme yeni bilgi katmaz → NÖTR. (Kullanıcı kuralı: sadece
+    # ESAS/ilk haber pozitif/negatif; güncelleme/düzeltme/tarih bildirimleri nötr.
+    # IHLAS bedelli "Düzeltme mi?: Evet" → yanlışlıkla pozitif puanlanıyordu.)
+    if re.search(r"(?:g[üu]ncelleme|d[üu]zeltme)\s*mi\s*\??\s*\|?\s*evet", text_lower):
         _decision_kw = (
             "bedelsiz", "bedelli", "sermaye art", "kar pay", "kâr pay",
             "temett", "kar dağ", "kar dag", "kâr dağ",
