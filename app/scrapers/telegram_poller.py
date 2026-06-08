@@ -1300,10 +1300,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 # AI'a güvenmeyip her zaman günlük-tutar eşiğine göre skor + özet ver.
                 # Böylece bildirim ile app feed AYNI olur; rutin/küçük alımlar Nötr kalır.
                 try:
+                    from app.services.buyback_processor import is_buyback as _isbb, buyback_score_and_summary
                     _bb_parsed = (session.info or {}).get("last_buyback_parsed") if hasattr(session, 'info') else None
                     _bb_ticker = (session.info or {}).get("last_buyback_ticker") if hasattr(session, 'info') else None
                     if _bb_parsed and _bb_ticker and _bb_ticker == (ticker or "").upper():
-                        from app.services.buyback_processor import buyback_score_and_summary
                         fb_score, fb_summary = buyback_score_and_summary(_bb_parsed, ticker)
                         logger.info(
                             "Buyback deterministik skor: %s — gunluk total_tl=%s, AI=%s -> skor=%.1f (override)",
@@ -1315,6 +1315,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         # tek seferlik kullan, temizle
                         session.info.pop("last_buyback_parsed", None)
                         session.info.pop("last_buyback_ticker", None)
+                    elif _isbb(news_title or title or ""):
+                        # Buyback ama günlük tutar PARSE EDİLEMEDİ → AI'ın (program toplamını
+                        # şişiren) skoruna GÜVENME. Pozitif push gitmesin diye Nötr'e çek.
+                        if ai_score is None or ai_score > 5.5:
+                            logger.info("Buyback parse fail (%s): AI skor %s -> 5.5 Nötr (cap)", ticker, ai_score)
+                            ai_score = 5.5
+                            ai_summary = ai_summary or (
+                                f"{ticker} pay geri alım programı kapsamında günlük işlem bildirimi. "
+                                "Rutin nitelikte; tek başına büyük fiyat etkisi beklenmez."
+                            )
                 except Exception as _bb_fb_err:
                     logger.warning("Buyback skor override hata (%s): %s", ticker, _bb_fb_err)
 
@@ -1382,7 +1392,17 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # diyorsa skor en az 6.2'ye, "olumsuz/negatif" diyorsa en fazla 3.8'e çekilir.
             # FORTE örneği: özet "pozitif sinyal, olumlu yansıma" diyordu ama skor 5.0
             # kalmıştı (Yeni İş İlişkisi). Hangi path'ten gelirse gelsin artık tutarlı.
-            if ai_summary and ai_score is not None and message_type in ("seans_ici_pozitif", "borsa_kapali"):
+            # BUYBACK MUAFIYETI: pay geri alımı skoru o günkü tutara göre deterministik
+            # ve OTORİTERDİR. Bu guardrail "şirket güveni" gibi pozitif kelimeler görünce
+            # skoru 6.2'ye çekip Nötr buyback'i yanlışlıkla "pozitif"e çeviriyordu →
+            # rutin geri alımda pozitif push gidiyordu. Buyback'lerde guardrail ATLANIR.
+            _is_bb_now = False
+            try:
+                from app.services.buyback_processor import is_buyback as _is_bb_fn
+                _is_bb_now = _is_bb_fn(news_title or title or "")
+            except Exception:
+                _is_bb_now = False
+            if (not _is_bb_now) and ai_summary and ai_score is not None and message_type in ("seans_ici_pozitif", "borsa_kapali"):
                 try:
                     from app.services.ai_news_scorer import _validate_score_against_content
                     # Baslik da icerige eklenir: "Yeni Is Iliskisi" gibi olay tipi
