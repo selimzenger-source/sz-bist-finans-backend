@@ -805,6 +805,20 @@ def _sanitize_tweet(text: str) -> str:
         return text
     t = text
 
+    # 0) TEKRAR EDEN hashtag/cashtag'i çıkar (ilkini tut). Örn: üstte "#HTTBT ..."
+    # zaten varken altta tekrar "#HTTBT" yazmak gereksiz + spam sinyali. İlk geçen
+    # kalır, sonraki aynı etiketler silinir (büyük/küçük harf duyarsız).
+    _seen_tags: set[str] = set()
+
+    def _dedup(m: "_re_sani.Match") -> str:
+        tag = m.group(0)
+        key = tag.lower()
+        if key in _seen_tags:
+            return ""
+        _seen_tags.add(key)
+        return tag
+    t = _re_sani.sub(_TAG_RE, _dedup, t)
+
     # 1) Ardışık 4+ hashtag/cashtag run'ını ilk 3'e indir (boşluk/satır ayrımı)
     def _trim_run(m: "_re_sani.Match") -> str:
         tags = m.group(0).split()
@@ -820,7 +834,8 @@ def _sanitize_tweet(text: str) -> str:
 
     # Fazla boşluk/satır temizliği
     t = _re_sani.sub(r"[ \t]{2,}", " ", t)
-    t = _re_sani.sub(r" +\n", "\n", t)
+    t = _re_sani.sub(r" +\n", "\n", t)        # satır sonu boşluk
+    t = _re_sani.sub(r"(?m)^[ \t]+", "", t)   # satır başı boşluk (silinen #etiket artığı)
     t = _re_sani.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
 
@@ -2249,11 +2264,13 @@ def tweet_kap_news(
 
         # AI tarafindan uretilen icerik hashtag'leri (sektor, konu vb.)
         # Sanitize: sadece harf/rakam/Turkce karakter — &, -, /, bosluk vs. icerenleri temizle
+        # Ticker ZATEN açılış satırında (#{ticker}) — altta TEKRAR etme (spam sinyali).
+        # AI ekstra hashtag'i de en fazla 1 → alt satır toplam ≤3 etiket.
         extra_hashtags = ""
         if ai_hashtags:
             import re as _re_ht
             _clean_tags = []
-            for _ht in ai_hashtags[:5]:
+            for _ht in ai_hashtags[:1]:
                 # Ozel karakterleri (& / - . bosluk vs.) at, sadece alfanumerik + Turkce harf
                 _ht_clean = _re_ht.sub(r'[^a-zA-Z0-9çşğüöıÇŞĞÜÖİ]', '', str(_ht))
                 if _ht_clean:  # bos kalmasin
@@ -2289,7 +2306,7 @@ def tweet_kap_news(
             f"{kap_section}\n"
             f"{cta_text}\n"
             f"\n"
-            f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+            f"#KAP #BorsaIstanbul{extra_hashtags}"
         )
 
         # Blue Tick 4000 karakter limiti — AI ozeti ile birlikte sigmazsa kirp
@@ -2308,7 +2325,7 @@ def tweet_kap_news(
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
-                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # Hala cok uzunsa: sadece skor, ozet yok
@@ -2323,7 +2340,7 @@ def tweet_kap_news(
                 f"{kap_section}\n"
                 f"{cta_text}\n"
                 f"\n"
-                f"#{ticker} #KAP #BorsaIstanbul{extra_hashtags}"
+                f"#KAP #BorsaIstanbul{extra_hashtags}"
             )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
