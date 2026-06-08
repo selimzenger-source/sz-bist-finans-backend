@@ -4740,6 +4740,30 @@ def _setup_scheduler_impl():
     )
     logger.info("Haftalık temettü takvimi tweet: AKTIF (Pazar 18:00 TR)")
 
+    # 7f-penta. SPK ONAYI BEKLEYEN SERMAYE ARTIRIMI — her Çarşamba 08:00 TR (UTC 05:00)
+    # YKK kararı alınmış, SPK onayı bekleyen bedelli/bedelsiz/tahsisli artırım talepleri
+    # grafikli kartlarla tweet'lenir.
+    async def _weekly_capital_spk_job():
+        try:
+            from app.services.capital_increase_weekly import run_weekly_capital_spk
+            r = await run_weekly_capital_spk()
+            logger.info("SPK bekleyen artırım job: sent=%s total=%s reason=%s",
+                        r.get("sent"), r.get("total"), r.get("reason"))
+        except Exception as e:
+            logger.error("SPK bekleyen artırım job hatasi: %s", e)
+
+    scheduler.add_job(
+        _weekly_capital_spk_job,
+        CronTrigger(day_of_week="wed", hour=5, minute=0),  # UTC 05:00 = TR 08:00 Çarşamba
+        id="weekly_capital_spk",
+        name="SPK Onayı Bekleyen Sermaye Artırımı Tweet (Çarşamba 08:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("SPK bekleyen artırım tweet: AKTIF (Çarşamba 08:00 TR)")
+
     # 7f-quater. HAFTALIK KAP ÖZETİ HAZIRLA — her Cumartesi 15:30 TR (UTC 12:30)
     # Geçen haftanın (Pzt–Cuma) günlük AI haber bülteninde biriken olumlu/olumsuz/
     # SPK gelişmelerini derler ve admin'e Telegram bildirimi atar ("hazır, seç & gönder").

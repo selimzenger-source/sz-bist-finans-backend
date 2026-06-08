@@ -4310,6 +4310,32 @@ async def admin_trigger_weekly_dividend_calendar(
         raise HTTPException(status_code=500, detail=f"Hata: {e}")
 
 
+@app.post("/api/v1/admin/trigger-weekly-capital-spk")
+@limiter.limit("3/minute")
+async def admin_trigger_weekly_capital_spk(
+    request: Request,
+    payload: dict,
+):
+    """Admin: SPK Onayı Bekleyen Sermaye Artırımı tweet'ini manuel tetikle.
+
+    body:
+      admin_password: zorunlu
+      dry_run: true ise tweet ATMAZ, sadece görsel + metin döndürür (önizleme)
+      force:   true ise sayı < 3 olsa bile devam eder (test)
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+    dry_run = bool(payload.get("dry_run", False))
+    force = bool(payload.get("force", False))
+    try:
+        from app.services.capital_increase_weekly import run_weekly_capital_spk
+        r = await run_weekly_capital_spk(force=force, dry_run=dry_run)
+        return {"success": True, "result": r}
+    except Exception as e:
+        logger.exception("Manuel SPK bekleyen artırım hatasi: %s", e)
+        raise HTTPException(status_code=500, detail=f"Hata: {e}")
+
+
 @app.post("/api/v1/admin/cleanup-isyatirim-dividends")
 @limiter.limit("3/minute")
 async def admin_cleanup_isyatirim_dividends(
