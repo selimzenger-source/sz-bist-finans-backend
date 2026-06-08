@@ -10782,21 +10782,38 @@ async def get_daily_news_summary(
         logger.warning("daily-summary tedbir alan ekleme hatası: %s", _te)
 
     try:
+        # LIFT MANTIĞI: end_date = SON yasaklı seans; engel bir sonraki İŞLEM GÜNÜ
+        # (tatil/hafta sonu atlanır) açılış seansında KALKAR. Bu yüzden "tedbiri biten"
+        # kaydı end_date gününe DEĞİL, KALKIŞ (lift) gününe yazılır. Örn end_date Cuma
+        # → lift Pazartesi → Pazartesi bülteninde "tedbiri kalkan" olarak görünür.
+        from app.utils.bist_holidays import tedbir_lift_date
+        # Pencereden birkaç gün geriden başla: end_date geçmiş ama lift'i pencereye
+        # düşen kayıtları (Cuma biten Pzt kalkan) yakala.
+        _ended_seen: dict[str, set] = {}
         _te_res = await db.execute(_sa_txt2("""
             SELECT UPPER(ticker) AS ticker, string_agg(DISTINCT tags, ',') AS tags, end_date
             FROM cautious_stocks
-            WHERE end_date BETWEEN :s AND :e
+            WHERE end_date BETWEEN :s2 AND :e
             GROUP BY UPPER(ticker), end_date
             ORDER BY end_date DESC, ticker
-        """), {"s": _win_start, "e": _win_end})
+        """), {"s2": _win_start - timedelta(days=6), "e": _win_end})
         for _tk, _tags, _ed_ in _te_res.all():
             if not _tk or not _ed_:
                 continue
-            _g = _ensure_group(_ed_.isoformat())
+            _lift = tedbir_lift_date(_ed_)
+            if _lift is None or not (_win_start <= _lift <= _win_end):
+                continue
+            _key = _lift.isoformat()
+            _seen = _ended_seen.setdefault(_key, set())
+            if _tk in _seen:
+                continue
+            _seen.add(_tk)
+            _g = _ensure_group(_key)
             _g["tedbir_ended"].append({
                 "ticker": _tk,
                 "tedbirler": _tedbir_labels(_tags),
                 "end_date": _ed_.isoformat(),
+                "lift_date": _key,  # engelin kalktığı gün (= bu grubun günü)
             })
     except Exception as _te2:
         logger.warning("daily-summary tedbir biten ekleme hatası: %s", _te2)
