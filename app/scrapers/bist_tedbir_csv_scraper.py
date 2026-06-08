@@ -230,13 +230,28 @@ async def sync_bist_tedbir() -> dict:
                 errors += 1
                 logger.warning("BIST tedbir upsert hatasi (%s): %s", ticker, e)
 
-        # CSV'de OLMAYAN aktif kayitlari is_active=False yap (tedbiri bitenler → "Bitenler")
+        # Deaktivasyon — LIFT MANTIĞI ile:
+        #  - Engel KALKMIŞSA (now >= lift 10:00) → is_active=False (doğal bitiş)
+        #  - CSV'den çıkmış AMA end_date'ten ÖNCE çıkmışsa → erken iptal → is_active=False
+        #  - CSV'de yok ama henüz kalkmamış (Cuma bitti, Pzt açılış öncesi) → AKTİF KALSIN
+        #    (kullanıcı "BU SEANS" görsün; lift geçince sonraki sync pasifler)
+        from app.utils.bist_holidays import tedbir_lift_datetime, _now_tr
+        now = _now_tr()
         deactivated = 0
         for key, rec in existing_by_key.items():
-            if rec.is_active and key not in csv_keys:
-                if rec.source in ("bist_csv", "halkarz", "manual_import"):
-                    rec.is_active = False
-                    deactivated += 1
+            if not rec.is_active:
+                continue
+            if rec.source not in ("bist_csv", "halkarz", "manual_import"):
+                continue
+            lift_dt = tedbir_lift_datetime(rec.end_date)
+            lifted = lift_dt is not None and now >= lift_dt
+            dropped = key not in csv_keys
+            early_cancel = (
+                dropped and rec.end_date is not None and now.date() < rec.end_date
+            )
+            if lifted or early_cancel:
+                rec.is_active = False
+                deactivated += 1
 
         try:
             await db.commit()

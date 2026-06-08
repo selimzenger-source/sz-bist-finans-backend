@@ -11,7 +11,17 @@ Pazartesi günkü haber bülteni:
   - Tatilden sonraki ilk iş gününde: son iş gününün 07:55'inden itibaren.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+
+try:
+    from zoneinfo import ZoneInfo
+    _TR_TZ = ZoneInfo("Europe/Istanbul")
+except Exception:  # pragma: no cover
+    _TR_TZ = None
+
+# BIST pay piyasası açılış (sürekli işlem) saati — tedbir bu seans açılışında kalkar.
+SESSION_OPEN_HOUR = 10
+SESSION_OPEN_MINUTE = 0
 
 
 # 2026 — Borsa İstanbul'un kapalı olduğu TAM gün tarihleri
@@ -75,3 +85,68 @@ def next_trading_day(d: date) -> date:
     while not is_trading_day(nxt):
         nxt = nxt + timedelta(days=1)
     return nxt
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  TEDBİR (VBTS) KALKIŞ MANTIĞI
+#  end_date = SON yasaklı seans. Engel, bir sonraki İŞLEM GÜNÜ seans açılışında
+#  (~10:00) kalkar. Hafta sonu/resmi tatil atlanır (Cuma biten → Pazartesi kalkar).
+# ════════════════════════════════════════════════════════════════════════════
+
+def tedbir_lift_date(end_date: date | None) -> date | None:
+    """Tedbirin KALKACAĞI gün = end_date'ten sonraki ilk işlem günü."""
+    if end_date is None:
+        return None
+    return next_trading_day(end_date)
+
+
+def _now_tr() -> datetime:
+    return datetime.now(_TR_TZ) if _TR_TZ else datetime.now()
+
+
+def tedbir_lift_datetime(end_date: date | None) -> datetime | None:
+    """Tedbirin kalkacağı tam an: lift günü saat 10:00 (TR)."""
+    lift = tedbir_lift_date(end_date)
+    if lift is None:
+        return None
+    dt = datetime.combine(lift, time(SESSION_OPEN_HOUR, SESSION_OPEN_MINUTE))
+    return dt.replace(tzinfo=_TR_TZ) if _TR_TZ else dt
+
+
+def cautious_status(end_date: date | None, is_active: bool,
+                    now: datetime | None = None) -> dict:
+    """Tedbir kaydının ANLIK durumu.
+
+    Döner:
+      {
+        "status": "active" | "ended",
+        "lift_date": date|None,          # kalkış günü
+        "ends_this_session": bool,       # bugün seans açılışında kalkacak (BU SEANS)
+        "days_to_lift": int|None,        # kalkışa kalan TAKVİM günü (0=bugün)
+      }
+    Mantık:
+      - now >= lift_datetime → ended (engel kalktı)
+      - now < lift_datetime ve is_active=False → ended (erken iptal — gizli)
+      - now < lift_datetime ve is_active=True → active
+    """
+    if now is None:
+        now = _now_tr()
+    lift = tedbir_lift_date(end_date)
+    lift_dt = tedbir_lift_datetime(end_date)
+
+    if lift_dt is None:
+        # end_date yok → süresiz; sadece is_active belirler
+        return {"status": "active" if is_active else "ended",
+                "lift_date": None, "ends_this_session": False, "days_to_lift": None}
+
+    if now >= lift_dt:
+        status = "ended"
+    elif not is_active:
+        status = "ended"   # erken iptal
+    else:
+        status = "active"
+
+    ends_this_session = (status == "active" and now.date() == lift)
+    days_to_lift = (lift - now.date()).days
+    return {"status": status, "lift_date": lift,
+            "ends_this_session": ends_this_session, "days_to_lift": days_to_lift}

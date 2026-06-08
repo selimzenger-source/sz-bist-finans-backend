@@ -11266,21 +11266,15 @@ async def list_cautious_stocks(
         Bunlar belirli bir cezadan ziyade kalıcı durum bilgisi içerir.
     """
     from app.models.cautious_stock import CautiousStock
-    from sqlalchemy import or_ as _or, and_ as _and, not_ as _not, extract as _extract
+    from app.utils.bist_holidays import cautious_status
+    from sqlalchemy import and_ as _and, not_ as _not, extract as _extract
     query = select(CautiousStock)
+    # LIFT MANTIĞI: end_date = SON yasaklı seans; engel bir sonraki işlem günü
+    # 10:00 seans açılışında kalkar. "Aktif" = kalkış anı GELMEMİŞ + erken iptal
+    # edilmemiş (is_active). Tarih filtresini SQL'de değil Python'da (lift-aware)
+    # yapıyoruz; tablo küçük. Erken iptal (YEOTK) is_active=False ile gizli kalır.
     if active_only:
-        # İKİ koşul birden:
-        #  1) is_active=True → resmi CSV'de HÂLÂ listeli (scraper CSV'den düşeni
-        #     is_active=False yapar). BIST bir tedbiri end_date'ten ÖNCE iptal
-        #     ederse (YEOTK örneği: 1-30 Haz listelendi, sonra çıkarıldı), kayıt
-        #     is_active=False olur ama end_date hâlâ gelecekte → eski kod bunu
-        #     yanlışlıkla göstermeye devam ediyordu.
-        #  2) end_date >= bugün → süresi dolmamış (cron gecikse bile expired gizlenir)
-        today = date.today()
-        query = query.where(
-            CautiousStock.is_active == True,
-            _or(CautiousStock.end_date >= today, CautiousStock.end_date.is_(None)),
-        )
+        query = query.where(CautiousStock.is_active == True)
     # Placeholder filtresi — start=Jan 1 + end=Dec 31 olan kalıcı/yıl-genişliğinde kayıtları çıkar
     query = query.where(
         _not(_and(
@@ -11292,32 +11286,41 @@ async def list_cautious_stocks(
     )
     if tag:
         query = query.where(CautiousStock.tags.like(f"%{tag.upper()}%"))
-    # Sıralama
     if sort == "end":
-        # Ceza bitimi yakın → uzak (asc), null'lar sona
-        # Tie-break: start_date desc (aynı bitişte yeni açıklanmış üstte)
         query = query.order_by(
             CautiousStock.end_date.asc().nullslast(),
             CautiousStock.start_date.desc().nullslast(),
             desc(CautiousStock.id),
         )
     else:
-        # Yeni Eklenen: açıklama tarihi (start_date) yeniden eskiye
-        # Tie-break: id desc (aynı günde birden fazla varsa son giren üstte)
         query = query.order_by(
             CautiousStock.start_date.desc().nullslast(),
             desc(CautiousStock.id),
         )
-    query = query.limit(limit)
-    rows = (await db.execute(query)).scalars().all()
-    return [{
-        "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
-        "last_price": r.last_price, "pct_change": r.pct_change,
-        "start_date": r.start_date.isoformat() if r.start_date else None,
-        "end_date": r.end_date.isoformat() if r.end_date else None,
-        "tags": r.tags.split(",") if r.tags else [],
-        "is_active": r.is_active, "kap_url": r.kap_url, "source": r.source,
-    } for r in rows]
+    # limit'i lift-filtreden SONRA uygula (filtrelenecek kayıtlar limiti yemesin)
+    rows = (await db.execute(query.limit(limit * 2))).scalars().all()
+
+    out = []
+    for r in rows:
+        st = cautious_status(r.end_date, r.is_active)
+        if active_only and st["status"] != "active":
+            continue
+        out.append({
+            "id": r.id, "ticker": r.ticker, "company_name": r.company_name,
+            "last_price": r.last_price, "pct_change": r.pct_change,
+            "start_date": r.start_date.isoformat() if r.start_date else None,
+            "end_date": r.end_date.isoformat() if r.end_date else None,
+            "tags": r.tags.split(",") if r.tags else [],
+            "is_active": r.is_active, "kap_url": r.kap_url, "source": r.source,
+            # ── Lift (kalkış) bilgileri ──
+            "status": st["status"],                       # active | ended
+            "lift_date": st["lift_date"].isoformat() if st["lift_date"] else None,
+            "ends_this_session": st["ends_this_session"], # bugün açılışta kalkacak (BU SEANS)
+            "days_to_lift": st["days_to_lift"],           # kalkışa kalan gün (0=bugün)
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 @app.get("/api/v1/business-deals")
