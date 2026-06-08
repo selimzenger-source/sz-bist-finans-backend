@@ -691,12 +691,20 @@ Sektor: {sector}
 
 KURALLAR:
 - BASLIK: Max 50 karakter, buyuk harf, ! ile bitir. Clickbait OLMASIN. Haberin ozunu yansitsin.
-- OZET: MINIMUM 120 kelime, MAKSIMUM 200 kelime. 5-8 cumle yaz. OZLU ama TAM yaz.
-  * Paragraf 1 (3-4 cumle): Haberin ana konusunu net acikla. Rakamlari, tarihleri, isimleri, tutarlari mutlaka dahil et. Ne oldu, kim yapti, neden onemli — kisa cumlelerle aktarim yap.
-  * Paragraf 2 (2-3 cumle): BIST etkisi — hangi sektoru/sirketleri etkileyecegini, yatirimcilar icin ne anlama geldigini yaz. SON CUMLE yatirimci icin kisa bir yorum/oneri olsun.
-  * Her paragraf arasinda BOS SATIR birak (\n\n ile ayir).
-  UYARI: 120 kelimeden KISA ozet KABUL EDILMEZ. HER CUMLEYI TAMAMLA, yarim birakma. Tek cumlelik ozet YASAK.
-  ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA tweet icerigine yazilmaz.
+- OZET: TAM 3 BOLUM halinde yaz. HER BOLUM kendi EMOJISI ile BASLASIN ve bolumler
+  arasinda MUTLAKA BOS SATIR olsun (\n\n ile ayir). Emoji disinda madde isareti/tire kullanma.
+
+  🔴 (3-4 cumle) Haberin ana konusu: ne oldu, kim yapti, neden onemli. Rakam, tarih,
+     isim, tutar mutlaka dahil et.
+
+  🔶 (2-3 cumle) BIST etkisi: hangi sektoru/sirketleri etkiler, yatirimcilar icin
+     ne anlama gelir.
+
+  🏷️ (1-2 cumle) Yatirimci icin KISA, temkinli bir degerlendirme/oneri.
+
+  Toplam 120-200 kelime. HER CUMLEYI TAMAMLA, yarim birakma. Her bolum dolu olsun.
+  Emojileri (🔴 🔶 🏷️) AYNEN kullan, baskasini ekleme.
+  ONEMLI: Cerez politikasi, gizlilik metni, site kullanim kosullari ASLA yazilmaz.
 - SIRKETLER: SADECE haberde DOGRUDAN bahsedilen BIST hisse kodlarini yaz (orn: THYAO, GARAN, EREGL).
   Haberde sirket gecmiyorsa ama sektor belliyse, o sektordeki en buyuk 2-3 BIST sirketini yaz.
   Sirket adini biliyorsan BIST ticker koduna cevir (orn: Turk Hava Yollari → THYAO).
@@ -842,18 +850,17 @@ async def _generate_tweet_content(news: dict, ai_result: dict) -> dict | None:
         category = ai_result["category"]
         banner = ai_result.get("banner") or category
         prefix = _TWEET_EMOJI.get(banner, _TWEET_EMOJI.get(category, "\U0001f4f0 HABER"))
+        # Baslik satirinda kategori KELIMESI degil, sadece EMOJI + haber basligi kullan
+        # (ornek format: "🛢️ İSRAİL SALDIRILARI SONRASI PETROL FİYATLARI YÜKSELDİ!")
+        title_emoji = prefix.split(" ", 1)[0]
 
-        # Tweet metni
+        # Tweet metni — sade format: başlık + emoji bloklar (🔴/🔶/🏷️ AI özetinde) + hashtag
         hashtags = _CATEGORY_HASHTAGS.get(category, "#Borsa #BIST100")
         ticker_str = " ".join(ticker_tags[:6])
 
-        # Kaynak — sadece isim, link yok (Twitter shadowban engellemek icin)
-        source_line = f"Kaynak: {news['source']}"
-
         tweet_text = (
-            f"{prefix}\n\n"
+            f"{title_emoji} {baslik}\n\n"
             f"{ozet}\n\n"
-            f"{source_line}\n\n"
             f"{hashtags}"
         )
         if ticker_str:
