@@ -833,6 +833,17 @@ def _sanitize_tweet(text: str) -> str:
             "", t, flags=_re_sani.IGNORECASE,
         )
 
+    # 3) DIŞ LİNK ÇIKAR — kaynak: twitter/the-algorithm OutOfNetworkCompetitorURLFilter.
+    # Ana tweette dış link erişimi %80-90 düşürür (free hesapta ~0 etkileşim). Link'i
+    # ana metinden çıkar; içeren satır sadece "📲 ... indir:" gibi label'a düşerse o
+    # satırı da kaldır (link olmadan anlamsız CTA kalmasın).
+    if _re_sani.search(r"https?://", t):
+        # SADECE URL token'ını sil (satırın içeriğini değil — inline linkte metin durur)
+        t = _re_sani.sub(r"https?://\S+", "", t)
+        # URL silinince geriye sadece emoji/sembol/noktalama kalan satırları (harf yok)
+        # kaldır — "📲" / "🔗:" gibi anlamsız artıklar gitsin.
+        t = _re_sani.sub(r"(?m)^[^\wçğıöşüÇĞİÖŞÜ]*$", "", t)
+
     # Fazla boşluk/satır temizliği
     t = _re_sani.sub(r"[ \t]{2,}", " ", t)
     t = _re_sani.sub(r" +\n", "\n", t)        # satır sonu boşluk
