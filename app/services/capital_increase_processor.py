@@ -67,6 +67,15 @@ async def merge_duplicate_capital_increases(db: AsyncSession) -> int:
         CapitalIncrease.status.notin_(["tamamlandi", "reddedildi"])
     )
     rows = (await db.execute(stmt)).scalars().all()
+
+    # SANITIZE: saçma yüzdeleri temizle (>%1000 = parse hatası — nominal tutar
+    # yüzde sanılmış: 202380%, 16666% gibi). Yanlış veri göstermektense boş bırak.
+    for r in rows:
+        for f in ("bedelli_pct", "bedelsiz_pct", "tahsisli_pct"):
+            v = getattr(r, f, None)
+            if v is not None and v > 1000:
+                setattr(r, f, None)
+
     groups: dict[tuple, list] = defaultdict(list)
     for r in rows:
         groups[(r.ticker, r.type)].append(r)
