@@ -1376,6 +1376,7 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 if _is_pas and ticker:
                     # share_transaction_details'tan pay oranı değişimine bak (alım=+, satım=-)
                     _dir = None
+                    _r = None
                     try:
                         from app.models.share_transaction_detail import ShareTransactionDetail as _STD
                         from sqlalchemy import select as _sel2, desc as _desc2
@@ -1393,27 +1394,53 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     # %1-3       -> belirgin (6.8 / 3.5)
                     # %3-5       -> guclu (7.3 / 2.8)
                     # >%5        -> cok guclu (7.8 / 2.3)
+                    # TAM CÜMLE özet: taraf + oran + yön + bağlamlı yorum (kuru fragman değil)
+                    def _pf(x):  # %1,23 formatı
+                        return f"%{abs(float(x)):.2f}".replace(".", ",")
+                    _party = (getattr(_r, "party_name", None) or "").strip() if _r is not None else ""
+                    if not _party or _party in ("?", "Bilinmiyor"):
+                        _party = "Önemli bir pay sahibi"
+                    _paynow = getattr(_r, "pay_orani_pct", None) if _r is not None else None
+                    _now_s = (f"; toplam payı {_pf(_paynow)} seviyesine geldi"
+                              if isinstance(_paynow, (int, float)) else "")
                     if _dir is not None:
                         _abs = abs(_dir)
                         _alim = _dir > 0
+                        _fiil = "artırdı" if _alim else "azalttı"
                         if _abs < 0.3:
                             ai_score = 5.0
-                            _pl = "pay alım-satım bildirimi (mikro, sınırlı etki)"
+                            ai_summary = ai_summary or (
+                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
+                                "Çok küçük ölçekli, mikro nitelikte bir işlem; fiyata doğrudan etki beklenmez.")
                         elif _abs < 1.0:
                             ai_score = 6.3 if _alim else 4.0
-                            _pl = ("içeriden hafif ALIM sinyali" if _alim else "hafif pay SATIM sinyali")
+                            ai_summary = ai_summary or (
+                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
+                                + ("İçeriden hafif alım; sınırlı da olsa güven sinyali olarak okunabilir."
+                                   if _alim else "Hafif satış; küçük çaplı pozisyon azaltımı, etkisi sınırlı."))
                         elif _abs < 3.0:
                             ai_score = 6.8 if _alim else 3.5
-                            _pl = ("içeriden belirgin ALIM — güven sinyali" if _alim else "belirgin pay SATIM — pozisyon azaltımı")
+                            ai_summary = ai_summary or (
+                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
+                                + ("İçeriden belirgin alım — yönetimin/ortağın hisseye güveni açısından olumlu sinyal."
+                                   if _alim else "Belirgin satış — pozisyon azaltımı; yatırımcı açısından temkinli bir sinyal."))
                         elif _abs < 5.0:
                             ai_score = 7.3 if _alim else 2.8
-                            _pl = ("güçlü içeriden ALIM" if _alim else "güçlü pay SATIM — kayda değer")
+                            ai_summary = ai_summary or (
+                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
+                                + ("Güçlü içeriden alım — kayda değer bir güven göstergesi, fiyat destekleyici olabilir."
+                                   if _alim else "Güçlü satış — kayda değer bir pozisyon azaltımı; arz baskısı yaratabilir, olumsuz sinyal."))
                         else:
                             ai_score = 7.8 if _alim else 2.3
-                            _pl = ("çok güçlü içeriden ALIM (>%5)" if _alim else "çok güçlü pay SATIM (>%5)")
+                            ai_summary = ai_summary or (
+                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} gibi yüksek bir oranda {_fiil}{_now_s}. "
+                                + ("Çok güçlü içeriden alım — büyük ölçekli güven sinyali, fiyat üzerinde olumlu etki potansiyeli."
+                                   if _alim else "Çok güçlü satış — büyük ölçekli çıkış; ciddi arz baskısı ve güven kaybı sinyali, olumsuz."))
                     else:
-                        ai_score = 5.0; _pl = "pay alım-satım bildirimi"
-                    ai_summary = ai_summary or f"{ticker} — {_pl}."
+                        ai_score = 5.0
+                        ai_summary = ai_summary or (
+                            f"{_party}, {ticker} paylarında alım-satım işlemi gerçekleştirdi. "
+                            "İşlem ölçeği netleşmediğinden fiyata doğrudan etki beklenmez.")
                 else:
                     ai_score = 5.0
                     ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
