@@ -1275,14 +1275,16 @@ PROSEDUR ADIMLARI (HER ZAMAN NOTR 5.0):
     nitelige donusturulmesi" VEYA "borsada satisa konu edilmesi" / "pay satis bilgi
     formu onaylanmasi" → bu paylar ARTIK PIYASADA SATILABILIR hale gelir = EK ARZ
     BASKISI, retail icin NEGATIF (mevcut ortak satis hazirligi sinyali).
-    Cikarilmis sermayeye oran (%) baz alinir (lot/nominal ve % EKTE verilir, OKU):
-      ≥ %5   → 3.5-4.0 (ciddi arz baskisi)
-      %1-5   → 4.0-4.5 (orta)
-      < %1   → 4.5-5.0 (kucuk/sinirli)
+    Cikarilmis sermayeye oran (%) baz alinir (lot/nominal ve % EKTE verilir, OKU).
+    ESIK DUSUK — kucuk oranda bile NEGATIF (mevcut ortak satis hazirligi sinyali):
+      ≥ %3   → 3.2-3.6 (ciddi arz baskisi)
+      %1-3   → 3.6-4.2 (belirgin)
+      %0.3-1 → 4.2-4.6 (orta-kucuk, yine hafif negatif)
+      < %0.3 → 4.6-4.9 (cok kucuk, sinirli negatif)
     KRITIK: "Ek'te aciklama var, somut bilgi yok, rutin → 5.0" DEME. EK'teki orani/lot'u
-    oku ve ona gore puanla. Bu temettu/bedelsiz gibi POZITIF DEGILDIR.
+    oku ve ona gore puanla. Bu temettu/bedelsiz gibi POZITIF DEGILDIR; en fazla 4.9'a kadar.
     Ornek: "%5'e tekabul eden 10M TL nominal B Grubu payin borsada islem goren nitelige
-    donusturulmesi/satisa konu edilmesi" → 3.5-4.0 (ciddi arz, negatif).
+    donusturulmesi/satisa konu edilmesi" → 3.3-3.5 (ciddi arz, negatif).
 
   PAY GERI ALIMI:
     Program duyurusu / ilk buyuk alim             → POZITIF (gerçek değer)
