@@ -36,6 +36,71 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════
+# DUPLICATE MERGE — güvenlik ağı (birden çok işleyici/scraper aynı
+# sermaye artırımı için ayrı satır açabiliyor: YKK stub + SPK onaylı vb).
+# Aynı (ticker, type) için AÇIK (terminal olmayan) kayıtları tek satırda
+# birleştirir: en İLERİ aşamayı tutar, eksik tarih/oran/url'leri katlar,
+# diğerlerini siler. Günlük job + her KAP işleme sonrası çağrılır.
+# ═══════════════════════════════════════════════════════════════════
+
+_STATUS_RANK = {
+    "tamamlandi": 5, "dagitiliyor": 4, "tarih_belli": 3,
+    "spk_onayli": 2, "ykk_alindi": 1,
+}
+_MERGE_DATE_COLS = ("ykk_date", "spk_approval_date", "distribution_date")
+_MERGE_FOLD_COLS = (
+    "percentage", "amount_tl", "bedelli_pct", "bedelsiz_pct", "tahsisli_pct",
+    "bolunme_sonrasi_sermaye_tl", "company_name",
+    "ykk_date", "ykk_kap_disclosure_id", "ykk_kap_url",
+    "spk_approval_date", "spk_approval_kap_disclosure_id", "spk_approval_kap_url",
+    "distribution_date", "distribution_kap_disclosure_id", "distribution_kap_url",
+)
+
+
+async def merge_duplicate_capital_increases(db: AsyncSession) -> int:
+    """Aynı (ticker, type) açık sermaye artırımı kayıtlarını tek satırda birleştir.
+
+    Döner: silinen (merge edilen) satır sayısı.
+    """
+    from collections import defaultdict
+    stmt = select(CapitalIncrease).where(
+        CapitalIncrease.status.notin_(["tamamlandi", "reddedildi"])
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    groups: dict[tuple, list] = defaultdict(list)
+    for r in rows:
+        groups[(r.ticker, r.type)].append(r)
+
+    deleted = 0
+    for _key, grp in groups.items():
+        if len(grp) < 2:
+            continue
+
+        def _score(r):
+            ndates = sum(1 for c in _MERGE_DATE_COLS if getattr(r, c) is not None)
+            return (_STATUS_RANK.get(r.status, 0), ndates, r.id or 0)
+
+        grp.sort(key=_score, reverse=True)
+        primary, others = grp[0], grp[1:]
+        # Eksik alanları diğerlerinden katla (primary boşsa doldur)
+        for o in others:
+            for f in _MERGE_FOLD_COLS:
+                pv = getattr(primary, f, None)
+                ov = getattr(o, f, None)
+                if (pv is None or pv == "") and ov not in (None, ""):
+                    setattr(primary, f, ov)
+        for o in others:
+            await db.delete(o)
+            deleted += 1
+        logger.info("Capital merge: %s/%s — tut #%s (%s), sil %s",
+                    primary.ticker, primary.type, primary.id, primary.status,
+                    [o.id for o in others])
+    if deleted:
+        await db.flush()
+    return deleted
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Fast title-pattern siniflandirici (AI cagirilmadan once filtre)
 # ═══════════════════════════════════════════════════════════════════
 

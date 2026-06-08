@@ -3803,11 +3803,21 @@ async def _calendar_status_updater_job():
     try:
         from datetime import date as _date
         from sqlalchemy import select as _sel
-        from app.services.capital_increase_processor import update_distribution_statuses
+        from app.services.capital_increase_processor import (
+            update_distribution_statuses, merge_duplicate_capital_increases,
+        )
         from app.services.dividend_calendar_processor import update_payment_statuses
         async with async_session() as db:
             cap_updated = await update_distribution_statuses(db)
             div_updated = await update_payment_statuses(db)
+            # Duplicate sermaye artırımı kayıtlarını birleştir (güvenlik ağı —
+            # birden çok işleyici aynı olay için ayrı satır açabiliyor)
+            try:
+                _merged = await merge_duplicate_capital_increases(db)
+                if _merged:
+                    logger.info("Sermaye artırımı duplicate merge: %d satır birleştirildi", _merged)
+            except Exception as _me:
+                logger.warning("Capital merge hatası: %s", _me)
             await db.commit()
         # Tedbirli — LIFT MANTIĞI: end_date'ten sonraki ilk işlem günü 10:00'da kalkar.
         # 09:00'da çalışsa bile sadece gerçekten kalkmış olanları pasifler (now>=lift).
