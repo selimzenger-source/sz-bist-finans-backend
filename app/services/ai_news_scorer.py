@@ -1463,36 +1463,34 @@ PARTNER PRESTIJ BONUSU:
   + Sektor lideri yerli sirket        → +0.2
   + Kamu (devlet kurumlari)           → +0.2 (genelde garantili odeme)
 
-SHARE BUYBACK (Pay Geri Alimi) — TL TUTARI BAZINDA SCALE:
+SHARE BUYBACK (Pay Geri Alimi) — O GUNKU ISLEM TUTARI BAZINDA SCALE:
 
-KRITIK FORMUL: alim_tutari = ortalama_fiyat × geri_alinan_pay_adedi
-Genelde KAP bildiriminde fiyat aralik olarak verilir (orn: 12.50 - 13.20).
-Ortalama_fiyat = (min + max) / 2. Adet de bildirimde olur.
+⚠️ EN KRITIK KURAL — GUNLUK vs PROGRAM TOPLAMI:
+KAP bildiriminde GENELDE iki tutar olur:
+  (a) O GUN alinan pay (gunluk islem) — SKOR BUNA GORE verilir.
+  (b) "Program kapsaminda BUGUNE KADAR alinan TOPLAM" / "toplam nominal" — BU KUMULATIF,
+      skorlamada KULLANILMAZ. Asla program toplamini o gunku alim sanip skoru sisirme!
+Ornek tuzak: "Bugun ~0.5M TL alindi, programda toplam 42.9M TL'ye ulasildi" → skor 0.5M'e
+gore = 5.0-5.5 NOTR. 42.9M'ye gore DEGIL. Gunluk tutar belirsizse NOTR (5.0-5.5) ver.
 
-PUAN TABLOSU:
-  <500 bin TL    → 5.0-5.3 (sembolik — gostermelik geri alim, fiyat etkisi yok)
-  500K-1M TL     → 5.3-5.5 (cok kucuk — Notr+)
-  1-5M TL        → 5.5-6.0 (kucuk — Notr-Hafif olumlu sinir)
-  5-10M TL       → 6.0-6.5 (hafif olumlu — kullanicinin tarifi)
-  10-25M TL      → 6.5-7.0 (olumlu — kullanicinin tarifi)
-  25-50M TL      → 7.0-7.5 (ciddi olumlu — kullanicinin tarifi)
-  50-100M TL     → 7.5-8.0 (cok pozitif — kullanicinin tarifi)
-  100-250M TL    → 8.0-8.5 (mega — fiyata destek garantili)
-  >250M TL       → 8.5-9.0 (devasa — manset olur)
+KRITIK FORMUL: gunluk_tutar = ortalama_fiyat × O GUN geri alinan pay adedi.
 
-MODIFIER'LAR:
-  + Toplam programin ilk hareketi → +0.0 (sade tutar)
-  + Programin son turlari, program tamamlandi → +0.2 (kararlilik sinyali)
-  + Ortalama fiyat son 30 gun TAVANINDA → +0.2 (yonetim "hisse pahali olmasina ragmen aliyor" sinyali)
-  + Ortalama fiyat son 30 gun TABANINDA → -0.1 (sadece "ucuz yerden topla" rutini)
-  + Fiyat araliginda fitiklilik (cok dar) → +0.1 (kararli, profesyonelce yapilmis)
-  + Cok sik gunluk alim (5+ gun ust uste) → +0.2
+PUAN TABLOSU (o GUNKU islem tutari):
+  < 1M TL        → 5.0   (sembolik — rutin gunluk islem, fiyat etkisi yok, NOTR)
+  1M - 50M TL    → 5.5   (rutin program islemi — NOTR+, "yari olumlu" renk, pozitif DEGIL)
+  50M - 150M TL  → 6.4   (buyuk gunluk alim — Hafif Olumlu)
+  150M - 500M TL → 7.2   (cok buyuk — Olumlu)
+  500M - 1B TL   → 7.8   (devasa — Olumlu/Cok Olumlu sinir)
+  > 1B TL        → 8.3   (Cok Olumlu — guclu sirket guveni)
 
-ORNEK 1: Sirket 5 TL fiyatla 100.000 lot aldi → tutar = 500K TL → 5.1 (sembolik)
-ORNEK 2: Sirket 8.5 TL fiyatla 1M lot aldi → tutar = 8.5M TL → 6.2 (hafif olumlu)
-ORNEK 3: Sirket 12 TL fiyatla 1.5M lot aldi → tutar = 18M TL → 6.7 (olumlu)
-ORNEK 4: Sirket 25 TL fiyatla 1.5M lot aldi → tutar = 37.5M TL → 7.3 (ciddi olumlu)
-ORNEK 5: Sirket 50 TL fiyatla 2M lot aldi → tutar = 100M TL → 8.0 (cok pozitif)
+KURAL: Rutin/orta olcekli gunluk geri alimlar NOTR kalir (kullanici istegi). Sadece
+o GUN 50M TL ustu alim "olumlu" sayilir. Suphe varsa NOTR ver, sisirme.
+
+ORNEK 1: Bugun 5 TL × 100.000 lot = 500K TL (programda toplam 42.9M) → 5.0 (NOTR, sembolik)
+ORNEK 2: Bugun 8.5 TL × 1M lot = 8.5M TL → 5.5 (NOTR+, rutin)
+ORNEK 3: Bugun 25 TL × 1.5M lot = 37.5M TL → 5.5 (NOTR+, henuz "cok buyuk" degil)
+ORNEK 4: Bugun 50 TL × 2M lot = 100M TL → 6.4 (Hafif Olumlu — buyuk gunluk alim)
+ORNEK 5: Bugun 40 TL × 5M lot = 200M TL → 7.2 (Olumlu — cok buyuk)
 
 POZITIF EVENT KUTUPHANESI (Sektoreller — etki tahmini icin rehber):
 
@@ -1954,15 +1952,15 @@ Body: "Sirketimiz XYZE Holding ile 5M TL'lik tedarik anlasmasi imzalamistir"
 Context: "OZSERMAYESI: 10 milyar TL"
 → {{"score": 6.0, "category": "strateji", "summary": "5M TL'lik tedarik anlasmasi 10B TL ozsermaye ile karsilastirildiginda %0.05 — sembolik nitelikte. Yeni musteri kazanmak yine de pozitif sinyal olarak degerlendirilir (en az hafif olumlu).", "hashtags": ["sozlesme"]}}
 
-Ex.25 (PAY GERI ALIM — 15M TL):
+Ex.25 (PAY GERI ALIM — gunluk 15M, programda toplam 42.9M):
 Title: "Pay Geri Alim Programi Kapsaminda Islemler"
-Body: "Sirketimiz 25 TL ortalama fiyatla 600.000 lot pay geri almistir"
-→ {{"score": 6.7, "category": "finansal", "summary": "15M TL'lik pay geri alimi (25 TL × 600K lot) — orta buyuklukte yatirim. Yonetimin hisseyi degerli gordugunu ve mevcut fiyat seviyesinde alici oldugunu gosterir; orta-vade fiyat destekleyici.", "hashtags": ["paygerialim"]}}
+Body: "Sirketimiz bugun 25 TL ortalama fiyatla 600.000 lot pay geri almistir. Program kapsaminda toplam nominal 42.9M TL'ye ulasilmistir."
+→ {{"score": 5.5, "category": "finansal", "summary": "Bugun ~15M TL'lik pay geri alimi (25 TL × 600K lot). Onceden duyurulan geri alim programinin rutin gunluk islemi; tek basina buyuk fiyat etkisi yaratacak olcekte degil. (Programdaki 42.9M kumulatif toplamdir, gunluk alim degil.)", "hashtags": ["paygerialim"]}}
 
-Ex.26 (PAY GERI ALIM — 500K TL sembolik):
+Ex.26 (PAY GERI ALIM — gunluk 500K sembolik):
 Title: "Pay Geri Alim Programi Kapsaminda Islemler"
-Body: "Sirketimiz 5 TL ortalama fiyatla 100.000 lot pay geri almistir"
-→ {{"score": 5.1, "category": "finansal", "summary": "500K TL'lik kucuk geri alim (5 TL × 100K lot) — sembolik islem. Buyuk olcekte fiyat etkisi yaratacak buyuklukte degildir; geri alim programinin rutin gunluk uygulamasi.", "hashtags": ["paygerialim"]}}
+Body: "Sirketimiz bugun 5 TL ortalama fiyatla 100.000 lot pay geri almistir"
+→ {{"score": 5.0, "category": "finansal", "summary": "Bugun 500K TL'lik kucuk geri alim (5 TL × 100K lot) — sembolik islem. Buyuk olcekte fiyat etkisi yaratacak buyuklukte degildir; geri alim programinin rutin gunluk uygulamasi.", "hashtags": ["paygerialim"]}}
 
 Ex.27 (ARGE MERKEZI):
 Title: "Arge Merkezi Kurulmasi"

@@ -1292,29 +1292,31 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as ai_err:
                     logger.warning("AI puanlama hatasi (%s): %s", ticker, ai_err)
 
-                # ★ BUYBACK FALLBACK: AI score None/dusukse buyback parsed
-                # data'sindan deterministik skor + standart ozet uret. Buyback'ler
-                # KAP form yapisindan tutar cikarilabilir oldugu icin AI'a guvenmek
-                # zorunda degiliz — TL tutarina gore esik bazli skor daha guvenli.
+                # ★ BUYBACK SKORU — DAİMA deterministik (GÜNLÜK tutar bazlı).
+                # KRİTİK: AI, KAP metnindeki PROGRAM TOPLAMI'nı (ör. GOKNR 42.9M)
+                # o günkü alımmış gibi okuyup skoru şişiriyordu → bildirim "6.2 Hafif
+                # Olumlu" gidiyor ama app feed Nötr 5.0 gösteriyordu (tutarsızlık).
+                # Buyback'lerde o GÜNKÜ işlem tutarı KAP formundan kesin parse edilir;
+                # AI'a güvenmeyip her zaman günlük-tutar eşiğine göre skor + özet ver.
+                # Böylece bildirim ile app feed AYNI olur; rutin/küçük alımlar Nötr kalır.
                 try:
                     _bb_parsed = (session.info or {}).get("last_buyback_parsed") if hasattr(session, 'info') else None
                     _bb_ticker = (session.info or {}).get("last_buyback_ticker") if hasattr(session, 'info') else None
                     if _bb_parsed and _bb_ticker and _bb_ticker == (ticker or "").upper():
-                        if (ai_score is None) or (ai_summary is None) or (ai_score < 5.0):
-                            from app.services.buyback_processor import buyback_score_and_summary
-                            fb_score, fb_summary = buyback_score_and_summary(_bb_parsed, ticker)
-                            ai_score = fb_score
-                            ai_summary = fb_summary
-                            ai_hashtags = ai_hashtags or ["paygerialim"]
-                            logger.info(
-                                "Buyback fallback skor: %s — total_tl=%s -> skor=%.1f",
-                                ticker, _bb_parsed.get("total_tl"), fb_score,
-                            )
+                        from app.services.buyback_processor import buyback_score_and_summary
+                        fb_score, fb_summary = buyback_score_and_summary(_bb_parsed, ticker)
+                        logger.info(
+                            "Buyback deterministik skor: %s — gunluk total_tl=%s, AI=%s -> skor=%.1f (override)",
+                            ticker, _bb_parsed.get("total_tl"), ai_score, fb_score,
+                        )
+                        ai_score = fb_score
+                        ai_summary = fb_summary
+                        ai_hashtags = ai_hashtags or ["paygerialim"]
                         # tek seferlik kullan, temizle
                         session.info.pop("last_buyback_parsed", None)
                         session.info.pop("last_buyback_ticker", None)
                 except Exception as _bb_fb_err:
-                    logger.warning("Buyback fallback hata (%s): %s", ticker, _bb_fb_err)
+                    logger.warning("Buyback skor override hata (%s): %s", ticker, _bb_fb_err)
 
             # ── GARANTİ SKOR — hiçbir öğe puansız (bare kart) kalmasın ──
             # Pay alım-satım / seans-dışı gibi AI dalına girmeyen tipler ai_score=None

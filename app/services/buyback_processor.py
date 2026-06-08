@@ -254,15 +254,18 @@ async def process_buyback(
 
 
 def buyback_score_and_summary(parsed: dict, ticker: str) -> tuple[float, str]:
-    """Buyback TL tutarina gore deterministik skor + standart ozet uret.
+    """Buyback o GÜNKÜ işlem TL tutarina gore deterministik skor + standart ozet.
+
+    NOT: tutar = o günkü işlem (program TOPLAMI değil). Kullanıcı kuralı: rutin geri
+    alım NÖTR kalsın (yarı olumlu renk), yalnızca ÇOK BÜYÜK günlük alım pozitif olsun.
 
     Esikler:
-      < 1M TL       -> 5.0  (sembolik, Notr)
-      1M - 10M TL   -> 5.5  (gostermelik, Notr)
-      10M - 50M TL  -> 6.3  (Hafif Olumlu)
-      50M - 200M TL -> 7.0  (Olumlu)
-      200M - 1B TL  -> 7.8  (Olumlu/Cok Olumlu sinir)
-      > 1B TL       -> 8.3  (Cok Olumlu — sirket guveni)
+      < 1M TL        -> 5.0  (sembolik, Notr)
+      1M - 50M TL    -> 5.5  (rutin program işlemi — Notr+, yarı olumlu renk)
+      50M - 150M TL  -> 6.4  (büyük günlük alım — Hafif Olumlu)
+      150M - 500M TL -> 7.2  (çok büyük — Olumlu)
+      500M - 1B TL   -> 7.8  (devasa — Olumlu/Çok Olumlu sınır)
+      > 1B TL        -> 8.3  (Cok Olumlu — guclu sirket guveni)
     """
     total_tl = parsed.get("total_tl") or 0
     lot = parsed.get("lot") or 0
@@ -270,18 +273,18 @@ def buyback_score_and_summary(parsed: dict, ticker: str) -> tuple[float, str]:
     if total_tl < 1_000_000:
         score = 5.0
         tier = "sembolik"
-    elif total_tl < 10_000_000:
-        score = 5.5
-        tier = "gostermelik"
     elif total_tl < 50_000_000:
-        score = 6.3
-        tier = "anlamli"
-    elif total_tl < 200_000_000:
-        score = 7.0
+        score = 5.5
+        tier = "rutin"
+    elif total_tl < 150_000_000:
+        score = 6.4
         tier = "buyuk"
+    elif total_tl < 500_000_000:
+        score = 7.2
+        tier = "cok_buyuk"
     elif total_tl < 1_000_000_000:
         score = 7.8
-        tier = "cok_buyuk"
+        tier = "devasa"
     else:
         score = 8.3
         tier = "guclu_guven"
