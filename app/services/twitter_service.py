@@ -2330,13 +2330,22 @@ def tweet_kap_news(
         _has_cat = bool(clean_kw and clean_kw != "Yeni KAP Bildirimi")
         import re as _re_first
         _full_sum = (ai_summary or "").strip()
-        # İlk cümleyi al (sayı içindeki noktada bölme: 97.042.071,00)
-        _m_first = _re_first.search(r'^(.*?[.!?])(?:\s+[A-ZÇŞĞÜÖİ0-9]|$)', _full_sum, _re_first.DOTALL)
-        _headline = (_m_first.group(1).strip() if _m_first else _full_sum).strip()
+        # İLK CÜMLE (manşet) — cümlelere böl, ardından SAYI/SIRA noktasında yapılan
+        # yanlış bölmeleri birleştir: "Sulaması 1." / "262.525.620,00" / "13." gibi
+        # parçalar gerçek cümle sonu DEĞİLDİR, devamıyla birleştirilir.
+        _sents0 = [s.strip() for s in
+                   _re_first.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9])', _full_sum) if s.strip()]
+        _merged0 = []
+        for _s in _sents0:
+            if _merged0 and _re_first.search(r'(?:\d|No|Md|md|Nr)[.,]$', _merged0[-1]):
+                _merged0[-1] = _merged0[-1] + " " + _s
+            else:
+                _merged0.append(_s)
+        _headline = (_merged0[0] if _merged0 else _full_sum).strip()
         if not _headline:
             _headline = clean_kw if _has_cat else "Yeni KAP bildirimi."
-        if len(_headline) > 280:
-            _headline = _headline[:280].rsplit(" ", 1)[0] + "…"
+        if len(_headline) > 320:
+            _headline = _headline[:320].rsplit(" ", 1)[0] + "…"
         _header = f"{emoji} #{ticker} · {clean_kw}" if _has_cat else f"{emoji} #{ticker}"
         text = (
             f"{_header}\n\n"

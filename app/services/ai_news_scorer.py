@@ -1872,6 +1872,10 @@ Topics: temettu, bedelsiz, sermayeartirimi, karaciklamasi, ihale, sozlesme, orta
 
 ═══ CRITICAL RULES ═══
 • NO HALLUCINATION: Use only information present in the disclosure text. NEVER fabricate.
+• SIRKET ADI — UYDURMA: Sirketi bildirimde GECEN tam unvaniyla an. Adindan EMIN
+  DEGILSEN sadece TICKER kullan (orn "#BORLS" / "BORLS"). YANLIS sirket adi yazma
+  (orn BORLS icin "Borusan Lojistik" gibi farkli/yanlis holding-istirak adi YASAK).
+  Suphede: ticker yeterli.
 • ANTI-NEUTRAL CLUSTERING: Avoid 4.5-5.5 cluster. Differentiate every disclosure.
 • SCALE PROPERLY: 100M$ contract ≠ 1M$ contract. Always calibrate by absolute amount.
 • NO HEDGING: Don't say "Olumlu/Olumsuz olabilir". Be decisive.
