@@ -1514,6 +1514,166 @@ def _fmt_capital(val) -> str:
         return str(val)
 
 
+def generate_kap_news_image(
+    ticker: str, company_name: Optional[str], sentiment: str,
+    ai_score: Optional[float], ai_summary: Optional[str],
+    category: Optional[str] = None,
+) -> Optional[str]:
+    """KAP haberi için dinamik görsel: POZİTİF/NEGATİF KAP BİLDİRİMİ banner header +
+    #TICKER + AI puanı + AI yorumu. (En sık atılan tweet — banner başlık, altında içerik.)
+    """
+    import os as _os
+    import tempfile as _tf
+    from datetime import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        _tz = _ZI("Europe/Istanbul")
+    except Exception:
+        _tz = None
+    try:
+        is_pos = (sentiment or "").lower() != "negative"
+        accent = (102, 187, 106) if is_pos else (239, 83, 80)
+        _IMG = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "static", "img")
+        banner_file = "kap_bildirim.png" if is_pos else "kap_bildirim_negatif.png"
+        banner_path = _os.path.join(_IMG, banner_file)
+
+        W, PAD = 1080, 48
+        # Header banner — tam genişlik, boy oranlı (gerekirse küçültülür)
+        head_h = 0
+        banner_img = None
+        if _os.path.exists(banner_path):
+            try:
+                b = Image.open(banner_path).convert("RGB")
+                head_h = int(W * b.height / b.width)
+                head_h = min(head_h, 470)  # boy sınırı — fazla yer kaplamasın
+                banner_img = b.resize((W, int(W * b.height / b.width)), Image.LANCZOS)
+                if banner_img.height > head_h:
+                    top = (banner_img.height - head_h) // 2
+                    banner_img = banner_img.crop((0, top, W, top + head_h))
+            except Exception:
+                banner_img = None
+                head_h = 0
+
+        f_tk = _load_font(58, bold=True)
+        f_comp = _load_font(26, bold=False)
+        f_score = _load_font(40, bold=True)
+        f_tier = _load_font(26, bold=True)
+        f_cat = _load_font(24, bold=True)
+        f_body = _load_font(30, bold=False)
+        f_time = _load_font(22, bold=False)
+
+        d0 = ImageDraw.Draw(Image.new("RGB", (8, 8)))
+
+        # AI yorumu kelime-sar
+        def _wrap(text, font, maxw):
+            words = (text or "").split()
+            lines, cur = [], ""
+            for w in words:
+                test = (cur + " " + w).strip()
+                if d0.textlength(test, font=font) <= maxw:
+                    cur = test
+                else:
+                    if cur:
+                        lines.append(cur)
+                    cur = w
+            if cur:
+                lines.append(cur)
+            return lines
+
+        body_maxw = W - 2 * PAD
+        summary = (ai_summary or "").strip()
+        if len(summary) > 600:
+            summary = summary[:600].rsplit(" ", 1)[0] + "…"
+        body_lines = _wrap(summary, f_body, body_maxw)[:9]
+        line_h = 42
+
+        # Tier etiketi
+        sc = ai_score if ai_score is not None else 5.0
+        if sc >= 8:
+            tier = "Çok Olumlu"
+        elif sc >= 6.5:
+            tier = "Olumlu"
+        elif sc >= 5.5:
+            tier = "Hafif Olumlu"
+        elif sc >= 4.5:
+            tier = "Nötr"
+        elif sc >= 3.5:
+            tier = "Hafif Olumsuz"
+        elif sc >= 2.5:
+            tier = "Olumsuz"
+        else:
+            tier = "Çok Olumsuz"
+        tier_color = accent if sc >= 4.5 else (239, 83, 80)
+        if 4.5 <= sc < 5.5:
+            tier_color = (170, 178, 190)  # nötr gri
+
+        # Yükseklik hesabı
+        content_top = head_h + 36
+        y = content_top
+        y += 62          # ticker
+        y += 30          # company
+        y += 16
+        y += 70          # score+tier kutusu
+        y += 24
+        if category:
+            y += 38
+        y += len(body_lines) * line_h
+        y += 30
+        footer_h = 90
+        H = y + footer_h
+
+        img = Image.new("RGB", (W, H), BG_COLOR)
+        d = ImageDraw.Draw(img)
+        if banner_img is not None:
+            img.paste(banner_img, (0, 0))
+        else:
+            # banner yoksa renkli başlık şeridi
+            d.rectangle([(0, 0), (W, 150)], fill=HEADER_BG)
+            d.text((PAD, 50), ("POZİTİF KAP BİLDİRİMİ" if is_pos else "NEGATİF KAP BİLDİRİMİ"),
+                   font=_load_font(44, bold=True), fill=accent)
+            head_h = 150
+
+        yy = content_top
+        # Ticker + saat
+        d.text((PAD, yy), f"#{(ticker or '').upper()}", font=f_tk, fill=accent)
+        _now = _dt.now(_tz).strftime("%d.%m.%Y %H:%M") if _tz else ""
+        if _now:
+            tw = d.textlength(_now, font=f_time)
+            d.text((W - PAD - tw, yy + 22), _now, font=f_time, fill=GRAY)
+        yy += 62
+        if company_name:
+            d.text((PAD, yy), company_name[:60], font=f_comp, fill=GRAY)
+        yy += 30 + 16
+
+        # AI Puanı + tier kutusu
+        box_w = W - 2 * PAD
+        d.rounded_rectangle([(PAD, yy), (PAD + box_w, yy + 70)], radius=12,
+                            fill=(24, 24, 40), outline=tier_color, width=2)
+        d.text((PAD + 20, yy + 16), f"AI Puanı: {sc:.1f}/10", font=f_score, fill=WHITE)
+        tlw = d.textlength(tier, font=f_tier)
+        d.text((PAD + box_w - 20 - tlw, yy + 22), tier, font=f_tier, fill=tier_color)
+        yy += 70 + 24
+
+        if category:
+            d.text((PAD, yy), f"📁 {category}", font=f_cat, fill=GOLD)
+            yy += 38
+
+        for ln in body_lines:
+            d.text((PAD, yy), ln, font=f_body, fill=(225, 228, 234))
+            yy += line_h
+
+        _draw_bg_watermark(img, W, H)
+        draw_brand_footer(d, img, W, H, center=True)
+        out = _os.path.join(_tf.gettempdir(),
+                            f"kap_news_{(ticker or 'X').upper()}_{_dt.now(_tz).strftime('%Y%m%d%H%M%S') if _tz else 'x'}.png")
+        img.save(out, "PNG", optimize=True)
+        logger.info("KAP haber görseli üretildi: %s", out)
+        return out
+    except Exception as e:
+        logger.exception("KAP haber görsel hatası: %s", e)
+        return None
+
+
 def generate_spk_onay_image(approvals: list, bulletin_no: str) -> Optional[str]:
     """SPK halka arz onayları için özel görsel oluşturur.
 

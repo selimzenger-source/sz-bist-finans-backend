@@ -2230,6 +2230,19 @@ def tweet_kap_news(
         if not clean_kw or "BULUNAMADI" in clean_kw.upper() or clean_kw == ticker:
             clean_kw = "Yeni KAP Bildirimi"
 
+        # ── DİNAMİK GÖRSEL: POZİTİF/NEGATİF KAP BİLDİRİMİ banner header + AI Puanı +
+        # AI yorumu + özet (en sık atılan tweet). Üretilemezse statik banner'a düşer. ──
+        try:
+            from app.services.chart_image_generator import generate_kap_news_image
+            _dyn_img = generate_kap_news_image(
+                ticker, None, sentiment, ai_score, ai_summary,
+                clean_kw if clean_kw and clean_kw != "Yeni KAP Bildirimi" else None,
+            )
+            if _dyn_img:
+                img_path = _dyn_img
+        except Exception as _gimg:
+            logger.warning("KAP dinamik görsel hatası (%s): %s", ticker, _gimg)
+
         # AI skoru emojisi
         if ai_score and ai_score >= 8:
             score_emoji = "🔥"
@@ -2311,49 +2324,17 @@ def tweet_kap_news(
         # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
         _category_line = f"📁 {clean_kw}" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
 
-        text = (
-            f"{_opening}\n"
-            + (f"\n{_category_line}\n" if _category_line else "")
-            + f"{ai_section}"
-            f"{kap_section}\n"
-            f"{cta_text}\n"
-            f"\n"
-            f"#KAP #BorsaIstanbul{extra_hashtags}"
+        # ── TWEET METNİ — özet + cümle içi #TICKER & #KAP (X kuralı: 2 hashtag, yığın YOK).
+        # AI Puanı + yorum + banner ZATEN görselde. Metinde haberin ÖZETİ doğal cümleyle. ──
+        _summary_txt = (ai_summary or "").strip() or (
+            clean_kw if clean_kw and clean_kw != "Yeni KAP Bildirimi" else "Yeni KAP bildirimi."
         )
-
-        # Blue Tick 4000 karakter limiti — AI ozeti ile birlikte sigmazsa kirp
-        if len(text) > 3800:
-            # AI ozeti yariya indir
-            ai_section_mid = ""
-            if ai_score is not None:
-                ai_section_mid = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
-            if ai_summary:
-                short_sum = ai_summary[:250] + ("..." if len(ai_summary) > 250 else "")
-                ai_section_mid += f"\n💬 {short_sum}\n"
-            text = (
-                f"{_opening}\n"
-                + (f"\n{_category_line}\n" if _category_line else "")
-                + f"{ai_section_mid}"
-                f"{kap_section}\n"
-                f"{cta_text}\n"
-                f"\n"
-                f"#KAP #BorsaIstanbul{extra_hashtags}"
-            )
-
-        # Hala cok uzunsa: sadece skor, ozet yok
-        if len(text) > 3800:
-            ai_section_short = ""
-            if ai_score is not None:
-                ai_section_short = f"\n{score_emoji} AI Puanı: {ai_score:.1f}/10\n"
-            text = (
-                f"{_opening}\n"
-                + (f"\n{_category_line}\n" if _category_line else "")
-                + f"{ai_section_short}"
-                f"{kap_section}\n"
-                f"{cta_text}\n"
-                f"\n"
-                f"#KAP #BorsaIstanbul{extra_hashtags}"
-            )
+        if len(_summary_txt) > 3500:
+            _summary_txt = _summary_txt[:3500].rsplit(" ", 1)[0] + "…"
+        text = (
+            f"{emoji} #{ticker} hissesinde #KAP'a iletilen bildirime göre 👇\n\n"
+            f"{_summary_txt}"
+        )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
         # force_send=True ile TWITTER_AUTO_SEND'den bagimsiz direkt atar
