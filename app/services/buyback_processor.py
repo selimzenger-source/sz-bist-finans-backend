@@ -42,6 +42,34 @@ def is_buyback(title: str) -> bool:
     return any(p in t for p in _BUYBACK_TITLE_PATTERNS)
 
 
+# YENİ PROGRAM DUYURUSU (karar) sinyalleri — gunluk islem DEGIL.
+# Yeni geri alim programi baslatilmasi/karari POZITIF (sirket guveni); gunluk
+# rutin alimlar Notr. Bu ayrim icin program-karar ifadeleri aranir.
+_PROGRAM_KEYWORDS = [
+    "geri alım programı başlat", "geri alim programi baslat",
+    "programın başlatıl", "programin baslatil",
+    "geri alım programı hakkında", "geri alim programi hakkinda",
+    "geri alım programı kabul", "geri alim programi kabul",
+    "geri alım programı onay", "geri alim programi onay",
+    "geri alım programı oluştur", "geri alim programi olustur",
+    "geri alım programının", "geri alim programinin",
+    "azami", "üst limit", "ust limit", "tutara kadar", "tl'ye kadar",
+    "adede kadar", "program süresi", "program suresi", "geri alıma ilişkin karar",
+]
+
+
+def is_buyback_program(title: str, body: str | None = None) -> bool:
+    """YENİ geri alım PROGRAMI duyurusu/kararı mı? (günlük işlem değil → POZITIF olabilir).
+
+    Günlük işlem: "DD.MM.YYYY tarihinde ... adet pay geri alındı" (parse edilir, Notr).
+    Program kararı: "azami N pay / X TL'ye kadar geri alım programı başlatılması" → POZITIF.
+    """
+    t = lower_tr(((title or "") + " " + (body or "")))
+    has_program = any(k in t for k in _PROGRAM_KEYWORDS)
+    has_daily = bool(re.search(r"\d{1,2}\.\d{1,2}\.\d{4}\s*(?:\([^)]*\))?\s*tarihinde", t))
+    return has_program and not has_daily
+
+
 # Pattern 1 (klasik): "DD.MM.YYYY (bugün) tarihinde ... pay başına X TL – Y TL ... toplam N adet pay geri alın"
 _TODAY_RE = re.compile(
     r"(\d{1,2}\.\d{1,2}\.\d{4})\s*(?:\([^)]*\))?\s*tarihinde[^.]*?"

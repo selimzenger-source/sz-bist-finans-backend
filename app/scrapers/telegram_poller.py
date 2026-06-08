@@ -1300,10 +1300,14 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 # AI'a güvenmeyip her zaman günlük-tutar eşiğine göre skor + özet ver.
                 # Böylece bildirim ile app feed AYNI olur; rutin/küçük alımlar Nötr kalır.
                 try:
-                    from app.services.buyback_processor import is_buyback as _isbb, buyback_score_and_summary
+                    from app.services.buyback_processor import (
+                        is_buyback as _isbb, is_buyback_program as _isbbprog,
+                        buyback_score_and_summary,
+                    )
                     _bb_parsed = (session.info or {}).get("last_buyback_parsed") if hasattr(session, 'info') else None
                     _bb_ticker = (session.info or {}).get("last_buyback_ticker") if hasattr(session, 'info') else None
                     if _bb_parsed and _bb_ticker and _bb_ticker == (ticker or "").upper():
+                        # GÜNLÜK İŞLEM (lot/fiyat parse edildi) → deterministik Nötr-civari skor.
                         fb_score, fb_summary = buyback_score_and_summary(_bb_parsed, ticker)
                         logger.info(
                             "Buyback deterministik skor: %s — gunluk total_tl=%s, AI=%s -> skor=%.1f (override)",
@@ -1312,14 +1316,17 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         ai_score = fb_score
                         ai_summary = fb_summary
                         ai_hashtags = ai_hashtags or ["paygerialim"]
-                        # tek seferlik kullan, temizle
                         session.info.pop("last_buyback_parsed", None)
                         session.info.pop("last_buyback_ticker", None)
                     elif _isbb(news_title or title or ""):
-                        # Buyback ama günlük tutar PARSE EDİLEMEDİ → AI'ın (program toplamını
-                        # şişiren) skoruna GÜVENME. Pozitif push gitmesin diye Nötr'e çek.
-                        if ai_score is None or ai_score > 5.5:
-                            logger.info("Buyback parse fail (%s): AI skor %s -> 5.5 Nötr (cap)", ticker, ai_score)
+                        if _isbbprog(news_title or title or "", text or ""):
+                            # YENİ GERİ ALIM PROGRAMI duyurusu (karar) → AI skoruna DOKUNMA
+                            # (program başlatılması gerçek pozitif: şirket güveni sinyali).
+                            logger.info("Buyback PROGRAM duyurusu (%s): AI skor %s korunuyor (pozitif olabilir)", ticker, ai_score)
+                        elif ai_score is None or ai_score > 5.5:
+                            # Günlük işlem ama tutar parse edilemedi → AI'ın şişmiş skoruna
+                            # güvenme, Nötr'e çek (pozitif push gitmesin).
+                            logger.info("Buyback gunluk parse fail (%s): AI skor %s -> 5.5 Nötr (cap)", ticker, ai_score)
                             ai_score = 5.5
                             ai_summary = ai_summary or (
                                 f"{ticker} pay geri alım programı kapsamında günlük işlem bildirimi. "
