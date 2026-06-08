@@ -2324,18 +2324,24 @@ def tweet_kap_news(
         # Kategori kelimesini opening'in altinda goster — bos satir ile ayir
         _category_line = f"📁 {clean_kw}" if clean_kw and clean_kw != "Yeni KAP Bildirimi" else ""
 
-        # ── TWEET METNİ — başlık (#TICKER · kategori) + özet + #KAP kapanış cümlesi.
-        # X kuralı: 2 hashtag (#TICKER ve #KAP), ikisi de cümle/başlık içinde; yığın YOK.
-        # AI Puanı + yorum + banner ZATEN görselde; metinde haberin ÖZETİ doğal cümleyle.
+        # ── TWEET METNİ — KISA: başlık (#TICKER · kategori) + SADECE İLK CÜMLE (manşet)
+        # + #KAP kapanış. UZUN YORUM/ÖZET GÖRSELDE (puan + tam yorum). X kuralı: 2 hashtag
+        # (#TICKER & #KAP) cümle içinde, yığın YOK. Metin kısa = daha çok okunur/etkileşim.
         _has_cat = bool(clean_kw and clean_kw != "Yeni KAP Bildirimi")
-        _summary_txt = (ai_summary or "").strip() or (clean_kw if _has_cat else "Yeni KAP bildirimi.")
-        if len(_summary_txt) > 3400:
-            _summary_txt = _summary_txt[:3400].rsplit(" ", 1)[0] + "…"
+        import re as _re_first
+        _full_sum = (ai_summary or "").strip()
+        # İlk cümleyi al (sayı içindeki noktada bölme: 97.042.071,00)
+        _m_first = _re_first.search(r'^(.*?[.!?])(?:\s+[A-ZÇŞĞÜÖİ0-9]|$)', _full_sum, _re_first.DOTALL)
+        _headline = (_m_first.group(1).strip() if _m_first else _full_sum).strip()
+        if not _headline:
+            _headline = clean_kw if _has_cat else "Yeni KAP bildirimi."
+        if len(_headline) > 280:
+            _headline = _headline[:280].rsplit(" ", 1)[0] + "…"
         _header = f"{emoji} #{ticker} · {clean_kw}" if _has_cat else f"{emoji} #{ticker}"
         text = (
             f"{_header}\n\n"
-            f"{_summary_txt}\n\n"
-            f"#KAP'a iletilen bildirimde paylaşıldı."
+            f"{_headline}\n\n"
+            f"📊 AI puanı + detaylı yorum görselde · #KAP bildirimi"
         )
 
         # KAP haberleri anlik bildirim — kuyrukta beklemesi anlamsiz
