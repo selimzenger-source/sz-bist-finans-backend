@@ -3805,29 +3805,19 @@ async def _calendar_status_updater_job():
         from sqlalchemy import select as _sel
         from app.services.capital_increase_processor import update_distribution_statuses
         from app.services.dividend_calendar_processor import update_payment_statuses
-        from app.models.cautious_stock import CautiousStock
         async with async_session() as db:
             cap_updated = await update_distribution_statuses(db)
             div_updated = await update_payment_statuses(db)
-
-            # Tedbirli — bitenler is_active=False
-            today = _date.today()
-            stmt = _sel(CautiousStock).where(
-                CautiousStock.is_active == True,
-                CautiousStock.end_date.isnot(None),
-                CautiousStock.end_date < today,
-            )
-            expired = (await db.execute(stmt)).scalars().all()
-            for r in expired:
-                r.is_active = False
-            cautious_updated = len(expired)
-
             await db.commit()
-            if cap_updated or div_updated or cautious_updated:
-                logger.info(
-                    "Takvim durum guncelleme: sermaye=%d, temettu=%d, tedbirli_bitti=%d",
-                    cap_updated, div_updated, cautious_updated,
-                )
+        # Tedbirli — LIFT MANTIĞI: end_date'ten sonraki ilk işlem günü 10:00'da kalkar.
+        # 09:00'da çalışsa bile sadece gerçekten kalkmış olanları pasifler (now>=lift).
+        from app.scrapers.bist_tedbir_csv_scraper import deactivate_lifted_cautious
+        cautious_updated = (await deactivate_lifted_cautious()).get("deactivated", 0)
+        if cap_updated or div_updated or cautious_updated:
+            logger.info(
+                "Takvim durum guncelleme: sermaye=%d, temettu=%d, tedbirli_bitti=%d",
+                cap_updated, div_updated, cautious_updated,
+            )
     except Exception as e:
         logger.error("Takvim durum guncelleme hatasi: %s", e)
 
@@ -4787,6 +4777,32 @@ def _setup_scheduler_impl():
         misfire_grace_time=600,
     )
     logger.info("BIST resmi tedbirli CSV scheduler: her 30dk aktif")
+
+    # 7f-bis2. Tedbir LIFT (kalkış) — TR 10:05 seans açılışından hemen sonra.
+    # end_date'ten sonraki ilk işlem günü 10:00'da engel kalkar; bu job o anda
+    # is_active=False yapıp "Bitenler"e taşır (AYCES vb. 10:00'da düşsün).
+    async def _bist_tedbir_lift():
+        try:
+            from app.scrapers.bist_tedbir_csv_scraper import deactivate_lifted_cautious
+            from app.utils.bist_holidays import is_trading_day, _now_tr
+            if not is_trading_day(_now_tr().date()):
+                return  # tatil/hafta sonu — borsa kapalı
+            stats = await deactivate_lifted_cautious()
+            logger.info("Tedbir lift job (TR 10:05): %s", stats)
+        except Exception as e:
+            logger.error("Tedbir lift job hatasi: %s", e)
+
+    scheduler.add_job(
+        _bist_tedbir_lift,
+        CronTrigger(hour=7, minute=5),  # UTC 07:05 = TR 10:05 (seans açılışı 10:00 sonrası)
+        id="bist_tedbir_lift",
+        name="Tedbir kalkış (lift) — TR 10:05",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+    )
+    logger.info("Tedbir lift job: TR 10:05 aktif")
 
     # 7f-tris. BIST hisse pazar segmenti CSV sync — gunde 1x, gece 02:00 TR
     # Kaynak: https://borsaistanbul.com/datum/hisse_endeks_ds.csv

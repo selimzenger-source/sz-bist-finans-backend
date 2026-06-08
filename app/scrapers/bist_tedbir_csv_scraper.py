@@ -271,6 +271,32 @@ async def sync_bist_tedbir() -> dict:
     return stats
 
 
+async def deactivate_lifted_cautious() -> dict:
+    """Engeli KALKMIŞ tedbirleri is_active=False yapar (Bitenler'e geçer).
+
+    LIFT MANTIĞI: tedbir, end_date'ten sonraki ilk İŞLEM GÜNÜ seans açılışında
+    (~10:00, tatil/hafta sonu atlanır) kalkar. now >= lift_datetime olanlar pasiflenir.
+    Bu işi seans açılışından hemen sonra (TR 10:05) çalıştır → AYCES gibi hisseler
+    10:00'da DB'de de 'Bitenler'e düşer.
+    """
+    from app.utils.bist_holidays import tedbir_lift_datetime, _now_tr
+    now = _now_tr()
+    changed = 0
+    async with async_session() as db:
+        rows = (await db.execute(
+            select(CautiousStock).where(CautiousStock.is_active == True)
+        )).scalars().all()
+        for r in rows:
+            lift_dt = tedbir_lift_datetime(r.end_date)
+            if lift_dt is not None and now >= lift_dt:
+                r.is_active = False
+                changed += 1
+        await db.commit()
+    if changed:
+        logger.info("Tedbir lift: %d hisse engeli kalkti -> Bitenler", changed)
+    return {"deactivated": changed}
+
+
 # Geriye uyumluluk: mevcut halkarz_tedbirli_scraper.sync_to_db ile ayni isim
 async def sync_to_db() -> dict:
     return await sync_bist_tedbir()
