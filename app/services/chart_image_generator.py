@@ -1702,9 +1702,14 @@ def generate_kap_news_image(
         _tint = tuple(int(c * 0.22 + 20) for c in tier_color)  # koyu accent tonu
         d.rounded_rectangle([(PAD, yy), (PAD + box_w, yy + 76)], radius=14,
                             fill=_tint, outline=tier_color, width=4)
-        d.text((PAD + 22, yy + 18), f"AI Puanı: {sc:.1f}/10", font=f_score, fill=WHITE)
+        # Koyu tonlu zeminde okunur PARLAK puan rengi (kırmızı/yeşil tier'a göre)
+        _bright = tuple(int(c + (255 - c) * 0.50) for c in tier_color)
+        _lbl = "AI Puanı: "
+        d.text((PAD + 22, yy + 18), _lbl, font=f_score, fill=WHITE)
+        _lw = d.textlength(_lbl, font=f_score)
+        d.text((PAD + 22 + _lw, yy + 18), f"{sc:.1f}/10", font=f_score, fill=_bright)
         tlw = d.textlength(tier, font=f_tier)
-        d.text((PAD + box_w - 22 - tlw, yy + 24), tier, font=f_tier, fill=WHITE)
+        d.text((PAD + box_w - 22 - tlw, yy + 24), tier, font=f_tier, fill=_bright)
         yy += 76 + 24
 
         if category:
