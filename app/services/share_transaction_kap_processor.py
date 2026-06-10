@@ -520,43 +520,72 @@ async def process_kap_disclosure(
     await db.flush()
     logger.info("ShareTx: yeni (%s, %s, %s)", ticker, transaction_type, party_name[:30])
 
-    # ── FEED SKORU: içeriden alım/satım → hafif sinyal ──
-    # Detay ekteyken feed skoru kapak notundan nötr (5.0) kalıyordu. Yön belliyse:
-    # içeriden SATIŞ → hafif olumsuz (~4.0), içeriden ALIŞ → hafif olumlu (~6.3).
-    # SADECE garanti-nötr (5.0) skoru override eder.
+    # ── FEED SKORU: içeriden alım/satım → DETERMİNİSTİK skor senkronu ──
+    # İKİ BUG FIX (TABGD %6 satış 6.8 Hafif Olumlu görünüyordu):
+    # 1) Eski kod `transaction_type == "satici"` arıyordu ama kayıtlar "satis"/
+    #    "alis" — satış else-dalına düşüp ALIM sayılıyordu.
+    # 2) Sadece 4.8-5.2 (nötr) bandı override ediliyordu — AI satışa 6.8 verdiyse
+    #    dokunulmuyordu. Artık parse yönü + oran değişimi belliyse skor HER ZAMAN
+    #    telegram_poller ile aynı deterministik banda çekilir; AI özeti yön ile
+    #    tutarlıysa korunur (rakamlı/iyi AI özetini silmeyiz), skor/etiket düzelir.
     if disclosure_id:
         try:
             from app.models.kap_all_disclosure import KapAllDisclosure
+            from app.utils.ai_score_label import score_to_label as _s2l
             disc = await db.get(KapAllDisclosure, disclosure_id)
             _cur = float(disc.ai_impact_score) if (disc and disc.ai_impact_score is not None) else None
-            if disc is not None and _cur is not None and 4.8 <= _cur <= 5.2:
-                _who = party_name if party_name and party_name != "?" else "Ortak/yönetici"
-                _role = parsed.get("party_role")
-                _who_full = f"{_who}" + (f" ({_role})" if _role else "")
-                _nom = parsed.get("nominal_lot")
-                _oran = parsed.get("pay_orani_pct")
-                _det = []
-                if _nom:
-                    _det.append(f"{_nom:,.0f} TL nominal".replace(",", "."))
-                if _oran is not None:
-                    _det.append(f"pay oranı %{_oran}")
-                _det_s = (" — " + ", ".join(_det)) if _det else ""
-                if transaction_type == "satici":
-                    disc.ai_impact_score = 4.0
-                    disc.ai_sentiment = "Hafif Olumsuz"
-                    disc.ai_summary = (
-                        f"{ticker} — İçeriden pay SATIŞI: {_who_full} hisse sattı{_det_s}. "
-                        "İçeriden satış, yatırımcı açısından zayıf/temkinli bir sinyaldir."
-                    )
+            _is_sell = (transaction_type or "").lower().startswith("sat")  # satis/satici/satım
+            _chg = parsed.get("pay_orani_change_pct")
+            if disc is not None:
+                # Hedef skor: oran değişimi varsa poller bantları; yoksa yön bazlı default
+                if _chg is not None:
+                    _a = abs(float(_chg))
+                    if _a < 0.3:
+                        _target = 5.0
+                    elif _a < 1.0:
+                        _target = 4.0 if _is_sell else 6.3
+                    elif _a < 3.0:
+                        _target = 3.5 if _is_sell else 6.8
+                    elif _a < 5.0:
+                        _target = 2.8 if _is_sell else 7.3
+                    else:
+                        _target = 2.3 if _is_sell else 7.8
                 else:
-                    disc.ai_impact_score = 6.3
-                    disc.ai_sentiment = "Hafif Olumlu"
-                    disc.ai_summary = (
-                        f"{ticker} — İçeriden pay ALIMI: {_who_full} hisse aldı{_det_s}. "
-                        "İçeriden alım, şirkete güven sinyali olarak olumlu değerlendirilir."
+                    _target = 4.0 if _is_sell else 6.3
+                # Skor yön ile çelişiyorsa veya nötrde kalmışsa hedefe çek.
+                # (Yön DOĞRU ve makul banttaysa AI skoruna dokunma.)
+                _conflict = (
+                    _cur is None
+                    or (4.8 <= _cur <= 5.2 and _target != 5.0)
+                    or (_is_sell and _cur > 5.2 and _target < 5.0)
+                    or ((not _is_sell) and _cur < 4.8 and _target > 5.0)
+                )
+                if _conflict and abs((_cur or 5.0) - _target) >= 0.1:
+                    _old = _cur
+                    disc.ai_impact_score = _target
+                    disc.ai_sentiment = _s2l(_target) or disc.ai_sentiment
+                    logger.info(
+                        "ShareTx feed skor senkron (%s): %s -> %.1f (%s, chg=%s)",
+                        ticker, _old, _target, transaction_type, _chg,
                     )
-                logger.info("ShareTx feed skor senkron (%s): 5.0 -> %.1f (%s)",
-                            ticker, disc.ai_impact_score, transaction_type)
+                # Özet boş/nötr-kapaksa tam cümleli deterministik özet yaz
+                if not (disc.ai_summary or "").strip() or "ekte yer al" in (disc.ai_summary or "").lower():
+                    _who = party_name if party_name and party_name != "?" else "Önemli bir pay sahibi"
+                    _role = parsed.get("party_role")
+                    _who_full = f"{_who}" + (f" ({_role})" if _role else "")
+                    _oran = parsed.get("pay_orani_pct")
+                    _chg_s = (f"%{abs(float(_chg)):.2f}".replace(".", ",") + " oranında ") if _chg is not None else ""
+                    _now_s = (f"; toplam payı %{_oran}".replace(".", ",") + " seviyesine geldi") if _oran is not None else ""
+                    if _is_sell:
+                        disc.ai_summary = (
+                            f"{_who_full}, {ticker} sermayesindeki payını {_chg_s}azalttı{_now_s}. "
+                            "İçeriden satış, yatırımcı açısından temkinli bir sinyaldir; ölçeğine göre arz baskısı yaratabilir."
+                        )
+                    else:
+                        disc.ai_summary = (
+                            f"{_who_full}, {ticker} sermayesindeki payını {_chg_s}artırdı{_now_s}. "
+                            "İçeriden alım, şirkete güven sinyali olarak olumlu değerlendirilir."
+                        )
         except Exception as _fe:
             logger.debug("ShareTx feed skor senkron hata (%s): %s", ticker, _fe)
 

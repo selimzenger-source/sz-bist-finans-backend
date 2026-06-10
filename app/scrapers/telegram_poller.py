@@ -1646,7 +1646,25 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                         _tk_score = ai_score
                         _tk_summary = ai_summary
                         _tk_sentiment = ka_sentiment
-                        if _multi_opposed:
+                        # ── ÇOK-ŞİRKETLİ LİSTE DUYURULARI (SPK işlem yasağı vb.) ──
+                        # "SPK İşlem Yasağı Nedeniyle Pay Duyurusu" tek bildirimde 10+
+                        # şirketi listeler; her şirketin dönüştürülen nominal tutarı EK
+                        # tablodadır ve birbirinden ÇOK farklıdır (bazısında 1 lot bile yok).
+                        # Primary analiz (örn DERHL'in 1.5M TL'si) diğer 13 şirkete aynen
+                        # kopyalanıyordu. Kural: bu kategoride her ticker'a RAKAMSIZ,
+                        # şirkete-özel NÖTR şablon yazılır — yanlış şirket verisi yazılmaz.
+                        _title_low_pt = (ka_title or "").lower().replace("̇", "")
+                        if ("işlem yasağı" in _title_low_pt or "islem yasag" in _title_low_pt) and len(all_tickers) >= 2:
+                            _tk_score = 5.0
+                            _tk_sentiment = "Nötr"
+                            _tk_summary = (
+                                f"SPK kararı doğrultusunda, işlem yasağı getirilen yatırımcılara ait {_tk} "
+                                "payları MKK tarafından borsada işlem görmeyen statüye dönüştürüldü. Bu, şirket "
+                                "faaliyetleriyle ilgili olmayan teknik/idari bir işlemdir; dönüştürülen tutar "
+                                "şirketten şirkete farklılık gösterir (şirkete özel tutar KAP ekindedir). "
+                                "Fiyat üzerinde doğrudan etki beklenmez."
+                            )
+                        elif _multi_opposed:
                             try:
                                 from app.services.ai_news_scorer import analyze_news as _an_pt
                                 _anchor = (
