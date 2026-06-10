@@ -1154,6 +1154,52 @@ async def run_gedik_scraper(
         return RedirectResponse(url=f"/admin/?error=Gedik hatasi: {str(e)[:100]}", status_code=303)
 
 
+@router.post("/run-scraper/spk-bulten")
+async def run_spk_bulten_scraper(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """SPK Bulten monitorunu admin panelden manuel tetikle.
+
+    Yeni bulten varsa tam akisi calistirir (IPO + analiz + tweet + push).
+    PDF bos/hazir degilse bulten islenmis sayilmaz — durum mesajda gosterilir,
+    sonraki tetiklemede (manuel veya scheduler) otomatik yeniden denenir.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    try:
+        from app.scrapers.spk_bulletin_scraper import (
+            check_spk_bulletins, SCRAPER_STATE_KEY, EMPTY_PDF_RETRY_KEY,
+        )
+        await check_spk_bulletins()
+
+        # Durum raporu — son islenen bulten + varsa bekleyen PDF retry
+        from app.models.scraper_state import ScraperState
+        res = await db.execute(
+            select(ScraperState).where(ScraperState.key == SCRAPER_STATE_KEY)
+        )
+        st = res.scalar_one_or_none()
+        last_no = st.value if st and st.value else "?"
+
+        res2 = await db.execute(
+            select(ScraperState).where(ScraperState.key == EMPTY_PDF_RETRY_KEY)
+        )
+        rt = res2.scalar_one_or_none()
+        if rt and rt.value:
+            summary = (
+                f"SPK Bülten taraması bitti — DİKKAT: {rt.value.split(':')[0]} PDF'i henüz "
+                f"okunamadı (deneme {rt.value.split(':')[-1]}), tekrar deneyin. Son işlenen: {last_no}"
+            )
+        else:
+            summary = f"SPK Bülten taraması tamamlandı. Son işlenen bülten: {last_no}"
+
+        return RedirectResponse(url=f"/admin/?success={summary}", status_code=303)
+    except Exception as e:
+        logger.error(f"Admin: SPK Bulten scraper tetikleme hatasi — {e}")
+        return RedirectResponse(url=f"/admin/?error=SPK Bülten hatası: {str(e)[:100]}", status_code=303)
+
+
 # -------------------------------------------------------
 # TWEET KUYRUGU — Bekleyen Tweetler
 # -------------------------------------------------------

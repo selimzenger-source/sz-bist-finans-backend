@@ -588,6 +588,60 @@ async def _save_last_bulletin_no(db, bulletin_no: tuple[int, int]):
         db.add(state)
 
 
+# Bos PDF retry takibi — SPK linki PDF'ten once yayinlayabiliyor.
+# Yogun saatte monitor her 1 dk calisir → 30 deneme ≈ 30 dk.
+EMPTY_PDF_MAX_RETRY = 30
+EMPTY_PDF_RETRY_KEY = "spk_empty_pdf_retry"
+
+
+async def _bump_empty_pdf_retry(db, bno_str: str) -> int:
+    """Bos PDF deneme sayacini artirir, guncel sayiyi dondurur.
+
+    Sayac ScraperState'te "2026/36:3" formatinda tutulur — farkli bir
+    bulten gelirse sayac o bulten icin 1'den baslar.
+    """
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    result = await db.execute(
+        select(ScraperState).where(ScraperState.key == EMPTY_PDF_RETRY_KEY)
+    )
+    state = result.scalar_one_or_none()
+    count = 1
+    if state and state.value:
+        try:
+            prev_bno, prev_count = state.value.rsplit(":", 1)
+            if prev_bno == bno_str:
+                count = int(prev_count) + 1
+        except ValueError:
+            pass
+    if state:
+        state.value = f"{bno_str}:{count}"
+        state.updated_at = datetime.utcnow()
+    else:
+        db.add(ScraperState(key=EMPTY_PDF_RETRY_KEY, value=f"{bno_str}:{count}"))
+    await db.commit()
+    return count
+
+
+async def _clear_empty_pdf_retry(db):
+    """Basarili parse sonrasi retry sayacini sifirlar."""
+    from sqlalchemy import select
+    from app.models.scraper_state import ScraperState
+
+    try:
+        result = await db.execute(
+            select(ScraperState).where(ScraperState.key == EMPTY_PDF_RETRY_KEY)
+        )
+        state = result.scalar_one_or_none()
+        if state and state.value:
+            state.value = ""
+            state.updated_at = datetime.utcnow()
+            await db.commit()
+    except Exception as _clr_err:
+        logger.warning("SPK retry sayaci temizlenemedi: %s", _clr_err)
+
+
 # -------------------------------------------------------
 # Scheduler Entrypoint
 # -------------------------------------------------------
@@ -691,6 +745,63 @@ async def _check_spk_bulletins_inner():
                 bno = bulletin["bulletin_no"]
                 bno_str_val = bulletin_no_str(*bno)
 
+                # ★ ONCE PDF'i indir + parse et. SPK bazen linki PDF'ten once
+                # yayinliyor (2026/36 vakasi) — icerik yoksa bulteni ISLENMIS
+                # SAYMA, push da ATMA; sonraki calismada otomatik yeniden dene.
+                approvals, full_bulletin_text = await scraper.process_bulletin(
+                    bulletin["pdf_url"], bno,
+                )
+
+                if not approvals and not full_bulletin_text:
+                    retry_count = await _bump_empty_pdf_retry(db, bno_str_val)
+                    if retry_count < EMPTY_PDF_MAX_RETRY:
+                        logger.warning(
+                            "SPK bulten %s: PDF bos/okunamadi — bulten no KAYDEDILMEDI, "
+                            "sonraki calismada yeniden denenecek (deneme %d/%d)",
+                            bno_str_val, retry_count, EMPTY_PDF_MAX_RETRY,
+                        )
+                        if retry_count == 1:
+                            try:
+                                from app.services.admin_telegram import send_admin_telegram
+                                await send_admin_telegram(
+                                    f"⏳ SPK Bülteni {bno_str_val}: PDF henüz hazır değil/boş — "
+                                    f"otomatik yeniden denenecek (max {EMPTY_PDF_MAX_RETRY} deneme)."
+                                )
+                            except Exception:
+                                pass
+                        # Watermark sirasi bozulmasin diye bu run'daki sonraki
+                        # bultenleri de isleme — hepsi sonraki calismada ele alinir.
+                        break
+                    else:
+                        logger.error(
+                            "SPK bulten %s: PDF %d denemede de okunamadi — vazgecildi, "
+                            "islenmis sayiliyor (push/tweet atilmadi, manuel kontrol gerekli)",
+                            bno_str_val, EMPTY_PDF_MAX_RETRY,
+                        )
+                        try:
+                            from app.services.admin_telegram import notify_scraper_error
+                            await notify_scraper_error(
+                                "SPK Bulten Monitor",
+                                f"Bülten {bno_str_val} PDF'i {EMPTY_PDF_MAX_RETRY} denemede "
+                                f"okunamadı — admin panelden manuel tetikleme gerekli",
+                            )
+                        except Exception:
+                            pass
+                        if highest_no is None or is_newer(bno, highest_no):
+                            highest_no = bno
+                            try:
+                                await _save_last_bulletin_no(db, highest_no)
+                                await db.commit()
+                            except Exception as _save_err:
+                                logger.error(
+                                    "SPK bulten no kaydedilemedi: %s - %s",
+                                    bulletin_no_str(*highest_no), _save_err,
+                                )
+                        continue
+
+                # Icerik OK — retry sayacini temizle
+                await _clear_empty_pdf_retry(db)
+
                 # ★ CRITICAL FIX: Bulten numarasini HEMEN, herhangi bir tweet/push'tan
                 # ONCE kaydet. Boylece scraper crash/restart olursa veya bir asama
                 # patlarsa, bir sonraki run AYNI BULTENI TEKRAR ISLEMEZ.
@@ -709,10 +820,6 @@ async def _check_spk_bulletins_inner():
                             "SPK bulten no kaydedilemedi: %s - %s",
                             bulletin_no_str(*highest_no), _save_err,
                         )
-
-                approvals, full_bulletin_text = await scraper.process_bulletin(
-                    bulletin["pdf_url"], bno,
-                )
 
                 # Bu bultendeki yeni IPO'lari topla — sonra tek tweet atilacak
                 new_ipos_this_bulletin = []
