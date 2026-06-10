@@ -2348,9 +2348,13 @@ NOTLAR:
         # pozitif özet skorsuz kalıp sonra 5.0 Nötr'e düşüyordu (FORTE örneği).
         # Artık özet varsa, skor None olsa bile 5.0 tabanından guardrail'e sokulur →
         # özet pozitifse 6.2'ye, negatifse 3.8'e oturur. Skor da özet de yoksa None kalır.
-        if content and (score is not None or (summary and summary.strip())):
+        # ÖNEMLİ FIX 2 (VSNMD örneği): `if content and ...` koşulu, TradingView/KAP
+        # içerik fetch'i başarısız olup content=None geldiğinde guardrail'i TAMAMEN
+        # atlıyordu → AI "hafif olumlu" özet + 5.0 Nötr skor çelişkisi düzeltilmeden
+        # kalıyordu. content yoksa "" ile çağır — özet-framing kontrolü yine çalışır.
+        if score is not None or (summary and summary.strip()):
             _base = score if score is not None else 5.0
-            score = _validate_score_against_content(_base, content, ticker, ai_summary=summary)
+            score = _validate_score_against_content(_base, content or "", ticker, ai_summary=summary)
 
         # ─── TEKRAR EDEN BILDIRIM DAMPER (STRICT) ───
         # Ayni ticker icin son 30 gunde ayni konuda yuksek skor verilmisse,
@@ -2800,7 +2804,26 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "stratejik karar içermem", "stratejik bir karar içermem",
         "rutin bir parça", "bilgilendirme niteliğinde",
     )
-    if summary_lower and any(p in summary_lower for p in NEUTRAL_OVERRIDE_PATTERNS):
+    # _neutral_hit: ozet "etki beklenmez/rutin" tarzi NOTR kanit iceriyor.
+    # KRITIK: bu flag asagidaki FRAMING LIFT/PULL bloklarini da devre disi birakir.
+    # Onceden 4.0<skor<5.5 bandinda neutral hit hicbir sey yapmadan gecip
+    # pos-framing lift'ine dusuyordu → "pozitif etki BEKLENMEMEKTEDIR" diyen
+    # ozet 6.2'ye kalkiyordu (KAREL/PKART/MGROS yanlis-lift ornekleri).
+    _neutral_hit = bool(summary_lower and any(p in summary_lower for p in NEUTRAL_OVERRIDE_PATTERNS))
+    # ISTISNA: ozet acik VERDIKT veriyorsa ("hafif olumlu/olumsuz olarak
+    # degerlendiril...") neutral kaniti ezer — VSNMD tarzi "kisa vadede etki
+    # beklenmese de ... hafif olumlu" ozetlerde framing duzeltmesi CALISMALI.
+    _explicit_verdict = bool(summary_lower and any(k in summary_lower for k in (
+        "hafif olumlu", "hafif olumsuz", "hafif pozitif", "hafif negatif",
+        "olumlu olarak değerlendiril", "olumsuz olarak değerlendiril",
+        "olumlu değerlendiril", "olumsuz değerlendiril",
+        "olumlu olarak yorumlan", "olumsuz olarak yorumlan",
+        "olumlu algılanabilir", "olumsuz algılanabilir",
+        "olumlu bir gelişme", "olumsuz bir gelişme",
+        "olumlu bir adım", "olumsuz bir adım",
+        "olumlu sinyal", "olumsuz sinyal", "pozitif sinyal", "negatif sinyal",
+    )))
+    if _neutral_hit and not _explicit_verdict:
         # Eger skor zaten 5.0 civariysa dokunma; 6.0+ ise 5.0'a CEK
         if score >= 5.5:
             logger.info(
@@ -2855,7 +2878,9 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # AI bazen yorumu pozitif yazıp puanı 5.0 nötr veriyor (PASEU, LMKDC örnekleri).
     # Özet pozitif framing içeriyorsa skor en az 6.2 (Hafif Olumlu), negatif framing
     # içeriyorsa en fazla 3.8 (Olumsuz) olmalı.
-    if summary_lower:
+    # NOT: neutral kanit var ve acik verdikt yoksa framing duzeltmesi YAPILMAZ —
+    # "pozitif/negatif etki beklenmemektedir" tarzi ozetler lift/pull tetiklemesin.
+    if summary_lower and not (_neutral_hit and not _explicit_verdict):
         pos_framing = [
             "stratejik adım", "stratejik karar", "stratejik bir adım", "stratejik bir karar",
             "ana işine odaklan", "ana faaliyete odaklan", "ana iş alanına",
@@ -2943,14 +2968,28 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         # NOT: "beklenmektedir"/"bekleniyor" (POZİTİF form) bilerek HARİÇ — sadece
         # "beklenmez/beklenmemekte/beklenmiyor" negatif formlari yakalanir.
         _pos_negated = len(_vr.findall(
-            r"(?:olumlu|pozitif)[^.;,!?]{0,40}?(?:"
+            r"(?:olumlu|pozitif)[^.;,!?]{0,60}?(?:"
             r"beklenm[ei]z|beklenmemekte|beklenmiyor|"
             r"etkisi yok|etki yok|etkisi bulunma|etki bulunma|"
             r"olmaz|olmamakta|taşımaz|tasimaz|içermez|icermez|sağlamaz|saglamaz|"
+            r"yaratmaz|yaratmamakta|yaratması beklenm|yaratmasi beklenm|"
             r"d[ei]ğil)",
             summary_lower,
         ))
         _pos_v = max(0, _pos_v - _pos_negated)
+        # Ayni negasyon kontrolu NEGATIF kelimeler icin de (SMRVA/OZRDN fix):
+        # "pozitif veya NEGATIF etki yaratmasi BEKLENMEMEKTEDIR" naif sayacta
+        # "negatif"i sayip skoru 3.8'e cekiyordu — negasyonlu "negatif" sayilmaz.
+        _neg_negated = len(_vr.findall(
+            r"(?:olumsuz|negatif)[^.;,!?]{0,60}?(?:"
+            r"beklenm[ei]z|beklenmemekte|beklenmiyor|"
+            r"etkisi yok|etki yok|etkisi bulunma|etki bulunma|"
+            r"olmaz|olmamakta|taşımaz|tasimaz|içermez|icermez|"
+            r"yaratmaz|yaratmamakta|yaratması beklenm|yaratmasi beklenm|"
+            r"d[ei]ğil)",
+            summary_lower,
+        ))
+        _neg_v = max(0, _neg_v - _neg_negated)
         if _pos_v > _neg_v:
             has_pos_framing = True
         elif _neg_v > _pos_v:
@@ -2983,8 +3022,15 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 )
             has_pos_framing = False
 
+        # BUYBACK ISTISNASI: rutin pay geri alim ozetleri ("geri alim ... olumlu
+        # etki yaratmasi beklenmektedir" klisesi) lift EDILMEZ — kullanici kurali:
+        # gunluk/rutin buyback Notr kalir, sadece YENI PROGRAM karari pozitif.
+        _is_buyback_summary = any(k in summary_lower for k in (
+            "geri alım", "geri alim", "geri alınan pay", "geri alinan pay",
+            "pay geri", "geri alım programı", "geri alim programi",
+        ))
         # Çelişkili framing varsa (hem pozitif hem negatif kelime) düzeltme yapma
-        if has_pos_framing and not has_neg_framing and score < 6.2:
+        if has_pos_framing and not has_neg_framing and score < 6.2 and not _is_buyback_summary:
             old = score
             score = 6.2
             logger.info(
