@@ -3932,17 +3932,16 @@ async def admin_set_app_version(
 @app.post("/api/v1/share-bilanco-tweet")
 @limiter.limit("10/minute")
 async def share_bilanco_tweet(request: Request, payload: dict = Body(...)):
-    """Web/admin bilanco kartini borsacebimde Twitter hesabindan paylas.
-
-    Body: {
-      "ticker": "MRGYO",
-      "period": "2025-Q4" | "2025/12" (gosterim icin),
-      "image_base64": "<PNG base64 — data URI prefix OPSIYONEL>"
-    }
-
-    PNG'i temp dosyaya yazar, _safe_tweet_with_media ile borsacebimde
-    Twitter'indan tweetler. force_send=True ile auto_send kontrolu bypass.
+    """KAPALI — guvenlik: bu endpoint AUTH'SUZ olarak borsacebimde resmi
+    Twitter hesabindan tweet atiyordu; herkese acik sitede herkes resmi
+    hesaptan paylasim yaptirabiliyordu. Web artik X Web Intent kullaniyor
+    (kullanici KENDI hesabindan paylasir). 410 Gone doner.
     """
+    raise HTTPException(
+        status_code=410,
+        detail="Bu endpoint kaldirildi — paylasim artik kullanicinin kendi X hesabindan yapilir.",
+    )
+    # ── Eski implementasyon (devre disi) ──────────────────────────────
     import base64 as _b64, os as _os, tempfile as _tf
     from app.services.twitter_service import _safe_tweet_with_media
 
