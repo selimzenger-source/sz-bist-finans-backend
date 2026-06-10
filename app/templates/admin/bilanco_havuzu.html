@@ -222,8 +222,8 @@
     <span class="text-base text-gray-400 font-normal">— {{ count }} şirket</span>
   </h1>
   <p class="text-sm text-gray-400">
-    Son açıklanan bilanço KAP'ları (Fintables tarzı). Paylaş butonu kartı PNG resim olarak indirir
-    — link/URL eklenmez, sadece görsel.
+    Son açıklanan bilanço KAP'ları (Fintables tarzı). "X'te Paylaş" kart görselini panonuza kopyalar
+    ve tweet taslağını <b>kendi X hesabınızda</b> açar — görseli Ctrl+V ile yapıştırıp paylaşın.
   </p>
 </div>
 
@@ -452,52 +452,62 @@ async function shareCard(ticker) {
   }
 }
 
+// X'te Paylaş — KULLANICININ KENDİ HESABINDAN (Web Intent).
+// Eskiden /admin/bilanco-havuzu/tweet'e POST edip BorsaCebimde hesabından
+// atıyordu — herkese açık sayfada kabul edilemez. Artık: kart görseli
+// panoya kopyalanır (+yedek olarak indirilir) ve X'in tweet taslağı
+// kullanıcının kendi hesabında açılır; görseli Ctrl+V ile yapıştırır.
 async function tweetCard(ticker, period) {
   const card = document.getElementById('card-' + ticker);
   if (!card) return;
   const btn = card.parentElement.querySelector('.x-btn');
 
-  // Metni önceden göster + onayla (yanlışlıkla atılmayı önle)
+  // Dönem: "2026-Q1" → "2026 1.Çeyrek"
   let perTxt = '';
   if (period) {
-    if (period.indexOf('-Q') > -1) { const p = period.split('-Q'); perTxt = p[0] + ' Q' + p[1] + ' '; }
+    if (period.indexOf('-Q') > -1) { const p = period.split('-Q'); perTxt = p[0] + ' ' + p[1] + '.Çeyrek '; }
     else perTxt = period.replace('-', ' ') + ' ';
   }
-  const preview =
-    '#' + ticker + ' ' + perTxt + 'sonuçlarını açıkladı 📊\n\n' +
-    'İşte finansal tablo özeti 👇\n\n' +
-    'Tüm bilançoları anlık takip etmek için uygulamamızı indirebilirsiniz 📲\n\n' +
-    '⚠️ Yatırım tavsiyesi değildir.\n\n' +
-    '#' + ticker + ' #bilanço #FAVÖK #BIST #borsaistanbul';
-  if (!confirm('Bu tweet X/Twitter\'a (herkese açık) görselle birlikte atılacak:\n\n' + preview + '\n\nGönderilsin mi?')) return;
+  const text =
+    '#' + ticker + ' ' + perTxt + 'bilançosunu açıkladı.. #bilanço 👇\n\n' +
+    '📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık uygulamamızda bulabilirsiniz...\n\n' +
+    '🔗 http://borsacebimde.com';
 
   btn.classList.add('loading');
-  btn.innerHTML = '<span>⏳</span> Görsel üretiliyor...';
+  btn.innerHTML = '<span>⏳</span> Görsel hazırlanıyor...';
   try {
     const canvas = await html2canvas(card, {
       backgroundColor: '#0F1A2E', scale: 2, logging: false, useCORS: true,
     });
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
-    btn.innerHTML = '<span>⏳</span> Gönderiliyor...';
-    const fd = new FormData();
-    fd.append('ticker', ticker);
-    fd.append('period', period || '');
-    fd.append('image', blob, 'bilanco-' + ticker + '.png');
-    const r = await fetch('/admin/bilanco-havuzu/tweet', { method: 'POST', body: fd });
-    const j = await r.json();
-    btn.classList.remove('loading');
-    if (j.ok) {
-      btn.innerHTML = '<span>✓</span> Atıldı';
-      setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 4000);
-    } else {
-      alert('Tweet atılamadı: ' + (j.error || 'bilinmeyen hata'));
-      btn.innerHTML = '<span>❌</span> Hata';
-      setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 3000);
+
+    // Görseli panoya kopyala (desteklenmiyorsa indir — kullanıcı tweete ekler)
+    let copied = false;
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        copied = true;
+      }
+    } catch (clipErr) { console.warn('Pano kopyalama desteklenmedi:', clipErr); }
+    if (!copied) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'bilanco-' + ticker + '.png';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     }
+
+    // X tweet taslağını KULLANICININ KENDİ hesabında aç
+    window.open('https://twitter.com/intent/tweet?text=' + encodeURIComponent(text),
+                '_blank', 'width=560,height=640');
+
+    btn.classList.remove('loading');
+    btn.innerHTML = copied ? '<span>✓</span> Görsel panoda — X\'te yapıştır (Ctrl+V)'
+                           : '<span>✓</span> Görsel indirildi — tweete ekle';
+    setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 6000);
   } catch (e) {
     console.error('Tweet error:', e);
     btn.classList.remove('loading');
-    alert('Hata: ' + e);
     btn.innerHTML = '<span>❌</span> Hata';
     setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 3000);
   }
