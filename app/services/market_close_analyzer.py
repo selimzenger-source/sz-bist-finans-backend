@@ -1197,7 +1197,14 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         logger.warning(f"Tavan supplementary hata: {e}")
                 tavan_images = generate_ceiling_floor_images(c_stats, is_ceiling=True, supplementary=tavan_supp)
                 if c_stats:
-                    tickers_str = " ".join([f"#{s.ticker}" for s in c_stats])
+                    # X algoritması: 3+ hashtag spam sayılır — ilk 2 ticker + "ve N hisse daha"
+                    if len(c_stats) > 2:
+                        tickers_str = (
+                            " ".join(f"#{s.ticker}" for s in c_stats[:2])
+                            + f" ve {len(c_stats) - 2} hisse daha görselde"
+                        )
+                    else:
+                        tickers_str = " ".join(f"#{s.ticker}" for s in c_stats)
                     tweet_text = (
                         f"📈 Günün TAVAN Yapan Hisseleri ve Sebepleri!\n\n"
                         f"Bugün {len(c_stats)} hisse tavan yaptı! Hangi şirketler neden uçuşa geçti? "
@@ -1248,7 +1255,14 @@ async def scrape_and_analyze_market_close(force: bool = False, analyze_only: boo
                         logger.warning(f"Taban supplementary hata: {e}")
                 taban_images = generate_ceiling_floor_images(fl_stats, is_ceiling=False, supplementary=taban_supp)
                 if fl_stats:
-                    tickers_str = " ".join([f"#{s.ticker}" for s in fl_stats])
+                    # X algoritması: 3+ hashtag spam sayılır — ilk 2 ticker + "ve N hisse daha"
+                    if len(fl_stats) > 2:
+                        tickers_str = (
+                            " ".join(f"#{s.ticker}" for s in fl_stats[:2])
+                            + f" ve {len(fl_stats) - 2} hisse daha görselde"
+                        )
+                    else:
+                        tickers_str = " ".join(f"#{s.ticker}" for s in fl_stats)
                     tweet_text = (
                         f"📉 Günün TABAN Yapan Hisseleri ve Sebepleri!\n\n"
                         f"Bugün {len(fl_stats)} hisse taban yaptı! Şirketler neden kan kaybetti? "

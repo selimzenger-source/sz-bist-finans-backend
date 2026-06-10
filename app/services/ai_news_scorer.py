@@ -2149,11 +2149,17 @@ HASHTAG KURALLARI:
   havacilik, perakende, celik, kimya, iletisim, savunmasanayi vb.
 
 SADECE asagidaki JSON formatinda yanit ver:
-{{"score": 7.3, "category": "finansal", "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}
+{{"verdict": "hafif_pozitif", "score": 7.3, "category": "finansal", "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}
 
 NOTLAR:
+- "verdict" ZORUNLU ve EN ONEMLI alan: ozetinin SON CUMLESINDEKI sonucla AYNI olmali.
+  Degerler: "guclu_pozitif" | "pozitif" | "hafif_pozitif" | "notr" | "hafif_negatif" | "negatif" | "guclu_negatif"
+  KURAL: Ozetinde "hafif olumlu" yaziyorsan verdict="hafif_pozitif" OLMAK ZORUNDA;
+  "olumsuz" yaziyorsan verdict negatif taraf OLMAK ZORUNDA. Verdict ile ozet ASLA celisemez.
+- "score" 1.0-10.0 arasi 0.1 hassasiyet — verdict bandiyla uyumlu olmali:
+  guclu_pozitif 8.0-10.0 · pozitif 6.8-7.9 · hafif_pozitif 6.0-6.7 · notr 4.5-5.9
+  hafif_negatif 3.8-4.4 · negatif 2.5-3.7 · guclu_negatif 1.0-2.4
 - "category" zorunlu: "finansal" / "strateji" / "bilgi" (system prompt'taki rehbere gore)
-- "score" 1.0-10.0 arasi 0.1 hassasiyet
 - "summary" 3-5 cumle Turkce, onemli rakamlari icermeli
 - "hashtags" 2-3 adet, # isareti olmadan, ticker tekrarlanmasin"""
 
@@ -2316,6 +2322,34 @@ NOTLAR:
         else:
             logger.warning("AI News Scorer: Gecersiz skor=%s (%s)", score, ticker)
             score = None
+
+        # ─── VERDICT KELEPÇESİ (skor-özet çelişkisinin KÖK ÇÖZÜMÜ) ───
+        # AI artık özetiyle AYNI üretimde sözel "verdict" döndürür; sayısal skor
+        # bu verdiktin bandına KELEPÇELENİR. Özet "hafif olumlu" deyip skor 5.0
+        # kalamaz — verdict=hafif_pozitif ise skor 6.0-6.7'ye oturur. Verdict ile
+        # özet aynı zihinsel sonucun iki ifadesi olduğundan çelişki kökten biter.
+        _VERDICT_BANDS = {
+            "guclu_pozitif": (8.0, 10.0, 8.5),
+            "pozitif": (6.8, 7.9, 7.0),
+            "hafif_pozitif": (6.0, 6.7, 6.2),
+            "notr": (4.5, 5.9, 5.0),
+            "hafif_negatif": (3.8, 4.4, 4.0),
+            "negatif": (2.5, 3.7, 3.0),
+            "guclu_negatif": (1.0, 2.4, 2.0),
+        }
+        _verdict = str(result.get("verdict") or "").strip().lower().replace(" ", "_").replace("-", "_")
+        if _verdict in _VERDICT_BANDS:
+            _lo, _hi, _mid = _VERDICT_BANDS[_verdict]
+            if score is None:
+                score = _mid
+                logger.info("AI News Scorer [VERDICT-FILL] %s: skor yok, verdict=%s -> %.1f", ticker, _verdict, _mid)
+            elif score < _lo or score > _hi:
+                _clamped = max(_lo, min(_hi, score))
+                logger.info(
+                    "AI News Scorer [VERDICT-CLAMP] %s: skor %.1f verdict=%s bandı dışında -> %.1f",
+                    ticker, score, _verdict, _clamped,
+                )
+                score = _clamped
 
         # ─── Summary validation ───
         if not isinstance(summary, str) or not summary.strip():

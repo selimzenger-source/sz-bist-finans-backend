@@ -472,21 +472,20 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         max_rows_in_any_page = max(len(p) for p in pages)
     image_paths = []
 
-    font_title = _load_font(34, bold=True)
+    font_title = _load_font(38, bold=True)
     font_row = _load_font(24)
     font_change = _load_font(22)              # Değişim sütunu — biraz küçük, çakışma önlenir
-    font_symbol = _load_font(24, bold=True)   # Ticker — küçültüldü, fiyatla çakışmasın
-    font_reason = _load_font(15, bold=False)
+    font_symbol = _load_font(27, bold=True)   # Ticker — büyük ve belirgin
+    font_reason = _load_font(19, bold=False)  # AI sebep — 15→19, okunur boyut
     font_col = _load_font(22, bold=True)
     font_seri_bold = _load_font(20, bold=True)
-    font_footer_brand = _load_font(16, bold=True)
-    font_footer_disclaimer = _load_font(14, bold=False)
     # Ek hisseler icin %25 daha kucuk fontlar
     font_supp_symbol = _load_font(24, bold=True)
     font_supp_row = _load_font(21)
     font_supp_title = _load_font(28, bold=True)
 
     CYAN = (34, 211, 238)
+    REASON_COLOR = (205, 211, 224)  # AI sebep — gri yerine açık/belirgin ton
 
     for page_idx, page_stats in enumerate(pages):
         row_h = 106
@@ -498,7 +497,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         if max_rows_in_any_page == 0:
             table_h = 80
         padding = 40
-        footer_h = 80  # 2 satir footer icin daha yuksek
+        footer_h = 70  # draw_brand_footer standart serit
 
         # Ek hisseler icin ek alan (sadece son sayfada)
         supp_section_h = 0
@@ -525,14 +524,16 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         page_text = f" (Sayfa {page_idx+1}/{len(pages)})" if len(pages) > 1 else ""
         title = f"Günün {'Tavan' if is_ceiling else 'Taban'} Yapan Hisseleri{page_text}"
         draw.text((padding, y), title, fill=GOLD, font=font_title)
-        y += 50
+        y += 52
 
-        draw.line([(padding, y), (width - padding, y)], fill=DIVIDER, width=2)
-        y += 15
+        draw.line([(padding, y), (width - padding, y)], fill=GOLD, width=2)
+        y += 13
 
         # BIST veri lisansı süreci: Fiyat kolonu kaldırıldı.
-        # 0: Hisse, 1: Son 30G, 2: Seri, 3: Neden
-        col_x = [padding, 250, 420, 560, 560]
+        # 0: Hisse, 1: Son 30G, 2: Seri, 3: Neden (AI) — AI alanı GENİŞ (690px)
+        col_x = [padding, 220, 350, 470]
+        # Kolon başlık bandı — tablo başlığı belirgin
+        draw.rectangle([(0, y - 6), (width, y + 34)], fill=HEADER_BG)
         draw.text((col_x[0], y), "Hisse", fill=GRAY, font=font_col)
         draw.text((col_x[1], y), "Son 30G", fill=GRAY, font=font_col)
         draw.text((col_x[2], y), "Seri", fill=GRAY, font=font_col)
@@ -552,36 +553,35 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
 
             text_y = row_y + 33
 
-            # Ticker
+            # Ticker — sol altın aksan çubuğu + büyük bold
+            accent_c = (34, 197, 94) if is_ceiling else (239, 68, 68)  # yeşil/kırmızı
+            draw.rectangle([(14, row_y + 28), (19, row_y + row_h - 28)], fill=accent_c)
             draw.text((col_x[0], text_y), stat.ticker, fill=WHITE, font=font_symbol)
 
             # Son 30G — col_x[1]
             m_count = stat.monthly_ceiling_count if is_ceiling else stat.monthly_floor_count
             m_yazi = f"{m_count} Kez"
             m_color = GOLD if m_count >= 2 else WHITE
-            m_font = font_seri_bold if m_count >= 2 else font_reason
+            m_font = font_seri_bold if m_count >= 2 else font_change
             draw.text((col_x[1], text_y), m_yazi, fill=m_color, font=m_font)
 
             # Seri — gold+bold if ≥2
             consec = stat.consecutive_ceiling_count if is_ceiling else stat.consecutive_floor_count
             seri_yazi = f"{consec}. Gün"
             seri_color = GOLD if consec >= 2 else WHITE
-            seri_font = font_seri_bold if consec >= 2 else font_reason
+            seri_font = font_seri_bold if consec >= 2 else font_change
             draw.text((col_x[2], text_y), seri_yazi, fill=seri_color, font=seri_font)
 
-            # Neden (Multi-line) — 15px font, ~9.6px/char, 440px alan → max 42 char/satır
+            # Neden (AI) — 19px font, 690px geniş alan (~60 char/satır), dikey ortalı
             reason_text = stat.reason if stat.reason else ""
             if reason_text:
-                wrapped = textwrap.wrap(reason_text, width=42)
-                if len(wrapped) > 2:
-                    r_y = text_y - 16
-                elif len(wrapped) > 1:
-                    r_y = text_y - 8
-                else:
-                    r_y = text_y
-                for line in wrapped[:3]:
-                    draw.text((col_x[3], r_y), line, fill=GRAY, font=font_reason)
-                    r_y += 22
+                wrapped = textwrap.wrap(reason_text, width=60)[:3]
+                line_h_r = 27
+                block_h = len(wrapped) * line_h_r
+                r_y = row_y + max(10, (row_h - block_h) // 2)
+                for line in wrapped:
+                    draw.text((col_x[3], r_y), line, fill=REASON_COLOR, font=font_reason)
+                    r_y += line_h_r
 
         # === EK HİSSELER BÖLÜMÜ ===
         if show_supplementary and is_last_page and supp_to_show:
@@ -612,15 +612,13 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
                 # Ticker (fiyat kaldırıldı)
                 draw.text((s_x_base, s_text_y), s_stat.ticker, fill=(180, 180, 180), font=font_supp_symbol)
 
-        # === FOOTER ===
-        footer_y = total_h - footer_h
-        draw.line([(padding, footer_y), (width - padding, footer_y)], fill=DIVIDER, width=2)
-        footer_y += 12
-        draw.text((padding, footer_y), "borsacebimde.com", fill=ORANGE, font=_load_font(18, bold=True))
-        line1 = "Borsa Cebimde Özel Eğitimli Modeller Tarafından Üretilmiştir."
-        line2 = "Yatırım yaparken mutlaka kendi araştırmanızı yapınız."
-        draw.text((padding + 170, footer_y), line1, fill=GRAY, font=_load_font(16, bold=False))
-        draw.text((padding + 170, footer_y + 22), line2, fill=(120, 120, 120), font=_load_font(14, bold=False))
+        # === FOOTER === (EK-1 standart şerit: solda kaynak, sağda logo+marka —
+        # eski 2 satırlı serbest metin site adıyla ÇAKIŞIYORDU, kaldırıldı)
+        draw_brand_footer(
+            draw, img, width, total_h,
+            source="Borsa Cebimde Özel Eğitimli AI Modelleri · Yatırım tavsiyesi değildir",
+            foot_h=footer_h,
+        )
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{'tavan' if is_ceiling else 'taban'}_sf{page_idx+1}_{ts}.png"

@@ -771,14 +771,20 @@ ONEMLI — TICKER ODAKLI ANALIZ:
 
 CIKTI ALANLARI:
 1. sentiment: "Olumlu" | "Olumsuz" | "Nötr"
-2. impact_score: 1.0-10.0 arasi 0.1 hassasiyetle (sysem prompt'undaki rubrik)
-3. category: "finansal" | "strateji" | "bilgi"
-4. summary: 3-5 cumle Turkce ozet (tweet-ready). SADECE {company_code} hakkinda. Ne oldugunu, sirket icin ne anlama geldigini,
+2. verdict: ZORUNLU ve EN ONEMLI alan — ozetinin SON CUMLESINDEKI sonucla AYNI olmali.
+   Degerler: "guclu_pozitif" | "pozitif" | "hafif_pozitif" | "notr" | "hafif_negatif" | "negatif" | "guclu_negatif"
+   KURAL: Ozetinde "hafif olumlu" yaziyorsan verdict="hafif_pozitif" OLMAK ZORUNDA;
+   "olumsuz" yaziyorsan verdict negatif taraf OLMAK ZORUNDA. Verdict ile ozet ASLA celisemez.
+3. impact_score: 1.0-10.0 arasi 0.1 hassasiyetle — verdict bandiyla uyumlu olmali:
+   guclu_pozitif 8.0-10.0 · pozitif 6.8-7.9 · hafif_pozitif 6.0-6.7 · notr 4.5-5.9
+   hafif_negatif 3.8-4.4 · negatif 2.5-3.7 · guclu_negatif 1.0-2.4
+4. category: "finansal" | "strateji" | "bilgi"
+5. summary: 3-5 cumle Turkce ozet (tweet-ready). SADECE {company_code} hakkinda. Ne oldugunu, sirket icin ne anlama geldigini,
    yatirimci icin neden onemli oldugunu acikla. Onemli rakamlari (tutar, %, oran) dahil et.
-5. hashtags: 2-3 adet (# isareti olmadan, ticker'i tekrar verme — sektor + konu)
+6. hashtags: 2-3 adet (# isareti olmadan, ticker'i tekrar verme — sektor + konu)
 
 SADECE asagidaki JSON formatinda yanit ver:
-{{"sentiment": "Olumlu", "impact_score": 7.3, "category": "finansal", "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
+{{"sentiment": "Olumlu", "verdict": "pozitif", "impact_score": 7.3, "category": "finansal", "summary": "3-5 cumle Turkce ozet.", "hashtags": ["sektor", "konu"]}}"""
 
     messages = [
         {"role": "system", "content": get_system_prompt()},
@@ -887,6 +893,29 @@ SADECE asagidaki JSON formatinda yanit ver:
         impact_score = round(float(impact_score), 1)
     else:
         impact_score = 5.0
+
+    # ── VERDICT KELEPÇESİ (skor-özet çelişkisinin KÖK ÇÖZÜMÜ) ──
+    # AI özetiyle AYNI üretimde sözel verdict döndürür; skor o banda kelepçelenir.
+    # "hafif olumlu" özet + 5.0 skor çelişkisi yapısal olarak imkânsızlaşır.
+    _VERDICT_BANDS = {
+        "guclu_pozitif": (8.0, 10.0, 8.5),
+        "pozitif": (6.8, 7.9, 7.0),
+        "hafif_pozitif": (6.0, 6.7, 6.2),
+        "notr": (4.5, 5.9, 5.0),
+        "hafif_negatif": (3.8, 4.4, 4.0),
+        "negatif": (2.5, 3.7, 3.0),
+        "guclu_negatif": (1.0, 2.4, 2.0),
+    }
+    _verdict = str(result.get("verdict") or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if _verdict in _VERDICT_BANDS:
+        _lo, _hi, _mid = _VERDICT_BANDS[_verdict]
+        if impact_score < _lo or impact_score > _hi:
+            _clamped = max(_lo, min(_hi, impact_score))
+            logger.info(
+                "KAP Analyzer [VERDICT-CLAMP] %s: skor %.1f verdict=%s bandı dışında -> %.1f",
+                company_code, impact_score, _verdict, _clamped,
+            )
+            impact_score = _clamped
 
     # Yeni 9 kategorili etiket sistemi — skor varsa daha detayli etiket uretilir.
     # Eski 3'lu sistem (Olumlu/Notr/Olumsuz) yerine artik tier label kayit edilir.
