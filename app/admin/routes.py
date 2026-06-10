@@ -4895,12 +4895,26 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
                     "current_assets", "non_current_assets", "total_assets",
                     "net_debt", "total_equity", "loans", "deposits",
                 )
+                # ★ BAZ UYUMU FIX (MARTI -94% saçması): restated "Önceki Dönem"
+                # kolonu GELİR (akış) kalemlerinde KÜMÜLATİFTİR (2025-Q4 raporunda
+                # 2024 TAM YILI); current değerler ise ÇEYREKLİKLEŞTİRİLMİŞ.
+                # Akış kalemleri restated'den SADECE Q1'de alınır (kümülatif=çeyrek);
+                # Q2-Q4'te tarihsel YoY çeyrek kaydı kullanılır. Bilanço (stok)
+                # kalemleri restated'den her zaman alınabilir.
+                _INCOME_F = (
+                    "revenue", "gross_profit", "ebitda", "net_income",
+                    "net_interest_income", "net_fees_commissions",
+                    "gross_premiums", "technical_balance",
+                )
+                _is_q1 = bool(getattr(current, "period", "") and str(current.period).endswith("-Q1"))
+                _ppd_income = {k: v for k, v in _ppd.items() if k in _INCOME_F} if _is_q1 else {}
+                _ppd_balance = {k: v for k, v in _ppd.items() if k not in _INCOME_F}
 
                 def _obj_fields(o):
                     return {c: getattr(o, c, None) for c in _fld} if o else {}
 
-                prev_income = {**_obj_fields(prev_income), **_ppd, "period": yoy}
-                prev_balance = {**_obj_fields(prev_balance), **_ppd, "period": year_end}
+                prev_income = {**_obj_fields(prev_income), **_ppd_income, "period": yoy}
+                prev_balance = {**_obj_fields(prev_balance), **_ppd_balance, "period": year_end}
 
         # Son 5 ceyreklik veri (en eski sondan ilk basa) — bar chart icin
         recent5 = list(reversed(fins[:5])) if fins else []

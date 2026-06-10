@@ -3293,7 +3293,12 @@ async def admin_patch_ipo_fields(
     fields = payload.get("fields") or {}
     ALLOWED = {"close_price", "percent_change", "ceiling_broken",
                "trading_day_count", "archived", "status", "distribution_completed",
-               "katilim_endeksi", "market_segment", "public_float_pct"}
+               "katilim_endeksi", "market_segment", "public_float_pct",
+               "spk_approval_date", "subscription_start", "subscription_end",
+               "trading_start"}
+    # JSON'dan string gelen tarih alanlarini date objesine cevir
+    DATE_FIELDS = {"spk_approval_date", "subscription_start", "subscription_end",
+                   "trading_start"}
 
     result = await db.execute(select(IPO).where(IPO.id == ipo_id))
     ipo = result.scalar_one_or_none()
@@ -3303,8 +3308,14 @@ async def admin_patch_ipo_fields(
     updated = {}
     for k, v in fields.items():
         if k in ALLOWED:
+            if k in DATE_FIELDS and isinstance(v, str):
+                from datetime import date as _date
+                try:
+                    v = _date.fromisoformat(v[:10])
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"{k} gecersiz tarih: {v} (YYYY-MM-DD bekleniyor)")
             setattr(ipo, k, v)
-            updated[k] = v
+            updated[k] = str(v)
     await db.commit()
 
     return {"status": "ok", "ipo_id": ipo_id, "ticker": ipo.ticker, "updated": updated}
@@ -9264,6 +9275,22 @@ async def admin_create_ipo(request: Request, payload: dict, db: AsyncSession = D
 
     ipo_data = {k: v for k, v in payload.items() if k != "admin_password"}
     ipo_data["status"] = "newly_approved"  # Admin her zaman newly_approved ekler
+
+    # JSON'dan string gelen tarih alanlarini date objesine cevir
+    # (string birakirsak asyncpg Date kolonunda 500 patlatiyor)
+    from datetime import date as _date
+    for _df in ("spk_approval_date", "subscription_start", "subscription_end", "trading_start"):
+        _val = ipo_data.get(_df)
+        if isinstance(_val, str):
+            try:
+                ipo_data[_df] = _date.fromisoformat(_val[:10])
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"{_df} gecersiz tarih: {_val} (YYYY-MM-DD bekleniyor)")
+
+    # SPK onay tarihi verilmediyse bugunu varsay — 07:00 anket push'u
+    # spk_approval_date dolu olan IPO'lari secer, bos kalirsa anket bildirimi GITMEZ
+    if not ipo_data.get("spk_approval_date"):
+        ipo_data["spk_approval_date"] = _date.today()
 
     ipo_service = IPOService(db)
     ipo = await ipo_service.create_or_update_ipo(ipo_data, allow_create=True)
@@ -17029,6 +17056,20 @@ async def list_latest_bilancos(
                 return _f(_ppd[field])
             return _f(getattr(fallback_obj, field, None)) if fallback_obj else None
 
+        # ★ BAZ UYUMU FIX (MARTI -94% saçması): raporun "Önceki Dönem" kolonu
+        # GELİR TABLOSU için KÜMÜLATİFTİR (2025-Q4 raporunda 2024 TAM YILI =
+        # 1.14 mr). DB current değerleri ise ÇEYREKLİKLEŞTİRİLMİŞ (66.9 mn).
+        # Q2/Q3/Q4'te kümülatif prev ile çeyreklik current karşılaştırılamaz —
+        # akış kalemlerinde restated kolon SADECE Q1'de kullanılır (Q1'de
+        # kümülatif = çeyreklik). Diğer çeyreklerde tarihsel YoY çeyrek kaydı.
+        # Bilanço (stok) kalemleri için restated kolon her zaman doğrudur.
+        _is_q1 = bool(fin and fin.period and str(fin.period).endswith("-Q1"))
+
+        def _pp_income(field, fallback_obj):
+            if _is_q1 and _ppd.get(field) is not None:
+                return _f(_ppd[field])
+            return _f(getattr(fallback_obj, field, None)) if fallback_obj else None
+
         # Çeyreklik bars — eskiden yeniye sirala (5 yil = 20 ceyrek, Derin Analiz icin)
         quarterly = list(reversed(finals[:20]))
 
@@ -17105,12 +17146,12 @@ async def list_latest_bilancos(
             "gross_margin_pct": _f(fin.gross_margin_pct) if fin else None,
             "net_margin_pct": _f(fin.net_margin_pct) if fin else None,
             "roe_pct": _f(fin.roe_pct) if fin else None,
-            # Önceki dönem — GELİR TABLOSU (YoY): raporun restated Önceki Dönem kolonu
-            # (yoksa tarihsel YoY çeyrek). _pp() önceliği prev_period_data'ya verir.
-            "revenue_prev": _pp("revenue", prev_to_use_income),
-            "gross_profit_prev": _pp("gross_profit", prev_to_use_income),
-            "ebitda_prev": _pp("ebitda", prev_to_use_income),
-            "net_income_prev": _pp("net_income", prev_to_use_income),
+            # Önceki dönem — GELİR TABLOSU (YoY): akış kalemi → restated kolon
+            # SADECE Q1'de (kümülatif=çeyreklik); Q2-Q4'te tarihsel YoY çeyrek.
+            "revenue_prev": _pp_income("revenue", prev_to_use_income),
+            "gross_profit_prev": _pp_income("gross_profit", prev_to_use_income),
+            "ebitda_prev": _pp_income("ebitda", prev_to_use_income),
+            "net_income_prev": _pp_income("net_income", prev_to_use_income),
             # Önceki dönem — BİLANÇO: raporun restated Önceki Dönem kolonu (yoksa önceki çeyrek)
             "current_assets_prev": _pp("current_assets", prev_to_use_balance),
             "non_current_assets_prev": _pp("non_current_assets", prev_to_use_balance),
