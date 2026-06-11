@@ -401,6 +401,28 @@ async def edit_ipo_form(
         success_msg = "IPO basariyla olusturuldu!"
     elif success == "updated":
         success_msg = "IPO basariyla guncellendi!"
+    elif success == "oy_eklendi":
+        success_msg = "✅ Anket oyları eklendi!"
+    elif success == "oy_hata":
+        success_msg = "⚠️ Oy eklenemedi (geçersiz faz/seçim/sayı)."
+
+    # Anket istatistikleri — formda göstermek için
+    poll_stats = {"hype": {"participate": 0, "skip": 0}, "ceiling": {}}
+    try:
+        from app.models.ipo_poll_vote import IPOPollVote
+        from sqlalchemy import func as _f
+        rows = (await db.execute(
+            select(IPOPollVote.phase, IPOPollVote.choice, _f.count().label("n"))
+            .where(IPOPollVote.ipo_id == ipo_id)
+            .group_by(IPOPollVote.phase, IPOPollVote.choice)
+        )).all()
+        for ph, ch, n in rows:
+            if ph == "hype":
+                poll_stats["hype"][ch] = n
+            elif ph == "ceiling":
+                poll_stats["ceiling"][ch] = n
+    except Exception as _pe:
+        logger.warning("Admin: poll_stats okunamadi — %s", _pe)
 
     return templates.TemplateResponse("admin/ipo_form.html", {
         "request": request,
@@ -408,6 +430,7 @@ async def edit_ipo_form(
         "is_new": False,
         "success": success_msg,
         "error": None,
+        "poll_stats": poll_stats,
     })
 
 
@@ -603,6 +626,69 @@ async def update_ipo(
             "success": None,
             "error": str(e),
         })
+
+
+# -------------------------------------------------------
+# IPO ANKET — MANUEL OY EKLEME (admin)
+# -------------------------------------------------------
+
+@router.post("/ipo/{ipo_id}/add-poll-votes")
+async def add_poll_votes(
+    request: Request,
+    ipo_id: int,
+    phase: str = Form(...),       # "hype" | "ceiling"
+    choice: str = Form(...),      # hype: participate|skip — ceiling: "1".."30"
+    count: int = Form(...),       # eklenecek oy sayisi
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: bir halka arz anketine manuel oy ekler.
+
+    hype anketi:   choice = participate (Katılacağım) | skip (Katılmayacağım)
+    ceiling anketi: choice = "1".."30" (tavan sayisi tahmini)
+
+    Her oy benzersiz device_id ile yazilir (tek-oy kuralini bozmadan).
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.ipo_poll_vote import IPOPollVote
+    from datetime import datetime, timezone
+
+    phase = (phase or "").strip()
+    choice = (choice or "").strip()
+    count = max(0, min(int(count or 0), 500))   # güvenlik: max 500
+
+    # Validasyon
+    err = None
+    if phase not in ("hype", "ceiling"):
+        err = "gecersiz_faz"
+    elif phase == "hype" and choice not in ("participate", "skip"):
+        err = "gecersiz_secim_hype"
+    elif phase == "ceiling":
+        if not choice.isdigit() or not (1 <= int(choice) <= 30):
+            err = "gecersiz_secim_ceiling"
+    if err or count <= 0:
+        return RedirectResponse(url=f"/admin/ipo/{ipo_id}/edit?success=oy_hata", status_code=303)
+
+    # Benzersiz device_id ile N oy ekle (zaman damgali, çakışmasın)
+    ts = int(datetime.now(timezone.utc).timestamp())
+    eklendi = 0
+    for i in range(count):
+        dev = f"admin_seed_{ipo_id}_{phase}_{choice}_{ts}_{i}"
+        db.add(IPOPollVote(
+            ipo_id=ipo_id, phase=phase, choice=choice,
+            device_id=dev, ip_address=None,
+        ))
+        eklendi += 1
+    try:
+        await db.commit()
+        logger.info("Admin: IPO %s anketine %d oy eklendi (%s=%s)", ipo_id, eklendi, phase, choice)
+    except Exception as e:
+        await db.rollback()
+        logger.error("Admin: oy ekleme hatasi — %s", e)
+        return RedirectResponse(url=f"/admin/ipo/{ipo_id}/edit?success=oy_hata", status_code=303)
+
+    return RedirectResponse(url=f"/admin/ipo/{ipo_id}/edit?success=oy_eklendi", status_code=303)
 
 
 # -------------------------------------------------------
