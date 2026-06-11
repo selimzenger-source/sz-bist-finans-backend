@@ -5178,6 +5178,58 @@ def _setup_scheduler_impl():
         coalesce=True,
         misfire_grace_time=1800,
     )
+
+    # Her 15 dk: kap_url'u NULL kalan haberlerin gercek KAP linkini doldur.
+    # (TradingView gec indeksledigi icin link bulunamadan kaydedilen haberler —
+    # telegram_poller artik bunlari ATMIYOR, kap_url=None ile kaydediyor.)
+    async def _kap_url_enricher_job():
+        from datetime import datetime as _dt, timedelta as _td
+        from sqlalchemy import select as _sel, and_
+        try:
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            from app.services.ai_news_scorer import resolve_kap_url_by_title
+
+            cutoff = _dt.utcnow() - _td(hours=48)
+            async with async_session() as db:
+                stmt = _sel(KapAllDisclosure).where(
+                    and_(
+                        KapAllDisclosure.kap_url.is_(None),
+                        KapAllDisclosure.created_at >= cutoff,
+                        KapAllDisclosure.company_code.is_not(None),
+                    )
+                ).limit(10)
+                rows = (await db.execute(stmt)).scalars().all()
+                if not rows:
+                    return
+                fixed = 0
+                for row in rows:
+                    try:
+                        url = await resolve_kap_url_by_title(row.company_code, row.title or "")
+                        if url and "kap.org.tr" in url:
+                            row.kap_url = url
+                            fixed += 1
+                            logger.info(
+                                "[KAP-URL-ENRICH] %s: url dolduruldu — %s (%s)",
+                                row.company_code, url, (row.title or "")[:40],
+                            )
+                    except Exception as _e_err:
+                        logger.debug("[KAP-URL-ENRICH] %s hata: %s", row.company_code, _e_err)
+                if fixed:
+                    await db.commit()
+                    logger.info("[KAP-URL-ENRICH] %d/%d haber linki dolduruldu", fixed, len(rows))
+        except Exception as e:
+            logger.error("[KAP-URL-ENRICH] Genel hata: %s", e)
+
+    scheduler.add_job(
+        _kap_url_enricher_job,
+        IntervalTrigger(minutes=15),
+        id="kap_url_enricher",
+        name="KAP URL Zenginlestirici (15 dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     # Her 15 dakikada bir: kapanis saati gecmis IPO'lar icin push at
     # (eskiden sabit 17:00 cron'du; her IPO'nun kendi close hour'una gore ateslesin)
     scheduler.add_job(

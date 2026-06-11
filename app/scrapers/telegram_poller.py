@@ -1488,7 +1488,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Degisim) TradingView'da KAP linki icermez; KAP kaynak oldugu icin burada
             # gercek Bildirim url'si bulunur. Boylece bilanco bildirimleri de diger
             # haberler gibi ORJINAL KAP linki gosterir (TV linki degil).
-            if not kap_url and ticker and news_title:
+            # ★ FIX (HALKB 6511839): eski kosul `if not kap_url` idi — ama analyze_news
+            # HER ZAMAN en azindan TradingView linki dondurur (TV'de haber olmasa,
+            # 404 olsa bile). Bu yuzden baslik eslestirme HIC calismiyordu ve gercek
+            # kap.org.tr linki bulunamayinca haber atiliyordu. Yeni kosul: gercek
+            # KAP linki YOKSA (bos veya TV linki) baslik eslestirmeyi DENE.
+            if ticker and news_title and "kap.org.tr" not in (kap_url or ""):
                 try:
                     from app.services.ai_news_scorer import resolve_kap_url_by_title
                     _rk = await resolve_kap_url_by_title(ticker, news_title)
@@ -1498,25 +1503,21 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 except Exception as _rk_err:
                     logger.debug("KAP url baslik eslestirme hatasi (%s): %s", ticker, _rk_err)
 
-            # ★ KAP URL ZORUNLU — gercek kap.org.tr linki yoksa bu haber YBORSADA
-            # GORUNMEZ. TradingView matriks linki YETERLI DEGIL (AMUNDI FUNDS gibi
-            # yabanci fon bildirimleri gercekte KAP'a dusmemis olabilir). Boyle
-            # haberler push gondermez, kap_all'a yazilmaz, twitter atilmaz.
+            # ★ KAP URL kontrolu — ESKI DAVRANIS: gercek kap.org.tr linki yoksa haber
+            # tamamen ATILIYORDU (TradingView gec indeksleyince haber sonsuza dek
+            # kayboluyordu — HALKB 6511839 vakasi, 11.06.2026). YENI DAVRANIS:
+            # Ticker zaten ustte BIST equity whitelist'inden gecti (fon/forex/yabanci
+            # AMUNDI tipi bildirimler oraya takilir) → gercek hissenin haberi KESINLIKLE
+            # kaydedilir. KAP linki yoksa kap_url=None yazilir; "KAP URL Zenginlestirici"
+            # job'i (15 dk'da bir) linki sonradan bulup doldurur.
             _has_real_kap_url = bool(kap_url) and "kap.org.tr" in (kap_url or "")
             if not _has_real_kap_url:
-                logger.info(
-                    "KAP url yok (TV linki yetersiz) — haber atlandi: ticker=%s, baslik='%s', matriks_id=%s",
+                kap_url = None  # TV 404 linki yazma — zenginlestirici sonra doldurur
+                logger.warning(
+                    "KAP url henuz yok — haber YINE DE kaydediliyor (url sonradan "
+                    "doldurulacak): ticker=%s, baslik='%s', matriks_id=%s",
                     ticker, (news_title or '')[:60], kap_id,
                 )
-                # commit yapip sonraki mesaja gec (rollback gerekmez, hicbir DB yazimi yapilmadi)
-                try:
-                    await session.commit()
-                except Exception:
-                    try:
-                        await session.rollback()
-                    except Exception:
-                        pass
-                continue
 
             # ──────────────────────────────────────────────────────────────────
             # YENI: kap_all_disclosures'a yaz — Tum KAP Haber sekmesi icin

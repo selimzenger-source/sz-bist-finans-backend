@@ -4133,12 +4133,23 @@ async def admin_reprocess_kap_news(
         kap_url = (tv_data or {}).get("real_kap_url") or f"https://tr.tradingview.com/news/matriks:{matriks_id}:0/"
         tv_title = (tv_data or {}).get("title") or explicit_title or f"KAP Bildirimi - {ticker}"
 
+        # 1b) TV'de yoksa (404/gec indeks) — admin'in verdigi ham metinle devam et.
+        # raw_text: bildirim icerigi (manuel kopyala-yapistir), kap_url: opsiyonel
+        # gercek KAP linki. HALKB 6511839 gibi TV'ye hic dusmemis haberler icin.
+        _manual_text = (payload.get("raw_text") or "").strip()
+        if (not tv_text or len(tv_text.strip()) < 50) and len(_manual_text) >= 50:
+            tv_text = f"{explicit_title or ''}\n\n{_manual_text}".strip()
+            _manual_kap_url = (payload.get("kap_url") or "").strip()
+            if _manual_kap_url:
+                kap_url = _manual_kap_url
+
         if not tv_text or len(tv_text.strip()) < 50:
             return {
                 "success": False,
                 "ticker": ticker,
                 "matriks_id": matriks_id,
-                "message": "TradingView icerik bos veya cok kisa, AI'a beslenemez",
+                "message": "TradingView icerik bos veya cok kisa, AI'a beslenemez "
+                           "(raw_text parametresiyle manuel icerik verebilirsiniz)",
             }
 
         # 2) AI puanla

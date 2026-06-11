@@ -356,7 +356,7 @@ async def _refresh_oid_cache() -> dict[str, str]:
         return _oid_cache
 
 
-async def fetch_kap_direct_content(ticker: str) -> dict | None:
+async def fetch_kap_direct_content(ticker: str, target_title: str | None = None) -> dict | None:
     """KAP.org.tr'den direkt bildirim icerigi cek (borsapy yontemi).
 
     TradingView fallback'i olarak kullanilir.
@@ -364,11 +364,15 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
     Akis:
     1. bist-sirketler'den mkkMemberOid al (cache'li)
     2. bildirim-sorgu-sonuc?member={OID} ile son bildirimleri cek
-    3. En son bildirimi sec
+    3. target_title verildiyse BASLIK eslesen bildirimi sec (24 saat tolerans);
+       yoksa en son bildirimi sec (10 dk tazelik filtresi)
     4. Bildirim sayfasindan icerik cek (fetch_kap_page_content)
 
     Args:
         ticker: Hisse kodu (orn: "ASTOR")
+        target_title: Aranan haberin baslig (orn: "Özel Durum Açıklaması (Genel)").
+            Verilirse yas filtresi gevser — dogru bildirim "eski" diye reddedilmez
+            (HALKB 1616100 vakasi: 35 dk eski diye atilmisti).
 
     Returns:
         {"full_text": str, "kap_url": str, "title": str, "disclosure_index": str}
@@ -394,10 +398,11 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
                 return None
 
             # Parse: publishDate\":\"29.12.2025 19:21:18\",...disclosureIndex\":1530826,...title\":\"...\"
+            # \\? ile hem escape'li hem duz tirnak formati yakalanir (KAP yeni site)
             pattern = (
-                r'publishDate\\":\\"([^\\"]+)\\".*?'
-                r'disclosureIndex\\":(\d+).*?'
-                r'title\\":\\"([^\\"]+)\\"'
+                r'publishDate\\?":\\?"([^"\\]+)\\?".*?'
+                r'disclosureIndex\\?":(\d+).*?'
+                r'title\\?":\\?"([^"\\]+)'
             )
             matches = re.findall(pattern, resp.text, re.DOTALL)
 
@@ -405,26 +410,50 @@ async def fetch_kap_direct_content(ticker: str) -> dict | None:
                 logger.info("KAP direkt: %s icin bildirim bulunamadi", ticker)
                 return None
 
-            # En son bildirimi al (ilk sirada — varsayilan sira yeniden eskiye)
-            date_str, disc_idx, title = matches[0]
+            # ── Bildirim secimi ──
+            # target_title verildiyse: BASLIK eslesen bildirimi ara. Eslesirse yas
+            # filtresi 24 saate gevser — dogru bildirim "35 dk eski → riskli" diye
+            # REDDEDILMEZ (HALKB 1616100 vakasi, 11.06.2026: icerik alinamayinca
+            # AI ciplak basliktan 5.0 Notr verdi, pozitif haber kacti).
+            date_str = disc_idx = title = None
+            if target_title:
+                _tgt = _norm_title(target_title)
+                if _tgt:
+                    for _d, _idx, _t in matches[:20]:
+                        _nt = _norm_title(_t)
+                        if _nt and (_nt == _tgt or _tgt in _nt or _nt in _tgt):
+                            date_str, disc_idx, title = _d, _idx, _t
+                            logger.info(
+                                "KAP direkt: BASLIK eslesti — %s %s ('%.50s')",
+                                ticker, disc_idx, _t,
+                            )
+                            break
+
+            _title_matched = disc_idx is not None
+            if not _title_matched:
+                # En son bildirimi al (ilk sirada — varsayilan sira yeniden eskiye)
+                date_str, disc_idx, title = matches[0]
+
             kap_url = f"https://www.kap.org.tr/tr/Bildirim/{disc_idx}"
 
             # ★ TAZELIK FILTRESI: bu fallback "ticker'in son bildirimi"ni dondurur ama
             # CAGIRAN AKIS muhtemelen YENI bir habere KAP url ariyor. Eger son bildirim
-            # COK ESKIYSE (>10 dakika), YANLIS eslesme riski var: yeni haberin kap_url'ine
+            # COK ESKIYSE, YANLIS eslesme riski var: yeni haberin kap_url'ine
             # SAATLER ONCEKI bildirimin url'si yapistirilir -> kap_all_disclosures'da
             # duplicate sayilip atlanir, Tum KAP listesinde haber GORUNMEZ (KTLEV 6490249 bug'i).
+            # Esik: baslik eslesti ise 24 saat (dogru bildirim kesin), yoksa 10 dk.
             # date_str format: "DD.MM.YYYY HH:MM:SS" (KAP TR saati = UTC+3)
+            _max_age_min = 1440 if _title_matched else 10
             try:
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _bd = _dt.strptime(date_str.strip(), "%d.%m.%Y %H:%M:%S")
                 # KAP TR saati → UTC
                 _bd_utc = _bd.replace(tzinfo=_tz(_td(hours=3))).astimezone(_tz.utc)
                 _age_min = (_dt.now(_tz.utc) - _bd_utc).total_seconds() / 60
-                if _age_min > 10:
+                if _age_min > _max_age_min:
                     logger.warning(
-                        "KAP direkt: %s en son bildirim %s (%.0f dk eski) — YENI haberle eslestirme RISKLI, atlandi",
-                        ticker, disc_idx, _age_min,
+                        "KAP direkt: %s en son bildirim %s (%.0f dk eski, esik=%d dk) — YENI haberle eslestirme RISKLI, atlandi",
+                        ticker, disc_idx, _age_min, _max_age_min,
                     )
                     return None
             except Exception as _dage_err:
@@ -508,10 +537,11 @@ async def resolve_kap_url_by_title(ticker: str, target_title: str) -> str | None
             resp = await client.get(f"{_KAP_DISCLOSURE_URL}?member={oid}")
             if resp.status_code != 200:
                 return None
+            # \\? ile hem escape'li hem duz tirnak formati yakalanir (KAP yeni site)
             pattern = (
-                r'publishDate\\":\\"([^\\"]+)\\".*?'
-                r'disclosureIndex\\":(\d+).*?'
-                r'title\\":\\"([^\\"]+)\\"'
+                r'publishDate\\?":\\?"([^"\\]+)\\?".*?'
+                r'disclosureIndex\\?":(\d+).*?'
+                r'title\\?":\\?"([^"\\]+)'
             )
             matches = re.findall(pattern, resp.text, re.DOTALL)
             if not matches:
@@ -3773,7 +3803,14 @@ async def analyze_news(
     # ── Oncelik 3: KAP.org.tr ticker bazli (spesifik URL de basarisizsa) ──
     if not tv_content and ticker:
         try:
-            kap_result = await fetch_kap_direct_content(ticker)
+            # Telegram ham metninden haber basligini cikar — KAP direkt secimde
+            # BASLIK eslestirme yapar (24 saat tolerans). Boylece TV'de olmayan
+            # haberin DOGRU KAP bildirimi bulunur (HALKB 1616100 vakasi).
+            _tgt_title = None
+            _tm = re.search(r"Ba[sş]l[ıi]k:\s*(.+)", raw_text or "")
+            if _tm:
+                _tgt_title = _tm.group(1).strip()[:200]
+            kap_result = await fetch_kap_direct_content(ticker, target_title=_tgt_title)
             if kap_result:
                 if kap_result.get("kap_url") and "kap.org.tr" not in (kap_url or ""):
                     kap_url = kap_result["kap_url"]
