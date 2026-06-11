@@ -1914,7 +1914,7 @@ DEBT INSTRUMENT ISSUANCE / BORCLANMA ARACI IHRACI (CRITICAL — neutral 4.5-5.4)
   Examples:
   Ex.A: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
         "Yönetim Kurulu 2025 yili kar payi DAGITILMAMASINI onaylamistir"
-        → 3.8 (NEGATIVE — yeni karar, sifir verim)
+        → 3.4 (NEGATIVE — yeni karar, sifir verim)
   Ex.B: Title "Kar Payi Dagitim Islemlerine Iliskin Bildirim" + content
         "X tarihinde aciklanan brut Y TL temettu odemesi gerceklesecektir"
         → 5.2 (NOTR — onceden ilan edilen miktarin uygulamasi)
@@ -1999,7 +1999,7 @@ Ex.14 (LOW DIVIDEND YIELD — NEGATIVE): "ABC 0.10 TL temettu (hisse 18 TL)" —
 → {{"score": 4.2, "category": "finansal", "summary": "Sembolik temettu (verim %0.56) — sirket gercek anlamda kar dagitmiyor sinyali.", "hashtags": ["temettu"]}}
 
 Ex.15 (GOING CONCERN): "DEF denetci raporunda surekliligi konusunda onemli supheler"
-→ {{"score": 1.8, "category": "finansal", "summary": "Going concern (sureklilik suphesi) — denetci sirketin mali yapisinda ciddi risk gormus, kritik olumsuz sinyal.", "hashtags": ["sureklilik", "risk"]}}
+→ {{"score": 1.6, "category": "finansal", "summary": "Going concern (sureklilik suphesi) — denetci sirketin mali yapisinda ciddi risk gormus, kritik olumsuz sinyal.", "hashtags": ["sureklilik", "risk"]}}
 
 Ex.16 (TEMETTU ILK KARAR — context'te gecmis yok):
 Title: "Kar Payi Dagitim Karari"
@@ -2081,7 +2081,7 @@ Body: "Sirketimizin planlamis oldugu rüzgar enerjisi santral yatirimi icin CED 
 Ex.29 (FAALIYET SONLANDIRMA — NEGATIF):
 Title: "Tesis Faaliyetlerinin Durdurulmasi"
 Body: "Sirketimiz Bursa fabrikasi faaliyetlerinin daimi olarak sonlandirilmasini onaylamistir"
-→ {{"score": 2.8, "category": "strateji", "summary": "Bursa fabrikasi daimi olarak kapatildi — kapasite ve gelir tabaninda ciddi azalma. Personel cikarmalari ve sabit varlik kayiplari ile birlikte ciddi negatif sinyal.", "hashtags": ["kapanis"]}}
+→ {{"score": 2.6, "category": "strateji", "summary": "Bursa fabrikasi daimi olarak kapatildi — kapasite ve gelir tabaninda ciddi azalma. Personel cikarmalari ve sabit varlik kayiplari ile birlikte ciddi negatif sinyal.", "hashtags": ["kapanis"]}}
 
 Respond with ONLY the JSON specified by the user prompt. No other text."""
 
@@ -2406,8 +2406,8 @@ NOTLAR:
             "pozitif": (7.0, 7.9, 7.3),
             "hafif_pozitif": (6.0, 6.9, 6.2),
             "notr": (4.1, 5.9, 5.0),
-            "hafif_negatif": (3.1, 4.0, 3.8),
-            "negatif": (2.1, 3.0, 2.8),
+            "hafif_negatif": (3.1, 4.0, 3.5),
+            "negatif": (2.1, 3.0, 2.6),
             "guclu_negatif": (1.0, 2.0, 1.5),
         }
         _verdict = str(result.get("verdict") or "").strip().lower().replace(" ", "_").replace("-", "_")
