@@ -2907,16 +2907,30 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # yukseltiyordu. AI'nin kendi yazdigi "etki BEKLENMEMEKTEDIR" cumlesi
     # otomatik olarak Notr demektir; bu durumda ON OLCEK overrides.
     # KAREL: "stratejik karar ICERMEMEKTEDIR ... etki BEKLENMEMEKTEDIR" -> 6.2 -> 5.0 olmali
+    # ⚠️ KRITIK DERS (BVSAN 09.06.2026): kaliplar NEGATIFLIGI ACIKCA icermeli!
+    # Eski "etki yaratmas" / "...beklenm" gibi KESIK kaliplar, POZITIF cumleyi de
+    # yakaliyordu: "pozitif bir etki yaratmasi BEKLENMEKTEDIR" (olumlu!) ile
+    # "etki yaratmasi BEKLENMEMEKTEDIR" (notr) ayni prefixi paylasir. Sonuc:
+    # AI 7.0 verdigi yeni-is haberleri otomatik 5.0'a eziliyordu → kullanicinin
+    # "yeni is iliskisi hep notr kaliyor" sikayetinin KOK NEDENI buydu.
+    # Kural: 'beklenm' ile biten kalip YASAK — 'beklenmemekte/beklenmez/beklenmiyor'
+    # tam halleri yazilir.
     NEUTRAL_OVERRIDE_PATTERNS = (
         "etki beklenmemektedir", "etki beklenmez", "etki beklenmiyor",
         "etkisi beklenmemektedir", "etkisi beklenmez",
-        "etki yaratmas", "etki yaratmiyor",  # "etki yaratmasi beklenmemekted"
+        "etki yaratmiyor",
+        "etki yaratmasi beklenmemekte", "etki yaratması beklenmemekte",
+        "etki yaratmasi beklenmez", "etki yaratması beklenmez",
+        "etki yaratacagi beklenmemekte", "etki yaratacağı beklenmemekte",
         "anlamli etki yok", "anlamli bir etki yok",
-        "anlamli etki beklenm", "anlamli bir etki beklenm",
+        "anlamli etki beklenmemekte", "anlamli bir etki beklenmemekte",
+        "anlamlı etki beklenmemekte", "anlamlı bir etki beklenmemekte",
         "dogrudan etki yok", "dogrudan bir etki yok",
-        "dogrudan etki beklenm", "dogrudan bir etki beklenm",
-        "fiyata etki beklenm", "fiyat uzerinde etki beklenm",
-        "fiyat uzerinde dogrudan",  # "fiyat uzerinde dogrudan bir etki beklenmemektedir"
+        "dogrudan etki beklenmemekte", "dogrudan bir etki beklenmemekte",
+        "doğrudan etki beklenmemekte", "doğrudan bir etki beklenmemekte",
+        "fiyata etki beklenmemekte", "fiyat uzerinde etki beklenmemekte",
+        "fiyata etki beklenmez", "fiyat uzerinde etki beklenmez",
+        "fiyat uzerinde dogrudan bir etki beklenmemekte",
         "yeni bilgi icermemek", "yeni bir bilgi icermemek",
         "yeni bir bilgi veya", "yeni bilgi veya",
         "stratejik karar icermemek", "stratejik bir karar icermemek",
@@ -2926,10 +2940,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "bildirim niteligindedir", "bilgi amaclidir",
         "olcek nedeniyle sinirli",  # KAP bildirim olcek nedeniyle sinirli
         "haber gercek bir etki", "haber gercek etki",
-        "etki yaratmasi beklenm", "etki yaratacagi beklenm",
         # TR karakterli versiyonlar (lower'da degisiyor ama emin olalim)
         "etki beklenmemekted", "anlamlı etki yok", "doğrudan etki yok",
-        "doğrudan bir etki beklenm", "fiyata etki beklenm",
         "yeni bilgi içermem", "yeni bir bilgi içermem",
         "stratejik karar içermem", "stratejik bir karar içermem",
         "rutin bir parça", "bilgilendirme niteliğinde",
@@ -2952,6 +2964,16 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "olumlu bir gelişme", "olumsuz bir gelişme",
         "olumlu bir adım", "olumsuz bir adım",
         "olumlu sinyal", "olumsuz sinyal", "pozitif sinyal", "negatif sinyal",
+        # Acik POZITIF iddialar — notr kanitiyla cakissa bile pozitif hukum ezer
+        # (BVSAN: "olumlu katki saglayacak ... pozitif etki yaratmasi beklenmektedir"
+        # ozeti notr override'a takilip 7.0 → 5.0 olmustu)
+        "olumlu katkı", "olumlu katki", "pozitif katkı", "pozitif katki",
+        "katkı sağlayacak", "katki saglayacak",
+        "katkı sağlaması beklen", "katki saglamasi beklen",
+        "pozitif bir etki yaratması beklenmektedir",
+        "pozitif etki yaratması beklenmektedir",
+        "olumlu etki yaratması beklenmektedir",
+        "olumlu bir etki yaratması beklenmektedir",
     )))
     if _neutral_hit and not _explicit_verdict:
         # Eger skor zaten 5.0 civariysa dokunma; 6.0+ ise 5.0'a CEK
@@ -3563,6 +3585,31 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             if m2:
                 try:
                     amount_tl_m = float(m2.group(1).replace(",", "."))
+                except (ValueError, TypeError):
+                    pass
+        # "82.775.000 TL" gibi NOKTALI MUTLAK tutar (>=1 milyon: en az 2 nokta grubu)
+        # BVSAN vakasi: "1.925.000 Avro (yaklasik 82.775.000 TL)" — eski parser
+        # sadece "X milyon TL" formatini taniyordu, bu format atlaniyordu.
+        if amount_tl_m is None:
+            m3 = re.search(r"(\d{1,3}(?:\.\d{3}){2,})\s*tl", content_lower)
+            if m3:
+                try:
+                    amount_tl_m = float(m3.group(1).replace(".", "")) / 1_000_000
+                except (ValueError, TypeError):
+                    pass
+        # EUR/Avro → TL (yaklasik 1 EUR = 43 TL)
+        if amount_tl_m is None:
+            m_eur = re.search(r"(\d+(?:[.,]\d+)?)\s*milyon\s*(?:eur|euro|avro)", content_lower)
+            if m_eur:
+                try:
+                    amount_tl_m = float(m_eur.group(1).replace(",", ".")) * 43
+                except (ValueError, TypeError):
+                    pass
+        if amount_tl_m is None:
+            m_eur2 = re.search(r"(\d{1,3}(?:\.\d{3}){1,})\s*(?:eur|euro|avro)", content_lower)
+            if m_eur2:
+                try:
+                    amount_tl_m = (float(m_eur2.group(1).replace(".", "")) * 43) / 1_000_000
                 except (ValueError, TypeError):
                     pass
         # USD/EUR varsa TL'ye cevir (yaklasik: 1 USD = 40 TL, 1 EUR = 43 TL)
