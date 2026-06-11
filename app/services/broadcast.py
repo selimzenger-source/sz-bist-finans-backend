@@ -290,8 +290,10 @@ async def broadcast_background_task(
                         failed += 1
                         error_details.append(f"User {user.id}: gonderim basarisiz")
 
-                    # 2sn throttle — rate limit koruması
-                    await asyncio.sleep(2)
+                    # 0.15sn throttle — FCM limiti çok yüksek (600k/dk), 2sn gereksizdi:
+                    # 851 kullanıcı 28 DAKİKA sürüyordu ve deploy/restart'a denk gelince
+                    # döngü ortada kesiliyordu (11 Haz anket push'u kaybı). ~2 dk'ya indi.
+                    await asyncio.sleep(0.15)
 
                 except Exception as e:
                     error_name = type(e).__name__
