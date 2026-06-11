@@ -5158,6 +5158,26 @@ def _setup_scheduler_impl():
         coalesce=True,
         misfire_grace_time=600,
     )
+
+    # Her 6 saatte: taslak izahname'li IPO'lar icin NIHAI izahname arama
+    # (sirket sitesi + halkarz). Bulununca URL guncellenir + analiz yenilenir.
+    async def _prospectus_finder_job():
+        try:
+            from app.services.prospectus_finder import check_final_prospectuses
+            await check_final_prospectuses()
+        except Exception as e:
+            logger.error("Izahname finder job hatasi: %s", e)
+
+    scheduler.add_job(
+        _prospectus_finder_job,
+        IntervalTrigger(hours=6),
+        id="prospectus_final_finder",
+        name="Nihai Izahname Bulucu (6 saatte bir)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
     # Her 15 dakikada bir: kapanis saati gecmis IPO'lar icin push at
     # (eskiden sabit 17:00 cron'du; her IPO'nun kendi close hour'una gore ateslesin)
     scheduler.add_job(
