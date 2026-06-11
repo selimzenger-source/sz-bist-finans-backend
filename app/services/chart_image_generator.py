@@ -2980,3 +2980,108 @@ def generate_allocation_result_image(ipo, allocations: list, total_applicants: i
     except Exception as e:
         logger.error("generate_allocation_result_image hatasi: %s", e, exc_info=True)
         return None
+
+
+# ================================================================
+# AYIN HALKA ARZI KAPAK GORSELI (thread ilk tweet'i icin, 16:9)
+# ================================================================
+
+def generate_ayin_kapak_image(company: str, ticker: str, price, overall_score, verdict: str = "") -> Optional[str]:
+    """'Ayin En Dikkat Ceken Halka Arzi' thread'inin kapak gorseli (1200x675).
+
+    Buyuk altin baslik + sirket adi + ticker + fiyat + AI puani rozetli
+    sik bir kart. Twitter'da 16:9 tam kart olarak gorunur.
+    """
+    import tempfile
+    import gc
+    from datetime import datetime as _dt
+
+    try:
+        W, H = 1200, 675
+        img = Image.new("RGB", (W, H), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        # ── Ust serit ──
+        draw.rectangle([(0, 0), (W, 8)], fill=GOLD)
+
+        f_kicker = _load_font(30, bold=True)
+        f_title = _load_font(52, bold=True)
+        f_company = _load_font(40, bold=True)
+        f_meta = _load_font(30)
+        f_score_big = _load_font(72, bold=True)
+        f_score_lbl = _load_font(24)
+        f_verdict = _load_font(26, bold=True)
+
+        _AYLAR_TR = ["OCAK", "ŞUBAT", "MART", "NİSAN", "MAYIS", "HAZİRAN",
+                     "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"]
+        _now = _dt.now()
+        kicker = f"{_AYLAR_TR[_now.month - 1]} {_now.year}"
+        kw = draw.textlength(kicker, font=f_kicker)
+        draw.text(((W - kw) / 2, 52), kicker, font=f_kicker, fill=GRAY)
+
+        title = "AYIN EN DİKKAT ÇEKEN HALKA ARZI"
+        tw = draw.textlength(title, font=f_title)
+        # Sigmazsa kucult
+        if tw > W - 80:
+            f_title = _load_font(44, bold=True)
+            tw = draw.textlength(title, font=f_title)
+        draw.text(((W - tw) / 2, 100), title, font=f_title, fill=GOLD)
+
+        # ── Sirket adi (ortali, uzunsa kirp) ──
+        comp = (company or "").strip()
+        while comp and draw.textlength(comp, font=f_company) > W - 120:
+            comp = comp[:-4] + "..."
+        cw = draw.textlength(comp, font=f_company)
+        draw.text(((W - cw) / 2, 210), comp, font=f_company, fill=WHITE)
+
+        # ── Ticker + fiyat satiri ──
+        meta_parts = []
+        if ticker and ticker != "BIST":
+            meta_parts.append(f"#{ticker}")
+        try:
+            if price and str(price) not in ("?", "None"):
+                meta_parts.append(f"Halka Arz Fiyatı: {float(price):.2f} TL")
+        except (ValueError, TypeError):
+            pass
+        meta = "   ·   ".join(meta_parts) if meta_parts else ""
+        if meta:
+            mw = draw.textlength(meta, font=f_meta)
+            draw.text(((W - mw) / 2, 278), meta, font=f_meta, fill=TAVAN_GREEN)
+
+        # ── AI Puan rozeti (ortada buyuk daire kutu) ──
+        score_txt = str(overall_score) if overall_score not in (None, "?", "") else "?"
+        box_w, box_h = 300, 170
+        bx, by = (W - box_w) / 2, 345
+        draw.rounded_rectangle([(bx, by), (bx + box_w, by + box_h)], radius=20,
+                               fill=HEADER_BG, outline=GOLD, width=3)
+        s_disp = f"{score_txt}/10"
+        sw = draw.textlength(s_disp, font=f_score_big)
+        draw.text((bx + (box_w - sw) / 2, by + 22), s_disp, font=f_score_big, fill=GOLD)
+        lbl = "AI DEĞERLENDİRME PUANI"
+        lw = draw.textlength(lbl, font=f_score_lbl)
+        draw.text((bx + (box_w - lw) / 2, by + 118), lbl, font=f_score_lbl, fill=GRAY)
+
+        # ── Verdict (varsa, rozetin altinda) ──
+        if verdict:
+            v = verdict.strip()
+            while v and draw.textlength(v, font=f_verdict) > W - 160:
+                v = v[:-4] + "..."
+            vw = draw.textlength(v, font=f_verdict)
+            draw.text(((W - vw) / 2, 540), v, font=f_verdict, fill=WHITE)
+
+        # ── Watermark + marka footer ──
+        _draw_bg_watermark(img, W, H)
+        draw_brand_footer(draw, img, W, H, center=True)
+
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        safe_ticker = (ticker or "ipo").lower()
+        filepath = os.path.join(tempfile.gettempdir(), f"ayin_halka_arz_{safe_ticker}_{ts}.png")
+        img.save(filepath, "PNG", optimize=True)
+        del img, draw
+        gc.collect()
+        logger.info("Ayin halka arzi kapak gorseli olusturuldu: %s", filepath)
+        return filepath
+
+    except Exception as e:
+        logger.error("generate_ayin_kapak_image hatasi: %s", e, exc_info=True)
+        return None

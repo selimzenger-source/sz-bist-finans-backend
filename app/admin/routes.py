@@ -1881,11 +1881,12 @@ async def approve_tweet(
                 thread_tweets = None
 
         if thread_tweets and isinstance(thread_tweets, list) and len(thread_tweets) >= 2:
-            # Thread olarak gönder (4s aralıklarla)
+            # Thread olarak gönder (4s aralıklarla) — kapak görseli varsa ilk tweet'e ekle
             success = real_tweet_thread(
                 thread_tweets,
                 source="admin_approve",
                 force_send=True,
+                first_media_path=tweet.image_path or None,
             )
         elif tweet.image_path:
             success = real_tweet_media(tweet.text, tweet.image_path, source="admin_approve", force_send=True)
@@ -2165,7 +2166,31 @@ async def trigger_ayin_halka_arzi(
             # Thread başarılı — ilk tweet ana metin olarak kullanılır
             tweet_text = thread_tweets[0]
 
-        # Pending tweet olarak ekle (thread_data ile birlikte)
+        # ── KAPAK GORSELI uret (ilk tweet'e eklenecek) ──
+        # Thread onaylanip gonderilirken ilk tweet bu gorselle atilir.
+        cover_path = None
+        try:
+            from app.services.chart_image_generator import generate_ayin_kapak_image
+            _raw_cover = generate_ayin_kapak_image(
+                company=company, ticker=ipo.ticker or "",
+                price=price, overall_score=overall_score, verdict=verdict,
+            )
+            if _raw_cover:
+                # /tmp deploy/restart ile silinir — kalici dizine kopyala
+                import os as _os, shutil as _shutil, tempfile as _tempfile
+                if _raw_cover.startswith(_tempfile.gettempdir()):
+                    _persist_dir = _os.path.join(
+                        _os.path.dirname(_os.path.dirname(__file__)), "static", "tmp",
+                    )
+                    _os.makedirs(_persist_dir, exist_ok=True)
+                    cover_path = _os.path.join(_persist_dir, _os.path.basename(_raw_cover))
+                    _shutil.copy2(_raw_cover, cover_path)
+                else:
+                    cover_path = _raw_cover
+        except Exception as _cov_err:
+            logger.warning("[ADMIN] Ayin kapak gorseli uretilemedi: %s", _cov_err)
+
+        # Pending tweet olarak ekle (thread_data + kapak gorseli ile birlikte)
         from app.models.pending_tweet import PendingTweet
 
         pending = PendingTweet(
@@ -2173,6 +2198,7 @@ async def trigger_ayin_halka_arzi(
             source="tweet_ayin_halka_arz",
             status="pending",
             thread_data=_json.dumps(thread_tweets, ensure_ascii=False) if thread_tweets else None,
+            image_path=cover_path,
         )
         db.add(pending)
         await db.commit()

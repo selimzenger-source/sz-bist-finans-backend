@@ -1008,10 +1008,12 @@ def _safe_tweet_thread(
     thread_tweets: list[str],
     source: str = "unknown",
     force_send: bool = False,
+    first_media_path: str | None = None,
 ) -> bool:
     """Thread (seri tweet) olarak birden fazla tweeti zincirleme atar.
 
     1. İlk tweeti bağımsız atar → tweet_id alır
+       (first_media_path verildiyse ilk tweet KAPAK GÖRSELİ ile atılır)
     2. Sonraki her tweet, bir öncekine reply olarak atılır
     3. Tweetler arası _THREAD_DELAY_SECONDS bekler (spam engeli)
 
@@ -1019,6 +1021,7 @@ def _safe_tweet_thread(
         thread_tweets: Sıralı tweet metinleri listesi (min 2)
         source: Tweet kaynağı
         force_send: True ise auto_send/kill_switch atlanır
+        first_media_path: İlk tweete eklenecek kapak görseli (opsiyonel)
 
     Returns:
         True: En az ilk tweet başarılı
@@ -1046,8 +1049,20 @@ def _safe_tweet_thread(
         total = len(thread_tweets)
         logger.info("Thread gönderimi başlıyor: %d tweet", total)
 
-        # 1. İlk tweet (bağımsız)
-        first_id = _post_tweet_get_id(thread_tweets[0])
+        # 1. İlk tweet (bağımsız) — kapak görseli varsa onunla at
+        first_id = None
+        if first_media_path and os.path.exists(first_media_path):
+            _fid = _safe_tweet_with_multi_media(
+                thread_tweets[0], [first_media_path],
+                source=source, force_send=force_send, return_id=True,
+            )
+            first_id = _fid or None
+            if first_id:
+                logger.info("Thread: ilk tweet KAPAK GORSELI ile atildi (id=%s)", first_id)
+            else:
+                logger.warning("Thread: kapak gorselli ilk tweet basarisiz — metin-tek deneniyor")
+        if not first_id:
+            first_id = _post_tweet_get_id(thread_tweets[0])
         if not first_id:
             logger.error("Thread: ilk tweet gönderilemedi, iptal")
             _notify_tweet_failure(thread_tweets[0], "[THREAD] İlk tweet başarısız")
