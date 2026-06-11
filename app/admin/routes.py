@@ -5189,24 +5189,24 @@ def _build_bilanco_tweet_text(ticker: str, period: str | None) -> str:
       #bilanço #FAVÖK #BIST #borsaistanbul
     """
     tk = (ticker or "").upper().strip()
-    # period "2026-Q1" -> "2026 Q1"
+    # period "2026-Q1" -> "2026 1.Çeyrek" (GUBRF geri bildirimi, 12.06.2026:
+    # "2026 Q1" yazimi begenilmedi)
     per_txt = ""
     if period:
         p = period.strip()
         if "-Q" in p:
             yr, q = p.split("-Q", 1)
-            per_txt = f"{yr} Q{q} "
+            per_txt = f"{yr} {q}.Çeyrek "
         elif "-" in p:
             per_txt = p.replace("-", " ") + " "
         else:
             per_txt = p + " "
     lines = [
-        # Kullanicinin begendigi format (MAVI ornegi, 09.06.2026):
+        # MAVI formati — LINK YOK (kullanici istegi 12.06.2026: site/url
+        # tweete girmesin, X harici linki cezalandiriyor + 'http://' cirkin)
         f"#{tk} {per_txt}bilançosunu açıkladı.. #bilanço 👇",
         "",
-        "📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık uygulamamızda bulabilirsiniz...",
-        "",
-        "borsacebimde.com",
+        "📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık Borsa Cebimde uygulamasında bulabilirsiniz...",
     ]
     return "\n".join(lines)
 
