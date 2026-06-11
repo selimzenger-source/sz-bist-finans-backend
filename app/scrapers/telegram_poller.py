@@ -1894,13 +1894,16 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                     logger.warning("Bilanco aciklandi bildirim hatasi (%s): %s", _tk, _bn_err)
 
                                 try:
-                                    from app.services.bilanco_pipeline import process_bilanco_bildirimi
-                                    import asyncio as _asyncio
-                                    _asyncio.create_task(
-                                        process_bilanco_bildirimi(_tk, kap_title=ka_title)
-                                    )
+                                    # ★ KUYRUK fix (11.06.2026): eskiden create_task ile
+                                    # DOGRUDAN paralel baslatiliyordu — 5-10 bilanco pespese
+                                    # gelince HEPSI AYNI ANDA calisip sistemi kasiyordu ve
+                                    # queue worker (sirali + dinamik bekleme) hic
+                                    # kullanilmiyordu. Artik kuyruga eklenir; worker SIRAYLA
+                                    # isler, hicbiri atlanmaz, zamana yayilir.
+                                    from app.services.bilanco_pipeline import enqueue_bilanco
+                                    await enqueue_bilanco(_tk, kap_title=ka_title)
                                     logger.info(
-                                        "Bilanco pipeline tetiklendi: %s — '%s'",
+                                        "Bilanco kuyruga eklendi (sirali islenecek): %s — '%s'",
                                         _tk, ka_title[:50],
                                     )
                                 except Exception as _bil_err:

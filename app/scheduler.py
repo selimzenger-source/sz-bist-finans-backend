@@ -5367,10 +5367,12 @@ def _setup_scheduler_impl():
             if not missed:
                 return
             logger.info("[BILANCO-CATCHUP] Atlanan bilanco adaylari: %s", missed)
-            from app.services.bilanco_pipeline import process_bilanco_bildirimi
-            for tk in missed[:2]:  # yavas yavas — her kosuda max 2
+            # KUYRUGA ekle — worker sirayla isler (poller ile ayni tek isleme
+            # noktasi; pespese 5-10 bilanco da olsa atlanmaz, zamana yayilir)
+            from app.services.bilanco_pipeline import enqueue_bilanco
+            for tk in missed[:5]:
                 try:
-                    await process_bilanco_bildirimi(tk, "Bilanço Yakalama (otomatik)")
+                    await enqueue_bilanco(tk, "Bilanço Yakalama (otomatik)")
                 except Exception as _bc_err:
                     logger.warning("[BILANCO-CATCHUP] %s hata: %s", tk, _bc_err)
         except Exception as e:

@@ -424,10 +424,19 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
             "sga_marketing": aux.get("_sga_marketing"),
             "sga_rd": aux.get("_sga_rd"),
         }
-        if _depr_raw is None:
+        # ★ SACMA-DEGER korumasi (REEDR 11.06.2026): amortisman tag'i bazen
+        # YANLIS satiri/olcegi yakaliyor (REEDR: 11.12 TL "amortisman"!) ve
+        # FAVÖK ~95mn eksik cikiyordu. Amortisman, brut karin binde 1'inden
+        # ve 100K TL'den kucukse guvenilmez → FAVÖK hesaplanmaz (N/A).
+        _depr_suspicious = (
+            _depr_raw is not None
+            and abs(_depr_raw) < max(100_000.0, 0.001 * abs(gross or 0))
+        )
+        if _depr_raw is None or _depr_suspicious:
             out["ebitda"] = None
             logger.warning(
-                "FAVÖK hesaplanamadi (amortisman tag'i yok) — N/A birakildi"
+                "FAVÖK hesaplanamadi (amortisman %s) — N/A birakildi",
+                "tag'i yok" if _depr_raw is None else f"degeri supheli: {_depr_raw}",
             )
         elif gross is not None and _has_sga:
             sga_total = (abs(aux.get("_sga_general") or 0)
@@ -508,7 +517,11 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
         _dep_raw_p = aux_prev.get("_depreciation_amortization")
         _dep = abs(_dep_raw_p or 0)
         _has_sga_p = any(aux_prev.get(k) is not None for k in ("_sga_general", "_sga_marketing", "_sga_rd"))
-        if _dep_raw_p is None:
+        _dep_suspicious_p = (
+            _dep_raw_p is not None
+            and abs(_dep_raw_p) < max(100_000.0, 0.001 * abs(_g or 0))
+        )
+        if _dep_raw_p is None or _dep_suspicious_p:
             prev["ebitda"] = None
         elif _g is not None and _has_sga_p:
             _sga = abs(aux_prev.get("_sga_general") or 0) + abs(aux_prev.get("_sga_marketing") or 0) + abs(aux_prev.get("_sga_rd") or 0)
