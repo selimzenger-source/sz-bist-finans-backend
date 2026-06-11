@@ -5376,15 +5376,21 @@ def _setup_scheduler_impl():
         except Exception as e:
             logger.error("[BILANCO-CATCHUP] Genel hata: %s", e)
 
+    # ★ DEPLOY-DAYANIKLILIK: IntervalTrigger sayaci her deploy/restart'ta
+    # SIFIRLANIR — gun boyu sik deploy yapildigi icin 30 dk'lik job HIC
+    # ATESLENEMIYORDU (GUBRF'nin saatlerce islenmeme sebebi). next_run_time
+    # ile ilk kosu boot'tan 3 dk sonraya sabitlenir; sonrasi 30 dk araliklarla.
+    from datetime import datetime as _catchup_dt, timedelta as _catchup_td
     scheduler.add_job(
         _bilanco_catchup_job,
         IntervalTrigger(minutes=30),
         id="bilanco_catchup",
-        name="Atlanan Bilanco Yakalama (30 dk)",
+        name="Atlanan Bilanco Yakalama (30 dk, boot+3dk ilk kosu)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=900,
+        next_run_time=_catchup_dt.now() + _catchup_td(minutes=3),
     )
     # Her 15 dakikada bir: kapanis saati gecmis IPO'lar icin push at
     # (eskiden sabit 17:00 cron'du; her IPO'nun kendi close hour'una gore ateslesin)
