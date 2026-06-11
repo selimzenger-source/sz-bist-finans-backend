@@ -468,10 +468,10 @@ async function tweetCard(ticker, period) {
     if (period.indexOf('-Q') > -1) { const p = period.split('-Q'); perTxt = p[0] + ' ' + p[1] + '.Çeyrek '; }
     else perTxt = period.replace('-', ' ') + ' ';
   }
+  // Link YOK (X harici linki cezalandırıyor) — marka görselde zaten var
   const text =
     '#' + ticker + ' ' + perTxt + 'bilançosunu açıkladı.. #bilanço 👇\n\n' +
-    '📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık uygulamamızda bulabilirsiniz...\n\n' +
-    '🔗 http://borsacebimde.com';
+    '📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık Borsa Cebimde uygulamasında bulabilirsiniz...';
 
   btn.classList.add('loading');
   btn.innerHTML = '<span>⏳</span> Görsel hazırlanıyor...';
