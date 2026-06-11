@@ -215,6 +215,9 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS hype_6h_notified_at TIMESTAMPTZ"
             ))
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ceiling_result_notified_at TIMESTAMPTZ"
+            ))
             await db.commit()
     except Exception as e:
         logger.warning("ipo poll notif migration atlandi: %s", e)

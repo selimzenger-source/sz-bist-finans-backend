@@ -4902,6 +4902,11 @@ def _setup_scheduler_impl():
                         f"{company} halka arzına katılacak mısınız? "
                         "Topluluğun beklentisini öğrenmek için hemen oy verin."
                     )
+                    # ★ DUPLICATE KORUMASI: flag'i push'tan ONCE set + commit.
+                    # Push patlasa/restart olsa bile bu IPO icin bir daha calismaz
+                    # (kullanici 1 push alir, asla 2+ almaz).
+                    ipo.hype_poll_notified_at = _dt.now(_tz.utc)
+                    await db.commit()
                     try:
                         await broadcast_background_task(
                             title=title,
@@ -4915,12 +4920,9 @@ def _setup_scheduler_impl():
                                 "poll_phase": "hype",
                             },
                         )
-                        ipo.hype_poll_notified_at = _dt.now(_tz.utc)
-                        await db.commit()
                         logger.info("[IPO-POLL-07:00] Push gonderildi: %s (id=%d)", company, ipo.id)
                     except Exception as e:
                         logger.error("[IPO-POLL-07:00] Push hata %s: %s", company, e)
-                        await db.rollback()
         except Exception as e:
             logger.error("[IPO-POLL-07:00] Genel hata: %s", e)
 
@@ -5010,6 +5012,11 @@ def _setup_scheduler_impl():
                         f"Şimdi tavan beklenti anketimiz açıldı, "
                         f"oy ver ve sonuçları gör."
                     )
+                    # ★ DUPLICATE KORUMASI: flag'i push'tan ONCE set + commit.
+                    # Bu job 15 dk'da bir calisir — flag sonra kaydedilirse
+                    # commit hatasi/restart durumunda 15 dk sonra AYNI push tekrar gider.
+                    ipo.ceiling_poll_notified_at = _dt.now(_tz.utc)
+                    await db.commit()
                     try:
                         await broadcast_background_task(
                             title=title,
@@ -5023,15 +5030,111 @@ def _setup_scheduler_impl():
                                 "poll_phase": "ceiling",
                             },
                         )
-                        ipo.ceiling_poll_notified_at = _dt.now(_tz.utc)
-                        await db.commit()
                         logger.info("[IPO-POLL-17:00] Push gonderildi: %s (id=%d, %d oy)",
                                     company, ipo.id, total)
                     except Exception as e:
                         logger.error("[IPO-POLL-17:00] Push hata %s: %s", company, e)
-                        await db.rollback()
         except Exception as e:
             logger.error("[IPO-POLL-17:00] Genel hata: %s", e)
+
+    async def _ipo_ceiling_result_notification():
+        """Her 15 dk — gong gunu tavan anketi KAPANINCA sonuc bildirimi.
+
+        Tavan anketi, IPO 'trading' statusune gectigi an kapanir (gong gunu).
+        Bu job yeni trading'e gecmis IPO'lari yakalar ve anket sonuclarini
+        (oy sayisi, ortalama tahmin, en populer tahmin) push ile duyurur.
+        Tiklayinca sirket karti (/ipo/{id}) acilir.
+
+        Duplicate korumasi: ceiling_result_notified_at DB flag'i — push'tan
+        ONCE set + commit edilir (restart/patlama durumunda asla 2. push gitmez).
+        Backfill korumasi: sadece trading_start bugun/dun olan IPO'lar —
+        deploy aninda eski IPO'lara (EKDMR vb.) toplu push gitmez.
+        """
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date
+        from sqlalchemy import select as _sel, and_, func as _func
+        try:
+            from app.models.ipo import IPO
+            from app.models.ipo_poll_vote import IPOPollVote
+            from app.services.broadcast import broadcast_background_task
+
+            now_tr = _dt.now(_tz(_td(hours=3)))
+            # Gece/sabah erken saatte push atma — gong ~10:00, 10:00-22:00 arasi calis
+            if not (10 <= now_tr.hour < 22):
+                return
+
+            today = _date.today()
+            async with async_session() as db:
+                stmt = _sel(IPO).where(
+                    and_(
+                        IPO.ceiling_result_notified_at.is_(None),
+                        IPO.status == "trading",
+                        IPO.trading_start.is_not(None),
+                        IPO.trading_start >= today - _td(days=1),  # backfill korumasi
+                        IPO.trading_start <= today,
+                    )
+                )
+                ipos = (await db.execute(stmt)).scalars().all()
+                if not ipos:
+                    return
+
+                for ipo in ipos:
+                    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+
+                    # ★ SPAM KORUMASI: flag'i HEMEN set + commit — push patlasa bile
+                    # bu IPO icin bir daha calismaz (1 push, asla 2+).
+                    ipo.ceiling_result_notified_at = _dt.now(_tz.utc)
+                    await db.commit()
+
+                    # Tavan anketi oylarini topla (choice = tavan sayisi tahmini, 1-25)
+                    vote_q = _sel(IPOPollVote.choice).where(
+                        and_(IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "ceiling")
+                    )
+                    choices = [r[0] for r in (await db.execute(vote_q)).all()]
+                    guesses = []
+                    for c in choices:
+                        try:
+                            guesses.append(int(c))
+                        except (ValueError, TypeError):
+                            pass
+
+                    if not guesses:
+                        logger.info(
+                            "[CEILING-RESULT] %s: tavan anketine oy yok, push atlanıyor (flag set)",
+                            company,
+                        )
+                        continue
+
+                    total = len(guesses)
+                    avg_guess = sum(guesses) / total
+                    # En populer tahmin (mod)
+                    from collections import Counter
+                    mode_guess, mode_cnt = Counter(guesses).most_common(1)[0]
+
+                    title = f"📊 {company} Tavan Anketi Sonuçlandı"
+                    body = (
+                        f"{total} oy kullanıldı — topluluk ortalaması {avg_guess:.0f} tavan, "
+                        f"en popüler tahmin {mode_guess} tavan ({mode_cnt} kişi). "
+                        f"Gerçekleşen performansı uygulamadan takip et!"
+                    )
+                    try:
+                        await broadcast_background_task(
+                            title=title,
+                            body=body,
+                            audience="all",
+                            deep_link_target="halka-arz-detay",
+                            extra_data={
+                                "screen": "halka-arz-detay",
+                                "ipo_id": str(ipo.id),
+                            },
+                        )
+                        logger.info(
+                            "[CEILING-RESULT] Push gonderildi: %s (id=%d, %d oy, ort=%.1f, mod=%d)",
+                            company, ipo.id, total, avg_guess, mode_guess,
+                        )
+                    except Exception as e:
+                        logger.error("[CEILING-RESULT] Push hata %s: %s", company, e)
+        except Exception as e:
+            logger.error("[CEILING-RESULT] Genel hata: %s", e)
 
     # 07:00 TR = 04:00 UTC (sabah katilim anketi push)
     scheduler.add_job(
@@ -5039,6 +5142,17 @@ def _setup_scheduler_impl():
         CronTrigger(hour=4, minute=0),
         id="ipo_hype_poll_07",
         name="IPO Katilim Anketi Push (07:00 TR)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
+    # Her 15 dk: gong gunu tavan anketi kapaninca sonuc push'u
+    scheduler.add_job(
+        _ipo_ceiling_result_notification,
+        IntervalTrigger(minutes=15),
+        id="ipo_ceiling_result_auto",
+        name="IPO Tavan Anketi SONUC Push (gong gunu)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

@@ -2796,3 +2796,187 @@ def generate_spk_bulletin_image(ai_text: str, bulletin_no: str) -> Optional[str]
         except Exception:
             pass
         return None
+
+
+# ================================================================
+# HALKA ARZ SONUCLANDI GORSELI (dagitim sonuclari — dinamik kart)
+# ================================================================
+
+def _fmt_int_tr(val) -> str:
+    """123456 -> '123.456' (TR binlik ayraci)."""
+    try:
+        return f"{int(val):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(val)
+
+
+def generate_allocation_result_image(ipo, allocations: list, total_applicants: int = 0) -> Optional[str]:
+    """'Halka Arz Sonuclandi' tweet gorseli.
+
+    Buyuk baslik + sirket adi + toplam katilimci sayisi (hero) +
+    grup bazli tahsisat tablosu (kisi/lot/oran) + bireysel ort. lot vurgusu.
+
+    Args:
+        ipo: IPO ORM objesi (company_name, ticker, ipo_price)
+        allocations: IPOAllocation listesi (veya dict listesi)
+        total_applicants: toplam basvuran (0 ise gruplardan toplanir)
+
+    Returns:
+        PNG dosya yolu veya None (hata)
+    """
+    import tempfile
+    import gc
+    from datetime import datetime as _dt
+
+    try:
+        WIDTH = 1200
+        PAD = 48
+
+        # ── Veriyi normalize et ──
+        grp_labels = {
+            "bireysel": "Bireysel",
+            "yuksek_basvurulu": "Yüksek Başvurulu",
+            "kurumsal_yurtici": "Kurumsal Yurt İçi",
+            "kurumsal_yurtdisi": "Kurumsal Yurt Dışı",
+        }
+        rows = []
+        bireysel_avg_lot = None
+        sum_participants = 0
+        for a in (allocations or []):
+            if isinstance(a, dict):
+                grp = a.get("group_name", "")
+                pct = a.get("allocation_pct")
+                lots = a.get("allocated_lots")
+                participants = a.get("participant_count")
+                avg_lot = a.get("avg_lot_per_person")
+            else:
+                grp = a.group_name
+                pct = a.allocation_pct
+                lots = a.allocated_lots
+                participants = a.participant_count
+                avg_lot = a.avg_lot_per_person
+            if participants:
+                sum_participants += int(participants)
+            if grp == "bireysel":
+                if avg_lot:
+                    bireysel_avg_lot = float(avg_lot)
+                elif lots and participants and int(participants) > 0:
+                    bireysel_avg_lot = int(lots) / int(participants)
+            rows.append({
+                "label": grp_labels.get(grp, grp or "-"),
+                "pct": pct, "lots": lots, "participants": participants,
+            })
+
+        if not total_applicants:
+            total_applicants = sum_participants
+
+        # ── Yukseklik hesabi ──
+        HEADER_H = 96
+        HERO_H = 170
+        TABLE_HEADER_H = 52
+        ROW_H = 64
+        AVG_LOT_H = 96 if bireysel_avg_lot else 0
+        FOOT_H = 70
+        total_h = HEADER_H + HERO_H + TABLE_HEADER_H + ROW_H * max(1, len(rows)) + AVG_LOT_H + 40 + FOOT_H
+
+        img = Image.new("RGB", (WIDTH, total_h), BG_COLOR)
+        draw = ImageDraw.Draw(img)
+
+        f_title = _load_font(40, bold=True)
+        f_sub = _load_font(28, bold=True)
+        f_hero_big = _load_font(64, bold=True)
+        f_hero_label = _load_font(26)
+        f_col = _load_font(22, bold=True)
+        f_row = _load_font(25)
+        f_row_bold = _load_font(25, bold=True)
+        f_avg = _load_font(30, bold=True)
+
+        # ── Header serit ──
+        draw.rectangle([(0, 0), (WIDTH, HEADER_H)], fill=HEADER_BG)
+        draw.rectangle([(0, HEADER_H - 4), (WIDTH, HEADER_H)], fill=GOLD)
+        ticker_txt = f"#{ipo.ticker}" if getattr(ipo, "ticker", None) else ""
+        draw.text((PAD, 26), "HALKA ARZ SONUÇLANDI", font=f_title, fill=GOLD)
+        if ticker_txt:
+            tw = draw.textlength(ticker_txt, font=f_title)
+            draw.text((WIDTH - PAD - tw, 26), ticker_txt, font=f_title, fill=TAVAN_GREEN)
+
+        y = HEADER_H + 18
+        # Sirket adi (uzunsa kirp)
+        company = (ipo.company_name or "").strip()
+        while company and draw.textlength(company, font=f_sub) > WIDTH - 2 * PAD:
+            company = company[:-4] + "..."
+        draw.text((PAD, y), company, font=f_sub, fill=WHITE)
+        y += 48
+
+        # ── HERO: toplam katilimci ──
+        if total_applicants:
+            hero_txt = _fmt_int_tr(total_applicants)
+            hw = draw.textlength(hero_txt, font=f_hero_big)
+            draw.text(((WIDTH - hw) / 2, y), hero_txt, font=f_hero_big, fill=TAVAN_GREEN)
+            y += 78
+            lbl = "kişi katıldı"
+            if getattr(ipo, "ipo_price", None):
+                try:
+                    lbl = f"kişi katıldı  ·  Arz fiyatı {float(ipo.ipo_price):.2f} TL"
+                except (ValueError, TypeError):
+                    pass
+            lw = draw.textlength(lbl, font=f_hero_label)
+            draw.text(((WIDTH - lw) / 2, y), lbl, font=f_hero_label, fill=GRAY)
+            y += 44
+        else:
+            y += 20
+
+        # ── Tablo basligi ──
+        col_x = {"label": PAD, "participants": 560, "lots": 800, "pct": 1080}
+        draw.rectangle([(PAD - 16, y), (WIDTH - PAD + 16, y + TABLE_HEADER_H - 8)], fill=HEADER_BG)
+        draw.text((col_x["label"], y + 10), "GRUP", font=f_col, fill=GRAY)
+        draw.text((col_x["participants"], y + 10), "KİŞİ", font=f_col, fill=GRAY)
+        draw.text((col_x["lots"], y + 10), "LOT", font=f_col, fill=GRAY)
+        draw.text((col_x["pct"], y + 10), "%", font=f_col, fill=GRAY)
+        y += TABLE_HEADER_H
+
+        # ── Satirlar ──
+        for i, r in enumerate(rows):
+            row_bg = ROW_EVEN if i % 2 == 0 else ROW_ODD
+            draw.rectangle([(PAD - 16, y), (WIDTH - PAD + 16, y + ROW_H - 6)], fill=row_bg)
+            is_bireysel = r["label"] == "Bireysel"
+            label_color = TAVAN_GREEN if is_bireysel else WHITE
+            draw.text((col_x["label"], y + 16), r["label"], font=f_row_bold if is_bireysel else f_row, fill=label_color)
+            draw.text((col_x["participants"], y + 16), _fmt_int_tr(r["participants"]) if r["participants"] else "-", font=f_row, fill=WHITE)
+            draw.text((col_x["lots"], y + 16), _fmt_int_tr(r["lots"]) if r["lots"] else "-", font=f_row, fill=WHITE)
+            pct_txt = f"%{float(r['pct']):.0f}" if r["pct"] else "-"
+            draw.text((col_x["pct"], y + 16), pct_txt, font=f_row, fill=GOLD)
+            y += ROW_H
+
+        # ── Bireysel ortalama lot vurgusu ──
+        if bireysel_avg_lot:
+            y += 14
+            _bval = float(bireysel_avg_lot)
+            if _bval == int(_bval):
+                _blot = str(int(_bval))
+            else:
+                _blot = f"{int(_bval)}-{int(_bval) + 1}"
+            avg_txt = f"Bireysel yatırımcıya düşen: ~{_blot} lot/kişi"
+            aw = draw.textlength(avg_txt, font=f_avg)
+            box_w = aw + 64
+            bx = (WIDTH - box_w) / 2
+            draw.rounded_rectangle([(bx, y), (bx + box_w, y + 64)], radius=14, fill=HEADER_BG, outline=GOLD, width=2)
+            draw.text((bx + 32, y + 14), avg_txt, font=f_avg, fill=GOLD)
+            y += 78
+
+        # ── Watermark + footer ──
+        _draw_bg_watermark(img, WIDTH, total_h)
+        draw_brand_footer(draw, img, WIDTH, total_h, center=True)
+
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        safe_ticker = (getattr(ipo, "ticker", None) or "ipo").lower()
+        filepath = os.path.join(tempfile.gettempdir(), f"halka_arz_sonuc_{safe_ticker}_{ts}.png")
+        img.save(filepath, "PNG", optimize=True)
+        del img, draw
+        gc.collect()
+        logger.info("Halka arz sonuc gorseli olusturuldu: %s (%.1f KB)", filepath, os.path.getsize(filepath) / 1024)
+        return filepath
+
+    except Exception as e:
+        logger.error("generate_allocation_result_image hatasi: %s", e, exc_info=True)
+        return None

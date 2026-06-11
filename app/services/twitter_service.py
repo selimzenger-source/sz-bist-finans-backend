@@ -1523,7 +1523,29 @@ def tweet_allocation_results(ipo, allocations: list = None) -> bool:
             f"#{ipo.ticker or 'halkaarz'} #halkaarz"
         )
 
-        return _safe_tweet_with_media(text, BANNER_DAGITIM_SONUCLARI, source="tweet_allocation_results")
+        # Dinamik "Halka Arz Sonuclandi" gorseli — kisi sayisi + tahsisat tablosu.
+        # Uretim basarisiz olursa eski sabit banner'a dusulur.
+        media_path = BANNER_DAGITIM_SONUCLARI
+        dynamic_img = None
+        try:
+            from app.services.chart_image_generator import generate_allocation_result_image
+            _total = getattr(ipo, "total_applicants", None) or 0
+            dynamic_img = generate_allocation_result_image(ipo, allocations, int(_total))
+            if dynamic_img:
+                media_path = dynamic_img
+        except Exception as _img_err:
+            logger.warning("Halka arz sonuc gorseli uretilemedi, banner kullanilacak: %s", _img_err)
+
+        ok = _safe_tweet_with_media(text, media_path, source="tweet_allocation_results")
+
+        # Temp gorseli temizle
+        if dynamic_img:
+            try:
+                os.remove(dynamic_img)
+            except OSError:
+                pass
+
+        return ok
     except Exception as e:
         logger.error(f"tweet_allocation_results hatası: {e}")
         return False

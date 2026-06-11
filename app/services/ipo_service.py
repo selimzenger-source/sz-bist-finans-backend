@@ -357,6 +357,7 @@ class IPOService:
 
         # IPO'yu guncelle
         ipo = await self.get_ipo_by_id(ipo_id)
+        was_announced = bool(ipo.allocation_announced) if ipo else False
         if ipo:
             ipo.allocation_announced = True
             ipo.updated_at = datetime.utcnow()
@@ -364,7 +365,9 @@ class IPOService:
         await self.db.flush()
 
         # Tweet #3: Kesinlesen Dagitim Sonuclari
-        if ipo:
+        # ★ DUPLICATE KORUMASI: sadece ILK kayitta tweet at. Admin formu
+        # ikinci kez kaydederse (duzeltme vb.) tweet TEKRAR atilmaz.
+        if ipo and not was_announced:
             try:
                 from app.services.twitter_service import tweet_allocation_results
                 from app.services.admin_telegram import notify_tweet_sent
@@ -372,6 +375,11 @@ class IPOService:
                 await notify_tweet_sent("dagitim_sonucu", ipo.ticker or ipo.company_name, tw_ok)
             except Exception:
                 pass  # Tweet hatasi sistemi etkilemez
+        elif ipo and was_announced:
+            logger.info(
+                "Dagitim sonucu tweeti atlandi (zaten atilmis): %s",
+                ipo.ticker or ipo.company_name,
+            )
 
         return new_allocations
 
