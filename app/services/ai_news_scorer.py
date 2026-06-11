@@ -2923,7 +2923,7 @@ def _extract_dividend_yield_pct(content: str) -> float | None:
     return None
 
 
-def _validate_score_against_content(score: float, content: str, ticker: str, ai_summary: str = "") -> float:
+def _validate_score_against_content(score: float, content: str, ticker: str, ai_summary: str = "", verdict: str = "") -> float:
     """Icerik patirnlerine gore skoru dogrular ve gerekirse duzeltir.
 
     Kritik negatif haberler icin skoru tavan sinirlar,
@@ -2933,7 +2933,16 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     ai_summary verildiyse: AI ozetinde pozitif/negatif framing kontrol edilir,
     skor-yorum tutarsizligi duzeltilir (orn: ozet 'stratejik adim' diyor
     ama skor 5.0 — yorumla tutarli olmasi icin min 6.2'ye cikar).
+
+    verdict verildiyse (AI'nin yapisal hukmu): pozitif/negatif verdict
+    keyword-bazli NOTR override'i EZER. AI acikca 'pozitif' dediyse, ozette
+    gecen 'etki beklenmemekte' gibi bir alt-cumle skoru 5.0'a CEKEMEZ.
+    Kok sebep: olumlu yorum + notr puan celiskisi (kullanici sikayeti).
     """
+    # AI'nin yapisal verdict'i — keyword heuristiklerinden DAHA guvenilir.
+    _v = (verdict or "").strip().lower().replace(" ", "_").replace("-", "_")
+    _verdict_pos = _v in ("guclu_pozitif", "pozitif", "hafif_pozitif")
+    _verdict_neg = _v in ("guclu_negatif", "negatif", "hafif_negatif")
     # Python .lower() Turkce İ -> "i̇" (i + U+0307 combining dot) uretir; bu da
     # "yeni iş ilişkisi" gibi keyword eslesmelerini bozar. U+0307'yi temizle
     # (yalnizca İ.lower()'dan gelir, baska keyword'u etkilemez).
@@ -3044,6 +3053,10 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # pos-framing lift'ine dusuyordu → "pozitif etki BEKLENMEMEKTEDIR" diyen
     # ozet 6.2'ye kalkiyordu (KAREL/PKART/MGROS yanlis-lift ornekleri).
     _neutral_hit = bool(summary_lower and any(p in summary_lower for p in NEUTRAL_OVERRIDE_PATTERNS))
+    # AI acikca POZITIF/NEGATIF verdict verdiyse, keyword-bazli notr cekme DEVRE DISI.
+    # (Olumlu yorum + notr puan celiskisinin kok cozumu — verdict otoritedir.)
+    if (_verdict_pos or _verdict_neg) and not _critical_neg:
+        _neutral_hit = False
     # ISTISNA: ozet acik VERDIKT veriyorsa ("hafif olumlu/olumsuz olarak
     # degerlendiril...") neutral kaniti ezer — VSNMD tarzi "kisa vadede etki
     # beklenmese de ... hafif olumlu" ozetlerde framing duzeltmesi CALISMALI.

@@ -948,7 +948,8 @@ SADECE asagidaki JSON formatinda yanit ver:
     if summary:
         try:
             from app.services.ai_news_scorer import _validate_score_against_content
-            _adj = _validate_score_against_content(impact_score, "", company_code, ai_summary=summary)
+            # verdict geçir → AI pozitif/negatif dediyse keyword-bazlı nötr çekme ezilir
+            _adj = _validate_score_against_content(impact_score, "", company_code, ai_summary=summary, verdict=_verdict)
             if _adj and abs(_adj - impact_score) >= 0.1:
                 logger.info(
                     "KAP Analyzer [TUTARLILIK] %s: %.1f -> %.1f (özet framing ile uyumlandı)",
