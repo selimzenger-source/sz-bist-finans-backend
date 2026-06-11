@@ -497,6 +497,25 @@ async function tweetCard(ticker, period) {
     });
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
 
+    // MOBİL: Web Share API — paylaşım menüsünden X seçilince görsel+metin otomatik
+    try {
+      const file = new File([blob], 'bilanco-' + ticker + '.png', { type: 'image/png' });
+      if (typeof navigator.share === 'function' && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text: text });
+        btn.classList.remove('loading');
+        btn.innerHTML = '<span>✓</span> Paylaşım menüsü açıldı';
+        setTimeout(() => { btn.innerHTML = '<span>𝕏</span> X\'te Paylaş'; }, 4000);
+        return;
+      }
+    } catch (shareErr) {
+      if (shareErr && shareErr.name === 'AbortError') {
+        btn.classList.remove('loading');
+        btn.innerHTML = '<span>𝕏</span> X\'te Paylaş';
+        return;
+      }
+      // desteklenmiyor → masaüstü akışına düş
+    }
+
     // Görseli panoya kopyala (desteklenmiyorsa indir — kullanıcı tweete ekler)
     let copied = false;
     try {
