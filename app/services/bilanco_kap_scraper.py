@@ -407,9 +407,21 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
         # SG&A hic parse edilemediyse fallback.
         gross = out.get("gross_profit")
         op = out.get("operating_profit")
-        depr = abs(aux.get("_depreciation_amortization") or 0)
+        # ★ REEDR fix (11.06.2026): amortisman tag'i GUNCEL kolonda parse
+        # edilemezse (None) FAVÖK ~amortisman kadar EKSIK hesaplaniyordu
+        # (REEDR 26Q1: -25mn basildi, Fintables +70.5mn — fark tam amortisman).
+        # Onceki kolon parse edildigi icin onceki donem dogruydu → tutarsiz
+        # gorunum. Kural: amortisman tag'i YOKSA FAVÖK hesaplanmaz (None →
+        # gorselde N/A) — yanlis deger basmaktansa bos birak.
+        _depr_raw = aux.get("_depreciation_amortization")
+        depr = abs(_depr_raw or 0)
         _has_sga = any(aux.get(k) is not None for k in ("_sga_general", "_sga_marketing", "_sga_rd"))
-        if gross is not None and _has_sga:
+        if _depr_raw is None:
+            out["ebitda"] = None
+            logger.warning(
+                "FAVÖK hesaplanamadi (amortisman tag'i yok) — N/A birakildi"
+            )
+        elif gross is not None and _has_sga:
             sga_total = (abs(aux.get("_sga_general") or 0)
                          + abs(aux.get("_sga_marketing") or 0)
                          + abs(aux.get("_sga_rd") or 0))
@@ -481,11 +493,16 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
         if _fd > 0:
             prev["net_debt"] = _fd - (prev.get("cash_and_equivalents") or 0)
         # FAVÖK prev — current ile AYNI Fintables formulu: Brut − SG&A + Amortisman
+        # REEDR fix: amortisman tag'i yoksa FAVÖK hesaplanmaz (None) — current
+        # ile ayni kural, asimetrik/yaniltici karsilastirma olusmasin.
         _g = prev.get("gross_profit")
         _op = prev.get("operating_profit")
-        _dep = abs(aux_prev.get("_depreciation_amortization") or 0)
+        _dep_raw_p = aux_prev.get("_depreciation_amortization")
+        _dep = abs(_dep_raw_p or 0)
         _has_sga_p = any(aux_prev.get(k) is not None for k in ("_sga_general", "_sga_marketing", "_sga_rd"))
-        if _g is not None and _has_sga_p:
+        if _dep_raw_p is None:
+            prev["ebitda"] = None
+        elif _g is not None and _has_sga_p:
             _sga = abs(aux_prev.get("_sga_general") or 0) + abs(aux_prev.get("_sga_marketing") or 0) + abs(aux_prev.get("_sga_rd") or 0)
             prev["ebitda"] = _g - _sga + _dep
         elif _op is not None:

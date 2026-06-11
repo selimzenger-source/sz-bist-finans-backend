@@ -5230,6 +5230,79 @@ def _setup_scheduler_impl():
         coalesce=True,
         misfire_grace_time=600,
     )
+
+    # Her 30 dk: ATLANAN BILANCOLARI YAKALA (GUBRF vakasi, 11.06.2026).
+    # Bilanco seti yayinlandiginda matriks bot bazen ana "Finansal Durum
+    # Tablosu" mesajini GONDERMIYOR — sadece yan urunler (Sorumluluk Beyani,
+    # Ozkaynaklar Degisim, Faaliyet Raporu) dusuyor ve pipeline hic tetiklenmiyor.
+    # Bu job: son 24 saatte >=2 bilanco-seti yan urunu olan ama company_financials
+    # kaydi OLUSMAYAN ticker'lari bulur ve pipeline'i SIRAYLA tetikler (max 2/run —
+    # yavas yavas, sistem yorulmasin). Pipeline'in kendi 1 saatlik dedup'u var.
+    async def _bilanco_catchup_job():
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        from sqlalchemy import select as _sel, and_
+        try:
+            from app.models.kap_all_disclosure import KapAllDisclosure as _KAD
+            from app.models.company_financial import CompanyFinancial as _CF
+
+            _MARKERS = (
+                "sorumluluk beyan", "özkaynaklar değişim", "ozkaynaklar degisim",
+                "faaliyet raporu", "nakit akış", "nakit akis",
+                "kar veya zarar", "kâr veya zarar", "finansal rapor",
+                "finansal durum tablosu",
+            )
+            cutoff = _dt.now(_tz.utc) - _td(hours=24)
+            async with async_session() as db:
+                rows = (await db.execute(
+                    _sel(_KAD.company_code, _KAD.title).where(
+                        and_(
+                            _KAD.created_at >= cutoff,
+                            _KAD.company_code.is_not(None),
+                        )
+                    )
+                )).all()
+
+                # Ticker basina FARKLI marker sayisi
+                marker_hits: dict[str, set] = {}
+                for code, title in rows:
+                    tl = (title or "").lower()
+                    for mk in _MARKERS:
+                        if mk in tl:
+                            marker_hits.setdefault(code, set()).add(mk)
+                candidates = [tk for tk, mks in marker_hits.items() if len(mks) >= 2]
+                if not candidates:
+                    return
+
+                # company_financials'ta son 24 saatte kaydi olanlar zaten islendi
+                done = set((await db.execute(
+                    _sel(_CF.ticker).where(
+                        and_(_CF.ticker.in_(candidates), _CF.scraped_at >= cutoff)
+                    ).group_by(_CF.ticker)
+                )).scalars().all())
+                missed = [tk for tk in candidates if tk not in done]
+
+            if not missed:
+                return
+            logger.info("[BILANCO-CATCHUP] Atlanan bilanco adaylari: %s", missed)
+            from app.services.bilanco_pipeline import process_bilanco_bildirimi
+            for tk in missed[:2]:  # yavas yavas — her kosuda max 2
+                try:
+                    await process_bilanco_bildirimi(tk, "Bilanço Yakalama (otomatik)")
+                except Exception as _bc_err:
+                    logger.warning("[BILANCO-CATCHUP] %s hata: %s", tk, _bc_err)
+        except Exception as e:
+            logger.error("[BILANCO-CATCHUP] Genel hata: %s", e)
+
+    scheduler.add_job(
+        _bilanco_catchup_job,
+        IntervalTrigger(minutes=30),
+        id="bilanco_catchup",
+        name="Atlanan Bilanco Yakalama (30 dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=900,
+    )
     # Her 15 dakikada bir: kapanis saati gecmis IPO'lar icin push at
     # (eskiden sabit 17:00 cron'du; her IPO'nun kendi close hour'una gore ateslesin)
     scheduler.add_job(
