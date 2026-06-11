@@ -4915,44 +4915,86 @@ async def bilanco_havuzu(request: Request, db: AsyncSession = Depends(get_db)):
             except Exception:
                 pass
 
-        # ★ ÖNCELİK: raporun KENDİ "Önceki Dönem" (restated) kolonu = prev_period_data.
-        #   Enflasyon-düzeltilmiş + aynı konsolidasyon bazlı → uygulama/Fintables ile BİREBİR.
-        #   Ayrı tarihsel DB kaydı eski enflasyon bazında olabilir (farklı görünür). app/main.py
-        #   /api/v1/bilanco ile aynı mantık. Eksik alanlar (banka/sigorta) tarihsel kayda düşer.
+        # ★ FINTABLES PARİTESİ: Özet Gelir Tablosu KÜMÜLATİF (YTD).
+        #   current akış kalemleri = yılın Q1..Qn çeyrek toplamı (1.608 mr gibi),
+        #   prev = raporun restated "Önceki Dönem" kolonu (zaten kümülatif,
+        #   enflasyon-düzeltilmiş → Fintables ile BİREBİR); yoksa önceki yıl YTD.
+        #   Bilanço (stok) kalemleri snapshot kalır. Çeyreklik bar chart'lar
+        #   çeyreklik kalır. app/main.py /api/v1/bilanco ile aynı mantık.
+        _fld = (
+            "revenue", "gross_profit", "ebitda", "net_income",
+            "net_interest_income", "net_fees_commissions",
+            "gross_premiums", "technical_balance",
+            "current_assets", "non_current_assets", "total_assets",
+            "net_debt", "total_equity", "loans", "deposits",
+        )
+        _INCOME_F = (
+            "revenue", "gross_profit", "ebitda", "net_income",
+            "net_interest_income", "net_fees_commissions",
+            "gross_premiums", "technical_balance",
+        )
+        _ppd: dict = {}
         if current and getattr(current, "prev_period_data", None):
             try:
                 import json as _json_ppd
                 _ppd = _json_ppd.loads(current.prev_period_data) or {}
             except Exception:
                 _ppd = {}
-            if _ppd:
-                _fld = (
-                    "revenue", "gross_profit", "ebitda", "net_income",
-                    "net_interest_income", "net_fees_commissions",
-                    "gross_premiums", "technical_balance",
-                    "current_assets", "non_current_assets", "total_assets",
-                    "net_debt", "total_equity", "loans", "deposits",
-                )
-                # ★ BAZ UYUMU FIX (MARTI -94% saçması): restated "Önceki Dönem"
-                # kolonu GELİR (akış) kalemlerinde KÜMÜLATİFTİR (2025-Q4 raporunda
-                # 2024 TAM YILI); current değerler ise ÇEYREKLİKLEŞTİRİLMİŞ.
-                # Akış kalemleri restated'den SADECE Q1'de alınır (kümülatif=çeyrek);
-                # Q2-Q4'te tarihsel YoY çeyrek kaydı kullanılır. Bilanço (stok)
-                # kalemleri restated'den her zaman alınabilir.
-                _INCOME_F = (
-                    "revenue", "gross_profit", "ebitda", "net_income",
-                    "net_interest_income", "net_fees_commissions",
-                    "gross_premiums", "technical_balance",
-                )
-                _is_q1 = bool(getattr(current, "period", "") and str(current.period).endswith("-Q1"))
-                _ppd_income = {k: v for k, v in _ppd.items() if k in _INCOME_F} if _is_q1 else {}
-                _ppd_balance = {k: v for k, v in _ppd.items() if k not in _INCOME_F}
 
-                def _obj_fields(o):
-                    return {c: getattr(o, c, None) for c in _fld} if o else {}
+        if current and current.period:
+            _cy = _cq = None
+            try:
+                _ys, _qs = str(current.period).split("-Q")
+                _cy, _cq = int(_ys), int(_qs)
+            except Exception:
+                pass
 
-                prev_income = {**_obj_fields(prev_income), **_ppd_income, "period": yoy}
-                prev_balance = {**_obj_fields(prev_balance), **_ppd_balance, "period": year_end}
+            def _ytd(field, year, upto_q):
+                vals = []
+                for f0 in fins:
+                    p0 = str(getattr(f0, "period", "") or "")
+                    if p0.startswith(f"{year}-Q"):
+                        try:
+                            qq = int(p0.split("-Q")[1])
+                        except Exception:
+                            continue
+                        if qq <= upto_q:
+                            v0 = getattr(f0, field, None)
+                            if v0 is not None:
+                                vals.append(float(v0))
+                return sum(vals) if vals else None
+
+            def _obj_fields(o):
+                return {c: getattr(o, c, None) for c in _fld} if o else {}
+
+            # current görünümü: akış kalemleri YTD toplam, stoklar aynen
+            from types import SimpleNamespace as _NS
+            _cur_d = _obj_fields(current)
+            _cur_d["period"] = current.period
+            for _extra in ("sector_type", "total_debt", "ai_score", "ai_summary",
+                           "ai_label", "ai_analysis", "announced_date"):
+                _cur_d[_extra] = getattr(current, _extra, None)
+            if _cy is not None:
+                for fld_ in _INCOME_F:
+                    s = _ytd(fld_, _cy, _cq)
+                    if s is not None:
+                        _cur_d[fld_] = s
+            current = _NS(**_cur_d)
+
+            # prev_income: restated kümülatif kolon > önceki yıl YTD > tarihsel kayıt
+            _pi_d = _obj_fields(prev_income)
+            for fld_ in _INCOME_F:
+                if _ppd.get(fld_) is not None:
+                    _pi_d[fld_] = _ppd[fld_]
+                elif _cy is not None:
+                    s = _ytd(fld_, _cy - 1, _cq)
+                    if s is not None:
+                        _pi_d[fld_] = s
+            prev_income = {**_pi_d, "period": yoy}
+
+            # prev_balance: stok kalemler restated'den (her zaman doğru)
+            _ppd_balance = {k: v for k, v in _ppd.items() if k not in _INCOME_F}
+            prev_balance = {**_obj_fields(prev_balance), **_ppd_balance, "period": year_end}
 
         # Son 5 ceyreklik veri (en eski sondan ilk basa) — bar chart icin
         recent5 = list(reversed(fins[:5])) if fins else []

@@ -17059,19 +17059,51 @@ async def list_latest_bilancos(
                 return _f(_ppd[field])
             return _f(getattr(fallback_obj, field, None)) if fallback_obj else None
 
-        # ★ BAZ UYUMU FIX (MARTI -94% saçması): raporun "Önceki Dönem" kolonu
-        # GELİR TABLOSU için KÜMÜLATİFTİR (2025-Q4 raporunda 2024 TAM YILI =
-        # 1.14 mr). DB current değerleri ise ÇEYREKLİKLEŞTİRİLMİŞ (66.9 mn).
-        # Q2/Q3/Q4'te kümülatif prev ile çeyreklik current karşılaştırılamaz —
-        # akış kalemlerinde restated kolon SADECE Q1'de kullanılır (Q1'de
-        # kümülatif = çeyreklik). Diğer çeyreklerde tarihsel YoY çeyrek kaydı.
-        # Bilanço (stok) kalemleri için restated kolon her zaman doğrudur.
-        _is_q1 = bool(fin and fin.period and str(fin.period).endswith("-Q1"))
+        # ★ FINTABLES PARİTESİ: Özet Gelir Tablosu KÜMÜLATİF (YTD) gösterilir.
+        # Fintables 2025/12 kolonu = 2025'in TAM YILI (1.608 mr), 2024/12 = 2024
+        # tam yılı (1.142 mr, +41%). DB kayıtları çeyreklik olduğundan:
+        #   current = yılın Q1..Qn çeyrek kayıtlarının TOPLAMI
+        #   prev    = raporun restated "Önceki Dönem" kolonu (zaten kümülatif,
+        #             enflasyon-düzeltilmiş → Fintables ile birebir);
+        #             yoksa önceki yılın aynı YTD toplamı.
+        # Çeyreklik değerler bar chart'larda ("quarterly") aynen sunulmaya devam eder.
+        _cy = _cq = None
+        try:
+            _ys, _qs = str(fin.period or "").split("-Q")
+            _cy, _cq = int(_ys), int(_qs)
+        except Exception:
+            pass
 
-        def _pp_income(field, fallback_obj):
-            if _is_q1 and _ppd.get(field) is not None:
+        def _ytd(field, year, upto_q):
+            vals = []
+            for f0 in finals:
+                p0 = str(getattr(f0, "period", "") or "")
+                if p0.startswith(f"{year}-Q"):
+                    try:
+                        qq = int(p0.split("-Q")[1])
+                    except Exception:
+                        continue
+                    if qq <= upto_q:
+                        v0 = getattr(f0, field, None)
+                        if v0 is not None:
+                            vals.append(float(v0))
+            return sum(vals) if vals else None
+
+        def _cum_cur(field):
+            if _cy is not None:
+                s = _ytd(field, _cy, _cq)
+                if s is not None:
+                    return s
+            return _f(getattr(fin, field, None)) if fin else None
+
+        def _cum_prev(field):
+            if _ppd.get(field) is not None:
                 return _f(_ppd[field])
-            return _f(getattr(fallback_obj, field, None)) if fallback_obj else None
+            if _cy is not None:
+                s = _ytd(field, _cy - 1, _cq)
+                if s is not None:
+                    return s
+            return _f(getattr(prev_to_use_income, field, None)) if prev_to_use_income else None
 
         # Çeyreklik bars — eskiden yeniye sirala (5 yil = 20 ceyrek, Derin Analiz icin)
         quarterly = list(reversed(finals[:20]))
@@ -17118,26 +17150,26 @@ async def list_latest_bilancos(
             "sector_type": fin.sector_type if fin and hasattr(fin, 'sector_type') else None,
             # Resmi BIST sektör adı (örn "Tekstil, Deri") — stock_sectors'tan
             "sector_name": sector_name_map.get(ticker),
-            # Banka spesifik
-            "net_interest_income": _f(fin.net_interest_income) if fin and hasattr(fin, 'net_interest_income') else None,
-            "net_fees_commissions": _f(fin.net_fees_commissions) if fin and hasattr(fin, 'net_fees_commissions') else None,
+            # Banka spesifik — akış kalemleri KÜMÜLATİF (YTD), stoklar snapshot
+            "net_interest_income": _cum_cur('net_interest_income') if fin else None,
+            "net_fees_commissions": _cum_cur('net_fees_commissions') if fin else None,
             "loans": _f(fin.loans) if fin and hasattr(fin, 'loans') else None,
             "deposits": _f(fin.deposits) if fin and hasattr(fin, 'deposits') else None,
-            # Sigorta spesifik
-            "gross_premiums": _f(fin.gross_premiums) if fin and hasattr(fin, 'gross_premiums') else None,
-            "technical_balance": _f(fin.technical_balance) if fin and hasattr(fin, 'technical_balance') else None,
+            # Sigorta spesifik — akış kalemleri KÜMÜLATİF (YTD)
+            "gross_premiums": _cum_cur('gross_premiums') if fin else None,
+            "technical_balance": _cum_cur('technical_balance') if fin else None,
             # Degerlik (financial_ratios -> temel_analiz fallback)
             "fk": fk_val,
             "pddd": pddd_val,
             "fd_favok": fd_favok_val,
             "piyasa_degeri": piyasa_val,
             "price": price_now,
-            # Mevcut donem — gelir tablosu
-            "revenue": _f(fin.revenue) if fin else None,
-            "gross_profit": _f(fin.gross_profit) if fin else None,
-            "operating_profit": _f(fin.operating_profit) if fin else None,
-            "ebitda": _f(fin.ebitda) if fin else None,  # parser doğru EBITDA hesapliyor, fallback yok
-            "net_income": _f(fin.net_income) if fin else None,
+            # Mevcut donem — gelir tablosu KÜMÜLATİF/YTD (Fintables paritesi)
+            "revenue": _cum_cur('revenue') if fin else None,
+            "gross_profit": _cum_cur('gross_profit') if fin else None,
+            "operating_profit": _cum_cur('operating_profit') if fin else None,
+            "ebitda": _cum_cur('ebitda') if fin else None,
+            "net_income": _cum_cur('net_income') if fin else None,
             # Mevcut donem — bilanço (snapshot)
             "current_assets": _f(fin.current_assets) if fin else None,
             "non_current_assets": _f(fin.non_current_assets) if fin else None,
@@ -17149,12 +17181,12 @@ async def list_latest_bilancos(
             "gross_margin_pct": _f(fin.gross_margin_pct) if fin else None,
             "net_margin_pct": _f(fin.net_margin_pct) if fin else None,
             "roe_pct": _f(fin.roe_pct) if fin else None,
-            # Önceki dönem — GELİR TABLOSU (YoY): akış kalemi → restated kolon
-            # SADECE Q1'de (kümülatif=çeyreklik); Q2-Q4'te tarihsel YoY çeyrek.
-            "revenue_prev": _pp_income("revenue", prev_to_use_income),
-            "gross_profit_prev": _pp_income("gross_profit", prev_to_use_income),
-            "ebitda_prev": _pp_income("ebitda", prev_to_use_income),
-            "net_income_prev": _pp_income("net_income", prev_to_use_income),
+            # Önceki dönem — GELİR TABLOSU KÜMÜLATİF YoY: restated "Önceki Dönem"
+            # kolonu (Fintables ile birebir) > önceki yılın aynı YTD toplamı.
+            "revenue_prev": _cum_prev("revenue"),
+            "gross_profit_prev": _cum_prev("gross_profit"),
+            "ebitda_prev": _cum_prev("ebitda"),
+            "net_income_prev": _cum_prev("net_income"),
             # Önceki dönem — BİLANÇO: raporun restated Önceki Dönem kolonu (yoksa önceki çeyrek)
             "current_assets_prev": _pp("current_assets", prev_to_use_balance),
             "non_current_assets_prev": _pp("non_current_assets", prev_to_use_balance),
