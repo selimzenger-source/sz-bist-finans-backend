@@ -5280,7 +5280,7 @@ def _setup_scheduler_impl():
                         KapAllDisclosure.created_at >= cutoff,
                         KapAllDisclosure.company_code.is_not(None),
                     )
-                ).limit(10)
+                ).limit(25)
                 rows = (await db.execute(stmt)).scalars().all()
                 if not rows:
                     return
@@ -5303,15 +5303,20 @@ def _setup_scheduler_impl():
         except Exception as e:
             logger.error("[KAP-URL-ENRICH] Genel hata: %s", e)
 
+    # DEPLOY-DAYANIKLILIK: catchup ile ayni sorun — IntervalTrigger sayaci
+    # her deploy'da sifirlaniyor, sik deploy gunlerinde job hic kosamiyordu
+    # (MARKA yan satirlarinin URL'leri saatlerce bos kaldi). Ilk kosu boot+2dk.
+    from datetime import datetime as _enr_dt, timedelta as _enr_td
     scheduler.add_job(
         _kap_url_enricher_job,
         IntervalTrigger(minutes=15),
         id="kap_url_enricher",
-        name="KAP URL Zenginlestirici (15 dk)",
+        name="KAP URL Zenginlestirici (15 dk, boot+2dk ilk kosu)",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
         misfire_grace_time=600,
+        next_run_time=_enr_dt.now() + _enr_td(minutes=2),
     )
 
     # Her 30 dk: ATLANAN BILANCOLARI YAKALA (GUBRF vakasi, 11.06.2026).
