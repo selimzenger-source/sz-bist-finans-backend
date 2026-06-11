@@ -434,6 +434,41 @@ function fmt_num(n) {
   return n.toFixed(0);
 }
 
+// ── EXPORT RENDER (indirme + tweet ortak) ─────────────────────────────
+// Sorun: html2canvas ekrandaki KART GENISLIGINI aynen alir — genis ekranda
+// kart yayilir, boslyklar/daireler/simetri bozulur, golgeler sari halka
+// artefakti birakir. Cozum: klonda SABIT 640px kompakt genislik (sitedeki
+// guzel gorunum) + tum golge/animasyon/transition sifirlanir → temiz,
+// modern, her ekranda AYNI cikti.
+function renderCardCanvas(card) {
+  const cardId = card.id;
+  return html2canvas(card, {
+    backgroundColor: '#0C1626',
+    scale: 2,
+    logging: false,
+    useCORS: true,
+    scrollY: -window.scrollY,  // sayfa scroll'dayken kayma/kırpılma fix
+    scrollX: 0,
+    onclone: (clonedDoc) => {
+      const c = clonedDoc.getElementById(cardId);
+      if (!c) return;
+      c.style.width = '640px';
+      c.style.maxWidth = '640px';
+      c.style.minWidth = '640px';
+      c.style.margin = '0';
+      c.style.boxShadow = 'none';
+      c.style.outline = 'none';
+      c.querySelectorAll('*').forEach((el) => {
+        el.style.boxShadow = 'none';
+        el.style.textShadow = 'none';
+        el.style.outline = 'none';
+        el.style.animation = 'none';
+        el.style.transition = 'none';
+      });
+    },
+  });
+}
+
 async function shareCard(ticker) {
   const card = document.getElementById('card-' + ticker);
   if (!card) return;
@@ -442,14 +477,7 @@ async function shareCard(ticker) {
   btn.innerHTML = '<span>⏳</span> Hazırlanıyor...';
 
   try {
-    const canvas = await html2canvas(card, {
-      backgroundColor: '#0C1626',
-      scale: 2,
-      logging: false,
-      useCORS: true,
-      scrollY: -window.scrollY,  // sayfa scroll'dayken kayma/kırpılma fix
-      scrollX: 0,
-    });
+    const canvas = await renderCardCanvas(card);
     canvas.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -488,10 +516,7 @@ async function tweetCard(ticker, period) {
   btn.classList.add('loading');
   btn.innerHTML = '<span>⏳</span> Görsel hazırlanıyor...';
   try {
-    const canvas = await html2canvas(card, {
-      backgroundColor: '#0C1626', scale: 2, logging: false, useCORS: true,
-      scrollY: -window.scrollY, scrollX: 0,  // scroll kayma/kırpılma fix
-    });
+    const canvas = await renderCardCanvas(card);
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
 
     btn.innerHTML = '<span>⏳</span> X\'e gönderiliyor...';

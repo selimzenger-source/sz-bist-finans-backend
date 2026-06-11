@@ -416,6 +416,14 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
         _depr_raw = aux.get("_depreciation_amortization")
         depr = abs(_depr_raw or 0)
         _has_sga = any(aux.get(k) is not None for k in ("_sga_general", "_sga_marketing", "_sga_rd"))
+        # Debug: FAVOK bilesenleri (test-bilanco-parse ciktisinda gorunur;
+        # save_parsed_bilanco alan listesinde olmadigi icin DB'ye YAZILMAZ)
+        out["_debug_favok"] = {
+            "gross": gross, "op": op, "depr_raw": _depr_raw,
+            "sga_general": aux.get("_sga_general"),
+            "sga_marketing": aux.get("_sga_marketing"),
+            "sga_rd": aux.get("_sga_rd"),
+        }
         if _depr_raw is None:
             out["ebitda"] = None
             logger.warning(
