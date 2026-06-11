@@ -616,7 +616,7 @@ def generate_ceiling_floor_images(stats: list, is_ceiling: bool, supplementary: 
         # eski 2 satırlı serbest metin site adıyla ÇAKIŞIYORDU, kaldırıldı)
         draw_brand_footer(
             draw, img, width, total_h,
-            source="Borsa Cebimde Özel Eğitimli AI Modelleri · Yatırım tavsiyesi değildir",
+            source="Özel Eğitimli AI Modelleri",
             foot_h=footer_h,
         )
 
