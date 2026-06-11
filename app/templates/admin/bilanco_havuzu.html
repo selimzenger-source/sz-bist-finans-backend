@@ -92,31 +92,38 @@
 {%- endmacro -%}
 
 <style>
-  /* Fintables tarzı dark theme kart */
+  /* Fintables tarzı dark theme kart — html2canvas UYUMLU:
+     · overflow:hidden + ellipsis KALDIRILDI (capture'da metnin alt yarısını kırpıyordu)
+     · her metne explicit line-height verildi (baseline kayması fix)
+     · rozet/chip'ler inline-flex + line-height:1 (kutudan taşma fix) */
   .bilanco-card {
-    background: #0F1A2E;
-    border: 1px solid #243245;
-    border-radius: 16px;
-    padding: 20px;
+    background: linear-gradient(165deg, #101C32 0%, #0C1626 60%, #0A1322 100%);
+    border: 1px solid #25344A;
+    border-radius: 18px;
+    padding: 22px;
     color: #ECF1F8;
     font-family: 'Manrope', system-ui, -apple-system, sans-serif;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    box-shadow: 0 6px 22px rgba(0,0,0,0.35);
   }
-  .bilanco-card .header { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-  .bilanco-card .ticker { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
+  .bilanco-card * { line-height: 1.4; }
+  .bilanco-card .header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .bilanco-card .ticker { font-size: 24px; font-weight: 800; letter-spacing: 0.6px; line-height: 1.2; }
   .bilanco-card .period-badge {
-    background: #1A2744; color: #42A5F5; font-size: 11px; font-weight: 700;
-    padding: 3px 9px; border-radius: 6px;
+    display: inline-flex; align-items: center; line-height: 1;
+    background: #14233E; color: #5CB4F8; font-size: 11px; font-weight: 700;
+    padding: 5px 10px; border-radius: 999px; border: 1px solid #1E3A5C;
+    font-variant-numeric: tabular-nums;
   }
-  .bilanco-card .company { font-size: 12px; color: #94A3B8; margin-top: 2px; }
+  .bilanco-card .company { font-size: 12px; color: #94A3B8; margin-top: 3px; }
   .bilanco-card .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .bilanco-card .table-box {
-    border: 1px solid #1F2C3D; border-radius: 10px; padding: 10px;
+    background: #0B1526; border: 1px solid #1F2C3D; border-radius: 12px; padding: 12px;
   }
   .bilanco-card .table-title {
-    font-size: 11px; font-weight: 700; color: #94A3B8;
-    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
-    padding-bottom: 6px; border-bottom: 1px dashed #1F2C3D;
+    font-size: 11px; font-weight: 800; color: #C8D2E0;
+    text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px;
+    padding-bottom: 7px; border-bottom: 1px solid #1F2C3D;
+    border-left: 3px solid #FFD700; padding-left: 8px; margin-left: -2px;
   }
   .bilanco-card .row {
     display: grid;
@@ -124,33 +131,37 @@
     grid-template-columns: 1fr 62px 62px 44px;
     column-gap: 4px;
     align-items: center;
-    padding: 4px 0; font-size: 12px;
+    padding: 5px 0; font-size: 12px;
   }
-  /* Etiket tek satırda kalsın (Dönen/Duran Varlık 2 satıra sarmasın) — font biraz ufak */
+  .bilanco-card .row + .row { border-top: 1px solid rgba(31,44,61,0.55); }
+  /* Etiket tek satır — overflow KESME YOK (html2canvas kırpıyordu) */
   .bilanco-card .row .label {
-    color: #94A3B8; text-align: left;
-    white-space: nowrap; font-size: 11px;
-    overflow: hidden; text-overflow: ellipsis;
+    color: #A8B3C5; text-align: left;
+    white-space: nowrap; font-size: 11px; line-height: 1.5;
   }
-  .bilanco-card .row .value { color: #ECF1F8; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  .bilanco-card .row .value { color: #F2F6FC; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; line-height: 1.5; }
   .bilanco-card .row .value.prev { color: #6B7A8D; font-weight: 500; }
-  .bilanco-card .row.head { border-bottom: 1px dashed #1F2C3D; margin-bottom: 2px; padding-bottom: 4px; }
-  .bilanco-card .row.head span { font-size: 10px; color: #6B7A8D; font-weight: 700; text-align: right; }
+  .bilanco-card .row.head { border-bottom: 1px dashed #2A3B52; margin-bottom: 2px; padding-bottom: 5px; }
+  .bilanco-card .row.head span { font-size: 10px; color: #7C8BA0; font-weight: 700; text-align: right; line-height: 1.5; }
   .bilanco-card .row.head .label { text-align: left; }
-  .bilanco-card .row .pct { font-size: 10.5px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  .bilanco-card .row.head + .row { border-top: none; }
+  .bilanco-card .row .pct { font-size: 10.5px; font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; line-height: 1.5; }
   .bilanco-card .row .pct.up { color: #00E676; }
   .bilanco-card .row .pct.down { color: #FF5252; }
   .bilanco-card .row .pct.na { color: #8E8E9A; }
   .ai-badge {
+    display: inline-flex; align-items: center; line-height: 1; gap: 2px;
     background: rgba(0, 230, 118, 0.12); color: #00E676;
-    padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700;
+    border: 1px solid rgba(0, 230, 118, 0.3);
+    padding: 7px 12px; border-radius: 999px; font-size: 12px; font-weight: 800;
+    white-space: nowrap;
   }
-  .ai-badge.neutral { background: rgba(255, 215, 0, 0.12); color: #FFD700; }
-  .ai-badge.negative { background: rgba(255, 82, 82, 0.12); color: #FF5252; }
+  .ai-badge.neutral { background: rgba(255, 215, 0, 0.12); color: #FFD700; border-color: rgba(255, 215, 0, 0.3); }
+  .ai-badge.negative { background: rgba(255, 82, 82, 0.12); color: #FF5252; border-color: rgba(255, 82, 82, 0.3); }
   .meta-bar {
     display: flex; align-items: center; gap: 8px;
-    padding: 8px 0; border-bottom: 1px dashed #1F2C3D; margin-bottom: 12px;
-    font-size: 11px; color: #94A3B8;
+    padding: 8px 0 10px; border-bottom: 1px solid #1F2C3D; margin-bottom: 12px;
+    font-size: 11px; color: #8B99AD;
   }
   /* Disclaimer */
   .disclaimer {
@@ -158,17 +169,18 @@
   }
   /* Marka bandı (paylaşım görselinde alta düşer) */
   .brand-banner {
-    margin-top: 14px; display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px; border-radius: 12px;
-    background: linear-gradient(135deg, #0B1220 0%, #111B2E 100%);
+    margin-top: 14px; display: flex; align-items: center; gap: 11px;
+    padding: 11px 14px; border-radius: 12px;
+    background: linear-gradient(135deg, #0B1220 0%, #121E33 100%);
     border: 1px solid #1F2C3D;
+    border-top: 2px solid #FFD700;
   }
   .brand-banner img {
-    width: 34px; height: 34px; border-radius: 9px; object-fit: cover;
+    width: 36px; height: 36px; border-radius: 10px; object-fit: cover;
     border: 1px solid #243248;
   }
-  .brand-banner .brand-name { font-size: 15px; font-weight: 800; color: #FFFFFF; letter-spacing: 0.2px; }
-  .brand-banner .brand-url  { font-size: 12px; font-weight: 600; color: #6B7790; }
+  .brand-banner .brand-name { font-size: 15px; font-weight: 800; color: #FFD700; letter-spacing: 0.2px; line-height: 1.3; }
+  .brand-banner .brand-url  { font-size: 12px; font-weight: 600; color: #8B99AD; line-height: 1.3; }
   /* Share button */
   .share-btn {
     margin-top: 10px; display: flex; align-items: center; justify-content: center;
@@ -187,29 +199,30 @@
   }
   /* Cesiklik bar chart blogu (3 mini chart yan yana) */
   .bilanco-card .charts {
-    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px;
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-top: 12px;
   }
   .bilanco-card .mini-chart {
-    background: #0A1424; border: 1px solid #1F2C3D; border-radius: 8px; padding: 8px;
+    background: #0B1526; border: 1px solid #1F2C3D; border-radius: 10px; padding: 10px 8px 6px;
   }
   .bilanco-card .mini-chart-title {
-    font-size: 10px; font-weight: 600; color: #94A3B8;
-    text-align: center; margin-bottom: 4px;
+    font-size: 10.5px; font-weight: 700; color: #C8D2E0;
+    text-align: center; margin-bottom: 6px; line-height: 1.3;
   }
   /* ROE / Borç bandi */
   .bilanco-card .ratios {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
   }
   .bilanco-card .ratio-box {
-    background: #0A1424; border: 1px solid #1F2C3D; border-radius: 8px;
-    padding: 8px 10px; text-align: center;
+    background: #0B1526; border: 1px solid #1F2C3D; border-radius: 10px;
+    padding: 10px; text-align: center;
   }
   .bilanco-card .ratio-label {
-    font-size: 10px; color: #94A3B8; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
+    font-size: 10px; color: #8B99AD; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.7px; line-height: 1.4;
   }
   .bilanco-card .ratio-value {
-    font-size: 16px; font-weight: 800; color: #fff; margin-top: 2px;
+    font-size: 18px; font-weight: 800; color: #fff; margin-top: 3px; line-height: 1.3;
+    font-variant-numeric: tabular-nums;
   }
   .bilanco-card .ratio-value.up { color: #00E676; }
   .bilanco-card .ratio-value.down { color: #FF5252; }
@@ -352,8 +365,8 @@
 
       {# AI bilanço yorumu (bilanco-spesifik analiz varsa) #}
       {% if it.ai_summary and it.ai_source == 'bilanco' %}
-      <div style="margin-top:12px; padding:10px 12px; background:#0A1424; border:1px solid #1F2C3D; border-radius:8px; font-size:11.5px; line-height:1.5; color:#CBD5E1;">
-        <div style="font-size:9.5px; font-weight:700; color:#FFD700; letter-spacing:0.5px; text-transform:uppercase; margin-bottom:6px;">
+      <div style="margin-top:12px; padding:11px 13px; background:#0B1526; border:1px solid #1F2C3D; border-left:3px solid #FFD700; border-radius:10px; font-size:11.5px; line-height:1.6; color:#D3DCE8;">
+        <div style="font-size:10px; font-weight:800; color:#FFD700; letter-spacing:0.7px; text-transform:uppercase; margin-bottom:6px; line-height:1.3;">
           🤖 AI Bilanço Yorumu
         </div>
         {{ it.ai_summary[:600] }}{% if it.ai_summary|length > 600 %}…{% endif %}
@@ -428,10 +441,12 @@ async function shareCard(ticker) {
 
   try {
     const canvas = await html2canvas(card, {
-      backgroundColor: '#0F1A2E',
+      backgroundColor: '#0C1626',
       scale: 2,
       logging: false,
       useCORS: true,
+      scrollY: -window.scrollY,  // sayfa scroll'dayken kayma/kırpılma fix
+      scrollX: 0,
     });
     canvas.toBlob((blob) => {
       const url = URL.createObjectURL(blob);
@@ -477,7 +492,8 @@ async function tweetCard(ticker, period) {
   btn.innerHTML = '<span>⏳</span> Görsel hazırlanıyor...';
   try {
     const canvas = await html2canvas(card, {
-      backgroundColor: '#0F1A2E', scale: 2, logging: false, useCORS: true,
+      backgroundColor: '#0C1626', scale: 2, logging: false, useCORS: true,
+      scrollY: -window.scrollY, scrollX: 0,  // scroll kayma/kırpılma fix
     });
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
 
