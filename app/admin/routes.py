@@ -5218,6 +5218,18 @@ async def news_pool_tweet(
         _parts = [p.strip().lstrip("#") for p in _re_ht.split(r"[\s,]+", hashtags_raw) if p.strip()]
         custom_hashtags = [p for p in _parts if p] or None
 
+    # ── DUZELTILEN METIN DB'YE DE ISLENIR ──
+    # Admin govdeyi duzeltiyse (orn. AI sirket adini yanlis yazdi: 'Berkovya'
+    # → 'Birikim'), duzeltme SADECE tweete degil kalici olarak kayda da
+    # yazilir — app feed'i ve web sitesi de dogru metni gosterir.
+    if custom_summary and custom_summary != (row.ai_summary or "").strip():
+        row.ai_summary = custom_summary
+        await db.commit()
+        logger.info(
+            "[ADMIN] news-pool govde duzeltmesi DB'ye islendi (id=%d, %s)",
+            disclosure_id, row.company_code,
+        )
+
     # Sentiment string: skora gore positive/negative
     if row.ai_impact_score and row.ai_impact_score >= 6.0:
         sentiment_str = "positive"

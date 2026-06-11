@@ -796,10 +796,57 @@ async def get_public_news_feed(
             return path
         return None
 
+    # ── AI YORUM ZENGINLESTIRME (web sitesi icin) ──────────────────────
+    # KAP haber tweetleri artik GORSEL odakli ve metni kisa — web'de kisa
+    # tweet metni yerine kap_all_disclosures'taki ASIL AI yorumu gosterilsin.
+    # Eslestirme: tweet'teki ilk #TICKER + sent_at'e en yakin (±2 saat) kayit.
+    _kap_sources = {"kap_news", "tweet_kap_news", "kap_haber", "kap_haber_negatif"}
+    _ai_bodies: dict[int, str] = {}
+    try:
+        _kap_tweets = [t for t in tweets if t.source in _kap_sources and t.sent_at]
+        if _kap_tweets:
+            from app.models.kap_all_disclosure import KapAllDisclosure as _KAD
+            _tickers = set()
+            _tk_of: dict[int, str] = {}
+            for t in _kap_tweets:
+                m = re.search(r"#([A-ZÇŞĞÜÖİ]{3,6})\b", t.text or "")
+                if m:
+                    _tk_of[t.id] = m.group(1).upper()
+                    _tickers.add(m.group(1).upper())
+            if _tickers:
+                _rows = (await db.execute(
+                    select(_KAD).where(
+                        _KAD.company_code.in_(list(_tickers)),
+                        _KAD.ai_summary.is_not(None),
+                        _KAD.created_at >= cutoff,
+                    )
+                )).scalars().all()
+                for t in _kap_tweets:
+                    _tk = _tk_of.get(t.id)
+                    if not _tk:
+                        continue
+                    _t_ts = t.sent_at.replace(tzinfo=None) if t.sent_at.tzinfo else t.sent_at
+                    _best, _best_dt = None, None
+                    for r in _rows:
+                        if r.company_code != _tk:
+                            continue
+                        _r_ts = r.published_at or r.created_at
+                        if not _r_ts:
+                            continue
+                        _r_ts = _r_ts.replace(tzinfo=None) if _r_ts.tzinfo else _r_ts
+                        _delta = abs((_t_ts - _r_ts).total_seconds())
+                        if _delta <= 7200 and (_best_dt is None or _delta < _best_dt):
+                            _best, _best_dt = r, _delta
+                    if _best and _best.ai_summary and len(_best.ai_summary) > 80:
+                        _hdr = f"#{_tk} — {(_best.title or 'KAP Bildirimi').strip()}"
+                        _ai_bodies[t.id] = f"{_hdr}\n\n{_best.ai_summary.strip()}"
+    except Exception as _enrich_err:
+        logger.debug("news-feed AI zenginlestirme hatasi: %s", _enrich_err)
+
     return [
         {
             "id": t.id,
-            "text": clean_text(t.text),
+            "text": _ai_bodies.get(t.id) or clean_text(t.text),
             "image_url": _image_url(t.image_path),
             "source": t.source,
             "sent_at": t.sent_at.isoformat() if t.sent_at else None,
