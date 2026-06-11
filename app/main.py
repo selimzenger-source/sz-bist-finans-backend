@@ -15191,6 +15191,65 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
         return resp
 
 
+@app.post("/api/v1/admin/trigger-ipo-hype-poll")
+@limiter.limit("3/minute")
+async def admin_trigger_ipo_hype_poll(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: IPO katılım anketi push'unu MANUEL tetikler (kesinti telafisi).
+
+    Body: {"admin_password": "...", "ipo_id": 48}
+    Push 'all' kitlesine arka planda gider; Telegram'a başlangıç + bitiş
+    raporu düşer. hype_poll_notified_at şimdiki zamana set edilir.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.ipo import IPO
+    from app.services.broadcast import broadcast_background_task
+    import asyncio as _aio
+
+    ipo_id = payload.get("ipo_id")
+    if not ipo_id:
+        return {"status": "error", "message": "ipo_id zorunlu"}
+
+    ipo = (await db.execute(select(IPO).where(IPO.id == int(ipo_id)))).scalar_one_or_none()
+    if not ipo:
+        return {"status": "error", "message": f"IPO bulunamadi: {ipo_id}"}
+
+    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+    title = f"📊 {company} Anketi Açıldı"
+    body = (
+        f"{company} halka arzına katılacak mısınız? "
+        "Topluluğun beklentisini öğrenmek için hemen oy verin."
+    )
+    ipo.hype_poll_notified_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    # Arka planda gönder (851 kullanıcı ~2 dk) — referans sakla (GC koruması)
+    _t = _aio.create_task(broadcast_background_task(
+        title=title,
+        body=body,
+        audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={
+            "screen": "halka-arz-detay",
+            "ipo_id": str(ipo.id),
+            "scroll_to": "poll",
+            "poll_phase": "hype",
+        },
+    ))
+    if not hasattr(app.state, "_bg_broadcast_tasks"):
+        app.state._bg_broadcast_tasks = set()
+    app.state._bg_broadcast_tasks.add(_t)
+    _t.add_done_callback(app.state._bg_broadcast_tasks.discard)
+
+    return {
+        "status": "started",
+        "ipo": company,
+        "message": "Broadcast arka planda basladi — Telegram'a baslangic + bitis raporu dusecek.",
+    }
+
+
 # -------------------------------------------------------
 # Admin: Ticker / Trading Date Bildirim + Tweet Trigger
 # -------------------------------------------------------

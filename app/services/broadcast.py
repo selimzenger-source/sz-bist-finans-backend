@@ -255,6 +255,18 @@ async def broadcast_background_task(
                 "Broadcast baslatiliyor: '%s' → %d kullanici (%s)",
                 title, total, audience,
             )
+            # BAŞLANGIÇ raporu — bitiş raporu döngü sonunda atıldığından, restart/
+            # kesinti durumunda hiç haber gelmiyordu (11 Haz anket vakası). Artık
+            # başlarken de Telegram'a düşer; bitiş raporu gelmezse kesinti anlaşılır.
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"📢 Broadcast BAŞLADI: '{title}' → {total} kullanıcı ({audience}). "
+                    f"Tahmini süre ~{max(1, int(total * 0.15 / 60))} dk — bitiş raporu gelecek.",
+                    silent=True,
+                )
+            except Exception:
+                pass
 
             notif_service = NotificationService(db)
 
