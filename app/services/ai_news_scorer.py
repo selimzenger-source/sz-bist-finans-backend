@@ -2543,6 +2543,72 @@ NOTLAR:
             except Exception as _follow_err:
                 logger.debug("Followup check hata (%s): %s", ticker, _follow_err)
 
+        # ─── İÇERİK-YOK GUARDRAIL (DOCO 6512741 vakası, 11.06.2026) ───
+        # AI özeti "haberin içeriği/detayları bu bildirimde yer almamaktadır"
+        # diye İTİRAF ediyorsa skor ASLA pozitif olamaz. (Çok-ticker'lı mesajda
+        # KAP içeriği ISMEN'e aitti; DOCO için içerik bulunamadı ama AI yine de
+        # 6.2 'Hafif Olumlu' verdi — içerik yoksa değerlendirme de yok → NÖTR.)
+        if score is not None and score > 5.4 and summary:
+            _s_low = summary.lower()
+            _no_content_patterns = [
+                "içeriği ve detayları bu bildirimde yer almamaktadır",
+                "içeriği bu bildirimde yer almamaktadır",
+                "detayları bu bildirimde yer almamaktadır",
+                "detayların eksikliği",
+                "içerik bulunmamaktadır",
+                "detay bulunmamaktadır",
+                "içeriğe ulaşılamamıştır",
+                "somut bilgi yer almamaktadır",
+                "somut bilgi bulunmamaktadır",
+                "değerlendirmeyi zorlaştırmaktadır",
+                "haberin detayları henüz",
+            ]
+            if any(p in _s_low for p in _no_content_patterns):
+                logger.info(
+                    "[NO-CONTENT GUARDRAIL] %s: %.1f -> 5.0 (özet içerik eksikliğini "
+                    "itiraf ediyor — içeriksiz habere pozitif skor verilmez)",
+                    ticker, float(score),
+                )
+                score = 5.0
+                summary = (
+                    f"Bu bildirimin {ticker} ile ilişkili içeriğine ulaşılamadı; "
+                    f"somut detay olmadan fiyat etkisi değerlendirilemez. "
+                    f"Detaylar için KAP bildirimine bakınız."
+                )
+
+        # ─── RUTİN ÖDÜL/PLAKET GUARDRAIL (INGRM/PENTA vakası, 11.06.2026) ───
+        # "Yılın Distribütörü", "Premium Distribütör", "Partner of the Year" tipi
+        # tedarikçi/partner ödülleri RUTİN PR'dır — somut finansal etki yoksa
+        # (sözleşme tutarı, yeni iş) skor max 5.5 (Nötr+). AI bunları 6.0-7.3'e
+        # şişiriyordu. Gerçek anlamlı ödüller (ihale, devlet teşviki, sertifika→
+        # yeni pazar) sayısal etki içerdiği için bu filtreye takılmaz.
+        if score is not None and 5.5 < score < 8.0 and summary:
+            _award_text = f"{summary} {(tv_content or raw_text or '')[:800]}".lower()
+            _award_patterns = [
+                "yılın distribütörü", "yilin distributoru",
+                "premium distribütör", "premium distributor",
+                "yılın partneri", "partner of the year",
+                "distributor of the year", "yılın bayisi",
+                "başarı ödülü", "basari odulu",
+                "ödülünü kazan", "odulunu kazan",
+                "ödülüne layık", "oduluna layik",
+                "plaket", "takdir belgesi",
+                "yılın iş ortağı",
+            ]
+            _has_award = any(p in _award_text for p in _award_patterns)
+            # Somut finansal etki var mı? (tutar/sözleşme varsa ödül filtresi çalışmaz)
+            _has_financial = bool(re.search(
+                r"(milyon|milyar)\s*(tl|usd|eur|dolar|avro)|sözleşme imzal|sozlesme imzal|sipariş|siparis|ihale",
+                _award_text,
+            ))
+            if _has_award and not _has_financial:
+                logger.info(
+                    "[ÖDÜL GUARDRAIL] %s: %.1f -> 5.5 (rutin partner/distribütör "
+                    "ödülü — somut finansal etki yok, PR niteliğinde)",
+                    ticker, float(score),
+                )
+                score = 5.5
+
         # ─── SKOR-ÖZET TUTARLILIK GUARDRAIL ───
         # Skor pozitif (>=6.0) ama özet "ek etki beklenmez / teknik takip
         # gelişmesidir" gibi NÖTRLEŞTİRİCİ cümle içeriyorsa o cümle çıkarılır ve
