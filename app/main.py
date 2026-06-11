@@ -17682,10 +17682,20 @@ async def get_temettu_akisi(
                 + (getattr(r, "source_title", "") or "")
             ).lower()
             _sc = _disc.get("ai_impact_score")
+            # GK sinyalleri GENİŞLETİLDİ (kullanıcı: dağıtmama GK kararları hep
+            # "YK önerisi" görünüyordu): GK'dan geçen karar KAP'ta çoğunlukla
+            # "Açıklama Güncellemesi" olarak gelir — özet "daha önce açıklanan
+            # kararın GÜNCELLEMESİDİR" der, skor 5.0 nötrlenir. Bunlar GK onayı/
+            # kesinleşme aşamasıdır, YK önerisi DEĞİL.
             is_ga = (
                 "genel kurulda onay" in _dt or "genel kurulda kabul" in _dt
                 or "genel kurulda onaylan" in _dt
+                or "genel kurul toplantısında" in _dt or "genel kurul toplantisinda" in _dt
+                or "genel kurulda karar" in _dt
+                or "güncellemesidir" in _dt or "guncellemesidir" in _dt
+                or "açıklama güncelle" in _dt or "aciklama guncelle" in _dt
                 or (_sc is not None and 4.3 <= _sc <= 4.7)
+                or (_sc is not None and _sc == 5.0)  # nötrlenmiş güncelleme = GK teyidi
             )
             stg = "ga_approval" if is_ga else "ykk"
             evt_dt = r.rejected_at or r.general_assembly_date or r.ykk_date or r.created_at
@@ -17733,7 +17743,16 @@ async def get_temettu_akisi(
             cards.append(_build_card(r, "odendi", "payment", r.payment_kap_disclosure_id, r.payment_kap_url, evt_dt))
             emitted_any = True
         if not emitted_any:
-            cards.append(_build_card(r, "karar", "ykk", None, r.ykk_kap_url, r.created_at))
+            # ★ İHLAS BEDELLİ SAVUNMASI: disclosure bağlantısız fallback kartı, kaynak
+            # başlık BISTECH/sermaye-artırımı/bedelli ise ÜRETME — temettü değildir.
+            _src_low = (getattr(r, "source_title", "") or "").lower()
+            _non_dividend = any(s in _src_low for s in (
+                "bistech", "bıstech", "pay piyasas",
+                "sermaye artırım", "sermaye artirim", "bedelli", "bedelsiz",
+                "rüçhan", "ruchan", "yeni pay alma",
+            ))
+            if not _non_dividend:
+                cards.append(_build_card(r, "karar", "ykk", None, r.ykk_kap_url, r.created_at))
 
     # ── Filtreler: tarih penceresi + tip (filter) + alt-stage (stage) ──
     def _passes(c) -> bool:

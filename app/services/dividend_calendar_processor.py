@@ -163,6 +163,12 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
             "sermaye artırımı karşılığı", "sermaye artirimi karsiligi",
             "kayitlilesmis pay senetlerinin artirim", "kaydileşmiş pay senetlerinin artırım",
             "alacak kaydedilmiştir", "alacak kaydedilmistir",
+            # ── İHLAS bedelli vakası: BEDELLİ artırım + rüçhan/yeni pay varyantları ──
+            "bedelli sermaye art", "bedelli pay",
+            "sermaye artırımı nedeniyle", "sermaye artirimi nedeniyle",
+            "sermaye artırımına ilişkin", "sermaye artirimina iliskin",
+            "yeni pay alma hak", "rüçhan hakk", "ruchan hakk",
+            "tahsisli sermaye", "rights issue",
         ]
         # Body'de "Pay Başına Brüt Temettü" yoksa AMA bedelsiz sinyali varsa → temettü değil
         is_capital_payload = any(s in b for s in capital_signals)
@@ -191,11 +197,19 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
     # Payment per share" ifadesi). İngilizce variantlar dahil.
     if ("bistech" in t or "bıstech" in t) and body:
         b = lower_tr(body)
+        # ★ İHLAS BEDELLİ FIX: "teorik fiyat" sinyali KALDIRILDI — bedelli/bedelsiz
+        # sermaye artırımı BISTECH duyurularında da teorik fiyat geçer; İHLAS bedellisi
+        # bu sinyalle temettü sanılıp Dağıtım Kararları'na düşmüştü. Artık BISTECH
+        # duyurusu yalnızca AÇIK temettü ifadesi varsa temettü sayılır; sermaye
+        # artırımı sinyali varsa (ve temettü ifadesi yoksa) kesin DEĞİL.
+        bistech_capital_signals = [
+            "sermaye artırım", "sermaye artirim", "bedelli", "bedelsiz",
+            "rüçhan", "ruchan", "yeni pay alma", "rights issue", "capital increase",
+        ]
         bistech_dividend_signals = [
             # Türkçe
             "pay başına brüt temettü", "pay basina brut temettu",
             "pay başına net temettü", "pay basina net temettu",
-            "teorik fiyat", "teorik fiyati",
             "kar payı dağıt", "kar payi dagit",
             "temettü dağıt", "temettu dagit",
             "temettü ödem", "temettu odem",
@@ -203,11 +217,14 @@ def is_dividend(title: str, body: str = "", ticker: str = "") -> bool:
             # İngilizce (KAP multi-language bulk)
             "gross dividend payment per share",
             "net dividend payment per share",
-            "theoretical price",
             "dividend payment",
         ]
-        if any(s in b for s in bistech_dividend_signals):
+        has_div = any(s in b for s in bistech_dividend_signals)
+        has_cap = any(s in b for s in bistech_capital_signals)
+        if has_div and not has_cap:
             return True
+        if has_cap:
+            return False
 
     return False
 
