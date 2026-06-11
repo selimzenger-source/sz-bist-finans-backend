@@ -326,25 +326,24 @@ async def _refresh_oid_cache() -> dict[str, str]:
                 logger.warning("KAP bist-sirketler HTTP %d", resp.status_code)
                 return _oid_cache
 
-            # Parse: \"mkkMemberOid\":\"xxx\",...,\"stockCode\":\"THYAO\"
-            # ★ EKDMR fix (11.06.2026): relatedMemberTitle bazi sirketlerde
-            # null (tirnaksiz!) geliyor — eski regex string varsayiyordu,
-            # bu sirketler cache'e HIC giremiyordu → baslik-eslestirme ve
-            # KAP-direkt onlar icin calismiyordu (yeni halka arzlar dahil).
-            pattern = (
-                r'\\"mkkMemberOid\\":\\"([^\\"]+)\\",'
-                r'\\"kapMemberTitle\\":\\"[^\\"]+\\",'
-                r'\\"relatedMemberTitle\\":(?:null|\\"[^\\"]*\\"),'
-                r'\\"stockCode\\":\\"([^\\"]+)\\"'
-            )
-            matches = re.findall(pattern, resp.text)
-
+            # ★ SAGLAM PARSER (12.06.2026 — MARKA vakasi): tek buyuk regex her
+            # alan-sirasi/escape varyasyonunda kiriliyordu:
+            #   - relatedMemberTitle null olunca (EKDMR + 16 sirket daha)
+            #   - basliklarda \\u0026 gibi unicode escape olunca (MARKA Yatirim)
+            # Yeni yontem: JSON obje sinirlarindan ( },{ ) bol, her segmentte
+            # oid ve stockCode'u BAGIMSIZ ara — alan sirasi/escape onemi yok.
             new_map: dict[str, str] = {}
-            for oid, codes_str in matches:
-                for code in codes_str.split(","):
+            _oid_re = re.compile(r'\\"mkkMemberOid\\":\\"([^\\"]+)\\"')
+            _code_re = re.compile(r'\\"stockCode\\":\\"([^\\"]+)\\"')
+            for seg in re.split(r"\},\s*\{", resp.text):
+                om = _oid_re.search(seg)
+                sm = _code_re.search(seg)
+                if not om or not sm:
+                    continue
+                for code in sm.group(1).split(","):
                     code = code.strip()
-                    if code:
-                        new_map[code] = oid
+                    if code and code not in new_map:
+                        new_map[code] = om.group(1)
 
             if new_map:
                 _oid_cache = new_map
