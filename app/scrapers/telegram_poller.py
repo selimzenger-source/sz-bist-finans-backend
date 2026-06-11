@@ -1403,6 +1403,39 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     _paynow = getattr(_r, "pay_orani_pct", None) if _r is not None else None
                     _now_s = (f"; toplam payı {_pf(_paynow)} seviyesine geldi"
                               if isinstance(_paynow, (int, float)) else "")
+                    # ── ARASE fix (11.06.2026): YON CELISKISI — AI ozet varsa o KAZANIR ──
+                    # DB'deki son share_transaction satiri KARSI TARAFIN kaydi olabilir:
+                    # aile ici pay devrinde satan %dusus yazar ama alanin satiri (+%)
+                    # daha yeni oldugu icin yon "alim" cikiyordu → patron hisse satarken
+                    # 6.8 'Hafif Olumlu' + negatif AI ozeti birlikte yayinlandi.
+                    if ai_summary and _dir is not None:
+                        _sum_l = ai_summary.lower()
+                        _neg_cue = any(k in _sum_l for k in (
+                            "geril", "azal", "düşüş", "dusus", "düşmüş", "dusmus",
+                            "satış baskısı", "satis baskisi", "arz baskısı", "arz baskisi",
+                            "olumsuz sinyal", "olumsuz bir sinyal", "güven kaybı", "guven kaybi",
+                        ))
+                        _pos_cue = any(k in _sum_l for k in (
+                            "artır", "artir", "yükselt", "yukselt", "yükselmiş", "yukselmis",
+                            "güven sinyali", "guven sinyali", "olumlu sinyal",
+                        ))
+                        if _neg_cue and not _pos_cue and _dir > 0:
+                            logger.info(
+                                "Garanti skor YON DUZELTME (%s): DB satiri 'alim' diyor ama "
+                                "AI ozet acikca satis/azalis anlatiyor → SATIS yonu esas alindi",
+                                ticker,
+                            )
+                            _dir = -abs(_dir)
+                        elif _pos_cue and not _neg_cue and _dir < 0:
+                            _dir = abs(_dir)
+                        # Buyukluk: ozette "%X'dan %Y'e" varsa gercek degisim oradan
+                        try:
+                            _pcts = [float(p.replace(",", ".")) for p in re.findall(r"%\s*([\d]+[.,]?[\d]*)", ai_summary)[:2]]
+                            if len(_pcts) == 2 and abs(_pcts[0] - _pcts[1]) > 0:
+                                _dir = (abs(_pcts[0] - _pcts[1])) * (1 if _dir > 0 else -1)
+                        except (ValueError, TypeError):
+                            pass
+
                     if _dir is not None:
                         _abs = abs(_dir)
                         _alim = _dir > 0
@@ -1444,6 +1477,18 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                 else:
                     ai_score = 5.0
                     ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
+
+                # AILE ICI DEVIR yumusatmasi: paylar piyasaya satilmiyor, gercek
+                # arz baskisi yok → satis yonlu skor en fazla hafif-temkinli (4.2)
+                _aile_blob = f"{ai_summary or ''} {text or ''}".lower()
+                if ai_score is not None and ai_score < 4.2 and any(
+                    k in _aile_blob for k in ("aile üyeleri", "aile uyeleri", "aile içi", "aile ici", "aile bireyleri")
+                ):
+                    logger.info(
+                        "Garanti skor AILE-ICI yumusatma (%s): %.1f -> 4.2 (piyasaya satis yok)",
+                        ticker, float(ai_score),
+                    )
+                    ai_score = 4.2
                 logger.info("Garanti skor uygulandı (%s): ai_score=%s", ticker, ai_score)
 
             # ── SON GUARDRAIL: skor-özet tutarlılık (pozitif özet → Nötr skor paradoksu) ──
@@ -1935,7 +1980,12 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     _all_pos = all(s >= 6.0 for s in _sc.values())
                     _all_neg = all(s < 4.1 for s in _sc.values())
                     _all_neu = all(4.1 <= s < 6.0 for s in _sc.values())
-                    if _all_pos or _all_neg or _all_neu:
+                    # B5 fix: ayni-yon birlestirme yalniz skorlar YAKINSA (fark
+                    # <= 0.5, LLM gurultusu) yapilir. Fark buyukse her ticker
+                    # KENDI skorunu korur — haksiz 8.5'in hafif 6.1'e (veya
+                    # hafif 4.0'in en kotunun 2.5'ine) kopyalanmasi onlenir.
+                    _spread = max(_sc.values()) - min(_sc.values())
+                    if (_all_pos or _all_neg or _all_neu) and _spread <= 0.5:
                         _rep = (max(_sc.values()) if _all_pos
                                 else min(_sc.values()) if _all_neg
                                 else round(sum(_sc.values()) / len(_sc), 1))
@@ -1948,6 +1998,11 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                 pass
                         logger.info("Multi-ticker skor birleştirildi (aynı yön): %s -> %.1f",
                                     list(_sc.items()), _rep)
+                    elif _all_pos or _all_neg or _all_neu:
+                        logger.info(
+                            "Multi-ticker skorlar KORUNDU (ayni yon ama fark %.1f > 0.5): %s",
+                            _spread, list(_sc.items()),
+                        )
                 _pos_tickers = [tk for tk, d in _pt_objs.items()
                                 if d.ai_impact_score is not None and float(d.ai_impact_score) >= 6.0]
                 if _pos_tickers:

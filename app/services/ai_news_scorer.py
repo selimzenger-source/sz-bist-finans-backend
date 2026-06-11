@@ -1129,19 +1129,47 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
             "temett", "kar dağ", "kar dag", "kâr dağ",
         )
         if any(k in text_lower for k in _decision_kw):
+            # Hangi karar tipi? — kullaniciya anlasilir cumle kurmak icin
+            if "temett" in text_lower or "kar pay" in text_lower or "kâr pay" in text_lower or "kar dağ" in text_lower or "kar dag" in text_lower or "kâr dağ" in text_lower:
+                _karar_adi = "kâr payı (temettü) kararına"
+            elif "bedelsiz" in text_lower:
+                _karar_adi = "bedelsiz sermaye artırımı kararına"
+            elif "bedelli" in text_lower:
+                _karar_adi = "bedelli sermaye artırımı kararına"
+            elif "sermaye art" in text_lower:
+                _karar_adi = "sermaye artırımı kararına"
+            else:
+                _karar_adi = "kararına"
             return {
                 "category": "Güncelleme/Takip Bildirimi",
                 "summary": (
-                    "Bu bildirim, daha önce açıklanan bir kararın GÜNCELLEMESİDİR "
-                    "(KAP formunda 'Açıklama Güncelleme mi?: Evet'). Asıl karar ve oran "
-                    "orijinal bildirimde ilan edildiği için bu güncelleme yeni bir fiyat "
-                    "etkisi taşımaz."
+                    f"Şirket, daha önce duyurduğu {_karar_adi} ilişkin bildirimini "
+                    "güncelledi. Karar ve oranlar ilk açıklamada zaten kamuya "
+                    "duyurulduğu için bu güncellemenin hisse fiyatına yeni bir "
+                    "etkisi beklenmez."
                 ),
                 "hashtags": [],
             }
 
+    # B9 fix: rutin pattern aramasi TAM METINDE yapiliyordu — body'deki yan
+    # cumle ("...KAP duyurusu ile...", "hak kullanim tarihi: ...") tum haberi
+    # AI'siz 5.0'a sabitliyordu (ILK temettu karari bile notrleniyordu!).
+    # 1) Guclu KARAR sinyali varsa rutin filtre TAMAMEN atlanir (AI'ya gider)
+    # 2) Pattern aramasi basliga yakin bolgeyle sinirlanir (ilk 300 karakter)
+    _decision_signal = bool(re.search(
+        r"pay\s*ba[sş][ıi]na\s*(?:br[üu]t|net)?\s*[\d.,]+\s*tl"   # temettu tutari
+        r"|temett[üu]\s*(?:verim|oran)"                             # temettu orani
+        r"|bedelsiz\s*(?:pay)?\s*%\s*\d+|%\s*\d+[\d.,]*\s*bedelsiz"  # bedelsiz oran
+        r"|s[öo]zle[sş]me\s*imzal|ihale\s*(?:kazan|al)"             # yeni is
+        r"|kar\s*pay[ıi]\s*da[gğ][ıi]t[ıi]m\s*karar",               # temettu karari
+        text_lower,
+    ))
+    if _decision_signal:
+        return None  # karar bildirimi — rutin sayma, AI analiz etsin
+
+    _scan_zone = text_lower[:300]
     for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
-        if re.search(pattern, text_lower):
+        if re.search(pattern, _scan_zone):
             # Ticker'i summary'nin basina ekle (kullanici ne hisse oldugunu bilsin)
             full_summary = summary
             return {
@@ -2195,8 +2223,8 @@ NOTLAR:
   KURAL: Ozetinde "hafif olumlu" yaziyorsan verdict="hafif_pozitif" OLMAK ZORUNDA;
   "olumsuz" yaziyorsan verdict negatif taraf OLMAK ZORUNDA. Verdict ile ozet ASLA celisemez.
 - "score" 1.0-10.0 arasi 0.1 hassasiyet — verdict bandiyla uyumlu olmali:
-  guclu_pozitif 8.0-10.0 · pozitif 6.8-7.9 · hafif_pozitif 6.0-6.7 · notr 4.5-5.9
-  hafif_negatif 3.8-4.4 · negatif 2.5-3.7 · guclu_negatif 1.0-2.4
+  guclu_pozitif 8.0-10.0 · pozitif 7.0-7.9 · hafif_pozitif 6.0-6.9 · notr 4.1-5.9
+  hafif_negatif 3.1-4.0 · negatif 2.1-3.0 · guclu_negatif 1.0-2.0
 - "category" zorunlu: "finansal" / "strateji" / "bilgi" (system prompt'taki rehbere gore)
 - "summary" 3-5 cumle Turkce, onemli rakamlari icermeli
 - "hashtags" 2-3 adet, # isareti olmadan, ticker tekrarlanmasin"""
@@ -2366,14 +2394,18 @@ NOTLAR:
         # bu verdiktin bandına KELEPÇELENİR. Özet "hafif olumlu" deyip skor 5.0
         # kalamaz — verdict=hafif_pozitif ise skor 6.0-6.7'ye oturur. Verdict ile
         # özet aynı zihinsel sonucun iki ifadesi olduğundan çelişki kökten biter.
+        # B6 fix: bandlar app/utils/ai_score_label.py (score_to_label) esikleriyle
+        # HIZALANDI — eski bandlar (pozitif 6.8-7.9, hafif_negatif 3.8-4.4 vb.)
+        # etiket esikleriyle celisiyordu (orn. 6.8 burada "pozitif" ama etikette
+        # "Hafif Olumlu" cikiyordu).
         _VERDICT_BANDS = {
             "guclu_pozitif": (8.0, 10.0, 8.5),
-            "pozitif": (6.8, 7.9, 7.0),
-            "hafif_pozitif": (6.0, 6.7, 6.2),
-            "notr": (4.5, 5.9, 5.0),
-            "hafif_negatif": (3.8, 4.4, 4.0),
-            "negatif": (2.5, 3.7, 3.0),
-            "guclu_negatif": (1.0, 2.4, 2.0),
+            "pozitif": (7.0, 7.9, 7.3),
+            "hafif_pozitif": (6.0, 6.9, 6.2),
+            "notr": (4.1, 5.9, 5.0),
+            "hafif_negatif": (3.1, 4.0, 3.8),
+            "negatif": (2.1, 3.0, 2.8),
+            "guclu_negatif": (1.0, 2.0, 1.5),
         }
         _verdict = str(result.get("verdict") or "").strip().lower().replace(" ", "_").replace("-", "_")
         if _verdict in _VERDICT_BANDS:
@@ -2616,6 +2648,17 @@ NOTLAR:
                     ticker, float(score),
                 )
                 score = 5.5
+                # B3 fix: ozet de NÖTRLEŞTİRİLİR (TAKİP-DAMPER teknigi) — aksi
+                # halde telegram_poller "Son guardrail" ve kap_all "skor-ozet
+                # tutarlilik" gecisleri pozitif ozeti gorup skoru POS-FRAMING-LIFT
+                # ile 6.2'ye geri kaldiriyordu.
+                _odul_notr_cumle = (
+                    " Bu tür tedarikçi/partner ödülleri rutin PR niteliğindedir; "
+                    "somut finansal etki içermediğinden fiyat üzerinde anlamlı "
+                    "bir etki beklenmemektedir."
+                )
+                if summary and "rutin pr niteliğindedir" not in summary.lower():
+                    summary = summary.rstrip() + _odul_notr_cumle
 
         # ─── SKOR-ÖZET TUTARLILIK GUARDRAIL ───
         # Skor pozitif (>=6.0) ama özet "ek etki beklenmez / teknik takip
@@ -2650,11 +2693,20 @@ NOTLAR:
 # -------------------------------------------------------
 
 # Pozitif skorla ÇELİŞEN (nötrleştirici) cümle kalıpları — skor>=6.0'da temizlenir
+# B8 fix: kesik '...beklenm' kaliplari POZITIF cumleleri de siliyordu
+# ("fiyata olumlu etki yaratmasi BEKLENMEKTEDIR" celiski sanilip atiliyordu).
+# Tum kaliplar acik NEGATIF formda: beklenmemekte/beklenmez/beklenmiyor.
 _CONTRADICTION_PHRASES = (
-    "etki beklenm", "etkisi beklenm", "fiyat etkisi beklenm",
-    "reaksiyon beklenm", "tepki beklenm", "pozitif etki beklenm",
-    "etki yaratmaz", "etki yaratması beklenm", "etki yaratmamak",
-    "pozitif etki yaratm", "ek bir fiyat etkisi", "yeni etki yaratmaz",
+    "etki beklenmemekte", "etki beklenmez", "etki beklenmiyor",
+    "etkisi beklenmemekte", "etkisi beklenmez", "etkisi beklenmiyor",
+    "fiyat etkisi beklenmemekte", "fiyat etkisi beklenmez",
+    "reaksiyon beklenmemekte", "reaksiyon beklenmez",
+    "tepki beklenmemekte", "tepki beklenmez",
+    "pozitif etki beklenmemekte", "pozitif etki beklenmez",
+    "etki yaratmaz", "etki yaratmamak",
+    "etki yaratması beklenmemekte", "etki yaratmasi beklenmemekte",
+    "etki yaratması beklenmez", "etki yaratmasi beklenmez",
+    "ek bir fiyat etkisi", "yeni etki yaratmaz",
     "teknik bir takip gelism", "teknik takip gelism",
     "nötr bir gelism", "notr bir gelism",
 )
@@ -2908,6 +2960,25 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             )
             return 5.0
 
+    # ─── 🛑 B10 fix: KRİTİK NEGATİF TESPİTİ ÖNE ALINDI ──────────────
+    # Eski konum fonksiyonun SONUNDAYDI; YENI-IS / KURUMSAL-ALIM floor'lari
+    # erken `return` ile cap'i atliyordu (TTK 376/iflas/islem durdurma iceren
+    # haberde "sozlesme imzal" gecince skor 8.0'a kadar cikabiliyordu).
+    # Burada hem skor cap'lenir hem _critical_neg flag'i set edilir — floor
+    # bloklari bu flag ile devre disi kalir. Sondaki cap blogu da KORUNUR
+    # (ara bloklar skoru yukseltirse cikista tekrar cap'lenir).
+    _critical_neg = False
+    for _cn_pat, _cn_max in _CRITICAL_NEGATIVE_PATTERNS:
+        if re.search(_cn_pat, content_lower):
+            _critical_neg = True
+            if score > _cn_max:
+                logger.info(
+                    "Skor dogrulama [KRITIK-NEG-ERKEN]: %s skor %.1f → %.1f (pattern: %s)",
+                    ticker, score, _cn_max, _cn_pat[:30],
+                )
+                score = _cn_max
+            break
+
     # ─── 🛑 NÖTR OVERRIDE (MUTLAK ÖNCELİK) ──────────────────────────
     # AI ozet KENDI ICINDE "etki yok / rutin / yeni bilgi yok / icermemektedir"
     # diyorsa skor 5.0'dan yuksek OLAMAZ — pozitif keyword'ler (stratejik karar,
@@ -2953,6 +3024,15 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "yeni bilgi içermem", "yeni bir bilgi içermem",
         "stratejik karar içermem", "stratejik bir karar içermem",
         "rutin bir parça", "bilgilendirme niteliğinde",
+        # B4/B12 fix: cok-ticker haberlerde KARSI-TARAF ozetlerinde gecen ama
+        # listede olmayan kaliplar — "X icin dogrudan gelisme degildir" tarzi
+        # ozetler YENI-IS floor'uyla 6.0'a eziliyordu.
+        "doğrudan etki taşımaz", "dogrudan etki tasimaz",
+        "doğrudan bir etki taşımaz", "dogrudan bir etki tasimaz",
+        "için doğrudan gelişme değildir", "icin dogrudan gelisme degildir",
+        "doğrudan gelişme değildir", "dogrudan gelisme degildir",
+        "doğrudan ilgilendirmemektedir", "dogrudan ilgilendirmemektedir",
+        "etki yaratmamaktadır", "etki yaratmamaktadir",
     )
     # _neutral_hit: ozet "etki beklenmez/rutin" tarzi NOTR kanit iceriyor.
     # KRITIK: bu flag asagidaki FRAMING LIFT/PULL bloklarini da devre disi birakir.
@@ -3000,17 +3080,37 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # KELIME duzeyinde negatif-etki sinyali varsa skor 6.0+'dan 5.0'a CEKILSIN.
     # Amac: gelecek varyantlari da yakalamak. Ornek: "piyasaya yansimayacaktir",
     # "somut bir etki yoktur", "olagan idari islem", "tesir etmemekted" vb.
-    if summary_lower and score >= 5.5:
+    # B1 fix (KRİTİK): kesik kaliplar POZITIF cumleleri de yakaliyordu —
+    #   "etki olm"            → "olumlu etki OLMASI beklenmektedir" (pozitif!)
+    #   "etkisi bulunm"       → "olumlu etkisi BULUNMAKTADIR" (pozitif!)
+    #   "yansıması beklenm"   → "olumlu yansıması BEKLENMEKTEDIR" (pozitif!)
+    #   "olağan" tek basina   → "OLAĞANÜSTÜ olumlu" (pozitif!)
+    #   "rutin" tek basina    → "rutin bir bildirim DEĞİLDİR" (negasyon!)
+    # Kaliplar TAM NEGATIF formlara cevrildi. Ayrica NÖTR OVERRIDE'daki
+    # _explicit_verdict muafiyeti eklendi: ozet acik olumlu/olumsuz hukum
+    # iceriyorsa bu blok skoru 5.0'a CEKMEZ.
+    if summary_lower and score >= 5.5 and not _explicit_verdict:
         broad_neutral_phrases = (
             "etki yok", "etki yoktur", "etkisi yok", "etkisi yoktur",
-            "etki olm", "etkisi olm",  # "etki olmayacak / etkisi olmayacak"
-            "etki bulunm", "etkisi bulunm",  # "etki bulunmamaktadir"
-            "tesir etm", "tesir yok",  # tesir etmez, tesir etmemekted
+            "etki olmayacak", "etkisi olmayacak", "etki olmaz", "etkisi olmaz",
+            "etki bulunmamakta", "etkisi bulunmamakta",  # "...bulunmamaktadir" dahil
+            "etki bulunmaz", "etkisi bulunmaz",
+            "tesir etmez", "tesir etmemekte", "tesir yok",
             "yansimayacak", "yansımayacak", "yansimama", "yansımama",
-            "yansimasi beklenm", "yansıması beklenm",
-            "kayda deger etki", "kayda değer etki", "kayda deger bir etki", "kayda değer bir etki",
-            "olagan", "olağan",  # "olagan idari islem"
-            "rutin",  # tek basina bile yeter (FORTE icin de gecerli)
+            "yansimasi beklenmemekte", "yansıması beklenmemekte",
+            "yansimasi beklenmez", "yansıması beklenmez",
+            "kayda deger etki beklenmem", "kayda değer etki beklenmem",
+            "kayda deger bir etki beklenmem", "kayda değer bir etki beklenmem",
+            "kayda deger etki beklenmez", "kayda değer etki beklenmez",
+            "kayda deger bir etki beklenmez", "kayda değer bir etki beklenmez",
+            "kayda deger etki yok", "kayda değer etki yok",
+            "olagan idari", "olağan idari",
+            "olagan islem", "olağan işlem",
+            "olagan operasyonel", "olağan operasyonel",
+            "rutin bir bildirimdir", "rutin bildirimdir",
+            "rutin bir bilgilendirmedir", "rutin bilgilendirmedir",
+            "rutin bir islemdir", "rutin bir işlemdir",
+            "rutin niteliktedir", "rutin idari",
             "sembolik nitelik", "sembolik islem",
             "prosedurel", "prosedürel", "formalit",
             "duzeltici", "düzeltici", "duzeltme niteligindedir",
@@ -3033,6 +3133,36 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                     ticker, score,
                 )
                 return 5.0
+
+    # ─── B3 fix: RUTİN ÖDÜL/PLAKET KONTROLÜ (POS-FRAMING-LIFT'ten ÖNCE) ───
+    # analyze_news icindeki ÖDÜL GUARDRAIL skoru 5.5'e cekiyordu ama sonraki
+    # gecislerde (telegram_poller "Son guardrail", kap_all skor-ozet tutarlilik)
+    # bu fonksiyon pozitif ozeti gorup skoru POS-FRAMING-LIFT ile 6.2'ye geri
+    # kaldiriyordu. Odul kalibi var + somut finansal tutar yoksa: lift atlanir,
+    # skor > 5.5 ise 5.5'e cekilir.
+    _award_patterns_v = (
+        "yılın distribütörü", "yilin distributoru",
+        "premium distribütör", "premium distributor",
+        "yılın partneri", "partner of the year",
+        "distributor of the year", "yılın bayisi",
+        "başarı ödülü", "basari odulu",
+        "ödülünü kazan", "odulunu kazan",
+        "ödülüne layık", "oduluna layik",
+        "plaket", "takdir belgesi",
+        "yılın iş ortağı",
+    )
+    _award_text_v = content_lower + " " + summary_lower
+    _is_award_routine = any(p in _award_text_v for p in _award_patterns_v) and not bool(re.search(
+        r"(milyon|milyar)\s*(tl|usd|eur|dolar|avro)|sözleşme imzal|sozlesme imzal|sipariş|siparis|ihale",
+        _award_text_v,
+    ))
+    if _is_award_routine and score > 5.5:
+        logger.info(
+            "AI News Scorer [ÖDÜL-REVALIDATE] %s: %.1f -> 5.5 "
+            "(rutin partner/distribütör ödülü — sonraki geçişte re-lift engellendi)",
+            ticker, score,
+        )
+        score = 5.5
 
     # ─── AI ÖZET FRAMING TUTARLILIK KONTROLÜ ─────────────────────────
     # AI bazen yorumu pozitif yazıp puanı 5.0 nötr veriyor (PASEU, LMKDC örnekleri).
@@ -3109,7 +3239,20 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "dağıtılmaması", "dağıtım yapılmaması",
         ]
         has_pos_framing = any(kw in summary_lower for kw in pos_framing)
-        has_neg_framing = any(kw in summary_lower for kw in neg_framing)
+        # B12 fix: "değer kaybı riski bulunmamaktadır" negasyonlu kullanim
+        # negatif framing sayilmaz (strong_neg_signals'daki guard'in aynisi)
+        has_neg_framing = False
+        for _nf_kw in neg_framing:
+            _nf_i = summary_lower.find(_nf_kw)
+            if _nf_i == -1:
+                continue
+            if _nf_kw.startswith(("değer kayb", "deger kayb")):
+                import re as _re_nf
+                _nf_win = summary_lower[_nf_i:_nf_i + len(_nf_kw) + 60]
+                if _re_nf.search(r"bulunmam|yoktur|beklenmem", _nf_win):
+                    continue
+            has_neg_framing = True
+            break
 
         # ── GENEL VERDİKT (keyword listesinden BAĞIMSIZ — kalıcı çözüm) ──
         # AI özeti sonuç olarak "olumlu/pozitif" diyorsa pozitif, "olumsuz/negatif"
@@ -3117,7 +3260,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         # Böylece her yeni ifade için keyword eklemeye gerek kalmaz; AI kendi
         # verdiktini bu kelimelerle söylediği sürece skor-özet paradoksu otomatik düzelir.
         import re as _vr
-        _pos_v = len(_vr.findall(r"(?:olumlu|pozitif)(?!\s*(?:değil|olmay|d[ei]ğil))", summary_lower))
+        # B7 fix: `d[ei]ğil` ASCII "degil"i yakalamiyordu — acik (değil|degil) kullan
+        _pos_v = len(_vr.findall(r"(?:olumlu|pozitif)(?!\s*(?:değil|degil|olmay))", summary_lower))
         _neg_v = len(_vr.findall(r"(?:olumsuz|negatif)", summary_lower))
         # ── NEGASYON DÜZELTME (KRİTİK) ──────────────────────────────────────
         # "doğrudan pozitif etkisi BEKLENMEZ", "olumlu etki YOK/OLMAZ", "pozitif
@@ -3127,13 +3271,18 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         # (~40 char, nokta/virgule kadar) negasyon varsa o "pozitif"i sayma.
         # NOT: "beklenmektedir"/"bekleniyor" (POZİTİF form) bilerek HARİÇ — sadece
         # "beklenmez/beklenmemekte/beklenmiyor" negatif formlari yakalanir.
+        # B7 fix: `etkisi bulunma|etki bulunma` POZITIF beyani ("olumlu etkisi
+        # BULUNMAKTADIR") da negasyon saniyordu → acik negatif formlar kullanildi
+        # (bulunmam... = bulunmamakta/bulunmamaktadir, bulunmaz). `d[ei]ğil` ASCII
+        # "degil"i kacirdigi icin (değil|degil) yapildi.
         _pos_negated = len(_vr.findall(
             r"(?:olumlu|pozitif)[^.;,!?]{0,60}?(?:"
             r"beklenm[ei]z|beklenmemekte|beklenmiyor|"
-            r"etkisi yok|etki yok|etkisi bulunma|etki bulunma|"
+            r"etkisi yok|etki yok|etkisi bulunmam|etki bulunmam|etkisi bulunmaz|etki bulunmaz|"
             r"olmaz|olmamakta|taşımaz|tasimaz|içermez|icermez|sağlamaz|saglamaz|"
-            r"yaratmaz|yaratmamakta|yaratması beklenm|yaratmasi beklenm|"
-            r"d[ei]ğil)",
+            r"yaratmaz|yaratmamakta|yaratması beklenmem|yaratmasi beklenmem|"
+            r"yaratması beklenm[ei]z|yaratmasi beklenm[ei]z|"
+            r"değil|degil)",
             summary_lower,
         ))
         _pos_v = max(0, _pos_v - _pos_negated)
@@ -3143,10 +3292,11 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         _neg_negated = len(_vr.findall(
             r"(?:olumsuz|negatif)[^.;,!?]{0,60}?(?:"
             r"beklenm[ei]z|beklenmemekte|beklenmiyor|"
-            r"etkisi yok|etki yok|etkisi bulunma|etki bulunma|"
+            r"etkisi yok|etki yok|etkisi bulunmam|etki bulunmam|etkisi bulunmaz|etki bulunmaz|"
             r"olmaz|olmamakta|taşımaz|tasimaz|içermez|icermez|"
-            r"yaratmaz|yaratmamakta|yaratması beklenm|yaratmasi beklenm|"
-            r"d[ei]ğil)",
+            r"yaratmaz|yaratmamakta|yaratması beklenmem|yaratmasi beklenmem|"
+            r"yaratması beklenm[ei]z|yaratmasi beklenm[ei]z|"
+            r"değil|degil)",
             summary_lower,
         ))
         _neg_v = max(0, _neg_v - _neg_negated)
@@ -3171,7 +3321,20 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "risk artır", "risk yarat",
             "olumsuz olarak değerlendir", "olumsuz olarak algılan",
         )
-        has_strong_neg = any(kw in summary_lower for kw in strong_neg_signals)
+        # B12 fix: "değer kaybı riski BULUNMAMAKTADIR" gibi negasyonlu kullanim
+        # strong-neg sinyal sayilmaz — "değer kayb*" kaliplarinda yakin bagde
+        # (60 char) negasyon (bulunmam/yoktur/beklenmem) varsa sinyal atlanir.
+        has_strong_neg = False
+        for _sn_kw in strong_neg_signals:
+            _sn_i = summary_lower.find(_sn_kw)
+            if _sn_i == -1:
+                continue
+            if _sn_kw.startswith(("değer kayb", "deger kayb")):
+                _sn_win = summary_lower[_sn_i:_sn_i + len(_sn_kw) + 60]
+                if _vr.search(r"bulunmam|yoktur|beklenmem", _sn_win):
+                    continue
+            has_strong_neg = True
+            break
 
         # STRONG NEG varsa pos framing'i devre dışı bırak (override hak kazanır)
         if has_strong_neg:
@@ -3190,7 +3353,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             "pay geri", "geri alım programı", "geri alim programi",
         ))
         # Çelişkili framing varsa (hem pozitif hem negatif kelime) düzeltme yapma
-        if has_pos_framing and not has_neg_framing and score < 6.2 and not _is_buyback_summary:
+        # B3 fix: rutin ödül/plaket haberi (finansal tutar yok) lift EDILMEZ
+        if has_pos_framing and not has_neg_framing and score < 6.2 and not _is_buyback_summary and not _is_award_routine:
             old = score
             score = 6.2
             logger.info(
@@ -3214,11 +3378,13 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             ))
             if not _has_pos_metric:
                 old = score
-                score = 4.0  # Hafif Olumsuz
+                # B2 fix: sabit 4.0 atama yerine yukaridan kelepce (min) —
+                # skor zaten dusukse yukari CEKILMEZ, cesitlilik korunur.
+                score = min(score, 4.0)  # Hafif Olumsuz tavani
                 logger.info(
-                    "AI News Scorer [NEG-FRAMING-PULL] %s: %.1f -> 4.0 "
+                    "AI News Scorer [NEG-FRAMING-PULL] %s: %.1f -> %.1f "
                     "(ozet olumsuz framing — skor Notr/pozitifte kalamaz)",
-                    ticker, old,
+                    ticker, old, score,
                 )
 
         # ─── M&A / ŞİRKET ALIMI / BİRLEŞME / SPK ONAYI — HARD FLOOR 6.8 ───
@@ -3265,7 +3431,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         )
         is_ma_milestone = any(kw in combined_text for kw in ma_keywords)
         is_ma_cancelled = any(kw in combined_text for kw in ma_negative)
-        if is_ma_milestone and not is_ma_cancelled and score < 6.8:
+        # B10 fix: kritik negatif (TTK 376/iflas/islem durdurma) varsa floor yok
+        if is_ma_milestone and not is_ma_cancelled and not _critical_neg and score < 6.8:
             old = score
             score = 6.8
             logger.info(
@@ -3273,13 +3440,18 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 "(şirket alım/birleşme/SPK onayı = Olumlu)",
                 ticker, old,
             )
-        elif has_neg_framing and not has_pos_framing and score > 3.8:
+        elif has_neg_framing and not has_pos_framing and score > 4.2:
+            # B2 fix (3.8 kumelenmesi): eski blok `score > 3.8` kosuluyla sabit
+            # 3.8 atiyordu — NEG-FRAMING-PULL'un 4.0'ini her seferinde 3.8'e
+            # ezdigi icin TUM negatif-framing haberler ayni 3.8 skoruna
+            # kumelaniyordu (kullanici sikayetinin ana nedeni). Artik 4.2
+            # tavanindan kelepce: skor zaten <= 4.2 ise DOKUNULMAZ.
             old = score
-            score = 3.8
+            score = min(score, 4.2)
             logger.info(
-                "AI News Scorer [NEG-FRAMING-DROP] %s: %.1f -> 3.8 "
-                "(ozet negatif framing icermesine ragmen skor yuksekti)",
-                ticker, old,
+                "AI News Scorer [NEG-FRAMING-CAP] %s: %.1f -> %.1f "
+                "(ozet negatif framing — skor yukaridan 4.2'ye kelepcelendi)",
+                ticker, old, score,
             )
 
         # ─── NÖTR FRAMING TESPİTİ — fiyat etkisi yok denilen haberleri NOTR'a çek ─
@@ -3562,7 +3734,20 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
 
     # ─── YENI IS ILISKISI / SOZLESME — Mutlak tutar HARD FLOOR ──────
     # AI'in 6.0-6.5 kumelemesini zorla cozer. Tutar tespit edilirse minimum skor garanti.
-    is_yeni_is = (not _deal_cancelled) and (not (is_preliminary_talk and not is_signed_deal)) and any(kw in content_lower for kw in [
+    # B4 fix: cok-ticker haberde KARSI-TARAF ozeti ("X icin dogrudan gelisme
+    # degildir / dogrudan etki tasimaz") YENI-IS floor'uyla EZILMEMELI — ozet
+    # bu kaliplardan birini iceriyorsa floor uygulanmaz.
+    _KARSI_TARAF_PATTERNS = (
+        "doğrudan etki taşımaz", "dogrudan etki tasimaz",
+        "doğrudan bir etki taşımaz", "dogrudan bir etki tasimaz",
+        "doğrudan gelişme değildir", "dogrudan gelisme degildir",
+        "doğrudan ilgilendirmemektedir", "dogrudan ilgilendirmemektedir",
+        "etki yaratmamaktadır", "etki yaratmamaktadir",
+        "doğrudan etki beklenmemekte", "dogrudan etki beklenmemekte",
+    )
+    _karsi_taraf_notr = bool(summary_lower and any(p in summary_lower for p in _KARSI_TARAF_PATTERNS))
+    # B10 fix: kritik negatif (_critical_neg) varsa yeni-is floor'u calismaz
+    is_yeni_is = (not _critical_neg) and (not _karsi_taraf_notr) and (not _deal_cancelled) and (not (is_preliminary_talk and not is_signed_deal)) and any(kw in content_lower for kw in [
         "yeni is iliskisi", "yeni iş ilişkisi",
         "sozlesme imzal", "sözleşme imzal",
         "anlasma imzal", "anlaşma imzal",
@@ -3673,7 +3858,8 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     # ─── Kurumsal block alim — HARD FLOOR ──────────────────────────────
     # Yatirim/portfoy fonu %5 esigi asar veya buyuk net alim yaparsa → 7.0+ zorunlu
     # PEKGY/TATEN tipi vakalari yakala
-    is_kurumsal_alim = (
+    # B10 fix: kritik negatif varsa kurumsal-alim floor'u da calismaz
+    is_kurumsal_alim = (not _critical_neg) and (
         ("portfoy yonetimi" in content_lower or "portföy yönetimi" in content_lower or "fonlar" in content_lower)
         and ("alim" in content_lower or "alım" in content_lower or "satın" in content_lower)
         and ("yukseldi" in content_lower or "yükseldi" in content_lower or "esik" in content_lower or "eşik" in content_lower)
@@ -3703,8 +3889,9 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
 
     # ─── Temettu yield% bazli HARD FLOOR ──────────────────────────────
     # OZKGY-tipi vakayi engelle: %19.87 yield iken AI 7.2 vermesin
+    # B10 fix: kritik negatif varsa erken-return'lu bu floor da atlanir
     yield_pct = _extract_dividend_yield_pct(content)
-    if yield_pct is not None:
+    if yield_pct is not None and not _critical_neg:
         # Sadece temettu bildirimi olduğundan emin ol
         if any(kw in content_lower for kw in ["kar payi", "kar payı", "temettu", "temettü", "pay basina", "pay başına"]):
             if yield_pct >= 20:
@@ -3790,6 +3977,34 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                     _r, ticker, score, _cap,
                 )
                 return _cap
+
+    # ─── 🛑 SON EMNİYET — ÖZET-YÖN MUTLAK TUTARLILIK (ARASE 11.06.2026) ───
+    # Hangi path hangi muafiyetle gecmis olursa olsun: AI ozeti ACIK OLUMSUZ
+    # hukum iceriyorsa skor POZITIF (>=6.0) KALAMAZ. ARASE vakasi: ozet
+    # "olumsuz bir sinyal olarak algilanabilir... satis baskisi" derken skor
+    # 6.8 'Hafif Olumlu' yayinlandi (celiskili-framing istisnasi yuzunden hicbir
+    # duzeltme calismamisti). Bu blok fonksiyonun EN SONUNDA — kacis yok.
+    if ai_summary and score >= 6.0:
+        _fs = ai_summary.lower()
+        _final_neg = any(k in _fs for k in (
+            "olumsuz bir sinyal", "olumsuz sinyal olarak",
+            "satış baskısı", "satis baskisi",
+            "arz baskısı", "arz baskisi",
+            "güven kaybı", "guven kaybi",
+            "hafif olumsuz", "olumsuz olarak değerlendir", "olumsuz olarak algılan",
+            "negatif sinyal", "olumsuz etki yarat", "olumsuz yansı",
+        ))
+        _final_pos = any(k in _fs for k in (
+            "olumlu sinyal", "pozitif sinyal", "olumlu katkı", "olumlu katki",
+            "hafif olumlu", "olumlu olarak değerlendir", "pozitif etki yarat",
+        ))
+        if _final_neg and not _final_pos:
+            logger.info(
+                "AI News Scorer [SON-EMNIYET] %s: %.1f -> 4.2 "
+                "(ozet acik olumsuz hukum iceriyor — pozitif skor yayinlanamaz)",
+                ticker, score,
+            )
+            return 4.2
 
     return score
 
