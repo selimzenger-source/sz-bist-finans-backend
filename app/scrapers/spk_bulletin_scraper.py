@@ -996,6 +996,22 @@ async def _check_spk_bulletins_inner():
                         if _an_check.scalar_one_or_none():
                             _analiz_already_tweeted = True
                             logger.info("SPK bulten analiz tweeti ZATEN atilmis: %s — atlandi", _analiz_key)
+                        # 2. KATMAN: admin manuel analiz endpoint'i flag'siz kayit
+                        # birakir (source=tweet_spk_bulletin_analysis). Ayni bulten
+                        # no'sunu iceren kayit varsa da DUPLICATE sayilir.
+                        if not _analiz_already_tweeted:
+                            _an_check2 = await db.execute(
+                                select(PendingTweet).where(
+                                    PendingTweet.source == "tweet_spk_bulletin_analysis",
+                                    PendingTweet.text.ilike(f"%{bno_str_val} SPK Bülten%"),
+                                ).limit(1)
+                            )
+                            if _an_check2.scalar_one_or_none():
+                                _analiz_already_tweeted = True
+                                logger.info(
+                                    "SPK bulten analiz ZATEN mevcut (manuel/onceki kayit): %s — atlandi",
+                                    bno_str_val,
+                                )
                     except Exception:
                         pass
 

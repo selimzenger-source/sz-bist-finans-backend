@@ -1171,7 +1171,45 @@ async def run_spk_bulten_scraper(
     try:
         from app.scrapers.spk_bulletin_scraper import (
             check_spk_bulletins, SCRAPER_STATE_KEY, EMPTY_PDF_RETRY_KEY,
+            EMPTY_PDF_MAX_RETRY, parse_bulletin_no, bulletin_no_str,
         )
+        from app.models.scraper_state import ScraperState as _ScraperState
+
+        # ── VAZGECILMIS BULTEN KURTARMA ──
+        # 30 denemede PDF okunamayinca bulten "islendi" sayilir (akis tikanmasin
+        # diye). Admin butona basarsa: watermark'i o bultenin ONCESINE geri al +
+        # retry sayacini sifirla → monitor TAM AKISI (IPO+tweet+push) yeniden
+        # calistirir. Duplicate flag'leri (push/tweet/analiz) zaten atilmis
+        # parcalari korur — hicbir sey iki kez gitmez.
+        _rt_res = await db.execute(
+            select(_ScraperState).where(_ScraperState.key == EMPTY_PDF_RETRY_KEY)
+        )
+        _rt_row = _rt_res.scalar_one_or_none()
+        if _rt_row and _rt_row.value:
+            try:
+                _giveup_bno_s, _cnt_s = _rt_row.value.rsplit(":", 1)
+                if int(_cnt_s) >= EMPTY_PDF_MAX_RETRY:
+                    _wm_res = await db.execute(
+                        select(_ScraperState).where(_ScraperState.key == SCRAPER_STATE_KEY)
+                    )
+                    _wm_row = _wm_res.scalar_one_or_none()
+                    _giveup_bno = parse_bulletin_no(_giveup_bno_s)
+                    if _wm_row and _giveup_bno and _wm_row.value == _giveup_bno_s and _giveup_bno[1] > 1:
+                        _wm_row.value = bulletin_no_str(_giveup_bno[0], _giveup_bno[1] - 1)
+                        _rt_row.value = ""
+                        await db.commit()
+                        logger.info(
+                            "[ADMIN] Vazgecilmis SPK bulteni %s yeniden kuyruga alindi "
+                            "(watermark %s'e geri cekildi)",
+                            _giveup_bno_s, _wm_row.value,
+                        )
+            except (ValueError, TypeError):
+                pass
+        # Sayaci her buton basisinda sifirla — taze deneme hakki
+        if _rt_row and _rt_row.value:
+            _rt_row.value = ""
+            await db.commit()
+
         await check_spk_bulletins()
 
         # Durum raporu — son islenen bulten + varsa bekleyen PDF retry
