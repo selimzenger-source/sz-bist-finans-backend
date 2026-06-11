@@ -5115,15 +5115,12 @@ def _build_bilanco_tweet_text(ticker: str, period: str | None) -> str:
         else:
             per_txt = p + " "
     lines = [
-        f"#{tk} {per_txt}sonuçlarını açıkladı 📊",
+        # Kullanicinin begendigi format (MAVI ornegi, 09.06.2026):
+        f"#{tk} {per_txt}bilançosunu açıkladı.. #bilanço 👇",
         "",
-        "İşte finansal tablo özeti 👇",
+        "📌 Detaylı AI analizi ve yorumunu ve bütün #bist bilançolarını anlık uygulamamızda bulabilirsiniz...",
         "",
-        "Tüm bilançoları anlık takip etmek için uygulamamızı indirebilirsiniz 📲",
-        "",
-        "⚠️ Yatırım tavsiyesi değildir.",
-        "",
-        f"#{tk} #bilanço #FAVÖK #BIST #borsaistanbul",
+        "borsacebimde.com",
     ]
     return "\n".join(lines)
 
