@@ -118,6 +118,16 @@ NEW BUSINESS RELATIONSHIP (yeni tedarikci/musteri/is ortakligi, amount unspecifi
     Amount missing + partner unclear     → 5.8-6.2
     Routine administrative supplier      → 5.4-5.8
 
+STRATEGIC AGREEMENT / MoU / CONCESSION (Stratejik Anlasma, On Anlasma/MoU,
+Imtiyaz, Munhasir Muzakere, Yatirim/Genisleme Programi, Yeni Pazar/Ulke):
+  CRITICAL: A preliminary/non-binding agreement (MoU, On Anlasma) STILL signals
+  positive strategic direction. NEVER score it Notr (5.0) just because it is
+  "preliminary" or "non-binding". The growth intent IS the signal.
+    Mega-scale / new market / concession win    → 6.8-7.5
+    Strategic MoU / exclusive negotiation        → 6.2-6.9
+    Preliminary agreement, scale unclear         → 6.0-6.5
+  Only drop toward Notr if the agreement is explicitly cancelled/failed/terminated.
+
 CAPITAL INCREASE (Sermaye Artirimi):
   Bedelsiz (free issue):
     %100+         → 9.0-9.5
