@@ -327,10 +327,14 @@ async def _refresh_oid_cache() -> dict[str, str]:
                 return _oid_cache
 
             # Parse: \"mkkMemberOid\":\"xxx\",...,\"stockCode\":\"THYAO\"
+            # ★ EKDMR fix (11.06.2026): relatedMemberTitle bazi sirketlerde
+            # null (tirnaksiz!) geliyor — eski regex string varsayiyordu,
+            # bu sirketler cache'e HIC giremiyordu → baslik-eslestirme ve
+            # KAP-direkt onlar icin calismiyordu (yeni halka arzlar dahil).
             pattern = (
                 r'\\"mkkMemberOid\\":\\"([^\\"]+)\\",'
                 r'\\"kapMemberTitle\\":\\"[^\\"]+\\",'
-                r'\\"relatedMemberTitle\\":\\"[^\\"]*\\",'
+                r'\\"relatedMemberTitle\\":(?:null|\\"[^\\"]*\\"),'
                 r'\\"stockCode\\":\\"([^\\"]+)\\"'
             )
             matches = re.findall(pattern, resp.text)

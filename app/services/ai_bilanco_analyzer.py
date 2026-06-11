@@ -755,6 +755,27 @@ async def save_parsed_bilanco(ticker: str, parsed: dict) -> bool:
         if not period:
             return False
 
+        # ★ BOS KAYIT GUARD (EKDMR vakasi, 11.06.2026): cekirdek alanlarin
+        # HEPSI bos ise kayit YAZILMAZ — bos satir web/app'te 'bombos tablo
+        # karti' olarak goruntuleniyordu. Veri sonradan gelince (kap_url
+        # enricher + catchup veya IsYatirim) yeniden denenir.
+        _core = ("revenue", "net_income", "total_assets", "total_equity", "gross_profit")
+        if all(parsed.get(k) is None for k in _core):
+            logger.warning(
+                "Bilanco BOS PARSE — kayit YAZILMADI: %s %s (cekirdek alanlar bos; "
+                "kap_url eksik/XBRL okunamamis olabilir, catchup yeniden deneyecek)",
+                ticker, period,
+            )
+            try:
+                from app.services.admin_telegram import send_admin_message
+                await send_admin_message(
+                    f"⚠️ Bilanço boş parse: {ticker} {period} — kayıt yazılmadı, "
+                    f"yakalama job'ı yeniden deneyecek."
+                )
+            except Exception:
+                pass
+            return False
+
         # Eksik kritik alan varsa admin'e bildir
         await _alert_bilanco_issue(ticker, parsed)
 
