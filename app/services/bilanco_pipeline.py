@@ -129,12 +129,27 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
                 # ama gerçek "Finansal Durum Tablosu (Bilanço)" KAP'ı kayıp olabilir.
                 # Bu yüzden son 7 gündeki TÜM is_bilanco=True KAP'lara bakıp
                 # XBRL içereni bulana kadar dene.
+                # ★ GUBRF fix (11.06.2026): ana mesaj HIC gelmediginde is_bilanco=True
+                # satir da olmaz → pipeline XBRL kaynagi bulamayip bos donuyordu.
+                # KAP'ta tum tablolar AYNI finansal rapor bildiriminin ekidir; bu
+                # yuzden set-uyesi basliklar (Ozkaynaklar Degisim / Kar veya Zarar /
+                # Nakit Akis / Finansal Rapor) da XBRL kaynagi olarak denenir.
                 from datetime import timedelta as _td
+                from sqlalchemy import or_ as _or
                 cutoff = datetime.now(timezone.utc) - _td(days=7)
                 kap_result = await db.execute(
                     select(KapAllDisclosure)
                     .where(KapAllDisclosure.company_code == ticker)
-                    .where(KapAllDisclosure.is_bilanco == True)
+                    .where(_or(
+                        KapAllDisclosure.is_bilanco == True,  # noqa: E712
+                        KapAllDisclosure.title.ilike("%özkaynaklar değişim%"),
+                        KapAllDisclosure.title.ilike("%ozkaynaklar degisim%"),
+                        KapAllDisclosure.title.ilike("%kar veya zarar%"),
+                        KapAllDisclosure.title.ilike("%kâr veya zarar%"),
+                        KapAllDisclosure.title.ilike("%nakit akış%"),
+                        KapAllDisclosure.title.ilike("%nakit akis%"),
+                        KapAllDisclosure.title.ilike("%finansal rapor%"),
+                    ))
                     .where(KapAllDisclosure.published_at >= cutoff)
                     .order_by(desc(KapAllDisclosure.published_at))
                     .limit(10)
