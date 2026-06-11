@@ -3832,6 +3832,79 @@ async def _calendar_status_updater_job():
         logger.error("Takvim durum guncelleme hatasi: %s", e)
 
 
+async def trim_free_user_watchlists(free_limit: int = 5):
+    """Diamond/PRO aboneliği OLMAYAN kullanıcıların KAP takip listesini
+    free_limit (5) hisse ile sınırlar. En eski eklenen 5 korunur, gerisi silinir.
+
+    expire_subscriptions sonrası çağrılır → abonelik bitince hisseler otomatik kırpılır.
+    Returns: kırpılan kullanıcı sayısı.
+    """
+    from app.models.user import User, UserSubscription
+    from app.models.user_watchlist import UserWatchlist
+    from sqlalchemy import select, delete, func, and_, or_
+
+    _now = datetime.now(timezone.utc)
+    trimmed = 0
+
+    async with async_session() as db:
+        # 1. Limiti aşan device_id'leri bul (watchlist > 5)
+        over = await db.execute(
+            select(UserWatchlist.device_id)
+            .group_by(UserWatchlist.device_id)
+            .having(func.count(UserWatchlist.id) > free_limit)
+        )
+        device_ids = [r[0] for r in over.fetchall()]
+
+        for device_id in device_ids:
+            # 2. Bu kullanıcının AKTİF ücretli aboneliği var mı?
+            user_res = await db.execute(select(User).where(User.device_id == device_id))
+            user = user_res.scalar_one_or_none()
+            if not user:
+                continue
+            sub_res = await db.execute(
+                select(UserSubscription).where(
+                    and_(
+                        UserSubscription.user_id == user.id,
+                        or_(
+                            UserSubscription.is_active == True,
+                            UserSubscription.expires_at > _now,
+                        ),
+                    )
+                )
+            )
+            has_paid = False
+            for sub in sub_res.scalars().all():
+                pkg = (sub.package or "").lower()
+                if pkg == "ana_yildiz" or "diamond" in pkg or "bilanco_temettu" in pkg or "pro" in pkg:
+                    has_paid = True
+                    break
+            if has_paid:
+                continue   # hâlâ ücretli → dokunma
+
+            # 3. En eski free_limit kadarını koru, gerisini sil
+            keep_res = await db.execute(
+                select(UserWatchlist.id)
+                .where(UserWatchlist.device_id == device_id)
+                .order_by(UserWatchlist.created_at.asc())
+                .limit(free_limit)
+            )
+            keep_ids = [r[0] for r in keep_res.fetchall()]
+            if keep_ids:
+                await db.execute(
+                    delete(UserWatchlist).where(
+                        UserWatchlist.device_id == device_id,
+                        UserWatchlist.id.notin_(keep_ids),
+                    )
+                )
+                trimmed += 1
+
+        if trimmed > 0:
+            await db.commit()
+            logger.warning("✂️ Watchlist kırpma: %d kullanıcı free limitine (%d) indirildi", trimmed, free_limit)
+
+    return trimmed
+
+
 async def expire_subscriptions():
     """Suresi dolan abonelikleri otomatik deaktif eder.
 
@@ -3922,6 +3995,14 @@ async def expire_subscriptions():
 
             await db.commit()
 
+        # 3. WATCHLIST KIRPMA — Diamond/PRO bitip free'ye düşen kullanıcıların
+        # KAP takip listesini ilk 5 hisse ile sınırla (en eski 5 kalır, gerisi silinir).
+        try:
+            trimmed_users = await trim_free_user_watchlists()
+        except Exception as _twe:
+            trimmed_users = 0
+            logger.error("Watchlist kırpma hatası: %s", _twe)
+
         total_expired = expired_news + expired_notif + expired_stale_wallet + expired_orphan
         if total_expired > 0:
             logger.warning(
@@ -3939,6 +4020,8 @@ async def expire_subscriptions():
                     parts.append(f"Eski Puan (NULL expires): {expired_stale_wallet}")
                 if expired_orphan > 0:
                     parts.append(f"Orphan ücretli (NULL expires): {expired_orphan}")
+                if trimmed_users > 0:
+                    parts.append(f"✂️ Watchlist kırpılan kullanıcı: {trimmed_users} (→ ilk 5 hisse)")
                 await send_admin_telegram(
                     f"⏰ Abonelik Expire\n"
                     f"{chr(10).join(parts)}\n"
@@ -6059,9 +6142,9 @@ def _setup_scheduler_impl():
     from app.services.market_close_analyzer import scrape_and_analyze_market_close
     scheduler.add_job(
         scrape_and_analyze_market_close,
-        CronTrigger(hour=15, minute=45, day_of_week="mon-fri"), # UTC 15:45 = TR 18:45
+        CronTrigger(hour=16, minute=5, day_of_week="mon-fri"), # UTC 16:05 = TR 19:05 (VIOP çakışmasını önlemek için 18:45'ten alındı)
         id="market_close_analyzer_tavan_taban",
-        name="Market Close Analyzer (Tavan/Taban) - 18:45 TR",
+        name="Market Close Analyzer (Tavan/Taban) - 19:05 TR",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

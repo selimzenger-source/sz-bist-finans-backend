@@ -736,15 +736,20 @@ async def get_public_news_feed(
     ]
     cutoff = datetime.utcnow() - timedelta(days=days)
 
+    # KISA TWEET METNI ELEME: "AI etki puanı + detaylı analiz görselde" içeren
+    # kısa tweet versiyonları feed'de GÖSTERİLMEZ (tam metin versiyonu zaten var).
+    # Tam haber metninde bu ifade ASLA geçmez → güvenli ayraç.
+    _SHORT_TWEET_MARKERS = ["%analiz görselde%", "%analiz gorselde%"]
+
     # 1) Bilinen haber source'lari
-    stmt1 = (
-        select(PendingTweet)
-        .where(
-            PendingTweet.status == "sent",
-            PendingTweet.sent_at >= cutoff,
-            PendingTweet.source.in_(NEWS_SOURCES),
-        )
-    )
+    stmt1_filter = [
+        PendingTweet.status == "sent",
+        PendingTweet.sent_at >= cutoff,
+        PendingTweet.source.in_(NEWS_SOURCES),
+    ]
+    for _m in _SHORT_TWEET_MARKERS:
+        stmt1_filter.append(~PendingTweet.text.ilike(_m))
+    stmt1 = select(PendingTweet).where(*stmt1_filter)
     # 2) bot_proxy'den sadece haber olanlar (VİOP + tavan/taban haric)
     _VIOP_KEYWORDS = ["%VİOP%", "%VIOP%", "%X30YVADE%"]
     bot_proxy_filter = [
@@ -752,7 +757,7 @@ async def get_public_news_feed(
         PendingTweet.sent_at >= cutoff,
         PendingTweet.source == "bot_proxy",
     ]
-    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS + _JUNK_KEYWORDS:
+    for kw in _VIOP_KEYWORDS + _TAVAN_KEYWORDS + _JUNK_KEYWORDS + _SHORT_TWEET_MARKERS:
         bot_proxy_filter.append(~PendingTweet.text.ilike(kw))
 
     stmt2 = select(PendingTweet).where(*bot_proxy_filter)
@@ -16267,6 +16272,70 @@ async def admin_publish_news(body: dict, db: AsyncSession = Depends(get_db)):
         logger.error("Publish-news push hatasi: %s", e)
 
     return {"status": "ok", "pending_tweet_id": pt.id}
+
+
+@app.post("/api/v1/admin/cleanup-duplicate-news")
+async def admin_cleanup_duplicate_news(body: dict, db: AsyncSession = Depends(get_db)):
+    """Kısa tweet metinli duplicate haberleri + (opsiyonel) belirli bir haberi siler.
+
+    Body:
+      admin_password: str
+      dry_run: bool (default True) → True ise SİLMEZ, sadece kaç kayıt etkilenir sayar
+      search: str (optional) → bu metni içeren TÜM haberleri sil (örn 'diaspor taşı')
+
+    İşlemler:
+      1. "analiz görselde" içeren KISA tweet versiyonlarını sil (tam metin korunur)
+      2. search verilmişse → o metni içeren tüm pending_tweets satırlarını sil
+    """
+    settings = get_settings()
+    if body.get("admin_password") != settings.ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Yetkisiz")
+
+    from app.models import PendingTweet
+    from sqlalchemy import select, delete, or_, func
+
+    dry_run = body.get("dry_run", True)
+    search = (body.get("search") or "").strip()
+
+    # 1. Kısa tweet duplicate'leri (analiz görselde ifadesi)
+    short_markers = ["%analiz görselde%", "%analiz gorselde%"]
+    short_filter = or_(*[PendingTweet.text.ilike(m) for m in short_markers])
+    short_count = (await db.execute(
+        select(func.count(PendingTweet.id)).where(short_filter)
+    )).scalar() or 0
+
+    # 2. Belirli haber (search)
+    search_count = 0
+    search_filter = None
+    if search:
+        search_filter = PendingTweet.text.ilike(f"%{search}%")
+        search_count = (await db.execute(
+            select(func.count(PendingTweet.id)).where(search_filter)
+        )).scalar() or 0
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "silinmedi": True,
+            "kisa_tweet_duplicate": short_count,
+            "search_eslesme": search_count,
+            "search_terimi": search or None,
+            "not": "Gerçekten silmek için dry_run=false gönder.",
+        }
+
+    # GERÇEK SİLME
+    deleted_short = (await db.execute(delete(PendingTweet).where(short_filter))).rowcount
+    deleted_search = 0
+    if search_filter is not None:
+        deleted_search = (await db.execute(delete(PendingTweet).where(search_filter))).rowcount
+    await db.commit()
+
+    return {
+        "dry_run": False,
+        "silinen_kisa_tweet": deleted_short,
+        "silinen_search": deleted_search,
+        "search_terimi": search or None,
+    }
 
 
 @app.post("/api/v1/admin/cleanup-bad-hashtags")

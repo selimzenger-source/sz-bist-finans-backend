@@ -1614,10 +1614,19 @@ def generate_kap_news_image(
         if len(_paras) <= 1 and summary:
             _sents = [s.strip() for s in
                       _re_par.split(r'(?<=[.!?])\s+(?=[A-ZÇŞĞÜÖİ0-9])', summary) if s.strip()]
-            # sayı içindeki nokta (97.042.071,00) yanlış bölmesin — kısa parçaları birleştir
+            # Kısaltmalar (St. Vincent, Dr., A.Ş. vb.) cümle sonu sanılıp bölünmesin
+            _ABBREV = {"st", "dr", "prof", "doç", "no", "nu", "vb", "vs", "sn",
+                       "av", "mr", "mrs", "ms", "ltd", "inc", "co", "corp",
+                       "a.ş", "t.a.ş", "bkz", "örn", "yy", "max", "min", "yak"}
+            # sayı içindeki nokta (97.042.071,00) VEYA kısaltma yanlış bölmesin — birleştir
             _merged = []
             for _s in _sents:
-                if _merged and _re_par.search(r'\d[.,]$', _merged[-1]):
+                _prev = _merged[-1] if _merged else ""
+                _sayi_sonu = bool(_re_par.search(r'\d[.,]$', _prev))
+                _last_tok_m = _re_par.search(r'(\S+)\.$', _prev)
+                _last_tok = _last_tok_m.group(1).lower().strip("()") if _last_tok_m else ""
+                _kisaltma = (_last_tok in _ABBREV) or (len(_last_tok) == 1)  # tek harf = baş harf
+                if _merged and (_sayi_sonu or _kisaltma):
                     _merged[-1] = _merged[-1] + " " + _s
                 else:
                     _merged.append(_s)
