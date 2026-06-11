@@ -365,6 +365,12 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
         tag_map = INDUSTRIAL_TAG_TO_FIELD
 
     # XBRL etiketlerinden ham değerleri çek
+    # ★ KOK FIX (REEDR FAVOK, 11.06.2026): aux alanlari KOSULSUZ uzerine
+    # yaziliyordu — tag_map'te ayni alana birden fazla etiket varsa (orn.
+    # amortisman: once NakitAkis 'Adjustments...' dogru 95.6mn'yi buldu,
+    # sonra genel 'DepreciationAndAmortisationExpense' dipnottaki 11.12'yi
+    # USTUNE YAZDI) → FAVOK ~95mn eksik cikiyordu. Kural artik out ile ayni:
+    # tag_map SIRASI = oncelik; ILK bulunan deger korunur.
     aux: dict = {}
     for tag, field in tag_map.items():
         v = _extract_value_after_tag(body, tag, col_count)
@@ -372,7 +378,8 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
             continue
         v_scaled = v * multiplier
         if field.startswith("_"):
-            aux[field] = v_scaled
+            if aux.get(field) is None:
+                aux[field] = v_scaled
         else:
             if out.get(field) is None:
                 out[field] = v_scaled
@@ -498,7 +505,9 @@ def parse_kap_finansal_rapor(body: str, ticker: str = "") -> dict:
             continue
         v_scaled = v * multiplier
         if field.startswith("_"):
-            aux_prev[field] = v_scaled
+            # KOK FIX: current ile ayni kural — ilk bulunan deger korunur
+            if aux_prev.get(field) is None:
+                aux_prev[field] = v_scaled
         elif prev.get(field) is None:
             prev[field] = v_scaled
     if sector == SECTOR_INDUSTRIAL:
