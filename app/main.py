@@ -4137,9 +4137,9 @@ async def admin_reprocess_kap_news(
         # raw_text: bildirim icerigi (manuel kopyala-yapistir), kap_url: opsiyonel
         # gercek KAP linki. HALKB 6511839 gibi TV'ye hic dusmemis haberler icin.
         _manual_text = (payload.get("raw_text") or "").strip()
+        _manual_kap_url = (payload.get("kap_url") or "").strip()
         if (not tv_text or len(tv_text.strip()) < 50) and len(_manual_text) >= 50:
             tv_text = f"{explicit_title or ''}\n\n{_manual_text}".strip()
-            _manual_kap_url = (payload.get("kap_url") or "").strip()
             if _manual_kap_url:
                 kap_url = _manual_kap_url
 
@@ -4160,7 +4160,13 @@ async def admin_reprocess_kap_news(
         )
         score = ai_result.get("score")
         summary = ai_result.get("summary")
-        url_from_ai = ai_result.get("kap_url") or kap_url
+        # Admin MANUEL kap_url verdiyse o KAZANIR — analyze_news her zaman en az
+        # TV linki dondurdugu icin eski oncelik manuel linki eziyor, dedup
+        # eslesmeyip DUPLICATE kayit olusuyordu (DOCO/INGRM 11.06 vakasi).
+        if _manual_kap_url:
+            url_from_ai = _manual_kap_url
+        else:
+            url_from_ai = ai_result.get("kap_url") or kap_url
 
         if score is None:
             return {
@@ -4231,6 +4237,56 @@ async def admin_reprocess_kap_news(
     except Exception as e:
         logger.exception("Reprocess KAP hatasi: %s", e)
         raise HTTPException(status_code=500, detail=f"Reprocess hatasi: {e}")
+
+
+@app.post("/api/v1/admin/patch-disclosure")
+@limiter.limit("20/minute")
+async def admin_patch_disclosure(
+    request: Request,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin: kap_all_disclosures kaydini duzelt veya sil.
+
+    body:
+      admin_password: zorunlu
+      id: zorunlu (disclosure id)
+      action: "delete" → kaydi sil
+      fields: {ai_impact_score, ai_sentiment, ai_summary, kap_url, title} → guncelle
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.kap_all_disclosure import KapAllDisclosure
+    from sqlalchemy import select as _sel
+
+    disc_id = payload.get("id")
+    if not disc_id:
+        raise HTTPException(status_code=400, detail="id zorunlu")
+
+    row = (await db.execute(
+        _sel(KapAllDisclosure).where(KapAllDisclosure.id == int(disc_id))
+    )).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Disclosure {disc_id} bulunamadi")
+
+    if payload.get("action") == "delete":
+        info = {"id": row.id, "ticker": row.company_code, "title": (row.title or "")[:60]}
+        await db.delete(row)
+        await db.commit()
+        return {"success": True, "action": "deleted", **info}
+
+    ALLOWED = {"ai_impact_score", "ai_sentiment", "ai_summary", "kap_url", "title"}
+    fields = payload.get("fields") or {}
+    updated = {}
+    for k, v in fields.items():
+        if k in ALLOWED:
+            setattr(row, k, v)
+            updated[k] = str(v)[:80]
+    if not updated:
+        raise HTTPException(status_code=400, detail=f"Guncellenecek alan yok ({ALLOWED})")
+    await db.commit()
+    return {"success": True, "action": "updated", "id": row.id, "updated": updated}
 
 
 @app.post("/api/v1/admin/sync-bist-tedbir")
