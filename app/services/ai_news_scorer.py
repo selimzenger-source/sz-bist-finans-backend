@@ -1368,6 +1368,14 @@ Yatirimci acisi her zaman BASKINDIR (puan asgari %60 buradan).
 5. SURPRISE VS EXPECTED: First-time announcement vs repeat; above/below expectations.
 6. FINAL SCORE: 1.0-10.0 with 0.1 precision. Be decisive.
 
+⚠️ SKOR ÇEŞİTLİLİĞİ (NEGATİFLER DAHİL): Şablon değerlere YAPIŞMA. Özellikle
+negatif tarafta 3.8 / 2.8 / 1.8 gibi tekrar eden kalıp değerler GÖRÜLDÜ — bu
+yanlış. Pozitif skorlarda nasıl 6.3, 6.7, 7.2, 7.8 gibi olaya özgü ince ayrım
+yapıyorsan, negatifte de AYNI hassasiyeti uygula: 4.2, 3.6, 3.1, 2.6, 2.3, 1.7
+gibi olayın gerçek şiddetine göre 0.1 hassasiyetinde DAĞILMIŞ değerler ver.
+Aynı gün içindeki farklı negatif haberler farklı şiddetteyse skorları da
+farklı olmalı.
+
 ═══ SCORING RUBRIC (1.0 — 10.0) ═══
 
 CRITICAL NEGATIVE (1.0-2.4):
