@@ -1912,17 +1912,33 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                     )
 
                             # ── ADMIN TELEGRAM GRUBU: POZITIF KAP BILDIRIMI ──
-                            # Sadece ai_score >= 6.0 olan haberler (Hafif Olumlu ve uzeri)
-                            # admin grubuna temiz formatla atilir.
-                            if ai_score is not None and ai_score >= 6.0:
+                            # ★ KOK FIX (EKDMR, 12.06.2026): kanal mesaji DB'ye
+                            # YAZILAN skoru/ozeti kullanir (_pt_objs[_tk] = kap_disc),
+                            # poller-seviye ai_score'u DEGIL. Eskiden ai_score 'Son
+                            # guardrail' ile 6.2'ye cikmis olabiliyordu ama DB per-
+                            # ticker re-validasyonla 5.0 yaziyordu -> app Notr,
+                            # kanal Pozitif celiskisi. Artik TEK KAYNAK: DB skoru.
+                            # "Notrse Notr" — DB 5.0 ise kanala POZITIF gitmez.
+                            _pt_db = _pt_objs.get(_tk)
+                            _ch_score = (
+                                float(_pt_db.ai_impact_score)
+                                if (_pt_db is not None and _pt_db.ai_impact_score is not None)
+                                else ai_score
+                            )
+                            _ch_summary = (
+                                _pt_db.ai_summary
+                                if (_pt_db is not None and _pt_db.ai_summary)
+                                else ai_summary
+                            )
+                            if _ch_score is not None and _ch_score >= 6.0:
                                 try:
                                     from app.services.admin_telegram import send_kap_positive_to_admin_group
                                     import asyncio as _asyncio2
                                     _asyncio2.create_task(
                                         send_kap_positive_to_admin_group(
                                             ticker=_tk,
-                                            ai_score=ai_score,
-                                            ai_summary=ai_summary,
+                                            ai_score=_ch_score,
+                                            ai_summary=_ch_summary,
                                             kap_url=kap_url,
                                             message_type=message_type,
                                         )
@@ -1934,8 +1950,9 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
                             # ── ADMIN: NEGATIF KAP BILDIRIMI (havuza dustu) ──
                             # Negatiflerden de haberin olmasi icin (pozitiflerle AYNI
-                            # kanal). ai_score <= 4.0 = havuzdaki negatif kart.
-                            if ai_score is not None and ai_score <= 4.0:
+                            # kanal). DB skoru <= 4.0 = havuzdaki negatif kart.
+                            # KOK FIX: pozitif ile ayni — DB'ye yazilan skor/ozet kullanilir.
+                            if _ch_score is not None and _ch_score <= 4.0:
                                 try:
                                     from app.services.admin_telegram import send_kap_negative_to_admin_group
                                     import asyncio as _asyncio3
@@ -1943,8 +1960,8 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                         send_kap_negative_to_admin_group(
                                             ticker=_tk,
                                             title=ka_title,
-                                            ai_score=ai_score,
-                                            ai_summary=ai_summary,
+                                            ai_score=_ch_score,
+                                            ai_summary=_ch_summary,
                                             kap_url=kap_url,
                                             message_type=message_type,
                                         )
