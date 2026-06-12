@@ -290,10 +290,13 @@ def _extract_value_after_tag(body: str, tag: str, col_count: int = 2, prev: bool
         # olabiliyor — "11,12,19" (Not 11, 12 ve 19) listesinden "11,12"
         # yakalanip 11.12 TL 'amortisman' saniliyordu (FAVOK ~95mn eksik).
         # Finansal satir degerleri HAM TL'dir: |v| < 1000 hicbir gercek
-        # tablo degeri olamaz (tag_map'te pay-basina/oran alani yok) —
-        # virgullu/noktali olsa bile atla. Eski filtre sadece duz sayilari
-        # ("11") atiyordu, virgullu dipnot listesi ("11,12") geciyordu.
-        if abs(v) < 1000:
+        # tablo degeri olamaz (tag_map'te pay-basina/oran alani yok).
+        # ★ MARKA FIX (12.06.2026): TAM SIFIR ("0") GERCEK degerdir —
+        # holding bu ceyrek satis raporlamamissa cari kolon 0 olur. Sifiri
+        # atinca kolon hizasi kayip ONCEKI donem CARİ saniliyordu (MARKA:
+        # Fintables cari=0/onceki=24.17mn iken bizde cari=24mn cikti).
+        # Dipnot referansi asla tek "0" olmaz — sifir guvenle kabul edilir.
+        if abs(v) < 1000 and v != 0:
             continue
         # URL'deki yıl rakamları (2000-2030, nokta/virgül yok)
         if "." not in raw and "," not in raw and 2000 <= abs(v) <= 2030:

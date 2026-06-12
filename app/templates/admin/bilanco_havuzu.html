@@ -67,15 +67,21 @@
 {%- if valid_vals -%}
   {%- set max_v = valid_vals | map('abs') | max -%}
   {%- set bar_count = items | length -%}
+  {#- ★ YENI SIRKET fix (EKDMR 12.06.2026): tek ceyrek veride bar tum
+      genisligi kapliyordu (cirkin blok). Sabit 5-slot izgara: az veri
+      olsa da bar genisligi 5'li gorunumle ayni kalir, barlar SAGA yaslanir
+      (en yeni ceyrek hep sag uctaki slotta — REEDR karti ile ayni duzen). -#}
+  {%- set slot_count = bar_count if bar_count > 5 else 5 -%}
+  {%- set pad_slots = slot_count - bar_count -%}
   {%- set chart_w = 200 -%}
   {%- set chart_h = 80 -%}
   {%- set bar_gap = 8 -%}
-  {%- set bar_w = ((chart_w - (bar_count - 1) * bar_gap) / bar_count) | round(0, 'floor') | int -%}
+  {%- set bar_w = ((chart_w - (slot_count - 1) * bar_gap) / slot_count) | round(0, 'floor') | int -%}
   <div class="mini-chart">
     <div class="mini-chart-title">{{ title }}</div>
     <svg viewBox="0 0 {{ chart_w }} {{ chart_h + 22 }}" width="100%" preserveAspectRatio="xMidYMid meet">
       {%- for it in items -%}
-        {%- set x = loop.index0 * (bar_w + bar_gap) -%}
+        {%- set x = (loop.index0 + pad_slots) * (bar_w + bar_gap) -%}
         {%- if it.value is not none and max_v > 0 -%}
           {%- set h = (it.value | abs / max_v) * chart_h -%}
           {%- set y = chart_h - h -%}
