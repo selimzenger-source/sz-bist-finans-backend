@@ -44,6 +44,12 @@ async def get_pending_spk_cards() -> dict:
     from app.database import async_session
     out = {"bedelli": [], "bedelsiz": [], "tahsisli": []}
     async with async_session() as s:
+        # ★ Liste CANLI HALKARZ'a sabit (12.06.2026): last_seen_on_source son
+        #   3 gunde damgalanmis = halkarz hala listeliyor. Hayalet/dusmus
+        #   kayitlar (KAP'tan gelip onay almamis veya tamamlanmis) otomatik haric.
+        # ★ pct tavani 1000 -> 10000: VKGYO %2753 gibi GERCEK yuksek bedelsizler
+        #   girsin; sadece bariz parse hatasi (amount kolonu pct sanilmis,
+        #   orn %132755) dislanir.
         res = await s.execute(sa_text(
             """
             SELECT UPPER(ticker) AS ticker, type, company_name, ykk_date,
@@ -51,9 +57,11 @@ async def get_pending_spk_cards() -> dict:
             FROM capital_increases
             WHERE status = 'ykk_alindi' AND spk_approval_date IS NULL
               AND ykk_date IS NOT NULL AND ykk_date >= (CURRENT_DATE - INTERVAL '120 days')
+              AND last_seen_on_source IS NOT NULL
+              AND last_seen_on_source >= (NOW() - INTERVAL '3 days')
               AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) IS NOT NULL
               AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) > 0
-              AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) <= 1000
+              AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) <= 10000
             ORDER BY ykk_date DESC, ticker
             """
         ))

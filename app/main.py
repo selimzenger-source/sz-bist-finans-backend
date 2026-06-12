@@ -218,6 +218,11 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ceiling_result_notified_at TIMESTAMPTZ"
             ))
+            # capital_increases: halkarz'da en son ne zaman gorulduyu — hayalet
+            # (KAP'tan gelip halkarz onayi almamis) kayitlari temizlemek icin.
+            await db.execute(sa_text(
+                "ALTER TABLE capital_increases ADD COLUMN IF NOT EXISTS last_seen_on_source TIMESTAMPTZ"
+            ))
             await db.commit()
     except Exception as e:
         logger.warning("ipo poll notif migration atlandi: %s", e)

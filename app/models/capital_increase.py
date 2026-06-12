@@ -107,6 +107,12 @@ class CapitalIncrease(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Halkarz'da en son ne zaman LISTELENDIGI. Her scrape'te aktif kayitlar
+    # damgalanir; bu damga eskirse/yoksa kayit halkarz'dan dusmus (tamamlandi/
+    # iptal/red) demektir -> bekleyen listeden cikarilir.
+    last_seen_on_source: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     __table_args__ = (
         # Ayni hisse + tip + YKK tarihi -> tek kayit (ayni surec)

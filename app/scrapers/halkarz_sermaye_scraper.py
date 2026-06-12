@@ -196,6 +196,7 @@ async def upsert_records(records: list[dict]) -> dict:
     updated = 0
     skipped = 0
 
+    _now = datetime.now(timezone.utc)
     async with async_session() as db:
         for rec in records:
             ticker = rec["ticker"]
@@ -215,12 +216,34 @@ async def upsert_records(records: list[dict]) -> dict:
             )
             existing = (await db.execute(existing_q)).scalar_one_or_none()
 
+            # ★ HAYALET BIRLESTIRME (12.06.2026): KAP scraper ayni hisse icin
+            # ykk_date=None ile "hayalet" kayit birakmis olabilir. Tam eslesme
+            # yoksa, ayni (ticker, type) + ykk_date IS NULL bekleyen kaydi ADOPT
+            # et (yenisini olusturup yaninda hayalet birakma). Halkarz ykk_date'i
+            # doldurur, kayit gercege baglanir.
+            if not existing:
+                ghost = (await db.execute(
+                    select(CapitalIncrease).where(
+                        CapitalIncrease.ticker == ticker,
+                        CapitalIncrease.type == cap_type,
+                        CapitalIncrease.ykk_date.is_(None),
+                        CapitalIncrease.status.in_(
+                            ["ykk_alindi", "spk_onayli", "tarih_belli"]
+                        ),
+                    ).limit(1)
+                )).scalar_one_or_none()
+                if ghost is not None:
+                    ghost.ykk_date = ykk_date
+                    existing = ghost
+
             pct = rec.get("percentage")
             amount = rec.get("amount_tl")
             pct_field = f"{cap_type}_pct"
 
             if existing:
                 changed = False
+                # Halkarz'da GORULDU — damgala (hayalet temizliginden korunur)
+                existing.last_seen_on_source = _now
                 # Tarihler — KAP doldurmamışsa Halkarz'dan al
                 if rec.get("spk_approval_date") and not existing.spk_approval_date:
                     existing.spk_approval_date = rec["spk_approval_date"]; changed = True
@@ -253,6 +276,7 @@ async def upsert_records(records: list[dict]) -> dict:
                     company_name=rec.get("company_name"),
                     type=cap_type,
                     ykk_date=ykk_date,
+                    last_seen_on_source=_now,  # halkarz'da goruldu
                 )
                 if pct is not None and hasattr(new, pct_field):
                     setattr(new, pct_field, pct)
@@ -281,22 +305,31 @@ async def upsert_records(records: list[dict]) -> dict:
 
 # ─── Ana Çalıştırıcı ──────────────────────────────────────────────────────────
 
-async def _mark_missing_as_completed(active_keys: set) -> int:
-    """Halkarz'da artik olmayan 'tarih_belli' kayitlari 'tamamlandi' olarak isaretle.
+_GHOST_GRACE_DAYS = 3  # halkarz'da gorunmeyen kayda taninan bekleme suresi
 
-    active_keys: bu scrape'te halkarz'da bulunan (ticker, type) tuple seti.
-    Halkarz dagitim sonrasi tabloyu temizler — bizdeki kayitlar da bittirilmeli.
-    Sadece source='halkarz' veya halkarz tarafindan dokunulmus olanlar etkilenir.
+
+async def _complete_stale_records() -> int:
+    """halkarz'da artik LISTELENMEYEN bekleyen kayitlari 'tamamlandi' yap.
+
+    KOK COZUM (12.06.2026): eski mantik sadece distribution_date'i gecmis
+    kayitlari temizliyordu — KAP'tan gelip halkarz onayi hic almamis 'hayalet'
+    kayitlar (ykk_date=None, dist=None) SONSUZA DEK bekliyor kaliyordu
+    (GUNDG/AYES/MANAS/KAREL/BIMAS sorunu).
+
+    Yeni kural — last_seen_on_source bazli, halkarz GERCEGE sabitlenir:
+      * last_seen damgasi son _GHOST_GRACE_DAYS gunde guncellendiyse → halkarz'da
+        hala var, DOKUNMA.
+      * Aksi halde (damga eski veya NULL) VE kayit _GHOST_GRACE_DAYS gunden eski
+        ise → halkarz'dan dusmus (tamamlandi/iptal/red veya KAP hayaleti) →
+        'tamamlandi' yap. created_at grace'i, taze KAP tespitlerini (halkarz
+        henuz listelememis) erken silmekten korur.
     """
     from app.database import async_session
     from app.models.capital_increase import CapitalIncrease
-    from datetime import date as _date, timedelta as _td
-    from sqlalchemy import and_ as _and, or_ as _or, update as _upd
+    from datetime import timedelta as _td
 
-    # Sadece distribution_date gectikten 7 gun sonra missing olanlari complete et
-    # (Halkarz bazi kayitlari 1-2 gun once kaldirabilir, hemen bittirmeyelim)
-    today = _date.today()
-    cutoff = today - _td(days=7)
+    now = datetime.now(timezone.utc)
+    cutoff = now - _td(days=_GHOST_GRACE_DAYS)
 
     async with async_session() as db:
         rows = (await db.execute(
@@ -307,17 +340,20 @@ async def _mark_missing_as_completed(active_keys: set) -> int:
 
         completed = 0
         for r in rows:
-            key = (r.ticker.upper(), r.type)
-            if key in active_keys:
-                continue  # Halkarz'da hala var, dokunma
-            # Dagitim tarihi gectiyse VE son 7 gunden eskiyse tamamlandi say
-            if r.distribution_date and r.distribution_date < cutoff:
-                r.status = "tamamlandi"
-                r.updated_at = datetime.now(timezone.utc)
-                completed += 1
+            seen = r.last_seen_on_source
+            # Son grace penceresinde halkarz'da goruldu -> aktif, dokunma
+            if seen is not None and seen >= cutoff:
+                continue
+            # Taze kayit (henuz halkarz listelememis olabilir) -> grace tani
+            created = r.created_at
+            if created is not None and created >= cutoff:
+                continue
+            r.status = "tamamlandi"
+            r.updated_at = now
+            completed += 1
         if completed > 0:
             await db.commit()
-            logger.info("Halkarz: %d eski kayit 'tamamlandi' olarak isaretlendi", completed)
+            logger.info("Halkarz: %d kayit halkarz'dan dusmus -> 'tamamlandi'", completed)
         return completed
 
 
@@ -333,9 +369,8 @@ async def scrape_halkarz_sermaye() -> dict:
 
     try:
         stats = await upsert_records(records)
-        # Halkarz'da artik gorunmeyenleri tamamlandi say (dagitim tarihi gecmis olanlar)
-        active_keys = {(r["ticker"].upper(), r["type"]) for r in records}
-        completed = await _mark_missing_as_completed(active_keys)
+        # Halkarz'dan dusmus bekleyen kayitlari tamamlandi yap (last_seen bazli)
+        completed = await _complete_stale_records()
         stats["completed"] = completed
         logger.info(
             "Halkarz sermaye: %d kayıt parse, %d yeni, %d güncellendi, %d atlandi, %d tamamlandi",
