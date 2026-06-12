@@ -3052,18 +3052,21 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             )
             return 5.0
 
-    # ─── 🏛 RUTİN YÖNETİM/ATAMA → NÖTR (EKDMR 1616860, 12.06.2026) ──────
+    # ─── 🏛 RUTİN YÖNETİM/ATAMA → NÖTR-KİLİT (EKDMR 1616860, 12.06.2026) ──
     # İÇERİK bazlı (özet framing'inden bağımsız) — hem app hem kanal yolu 5.0'da
     # anlaşsın. AI atamayı "hafif olumlu adım" yorumlasa bile somut finansal etki
-    # yoksa skor NÖTR; pozitif framing lift'i bu erken return ile devre dışı kalır.
-    if score is not None and score > 5.5:
-        if _is_routine_governance(content_lower + " " + summary_lower):
-            logger.info(
-                "AI News Scorer [RUTİN-YÖNETİM→NOTR] %s: %.1f -> 5.0 "
-                "(atama/yönetim değişikliği — somut finansal etki yok)",
-                ticker, score,
-            )
-            return 5.0
+    # yoksa skor NÖTR. _routine_gov bayrağı fonksiyon boyunca taşınır:
+    # POS-FRAMING-LIFT bu bayrak varken ÇALIŞMAZ ve fonksiyon sonunda pozitif-yön
+    # son emniyet 6.0+'ı 5.0'a indirir (denetim bulgusu: skor zaten 5.0 iken erken
+    # return atlanıyor, sonra lift 6.2'ye kaldırıyordu — NÖTR KARARI MUTLAKTIR).
+    _routine_gov = _is_routine_governance(content_lower + " " + summary_lower)
+    if _routine_gov and score is not None and score > 5.5:
+        logger.info(
+            "AI News Scorer [RUTİN-YÖNETİM→NOTR] %s: %.1f -> 5.0 "
+            "(atama/yönetim değişikliği — somut finansal etki yok)",
+            ticker, score,
+        )
+        return 5.0
 
     # ─── 🛑 B10 fix: KRİTİK NEGATİF TESPİTİ ÖNE ALINDI ──────────────
     # Eski konum fonksiyonun SONUNDAYDI; YENI-IS / KURUMSAL-ALIM floor'lari
@@ -3463,7 +3466,9 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         ))
         # Çelişkili framing varsa (hem pozitif hem negatif kelime) düzeltme yapma
         # B3 fix: rutin ödül/plaket haberi (finansal tutar yok) lift EDILMEZ
-        if has_pos_framing and not has_neg_framing and score < 6.2 and not _is_buyback_summary and not _is_award_routine:
+        # NÖTR-KİLİT: rutin yönetim/atama haberi de lift EDILMEZ (EKDMR vakası —
+        # özet "olumlu adım" dese bile atama haberi 6.2'ye kaldırılamaz)
+        if has_pos_framing and not has_neg_framing and score < 6.2 and not _is_buyback_summary and not _is_award_routine and not _routine_gov:
             old = score
             score = 6.2
             logger.info(
@@ -4114,6 +4119,19 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
                 ticker, score,
             )
             return 4.2
+
+    # ─── 🛑 SON EMNİYET (POZİTİF YÖN) — NÖTR KARARI MUTLAK (12.06.2026) ───
+    # Rutin yönetim/atama haberi hangi lift/floor'dan geçmiş olursa olsun
+    # 6.0+ ile fonksiyondan ÇIKAMAZ. Denetim bulgusu: erken-return atlandığında
+    # POS-FRAMING-LIFT veya başka bir geçiş skoru pozitife kaldırabiliyordu;
+    # bu blok fonksiyonun EN SONUNDA — nötr→pozitif sızıntıya kaçış yok.
+    if _routine_gov and score >= 6.0:
+        logger.info(
+            "AI News Scorer [SON-EMNIYET-NOTR] %s: %.1f -> 5.0 "
+            "(rutin yönetim/atama — nötr kararı mutlak, pozitif yayınlanamaz)",
+            ticker, score,
+        )
+        return 5.0
 
     return score
 

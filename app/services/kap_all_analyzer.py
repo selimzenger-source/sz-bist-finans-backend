@@ -949,7 +949,12 @@ SADECE asagidaki JSON formatinda yanit ver:
         try:
             from app.services.ai_news_scorer import _validate_score_against_content
             # verdict geçir → AI pozitif/negatif dediyse keyword-bazlı nötr çekme ezilir
-            _adj = _validate_score_against_content(impact_score, "", company_code, ai_summary=summary, verdict=_verdict)
+            # ★ KOK FIX (12.06.2026): content "" GEÇİLMEZ — boş içerik tüm içerik-bazlı
+            # nötr blokları (RUTİN-YÖNETİM, GOVERNANCE-NEUTRAL, CREDIT-NEUTRAL vb.)
+            # devre dışı bırakıyordu; atama haberi bu yolda 6.2'ye kaldırılabiliyordu.
+            # Eldeki gerçek metin (title+body, ilk 3000 kr) verilir.
+            _vc_content = f"{title or ''}\n{(body or '')[:3000]}".strip()
+            _adj = _validate_score_against_content(impact_score, _vc_content, company_code, ai_summary=summary, verdict=_verdict)
             if _adj and abs(_adj - impact_score) >= 0.1:
                 logger.info(
                     "KAP Analyzer [TUTARLILIK] %s: %.1f -> %.1f (özet framing ile uyumlandı)",

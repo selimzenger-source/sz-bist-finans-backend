@@ -1066,16 +1066,23 @@ class NotificationService:
         if ai_score is not None:
             score_tag = f" (AI: {ai_score:.1f}/10)"
 
+        # ★ TUTARLILIK (12.06.2026, denetim bulgusu): "Pozitif" kelimesi
+        # news_type'a gore SABIT yaziliyordu — skor 5.0 NOTR olsa bile basliga
+        # "Pozitif Haber" gidebiliyordu. Artik skor verilmisse baslik SKORA
+        # gore secilir: >= 6.0 ise "Pozitif Haber", degilse notr "Haber".
+        # Skor verilmemisse (None) eski davranis korunur (caller zaten gate'li).
+        _pos_word = "Pozitif " if (ai_score is None or float(ai_score) >= 6.0) else ""
+
         if news_type == "seans_ici":
-            title_paid = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}{score_tag}"
-            title_free = f"⚡ Seans İçi Pozitif Haber Yakalandı - {ticker}"
+            title_paid = f"⚡ Seans İçi {_pos_word}Haber Yakalandı - {ticker}{score_tag}"
+            title_free = f"⚡ Seans İçi {_pos_word}Haber Yakalandı - {ticker}"
         elif news_type == "seans_disi_acilis":
             gap_str = f" ({gap_pct})" if gap_pct else ""
             title_paid = f"📊 {ticker} Açılış{gap_str}{score_tag}"
             title_free = f"📊 {ticker} Açılış{gap_str}"
         else:
-            title_paid = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}{score_tag}"
-            title_free = f"🌙 Seans Dışı Pozitif Haber Yakalandı - {ticker}"
+            title_paid = f"🌙 Seans Dışı {_pos_word}Haber Yakalandı - {ticker}{score_tag}"
+            title_free = f"🌙 Seans Dışı {_pos_word}Haber Yakalandı - {ticker}"
 
         # Geriye donuk uyumluluk: tek title degiskeni (paid versiyon — admin loglari icin)
         title = title_paid

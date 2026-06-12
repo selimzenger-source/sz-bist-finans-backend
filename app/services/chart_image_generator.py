@@ -1529,7 +1529,15 @@ def generate_kap_news_image(
     except Exception:
         _tz = None
     try:
-        is_pos = (sentiment or "").lower() != "negative"
+        # ★ TUTARLILIK (12.06.2026, denetim bulgusu): banner (POZİTİF/NEGATİF)
+        # ile skor rengi İKİ AYRI girdiden geliyordu — sentiment="positive" +
+        # ai_score=5.0 ile yeşil POZİTİF banner üstünde nötr renk basılabiliyordu.
+        # Skor verilmişse banner SKORDAN türetilir (tek kaynak); sentiment
+        # yalnızca skor yokken fallback.
+        if ai_score is not None:
+            is_pos = float(ai_score) >= 5.0
+        else:
+            is_pos = (sentiment or "").lower() != "negative"
 
         # PUAN GRADIENT RENK (kullanıcı kuralı 12.06.2026):
         #   YEŞİL barem: 6 açık → 7 → 8 → 9 koyu/parlak (yükseldikçe koyulaşır)

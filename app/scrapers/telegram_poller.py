@@ -1849,7 +1849,10 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                                         ticker=_tk,
                                         company_name=None,
                                         title=ka_title,
-                                        body=ai_summary,
+                                        # BUG-3 fix: bu ticker'a ait özet (_tk_summary) —
+                                        # primary'nin özeti değil; multi-opposed'da yanlış
+                                        # ticker özeti ile takvim sınıflandırması yapılıyordu
+                                        body=_tk_summary or ai_summary,
                                         kap_url=kap_url,
                                         published_at=msg_date,
                                     )
@@ -2032,6 +2035,24 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
                     ai_score = float(_pt_objs[_rep_tk].ai_impact_score)
                     if _pt_objs[_rep_tk].ai_summary:
                         ai_summary = _pt_objs[_rep_tk].ai_summary
+                else:
+                    # ★ TEK-KAYNAK SENKRONU (12.06.2026, denetim BUG-2/BUG-4):
+                    # Pozitif temsilci YOKSA da poller-seviye ai_score/ai_summary
+                    # DB'ye yazilan degere esitlenir. Eskiden 'Son guardrail'
+                    # ai_score'u 6.2'ye kaldirmis ama DB re-validasyonla 5.0
+                    # yazmis olabiliyordu; negatif-tweet kapisi ve loglar stale
+                    # degeri kullaniyordu. Bundan sonraki TUM tuketiciler
+                    # (push karari, negatif tweet, log) DB skoruyla calisir.
+                    _db_pri = _pt_objs.get((ticker or "").upper()) or next(iter(_pt_objs.values()))
+                    if _db_pri.ai_impact_score is not None:
+                        if ai_score is not None and abs(float(_db_pri.ai_impact_score) - float(ai_score)) >= 0.1:
+                            logger.info(
+                                "Tek-kaynak senkron (%s): poller skoru %.1f -> DB %.1f",
+                                ticker, float(ai_score), float(_db_pri.ai_impact_score),
+                            )
+                        ai_score = float(_db_pri.ai_impact_score)
+                        if _db_pri.ai_summary:
+                            ai_summary = _db_pri.ai_summary
 
             # ai_score None = AI basarisiz → guvenli yol: kaydet + bildir
             # ★ TUTARLILIK: kap_all feed per-ticker skorlari yazildiysa (_pt_objs),

@@ -194,7 +194,15 @@
               <span class="text-xs {{ badge_bg }} px-2 py-0.5 rounded">
                 AI: {{ "%.1f"|format(row.ai_impact_score) }}/10
               </span>
-              {% if row.ai_sentiment %}
+              {# Etiket SKORDAN türetilir (stale ai_sentiment string'i değil) —
+                 renk ile etiket tek kaynaktan, çelişemez. Bantlar
+                 app/utils/ai_score_label.py score_to_label ile BİREBİR (12.06.2026) #}
+              {% if row.ai_impact_score is not none %}
+              {% set sc = row.ai_impact_score %}
+              <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
+                {%- if sc >= 9.0 %}Güçlü Olumlu{% elif sc >= 8.0 %}Çok Olumlu{% elif sc >= 7.0 %}Olumlu{% elif sc >= 6.0 %}Hafif Olumlu{% elif sc >= 4.1 %}Nötr{% elif sc >= 3.1 %}Hafif Olumsuz{% elif sc >= 2.1 %}Olumsuz{% elif sc >= 1.1 %}Çok Olumsuz{% else %}Güçlü Olumsuz{% endif -%}
+              </span>
+              {% elif row.ai_sentiment %}
               <span class="text-xs bg-gray-700 text-gray-300 px-2 py-0.5 rounded">
                 {{ row.ai_sentiment }}
               </span>
