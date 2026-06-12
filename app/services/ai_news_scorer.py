@@ -2663,6 +2663,22 @@ NOTLAR:
                 if summary and "rutin pr niteliğindedir" not in summary.lower():
                     summary = summary.rstrip() + _odul_notr_cumle
 
+        # ─── RUTİN YÖNETİM/ATAMA GUARDRAIL (EKDMR 1616860, 12.06.2026) ───
+        # Atama/yönetim değişikliği + somut finansal etki yok → NÖTR (5.0) +
+        # özetteki POZİTİF YORUM cümleleri SİLİNİR. Aksi halde özet "hafif olumlu
+        # adım" derken kanal yolundaki POS-FRAMING-LIFT skoru 6.2'ye çıkarıyordu
+        # (app 5.0 nötr, kanal 6.2 pozitif çelişkisi — kullanıcı şikayeti).
+        if summary and _is_routine_governance(
+            f"{summary} {(tv_content or raw_text or '')[:1000]}".lower().replace("̇", "")
+        ):
+            if score is None or float(score) > 5.4:
+                logger.info(
+                    "[RUTİN-YÖNETİM GUARDRAIL] %s: %.1f -> 5.0 + özet nötrleştirildi",
+                    ticker, float(score) if score is not None else -1.0,
+                )
+                score = 5.0
+            summary = _strip_positive_eval_sentences(summary)
+
         # ─── SKOR-ÖZET TUTARLILIK GUARDRAIL ───
         # Skor pozitif (>=6.0) ama özet "ek etki beklenmez / teknik takip
         # gelişmesidir" gibi NÖTRLEŞTİRİCİ cümle içeriyorsa o cümle çıkarılır ve
@@ -2713,6 +2729,70 @@ _CONTRADICTION_PHRASES = (
     "teknik bir takip gelism", "teknik takip gelism",
     "nötr bir gelism", "notr bir gelism",
 )
+
+
+# ─── RUTİN YÖNETİM/ATAMA TESPİTİ (EKDMR 1616860 vakası, 12.06.2026) ───
+# Yönetim kurulu/direktör/müdür atamasi, istifa, uyum gorevlisi, imza
+# yetkisi gibi RUTIN KURUMSAL gelismeler -> NOTR (5.0). AI bunlari "yatirimci
+# guvenini artirici hafif olumlu adim" diye yorumlayinca skor 6.2'ye
+# yukseliyordu (nötr puan + pozitif yorum celiskisi). Somut finansal etki
+# (tutar/sozlesme/ihale/M&A/sermaye) varsa rutin SAYILMAZ.
+_GOVERNANCE_SIGNALS = (
+    "olarak atad", "olarak atan", "olarak görevlend", "olarak gorevlend",
+    "görevine atan", "gorevine atan", "görevine getir", "gorevine getir",
+    "direktörü olarak", "direktoru olarak", "müdürü olarak", "muduru olarak",
+    "müdür olarak", "mudur olarak", "yöneticisi olarak", "yoneticisi olarak",
+    "yönetim kurulu üyel", "yonetim kurulu uyel",
+    "yönetim kurulu baş", "yonetim kurulu bas",  # baskan ataması/değişimi
+    "icra kurulu", "genel müdür", "genel mudur",
+    "uyum görevlisi", "uyum gorevlisi",
+    "yatırımcı ilişkileri yöneticisi", "yatirimci iliskileri yoneticisi",
+    "istifa", "görevden ayrıl", "gorevden ayril", "görevinden ayrıl",
+    "imza yetkili", "imza sirkül", "imza sirkul",
+    "ceo olarak", "cfo olarak", "mali işler direktör", "mali isler direktor",
+    "komite üyel", "komite uyel", "komite oluştur", "komite olustur",
+)
+_GOVERNANCE_IMPACT_EXCLUDE = re.compile(
+    r"(milyon|milyar)\s*(tl|usd|eur|dolar|avro)"
+    r"|sözleşme imzal|sozlesme imzal|ihale kazan|ihale al|sipariş|siparis"
+    r"|bedelsiz|bedelli|temett|kar pay|kâr pay|kar dağ|kar dag"
+    r"|satın al|satin al|devral|birleşme|birlesme|iştirak edin|istirak edin"
+    r"|sermaye art"
+)
+
+
+def _is_routine_governance(blob_lower: str) -> bool:
+    """Metin (içerik+özet) rutin atama/yönetim değişikliği mi? (somut etki yoksa)."""
+    if not blob_lower:
+        return False
+    if not any(sig in blob_lower for sig in _GOVERNANCE_SIGNALS):
+        return False
+    if _GOVERNANCE_IMPACT_EXCLUDE.search(blob_lower):
+        return False
+    return True
+
+
+def _strip_positive_eval_sentences(summary: str) -> str:
+    """Özetten POZİTİF DEĞERLENDİRME cümlelerini çıkarır (nötr olaylar için).
+
+    'hafif olumlu bir adım', 'yatırımcı güvenini artırıcı', 'olumlu sinyal'
+    gibi yorum cümleleri atılır; geriye olgusal cümleler kalır + nötr kapanış.
+    """
+    import re as _re
+    _POS_EVAL = (
+        "olumlu", "pozitif", "güven artır", "guven artir",
+        "güvenini artır", "guvenini artir", "olumlu adım", "olumlu adim",
+        "olumlu bir adım", "olumlu bir adim", "olumlu sinyal", "olumlu gelişme",
+        "olumlu gelisme", "değer katacak", "deger katacak",
+    )
+    sentences = _re.split(r'(?<=[.!?])\s+', (summary or "").strip())
+    kept = [s for s in sentences if s.strip() and not any(p in s.lower() for p in _POS_EVAL)]
+    body = " ".join(kept).strip()
+    if body and not body.endswith((".", "!", "?")):
+        body += "."
+    closing = ("Bu rutin/idari nitelikteki bir gelişme olup, fiyat üzerinde "
+               "doğrudan bir etki beklenmemektedir.")
+    return (body + " " + closing).strip() if body else closing
 
 
 def _enforce_summary_score_consistency(score, summary: str) -> str:
@@ -2968,6 +3048,19 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             logger.info(
                 "AI News Scorer [SPOR-TRANSFER→NOTR] %s: %.1f -> 5.0 "
                 "(spor kulubu transfer/futbolcu haberi — finansal etki belirsiz)",
+                ticker, score,
+            )
+            return 5.0
+
+    # ─── 🏛 RUTİN YÖNETİM/ATAMA → NÖTR (EKDMR 1616860, 12.06.2026) ──────
+    # İÇERİK bazlı (özet framing'inden bağımsız) — hem app hem kanal yolu 5.0'da
+    # anlaşsın. AI atamayı "hafif olumlu adım" yorumlasa bile somut finansal etki
+    # yoksa skor NÖTR; pozitif framing lift'i bu erken return ile devre dışı kalır.
+    if score is not None and score > 5.5:
+        if _is_routine_governance(content_lower + " " + summary_lower):
+            logger.info(
+                "AI News Scorer [RUTİN-YÖNETİM→NOTR] %s: %.1f -> 5.0 "
+                "(atama/yönetim değişikliği — somut finansal etki yok)",
                 ticker, score,
             )
             return 5.0
