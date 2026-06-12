@@ -5319,6 +5319,64 @@ def _setup_scheduler_impl():
         next_run_time=_enr_dt.now() + _enr_td(minutes=2),
     )
 
+    # ★ GOLDEN SELF-TEST (12.06.2026): her deploy'dan 4 dk sonra parser
+    # altin-ornek testleri kosulur (tests/test_bilanco_golden.py — REEDR/
+    # MARKA/EKDMR/GUBRF gercek govdeleri, Fintables-dogrulanmis beklenenler).
+    # Bir degisiklik gecmis hata siniflarini geri getirirse KULLANICIDAN
+    # ONCE Telegram'a '🚨 PARSER REGRESYON' alarmi duser.
+    async def _golden_selftest_job():
+        try:
+            import importlib.util
+            import os as _os
+            _path = _os.path.join(
+                _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                "tests", "test_bilanco_golden.py",
+            )
+            if not _os.path.exists(_path):
+                logger.info("Golden self-test atlandi (test dosyasi yok)")
+                return
+            _spec = importlib.util.spec_from_file_location("_golden_selftest", _path)
+            _mod = importlib.util.module_from_spec(_spec)
+            _spec.loader.exec_module(_mod)
+            _fails = []
+            _count = 0
+            for _n in dir(_mod):
+                if _n.startswith("test_") and callable(getattr(_mod, _n)):
+                    _count += 1
+                    try:
+                        getattr(_mod, _n)()
+                    except AssertionError as _ae:
+                        _fails.append(f"{_n}: {str(_ae)[:120]}")
+                    except Exception as _te:
+                        _fails.append(f"{_n}: HATA {str(_te)[:120]}")
+            if _fails:
+                logger.error("GOLDEN SELF-TEST FAIL: %s", _fails)
+                try:
+                    from app.services.admin_telegram import send_admin_message
+                    await send_admin_message(
+                        "🚨 PARSER REGRESYON (golden self-test)!\n"
+                        "Son deploy bilanço parser'ını bozdu:\n" + "\n".join(_fails)
+                    )
+                except Exception:
+                    pass
+            else:
+                logger.info("Golden self-test: %d/%d PASS", _count, _count)
+        except Exception as e:
+            logger.warning("Golden self-test calistirilamadi: %s", e)
+
+    from datetime import datetime as _gst_dt, timedelta as _gst_td
+    scheduler.add_job(
+        _golden_selftest_job,
+        IntervalTrigger(hours=24),
+        id="golden_selftest",
+        name="Bilanco Golden Self-Test (boot+4dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=3600,
+        next_run_time=_gst_dt.now() + _gst_td(minutes=4),
+    )
+
     # Her 30 dk: ATLANAN BILANCOLARI YAKALA (GUBRF vakasi, 11.06.2026).
     # Bilanco seti yayinlandiginda matriks bot bazen ana "Finansal Durum
     # Tablosu" mesajini GONDERMIYOR — sadece yan urunler (Sorumluluk Beyani,
