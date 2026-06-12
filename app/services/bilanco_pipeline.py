@@ -379,6 +379,28 @@ async def process_bilanco_bildirimi(ticker: str, kap_title: str = "", force: boo
         if ai_result:
             await _tweet_bilanco_analysis(ticker, kap_title, ai_result)
 
+        # 4b. HABER KANALI (kullanici istegi 12.06.2026): bilanco analizi de
+        # haber trade kanalina KAP haberleriyle AYNI formatta dusurulur
+        # (AI puani + Olumlu/Cok Olumlu bantlari). App/web isleyisi degismez.
+        if ai_result:
+            try:
+                from app.services.admin_telegram import send_bilanco_to_haber_kanali
+                _kanal_url = None
+                try:
+                    _kanal_url = (kap_news_list[0].kap_url if kap_news_list else None)
+                except Exception:
+                    _kanal_url = None
+                await send_bilanco_to_haber_kanali(
+                    ticker=ticker,
+                    health_score=ai_result.get("overall_health_score"),
+                    health_label=ai_result.get("overall_health_label"),
+                    summary=ai_result.get("summary") or ai_result.get("ai_summary"),
+                    kap_url=_kanal_url,
+                    period=ai_result.get("period") or (recent_q[0].period if recent_q else None),
+                )
+            except Exception as _kanal_err:
+                logger.warning("Bilanco haber kanali gonderim hatasi (%s): %s", ticker, _kanal_err)
+
         # 5. Bildirim gonder (premium / topic aboneleri)
         if ai_result:
             await _send_bilanco_notification(ticker, ai_result)

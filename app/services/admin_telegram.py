@@ -151,6 +151,90 @@ def _score_to_tier(score: float) -> tuple[str, str]:
     return ("Nötr", "⚪")
 
 
+async def send_bilanco_to_haber_kanali(
+    ticker: str,
+    health_score,
+    health_label: Optional[str],
+    summary: Optional[str],
+    kap_url: Optional[str],
+    period: Optional[str] = None,
+) -> bool:
+    """Bilanco AI analizini haber kanalina KAP-haber formatiyla gonderir.
+
+    Kullanici istegi (12.06.2026): bilanco da haber kanalina haberlerle AYNI
+    kriterlerle dussun — 6-7 Hafif Olumlu, 7-8 Olumlu, 8-9 Çok Olumlu, 9+
+    Güçlü Olumlu; 4 alti Olumsuz. Uygulama/web isleme akisi DEGISMEZ, bu
+    sadece kanal bildirimi.
+    """
+    try:
+        _s = float(health_score) if health_score is not None else None
+    except (ValueError, TypeError):
+        _s = None
+    if _s is None:
+        return False
+
+    if _s >= 6.0:
+        tier_label, tier_emoji = _score_to_tier(_s)
+        header = "📊 Bilanço Analizi — Pozitif"
+    elif _s <= 4.0:
+        tier_label, tier_emoji = ("Olumsuz", "🔴")
+        header = "🔴 Bilanço Analizi — Negatif"
+    else:
+        tier_label, tier_emoji = ("Nötr", "⚪")
+        header = "📊 Bilanço Analizi"
+
+    _per = f" · {period}" if period else ""
+    parts = [
+        header,
+        "",
+        f"{ticker.upper()}{_per}",
+        "",
+        f"📊 AI Puanı: {_s:.1f}/10",
+        f"{tier_emoji} {tier_label}" + (f" ({health_label})" if health_label and health_label != tier_label else ""),
+        "",
+    ]
+    if summary:
+        s_txt = summary.strip()
+        if len(s_txt) > 3000:
+            s_txt = s_txt[:2997] + "..."
+        parts.append(s_txt)
+        parts.append("")
+    if kap_url:
+        parts.append(f"🔗 KAP: {kap_url}")
+
+    text = "\n".join(parts)
+
+    # Anti-spam: ayni ticker icin 10 dk dedup (force-reprocess vb.)
+    _dedup_key = f"bilanco_kanal_{ticker.upper()}"
+    _now = time.monotonic()
+    if _now - _kap_positive_last_send.get(_dedup_key, 0) < 600:
+        logger.info("Bilanco kanal: %s — son 10 dk icinde gonderilmis, atlandi", ticker)
+        return False
+    _kap_positive_last_send[_dedup_key] = _now
+
+    bot_token, chat_id = _get_kap_positive_config()
+    if not bot_token or not chat_id:
+        logger.debug("Bilanco kanal Telegram yapilandirilmamis, atlaniyor")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "disable_web_page_preview": True,
+            })
+            if resp.status_code != 200:
+                logger.warning("Bilanco kanal gonderilemedi: %s — %s", resp.status_code, resp.text[:150])
+                return False
+            logger.info("Bilanco kanala gonderildi: %s (skor=%.1f)", ticker, _s)
+            return True
+    except Exception as e:
+        logger.error("Bilanco kanal hatasi: %s", e)
+        return False
+
+
 async def send_kap_positive_to_admin_group(
     ticker: str,
     ai_score: float,
