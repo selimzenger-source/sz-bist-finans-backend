@@ -1531,28 +1531,33 @@ def generate_kap_news_image(
     try:
         is_pos = (sentiment or "").lower() != "negative"
 
-        # PUAN GRADIENT RENK — uçlara gidildikçe DAHA KOYU/BELİRGİN:
-        # düştükçe koyu kırmızı (2.8 → koyu), yükseldikçe koyu/belirgin yeşil.
+        # PUAN GRADIENT RENK (kullanıcı kuralı 12.06.2026):
+        #   YEŞİL barem: 6 açık → 7 → 8 → 9 koyu/parlak (yükseldikçe koyulaşır)
+        #   KIRMIZI barem: ~3-4 turuncuya yakın (hafif), 3 altı koyu,
+        #                  2 altı iyice koyu kırmızı (en olumsuz)
+        # Etiket YAZISI YOK — anlam SADECE renkten okunur.
         def _score_color(sc: float) -> tuple:
             if sc >= 9.0:
-                return (16, 122, 60)    # en koyu yeşil (devasa pozitif)
+                return (12, 110, 52)    # en koyu/parlak yeşil
             if sc >= 8.0:
-                return (24, 148, 74)    # koyu belirgin yeşil
+                return (22, 140, 70)    # koyu yeşil
             if sc >= 7.0:
-                return (40, 170, 92)    # yeşil
+                return (42, 168, 92)    # yeşil
             if sc >= 6.0:
-                return (76, 187, 104)   # orta yeşil
-            if sc >= 5.5:
-                return (124, 190, 90)   # açık yeşil (hafif olumlu)
+                return (96, 196, 118)   # açık yeşil (barem başı)
+            if sc >= 5.0:
+                return (150, 170, 120)  # yeşilimsi-gri geçiş
             if sc >= 4.5:
                 return (176, 184, 196)  # nötr gri
             if sc >= 3.5:
-                return (224, 96, 72)    # turuncu-kırmızı (hafif olumsuz)
-            if sc >= 2.5:
-                return (200, 48, 44)    # koyu kırmızı (olumsuz)
-            if sc >= 1.5:
-                return (168, 30, 30)    # daha koyu kırmızı
-            return (140, 20, 20)        # en koyu kırmızı (çok olumsuz)
+                return (235, 130, 60)   # turuncu (hafif olumsuz, ~3-4)
+            if sc >= 3.0:
+                return (224, 96, 60)    # turuncu-kırmızı
+            if sc >= 2.0:
+                return (196, 46, 42)    # koyu kırmızı (3 altı)
+            if sc >= 1.0:
+                return (150, 26, 26)    # iyice koyu kırmızı (2 altı)
+            return (120, 18, 18)        # en koyu kırmızı
 
         _sc0 = ai_score if ai_score is not None else 5.0
         accent = _score_color(_sc0)
@@ -1640,22 +1645,25 @@ def generate_kap_news_image(
         body_lines = body_lines[:18]
         line_h = 42
 
-        # Tier etiketi
+        # ETKİ ETİKETİ (kullanıcı kuralı 12.06.2026): "Olumlu/Olumsuz" YOK.
+        # Yön = RENK (yeşil pozitif / kırmızı negatif), büyüklük = ETKİ kelimesi.
+        # Nötr merkez 5'e uzaklığa göre 4 barem — pozitif/negatif simetrik:
+        #   |sc-5| 1-2 → Hafif Etki  (6-7 / 3-4)
+        #   |sc-5| 2-3 → Etkili      (7-8 / 2-3)
+        #   |sc-5| 3-4 → Çok Etkili  (8-9 / 1-2)
+        #   |sc-5| ≥4  → Kritik Etki (9+ / <1)
         sc = ai_score if ai_score is not None else 5.0
-        if sc >= 8:
-            tier = "Çok Olumlu"
-        elif sc >= 6.5:
-            tier = "Olumlu"
-        elif sc >= 5.5:
-            tier = "Hafif Olumlu"
-        elif sc >= 4.5:
-            tier = "Nötr"
-        elif sc >= 3.5:
-            tier = "Hafif Olumsuz"
-        elif sc >= 2.5:
-            tier = "Olumsuz"
+        _dist = abs(sc - 5.0)
+        if _dist >= 4.0:
+            tier = "Kritik Etki"
+        elif _dist >= 3.0:
+            tier = "Çok Etkili"
+        elif _dist >= 2.0:
+            tier = "Etkili"
+        elif _dist >= 1.0:
+            tier = "Hafif Etki"
         else:
-            tier = "Çok Olumsuz"
+            tier = "Nötr"
         tier_color = accent  # gradient renk (puana göre) zaten accent'te
 
         # Yükseklik hesabı
