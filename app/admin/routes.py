@@ -3201,6 +3201,28 @@ async def weekly_dividend_send(request: Request):
         status_code=303)
 
 
+def _ipo_poll_view(ipo) -> dict:
+    """Admin anket paneli için IPO özet görünümü — durum, son XX gün, flag'ler."""
+    from datetime import date as _date
+    company = (ipo.ticker or ipo.company_name or "Halka Arz")[:50]
+    son_gun = None
+    if ipo.subscription_end:
+        son_gun = (ipo.subscription_end - _date.today()).days
+    return {
+        "id": ipo.id,
+        "company": company,
+        "status": ipo.status,
+        "subscription_start": ipo.subscription_start.isoformat() if ipo.subscription_start else None,
+        "subscription_end": ipo.subscription_end.isoformat() if ipo.subscription_end else None,
+        "subscription_hours": ipo.subscription_hours or "",
+        "trading_start": ipo.trading_start.isoformat() if ipo.trading_start else None,
+        "son_gun": son_gun,
+        "hype_sent": ipo.hype_poll_notified_at is not None,
+        "ceiling_sent": ipo.ceiling_poll_notified_at is not None,
+        "result_sent": ipo.ceiling_result_notified_at is not None,
+    }
+
+
 @router.get("/broadcast", response_class=HTMLResponse)
 async def broadcast_page(
     request: Request,
@@ -3213,8 +3235,18 @@ async def broadcast_page(
         return RedirectResponse(url="/admin/login", status_code=303)
 
     from app.services.broadcast import can_broadcast
+    from app.models.ipo import IPO
 
     can_send, cooldown_remaining = can_broadcast()
+
+    # Aktif/yaklaşan IPO'lar — anket manuel tetikleme seçimi için
+    ipo_rows = (await db.execute(
+        select(IPO).where(and_(
+            IPO.archived == False,  # noqa: E712
+            IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading", "trading"]),
+        )).order_by(IPO.subscription_end.desc().nullslast())
+    )).scalars().all()
+    poll_ipos = [_ipo_poll_view(i) for i in ipo_rows]
 
     return templates.TemplateResponse("admin/broadcast.html", {
         "request": request,
@@ -3222,7 +3254,162 @@ async def broadcast_page(
         "error": error,
         "can_send": can_send,
         "cooldown_remaining": cooldown_remaining,
+        "poll_ipos": poll_ipos,
     })
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  HALKA ARZ ANKETİ — MANUEL TETİKLEME (broadcast sayfası)
+#  Otomatik 07:00 anketi gitmezse / sonuç-tavan bildirimleri için kurtarma yolu.
+#  Hepsi spam-safe: flag set edilir (oto job bir daha göndermez) + Telegram rapor
+#  (broadcast_background_task başlangıç+bitiş raporu otomatik düşer).
+# ════════════════════════════════════════════════════════════════════════════
+
+async def _fetch_ipo_or_redirect(db, ipo_id):
+    from app.models.ipo import IPO
+    if not ipo_id:
+        return None, None
+    ipo = (await db.execute(select(IPO).where(IPO.id == int(ipo_id)))).scalar_one_or_none()
+    return ipo, (ipo.ticker or ipo.company_name or "Halka Arz")[:50] if ipo else None
+
+
+@router.post("/ipo-poll/hype")
+async def admin_ipo_poll_hype(request: Request, db: AsyncSession = Depends(get_db)):
+    """Katılım anketi ('katılacak mısınız?') push'unu MANUEL tetikler."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    from datetime import datetime as _dt, timezone as _tz, date as _date
+    from app.services.broadcast import broadcast_background_task
+
+    form = await request.form()
+    ipo, company = await _fetch_ipo_or_redirect(db, form.get("ipo_id"))
+    if not ipo:
+        return RedirectResponse(url="/admin/broadcast?error=IPO+bulunamadi", status_code=303)
+
+    # "Ankete son XX gün" — talep toplama bitişine (subscription_end) göre
+    son_txt = ""
+    if ipo.subscription_end:
+        _gun = (ipo.subscription_end - _date.today()).days
+        if _gun > 1:
+            son_txt = f"Talep toplamaya son {_gun} gün! "
+        elif _gun == 1:
+            son_txt = "Talep toplamaya son 1 gün! "
+        elif _gun == 0:
+            son_txt = "Son gün bugün! "
+
+    title = f"📊 {company} Anketi Açıldı"
+    body = (
+        f"{company} halka arzına katılacak mısınız? {son_txt}"
+        "Topluluğun beklentisini öğrenmek için hemen oy ver."
+    )
+    ipo.hype_poll_notified_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    _fire_and_forget(broadcast_background_task(
+        title=title, body=body, audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={"screen": "halka-arz-detay", "ipo_id": str(ipo.id),
+                    "scroll_to": "poll", "poll_phase": "hype"},
+    ))
+    return RedirectResponse(
+        url=f"/admin/broadcast?success=Katilim+anketi+push+basladi+({company})+-+Telegram%27a+rapor+dusecek",
+        status_code=303)
+
+
+@router.post("/ipo-poll/ceiling")
+async def admin_ipo_poll_ceiling(request: Request, db: AsyncSession = Depends(get_db)):
+    """Talep toplama bitti → katılım sonucu + TAVAN anketi açıldı push'u."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.ipo_poll_vote import IPOPollVote
+    from app.services.broadcast import broadcast_background_task
+
+    form = await request.form()
+    ipo, company = await _fetch_ipo_or_redirect(db, form.get("ipo_id"))
+    if not ipo:
+        return RedirectResponse(url="/admin/broadcast?error=IPO+bulunamadi", status_code=303)
+
+    # Katılım (hype) anketi sonucu — kaç kişi katıldı, %kaç 'katılıyorum'
+    rows = (await db.execute(
+        select(IPOPollVote.choice).where(and_(
+            IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype"))
+    )).all()
+    total = len(rows)
+    part = sum(1 for (c,) in rows if c == "participate")
+    pct = round(part / total * 100) if total else 0
+    ozet = (f"{total} kişi ankete katıldı, %{pct} 'katılıyorum' dedi. "
+            if total else "")
+
+    title = f"📊 {company} — Talep Toplama Bitti"
+    body = (
+        f"{company} talep toplama sona erdi! {ozet}"
+        "Şimdi tahmin et: ilk günlerde kaç tavan yapar? Oyunu kullan!"
+    )
+    ipo.ceiling_poll_notified_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    _fire_and_forget(broadcast_background_task(
+        title=title, body=body, audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={"screen": "halka-arz-detay", "ipo_id": str(ipo.id),
+                    "scroll_to": "poll", "poll_phase": "ceiling"},
+    ))
+    return RedirectResponse(
+        url=f"/admin/broadcast?success=Tavan+anketi+push+basladi+({company})+-+Telegram%27a+rapor+dusecek",
+        status_code=303)
+
+
+@router.post("/ipo-poll/result")
+async def admin_ipo_poll_result(request: Request, db: AsyncSession = Depends(get_db)):
+    """Tavan anketi SONUÇLANDI — sonuçları açık şekilde duyurur (gong günü)."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    from datetime import datetime as _dt, timezone as _tz
+    from collections import Counter
+    from app.models.ipo_poll_vote import IPOPollVote
+    from app.services.broadcast import broadcast_background_task
+
+    form = await request.form()
+    ipo, company = await _fetch_ipo_or_redirect(db, form.get("ipo_id"))
+    if not ipo:
+        return RedirectResponse(url="/admin/broadcast?error=IPO+bulunamadi", status_code=303)
+
+    rows = (await db.execute(
+        select(IPOPollVote.choice).where(and_(
+            IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "ceiling"))
+    )).all()
+    guesses = []
+    for (c,) in rows:
+        try:
+            guesses.append(int(c))
+        except (ValueError, TypeError):
+            pass
+    if not guesses:
+        return RedirectResponse(
+            url=f"/admin/broadcast?error=Tavan+anketine+oy+yok+({company})", status_code=303)
+
+    total = len(guesses)
+    avg_guess = sum(guesses) / total
+    mode_guess, mode_cnt = Counter(guesses).most_common(1)[0]
+
+    title = f"📊 {company} Tavan Anketi Sonuçlandı"
+    body = (
+        f"{total} oy kullanıldı — topluluk ortalaması {avg_guess:.0f} tavan, "
+        f"en popüler tahmin {mode_guess} tavan ({mode_cnt} kişi). "
+        "Gerçekleşen performansı uygulamadan takip et!"
+    )
+    ipo.ceiling_result_notified_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    _fire_and_forget(broadcast_background_task(
+        title=title, body=body, audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={"screen": "halka-arz-detay", "ipo_id": str(ipo.id)},
+    ))
+    return RedirectResponse(
+        url=f"/admin/broadcast?success=Tavan+sonuc+push+basladi+({company},+{total}+oy)+-+Telegram%27a+rapor",
+        status_code=303)
 
 
 @router.post("/broadcast/preview")

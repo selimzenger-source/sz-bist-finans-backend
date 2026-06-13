@@ -4953,22 +4953,35 @@ def _setup_scheduler_impl():
     async def _ipo_hype_poll_notification():
         """07:00 TR — SPK onay sonrasi katilim anketi push (her IPO icin 1 kez)."""
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td, date as _date
-        from sqlalchemy import select as _sel, and_
+        from sqlalchemy import select as _sel, and_, or_
         try:
             from app.models.ipo import IPO
             from app.services.broadcast import broadcast_background_task
 
             today = _date.today()
             yesterday = today - _td(days=1)
-            # SPK onayi dun veya bugun olan, hype anketi push'u henuz gitmemis
-            # ve statu uygun (henuz dagitim baslamamis veya yeni baslayan)
+            # ★ KÖK FIX (13.06.2026): eskiden SADECE spk_approval_date dolu IPO'lar
+            # seçiliyordu. Otomatik halkarz scraper bu alanı DOLDURMADIĞINDAN
+            # otomatik gelen IPO'larda sabah anketi HİÇ tetiklenmiyordu (kullanıcı:
+            # bildirim gitmedi). Artık şu 3 koşuldan BİRİ yeterli (backfill-güvenli):
+            #   • SPK onayı son 7 gün, VEYA
+            #   • talep toplama bitişi bugün/ileride (dağıtım sürüyor/yaklaşıyor), VEYA
+            #   • talep başlangıcı son 7 gün — yakın 14 gün penceresi
+            # Eski/kapanmış IPO'lar (subscription_end geçmiş) seçilmez → toplu spam yok.
             async with async_session() as db:
                 stmt = _sel(IPO).where(
                     and_(
                         IPO.hype_poll_notified_at.is_(None),
-                        IPO.spk_approval_date.is_not(None),
-                        IPO.spk_approval_date >= today - _td(days=7),  # son 7 gun icinde SPK onayi
                         IPO.status.in_(["newly_approved", "in_distribution", "awaiting_trading"]),
+                        or_(
+                            and_(IPO.spk_approval_date.is_not(None),
+                                 IPO.spk_approval_date >= today - _td(days=7)),
+                            and_(IPO.subscription_end.is_not(None),
+                                 IPO.subscription_end >= today),
+                            and_(IPO.subscription_start.is_not(None),
+                                 IPO.subscription_start >= today - _td(days=7),
+                                 IPO.subscription_start <= today + _td(days=14)),
+                        ),
                     )
                 )
                 result = await db.execute(stmt)
