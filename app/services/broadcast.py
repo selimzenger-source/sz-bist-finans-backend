@@ -346,8 +346,23 @@ async def _send_telegram_report(
     target_labels = {
         "none": "Yok",
         "halka-arz": "Halka Arz",
+        "halka-arz-detay": "Halka Arz Detay/Anket",
         "ai-haberler": "KAP Haberler",
+        "ai-kap": "Şirket Haber / AI",
+        "bilanco": "Bilanço",
+        "temettu": "Temettü",
+        "finans-ai": "Finans AI",
+        "tavan-taban-gunluk": "Tavan/Taban Günlük",
+        "tedbirli-hisseler": "Tedbirli Hisseler",
+        "halka-arz-defteri": "Halka Arz Defterim",
+        "kurum-onerileri": "Kurum Önerileri",
+        "haber-ozeti": "Günlük Haber Bülteni",
+        "haberler-genel": "Genel Haberler",
+        "spk-bulten-analiz": "SPK Bülten Analizi",
+        "viop-gece-seansi": "VIOP Gece Seansı",
+        "rehber": "Rehber/Blog",
         "ayarlar": "Ayarlar",
+        "bildirim-merkezi": "Bildirim Merkezi",
         "store": "Mağaza (Güncelleme)",
     }
 

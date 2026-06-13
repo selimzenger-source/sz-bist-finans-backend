@@ -2244,9 +2244,9 @@ async def trigger_ayin_halka_arzi(
                 f"📌 Ticker: ${ticker}\n"
                 f"💰 Halka Arz Fiyatı: {price} TL\n"
                 f"🤖 AI Değerlendirme Puanı: {overall_score}/10\n\n"
-                f"📋 Detaylı analiz raporu ve video aşağıda 👇\n\n"
+                f"📋 Detaylı AI raporunu Borsa Cebimde uygulamamızda bulabilirsiniz 👇\n\n"
                 f"⚠️ Yatırım tavsiyesi değildir.\n\n"
-                f"#halkaarz #{ticker} #borsa #BIST #yatırım"
+                f"#halkaarz #{ticker}"
             )
         else:
             # Thread başarılı — ilk tweet ana metin olarak kullanılır
@@ -2309,7 +2309,7 @@ async def trigger_ayin_halka_arzi(
 
 # ── Claude AI Thread Üretici — Ayın Halka Arzı ──
 
-_THREAD_SYSTEM_PROMPT = """Sen @szalgofinans hesabının profesyonel finans içerik editörüsün.
+_THREAD_SYSTEM_PROMPT = """Sen @BorsaCebimde hesabının profesyonel finans içerik editörüsün.
 X (Twitter) Premium hesap için 4-5 tweet'lik detaylı thread yazıyorsun.
 
 KRİTİK KURALLAR:
@@ -2318,8 +2318,11 @@ KRİTİK KURALLAR:
 3. Türkçe karakterler ZORUNLU: ö, ü, ş, ç, ğ, ı, İ, Ö, Ü, Ş, Ç, Ğ
 4. Yatırım tavsiyesi içermez — bilgilendirme amaçlıdır.
 5. Tweet 1'de 🧵👇 ile thread olduğunu belirt.
-6. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı + #hashtag'ler olmalı.
-7. Profesyonel ama samimi ton — sohbet havası, sanki takipçilerle sohbet ediyorsun.
+6. HASHTAG KURALI (KESİN): TÜM thread'de TOPLAM en fazla 2 hashtag, sadece SON tweette.
+   X (Twitter) spam/ban kurallarına takılmamak için 3+ hashtag YASAK. Sade tut:
+   genelde #halkaarz ve #$TICKER yeterli. Peş peşe 5-6 hashtag ASLA kullanma.
+7. Son tweette ⚠️ yatırım tavsiyesi değildir uyarısı olmalı.
+8. Profesyonel ama samimi ton — sohbet havası, sanki takipçilerle sohbet ediyorsun.
 8. Rakamları, yüzdeleri, oranları BOL BOL kullan — okuyucu rakam görmek istiyor.
 9. Her tweette satır araları bırak, okunabilirlik ve şıklık önemli.
 10. Emoji kullan ama abartma — her bilgi satırının başına uygun emoji koy.
@@ -2371,9 +2374,9 @@ AI algoritmasının öne çıkardığı uyarılar.
 Tweet 5 — SONUÇ & CTA (isteğe bağlı — raporda yeterli veri varsa yaz):
 ✅ veya ⚠️ Genel değerlendirme özeti (olumlu/nötr/dikkat).
 Bu halka arzı öne çıkaran 2-3 ana faktör.
-"📱 Detaylı AI raporu uygulamamızda → szalgo.net.tr" CTA.
+"📱 Detaylı AI raporunu ve tüm halka arz analizlerini Borsa Cebimde uygulamamızda bulabilirsiniz." CTA. (Web sitesi/link YAZMA.)
 ⚠️ Yatırım tavsiyesi değildir disclaimer.
-İlgili hashtag'ler: #halkaarz #{ticker} #borsa #BIST #yatırım #borsaistanbul
+HASHTAG: SADECE 2 tane, son satıra koy → #halkaarz #{ticker}  (başka hashtag EKLEME, 3+ hashtag X ban riski)
 
 ÖNEMLİ:
 - Raporda yeterli veri varsa 5 tweet yaz, veri az ise 4 tweet yaz (son tweette sonuç + CTA + disclaimer birleştir).
@@ -3218,6 +3221,7 @@ def _ipo_poll_view(ipo) -> dict:
         "trading_start": ipo.trading_start.isoformat() if ipo.trading_start else None,
         "son_gun": son_gun,
         "hype_sent": ipo.hype_poll_notified_at is not None,
+        "hype_result_sent": getattr(ipo, "hype_result_notified_at", None) is not None,
         "ceiling_sent": ipo.ceiling_poll_notified_at is not None,
         "result_sent": ipo.ceiling_result_notified_at is not None,
     }
@@ -3316,9 +3320,9 @@ async def admin_ipo_poll_hype(request: Request, db: AsyncSession = Depends(get_d
         status_code=303)
 
 
-@router.post("/ipo-poll/ceiling")
-async def admin_ipo_poll_ceiling(request: Request, db: AsyncSession = Depends(get_db)):
-    """Talep toplama bitti → katılım sonucu + TAVAN anketi açıldı push'u."""
+@router.post("/ipo-poll/hype-result")
+async def admin_ipo_poll_hype_result(request: Request, db: AsyncSession = Depends(get_db)):
+    """Katılım anketi SONUÇLANDI — kaç kişi katıldı / %kaç 'katılacağım' (talep bitiminde)."""
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
     from datetime import datetime as _dt, timezone as _tz
@@ -3330,7 +3334,6 @@ async def admin_ipo_poll_ceiling(request: Request, db: AsyncSession = Depends(ge
     if not ipo:
         return RedirectResponse(url="/admin/broadcast?error=IPO+bulunamadi", status_code=303)
 
-    # Katılım (hype) anketi sonucu — kaç kişi katıldı, %kaç 'katılıyorum'
     rows = (await db.execute(
         select(IPOPollVote.choice).where(and_(
             IPOPollVote.ipo_id == ipo.id, IPOPollVote.phase == "hype"))
@@ -3338,13 +3341,50 @@ async def admin_ipo_poll_ceiling(request: Request, db: AsyncSession = Depends(ge
     total = len(rows)
     part = sum(1 for (c,) in rows if c == "participate")
     pct = round(part / total * 100) if total else 0
-    ozet = (f"{total} kişi ankete katıldı, %{pct} 'katılıyorum' dedi. "
-            if total else "")
 
-    title = f"📊 {company} — Talep Toplama Bitti"
+    title = f"📊 {company} Katılım Anketi Sonuçlandı"
+    if total:
+        body = (
+            f"Talep toplama sona erdi! {total} kişi ankete katıldı — "
+            f"%{pct}'i '{company} halka arzına katılacağım' dedi. "
+            "Sonuçları ve detayları gör 👇"
+        )
+    else:
+        body = (
+            f"{company} talep toplama sona erdi. Sonuçları ve halka arz "
+            "detaylarını uygulamadan inceleyebilirsin 👇"
+        )
+    ipo.hype_result_notified_at = _dt.now(_tz.utc)
+    await db.commit()
+
+    _fire_and_forget(broadcast_background_task(
+        title=title, body=body, audience="all",
+        deep_link_target="halka-arz-detay",
+        extra_data={"screen": "halka-arz-detay", "ipo_id": str(ipo.id),
+                    "scroll_to": "poll", "poll_phase": "hype"},
+    ))
+    return RedirectResponse(
+        url=f"/admin/broadcast?success=Katilim+sonuc+push+basladi+({company},+{total}+oy)+-+Telegram%27a+rapor",
+        status_code=303)
+
+
+@router.post("/ipo-poll/ceiling")
+async def admin_ipo_poll_ceiling(request: Request, db: AsyncSession = Depends(get_db)):
+    """TAVAN anketi açıldı push'u ('kaç tavan yapar?')."""
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+    from datetime import datetime as _dt, timezone as _tz
+    from app.services.broadcast import broadcast_background_task
+
+    form = await request.form()
+    ipo, company = await _fetch_ipo_or_redirect(db, form.get("ipo_id"))
+    if not ipo:
+        return RedirectResponse(url="/admin/broadcast?error=IPO+bulunamadi", status_code=303)
+
+    title = f"🔔 {company} — Tavan Anketi Açıldı"
     body = (
-        f"{company} talep toplama sona erdi! {ozet}"
-        "Şimdi tahmin et: ilk günlerde kaç tavan yapar? Oyunu kullan!"
+        f"{company} işleme başlamadan önce sırada heyecanlı kısım: "
+        "ilk günlerde kaç tavan yapar? Tahminini yap, oyunu kullan!"
     )
     ipo.ceiling_poll_notified_at = _dt.now(_tz.utc)
     await db.commit()
@@ -3453,6 +3493,7 @@ async def broadcast_send(
     audience = form.get("audience", "all")
     deep_link_target = form.get("deep_link_target", "none")
     device_id = (form.get("device_id") or "").strip()
+    link_url = (form.get("link_url") or "").strip()
 
     # Validasyon
     if not title or len(title) > 100:
@@ -3475,8 +3516,29 @@ async def broadcast_send(
             url="/admin/broadcast?error=Cihaz ID en az 4 karakter olmali (tam veya prefix)",
             status_code=303,
         )
-    if deep_link_target not in ("none", "halka-arz", "ai-haberler", "ayarlar", "store"):
+    # ── Deep-link hedefleri = mobil bildirim handler'ının anladığı 'screen'
+    # anahtarları (NotificationContext.tsx). Eski 'ai-haberler' → 'ai-kap'.
+    _DEEP_LINK_ALIASES = {"ai-haberler": "ai-kap"}
+    deep_link_target = _DEEP_LINK_ALIASES.get(deep_link_target, deep_link_target)
+    _VALID_DEEP_LINKS = {
+        "none", "halka-arz", "ai-kap", "bilanco", "temettu", "finans-ai",
+        "tavan-taban-gunluk", "tedbirli-hisseler", "halka-arz-defteri",
+        "kurum-onerileri", "haber-ozeti", "haberler-genel", "spk-bulten-analiz",
+        "viop-gece-seansi", "rehber", "ayarlar", "bildirim-merkezi", "store",
+    }
+    if deep_link_target not in _VALID_DEEP_LINKS:
         deep_link_target = "none"
+
+    # ── Harici link (URL) — verilirse bildirime tıklayınca tarayıcı/uygulama açılır.
+    # (Sadece 3.1.4+ uygulamalarda çalışır — eski sürüm 'url' alanını işlemez.)
+    if link_url:
+        if not re.match(r"^https?://", link_url, re.I):
+            link_url = "https://" + link_url  # şema yoksa ekle (https zorunlu)
+        if not re.match(r"^https?://[^\s/]+\.[^\s]+", link_url, re.I) or len(link_url) > 500:
+            return RedirectResponse(
+                url="/admin/broadcast?error=Gecersiz link (ornek: https://site.com/...)",
+                status_code=303,
+            )
 
     from app.services.broadcast import can_broadcast, mark_broadcast_sent, count_recipients
 
@@ -3516,6 +3578,13 @@ async def broadcast_send(
         "type": "announcement",
         "target": str(deep_link_target),
     }
+    # ★ FIX: mobil handler 'data.screen' okuyor — eskiden sadece 'target' yazılıyordu,
+    # iç yönlendirme çalışmıyordu. Artık screen de yazılır.
+    if deep_link_target and deep_link_target != "none":
+        safe_data["screen"] = str(deep_link_target)
+    # ★ Harici link → tarayıcı (URL, screen'i ezer; handler önce url'ye bakar)
+    if link_url:
+        safe_data["url"] = link_url
 
     sent = 0
     failed = 0

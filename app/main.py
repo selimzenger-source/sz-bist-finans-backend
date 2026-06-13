@@ -218,6 +218,9 @@ async def lifespan(app: FastAPI):
             await db.execute(sa_text(
                 "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS ceiling_result_notified_at TIMESTAMPTZ"
             ))
+            await db.execute(sa_text(
+                "ALTER TABLE ipos ADD COLUMN IF NOT EXISTS hype_result_notified_at TIMESTAMPTZ"
+            ))
             # capital_increases: halkarz'da en son ne zaman gorulduyu — hayalet
             # (KAP'tan gelip halkarz onayi almamis) kayitlari temizlemek icin.
             await db.execute(sa_text(
@@ -895,14 +898,20 @@ async def get_public_daily_market_stats(
             "id": s.id,
             "ticker": s.ticker,
             "date": s.date.isoformat(),
-            # close_price KALDIRILDI (BIST lisans), percent_change response'a dahil edilmez
+            # ★ ESKİ SÜRÜM CRASH FIX (13.06.2026): close_price/percent_change BIST
+            # lisansı nedeniyle KALDIRILDI ama eski app'ler (iOS 2.8.3) bu alanlara
+            # .toFixed() çağırıyor → undefined.toFixed() crash. Alanlar HER ZAMAN
+            # sayı (0.0) döndürülür → eski app patlamaz, "0" gösterir; yeni app bu
+            # alanları zaten kullanmıyor. (Gerçek fiyat lisans gereği gösterilemez.)
+            "close_price": 0.0,
+            "percent_change": 0.0,
             "is_ceiling": s.is_ceiling,
             "is_floor": s.is_floor,
-            "consecutive_ceiling_count": s.consecutive_ceiling_count,
-            "monthly_ceiling_count": s.monthly_ceiling_count,
-            "consecutive_floor_count": s.consecutive_floor_count,
-            "monthly_floor_count": s.monthly_floor_count,
-            "reason": s.reason,
+            "consecutive_ceiling_count": s.consecutive_ceiling_count or 0,
+            "monthly_ceiling_count": s.monthly_ceiling_count or 0,
+            "consecutive_floor_count": s.consecutive_floor_count or 0,
+            "monthly_floor_count": s.monthly_floor_count or 0,
+            "reason": s.reason or "",
         }
         for s in stats
     ]

@@ -72,9 +72,18 @@
                             📢 Katılım Anketi{% if ipo.hype_sent %} ✅{% endif %}
                         </button>
                     </form>
-                    <!-- 2) Tavan Anketi (talep bitti + katılım sonucu) -->
+                    <!-- 2) Katılım Sonucu (talep bitti, kaç kişi katıldı) -->
+                    <form method="post" action="/admin/ipo-poll/hype-result" class="inline"
+                          onsubmit="return confirm('{{ ipo.company }} — KATILIM SONUCU push (kaç kişi katıldı, tüm kullanıcılar). Gönderilsin mi?')">
+                        <input type="hidden" name="ipo_id" value="{{ ipo.id }}">
+                        <button type="submit" class="text-sm px-3 py-1.5 rounded-lg font-medium transition
+                            {% if ipo.hype_result_sent %}bg-gray-700 text-gray-400 hover:bg-gray-600{% else %}bg-teal-600 text-white hover:bg-teal-500{% endif %}">
+                            📊 Katılım Sonucu{% if ipo.hype_result_sent %} ✅{% endif %}
+                        </button>
+                    </form>
+                    <!-- 3) Tavan Anketi (kaç tavan?) -->
                     <form method="post" action="/admin/ipo-poll/ceiling" class="inline"
-                          onsubmit="return confirm('{{ ipo.company }} — Talep bitti + TAVAN anketi push (tüm kullanıcılar). Gönderilsin mi?')">
+                          onsubmit="return confirm('{{ ipo.company }} — TAVAN anketi push (kaç tavan?, tüm kullanıcılar). Gönderilsin mi?')">
                         <input type="hidden" name="ipo_id" value="{{ ipo.id }}">
                         <button type="submit" class="text-sm px-3 py-1.5 rounded-lg font-medium transition
                             {% if ipo.ceiling_sent %}bg-gray-700 text-gray-400 hover:bg-gray-600{% else %}bg-blue-600 text-white hover:bg-blue-500{% endif %}">
@@ -200,19 +209,53 @@
             </div>
 
             <!-- Yönlendirme -->
-            <div class="mb-6">
+            <div class="mb-4">
                 <label class="block text-sm font-medium text-gray-300 mb-1">
-                    Tıklanınca Yönlendirme
+                    Tıklanınca Yönlendirme (uygulama içi sayfa)
                 </label>
                 <select name="deep_link_target"
                         class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
                                text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                     <option value="none">Yönlendirme Yok (Uygulamayı Aç)</option>
-                    <option value="halka-arz">📊 Halka Arz Sayfası</option>
-                    <option value="ai-haberler">📰 KAP Haber Sayfası</option>
-                    <option value="ayarlar">⚙️ Ayarlar Sayfası</option>
-                    <option value="store">🚀 Mağaza (Play Store / App Store - Güncelleme)</option>
+                    <optgroup label="Ana Sekmeler">
+                        <option value="halka-arz">📊 Halka Arz Sayfası</option>
+                        <option value="ai-kap">📰 Şirket Haber / AI Haberler</option>
+                        <option value="bilanco">📑 Bilanço Sayfası</option>
+                        <option value="temettu">💰 Temettü Sayfası</option>
+                        <option value="finans-ai">🤖 Finans AI</option>
+                    </optgroup>
+                    <optgroup label="Diğer Ekranlar">
+                        <option value="tavan-taban-gunluk">📈 Tavan/Taban Günlük</option>
+                        <option value="tedbirli-hisseler">⚠️ Tedbirli Hisseler</option>
+                        <option value="halka-arz-defteri">📒 Halka Arz Defterim</option>
+                        <option value="kurum-onerileri">🏦 Kurum Önerileri</option>
+                        <option value="haber-ozeti">📰 Günlük Haber Bülteni</option>
+                        <option value="haberler-genel">🗞️ Genel Haberler</option>
+                        <option value="spk-bulten-analiz">📋 SPK Bülten Analizi</option>
+                        <option value="viop-gece-seansi">🌙 VIOP Gece Seansı</option>
+                        <option value="rehber">📚 Rehber/Blog</option>
+                        <option value="ayarlar">⚙️ Ayarlar</option>
+                        <option value="bildirim-merkezi">🔔 Bildirim Merkezi</option>
+                    </optgroup>
+                    <option value="store">🚀 Mağaza (Güncelleme)</option>
                 </select>
+            </div>
+
+            <!-- Harici Link (URL) -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-gray-300 mb-1">
+                    🔗 Harici Link (opsiyonel) <span class="text-gray-500">— tıklanınca tarayıcı açar</span>
+                </label>
+                <input type="url" name="link_url" maxlength="500"
+                       placeholder="https://ornek.com/kampanya"
+                       class="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2
+                              text-gray-100 placeholder-gray-500
+                              focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
+                <div class="text-xs text-amber-400/80 mt-1">
+                    ⚠️ Link girilirse yukarıdaki sayfa yönlendirmesi yerine tarayıcı açılır.
+                    Sadece <strong>güncel sürüm (3.1.4+)</strong> kullanıcılarda çalışır — eski
+                    sürümde sadece uygulama açılır.
+                </div>
             </div>
 
             <!-- Önizleme -->

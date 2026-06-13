@@ -3073,18 +3073,25 @@ def generate_ayin_kapak_image(company: str, ticker: str, price, overall_score, v
             mw = draw.textlength(meta, font=f_meta)
             draw.text(((W - mw) / 2, 278), meta, font=f_meta, fill=TAVAN_GREEN)
 
-        # ── AI Puan rozeti (ortada buyuk daire kutu) ──
+        # ── AI Puan rozeti (ortada kutu — ÇAKIŞMA önlemli, anchor="mm" ile) ──
+        # Eski kod manuel y konumu kullanıyordu; 72px skorun satır yüksekliği
+        # label'a ve kutu kenarına taşıyordu (kullanıcı: kare/harf çakışması).
+        # Artık skor ve label kendi merkezlerine hizalanır, aralarında net boşluk,
+        # kutu kenarına güvenli margin var.
         score_txt = str(overall_score) if overall_score not in (None, "?", "") else "?"
-        box_w, box_h = 300, 170
-        bx, by = (W - box_w) / 2, 345
-        draw.rounded_rectangle([(bx, by), (bx + box_w, by + box_h)], radius=20,
+        box_w, box_h = 340, 184
+        bx, by = (W - box_w) / 2, 340
+        cx = bx + box_w / 2
+        draw.rounded_rectangle([(bx, by), (bx + box_w, by + box_h)], radius=22,
                                fill=HEADER_BG, outline=GOLD, width=3)
         s_disp = f"{score_txt}/10"
-        sw = draw.textlength(s_disp, font=f_score_big)
-        draw.text((bx + (box_w - sw) / 2, by + 22), s_disp, font=f_score_big, fill=GOLD)
+        draw.text((cx, by + 66), s_disp, font=f_score_big, fill=GOLD, anchor="mm")
+        # Label kutuya sığmazsa fontu küçült (taşma/kenar çakışması önlenir)
         lbl = "AI DEĞERLENDİRME PUANI"
-        lw = draw.textlength(lbl, font=f_score_lbl)
-        draw.text((bx + (box_w - lw) / 2, by + 118), lbl, font=f_score_lbl, fill=GRAY)
+        _flbl = f_score_lbl
+        while draw.textlength(lbl, font=_flbl) > box_w - 30 and getattr(_flbl, "size", 24) > 16:
+            _flbl = _load_font(_flbl.size - 2)
+        draw.text((cx, by + 140), lbl, font=_flbl, fill=GRAY, anchor="mm")
 
         # ── Verdict (varsa, rozetin altinda) ──
         if verdict:
