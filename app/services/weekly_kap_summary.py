@@ -601,38 +601,22 @@ def _paginate(sections, extras_h: int = 0) -> list[list]:
                 ops.append(("item", s, it, i))
         return [ops]
 
-    # DENGELİ DAĞITIM — önce gereken sayfa sayısı (cap'e göre), sonra hedef yükseklik
-    # (base/N). Öğeler sayfalara EŞİT dağılır → son sayfa seyrek kalmaz; tüm kareler
-    # benzer dolulukta olur. generate'te eşit-yükseklik ile birlikte 4 slayt AYNI boyut.
-    def _greedy_count() -> int:
-        pages_n, cur = 1, 0
-        for s in sections:
-            if cur > 0 and cur + _SEC_HEAD_H + (s["items"][0]["_h"] if s["items"] else 0) > cap(pages_n - 1):
-                pages_n += 1; cur = 0
-            cur += _SEC_HEAD_H
-            for it in s["items"]:
-                if cur + _ih(it) > cap(pages_n - 1):
-                    pages_n += 1; cur = _SEC_HEAD_H
-                cur += _ih(it)
-            cur += _SEC_GAP
-        return pages_n
-
-    N = max(2, min(4, _greedy_count()))  # TEK TWEET → max 4 kare
-    target = base / N  # sayfa başına dengeli hedef yükseklik
-
+    # GREEDY-TO-CAP: her sayfa CAP'e kadar DOLDURULUR → sayfalar tam dolu, yeni
+    # sayfa yalnız taşmada açılır. Eski 'target=base/N' erken-kırma sayfa 2/3'ü
+    # cap'in altında bırakıp eşitlemede alt boşluk yaratıyordu (kullanıcı şikayeti:
+    # 2. ve 3. sayfa bomboş). shared_h eşitlemesi yalnız SON sayfayı pad'ler.
     pages: list[list] = [[]]
     cur_h = 0
     for s in sections:
         pi = len(pages) - 1
         first_ih = s["items"][0]["_h"] if s["items"] else 0
-        if cur_h > 0 and (cur_h + _SEC_HEAD_H + first_ih > cap(pi)
-                          or (cur_h >= target and len(pages) < N)):
+        if cur_h > 0 and cur_h + _SEC_HEAD_H + first_ih > cap(pi):
             pages.append([]); cur_h = 0; pi = len(pages) - 1
         pages[pi].append(("header", s, False))
         cur_h += _SEC_HEAD_H
         for i, it in enumerate(s["items"]):
             pi = len(pages) - 1
-            if cur_h + _ih(it) > cap(pi) or (cur_h >= target and len(pages) < N):
+            if cur_h + _ih(it) > cap(pi):
                 pages.append([]); cur_h = 0; pi = len(pages) - 1
                 pages[pi].append(("header", s, True))
                 cur_h += _SEC_HEAD_H
@@ -761,9 +745,30 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
         _ex_h = _extras_height(extras) if extras else 0
         pages = _paginate(sections, _ex_h)
         if len(pages) > 4:
-            logger.warning("Haftalık KAP: %d sayfa üretildi, TEK TWEET için 4'e kırpılıyor "
-                           "(fazla öğeler düştü)", len(pages))
-            pages = pages[:4]  # TEK TWEET → max 4 kare (thread YOK)
+            # ★ SPK ASLA DÜŞMEZ (kullanıcı: seçtiğim kararlar yayınlanamıyor).
+            # Eski kod blind pages[:4] yapıp SON bölümü (SPK) kesiyordu. Artık 4
+            # kareye sığana dek EN BÜYÜK NON-SPK bölümden (genelde olumlu) en
+            # DÜŞÜK etkili öğe çıkarılır; SPK + olumsuz korunur.
+            _trimmed = 0
+            while len(_paginate(sections, _ex_h)) > 4:
+                _cand = None
+                for s in sections:
+                    if s["title"].startswith("SPK"):
+                        continue
+                    if len(s["items"]) > 1 and (_cand is None or len(s["items"]) > len(_cand["items"])):
+                        _cand = s
+                if _cand is None:
+                    break  # kırpılacak başka şey yok (yalnız SPK kaldı)
+                _items = _cand["items"]
+                _mn = min(range(len(_items)), key=lambda i: _items[i].get("impact", 0) or 0)
+                _items.pop(_mn)
+                _trimmed += 1
+            pages = _paginate(sections, _ex_h)
+            if _trimmed:
+                logger.warning("Haftalık KAP: 4 kareye sığması için %d olumlu öğe kırpıldı "
+                               "(SPK + olumsuz korundu)", _trimmed)
+            if len(pages) > 4:
+                pages = pages[:4]  # son çare (teorik)
         total = len(pages)
         # TÜM kareler EŞİT yükseklikte (en dolu sayfaya göre, cap _SQUARE_MAX) → 4 slayt
         # AYNI boyutta görünür ("son slayt iri" sorunu biter). Dengeli dağıtım sayesinde
@@ -783,10 +788,21 @@ def generate_weekly_kap_images(positive: list, negative: list, spk: list, label:
 
 
 def item_key(kind: str, item: dict) -> str:
-    """Seçim için stabil anahtar. kind: 'positive'|'negative'|'spk'."""
+    """Seçim için stabil anahtar. kind: 'positive'|'negative'|'spk'.
+
+    SPK: id yok → içerik-hash. HTML-güvenli (boşluk/özel karakter yok) ve
+    çağrılar arası stabil. "Karar N" label'ı SIRA-bağımlı olduğundan piyasa-
+    geneli kararlarda HASH'e DAHİL EDİLMEZ (yalnızca summary) — aksi halde araya
+    yeni SPK tweet girince numara kayıp seçim eşleşmiyordu (kullanıcı: seçtiğim
+    kararlar yayınlanamıyor).
+    """
     if kind in ("positive", "negative"):
         return f"{kind[0]}{item.get('id')}"
-    return "s" + item.get("ticker", "") + "|" + (item.get("summary", "")[:24])
+    import hashlib as _hl
+    _tk = (item.get("ticker", "") or "")
+    _sm = (item.get("summary", "") or "")
+    _raw = _sm if _tk.lower().startswith("karar") else (_tk + "|" + _sm)
+    return "s" + _hl.md5(_raw.encode("utf-8")).hexdigest()[:12]
 
 
 def default_selection(data: dict, max_total: int = MAX_TOTAL_ITEMS) -> set[str]:
