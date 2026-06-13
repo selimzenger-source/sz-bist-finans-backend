@@ -11123,6 +11123,18 @@ async def list_capital_increases(
         query = query.where(CapitalIncrease.type == type)
     if status and status in ("ykk_alindi", "spk_onayli", "tarih_belli", "dagitiliyor", "tamamlandi", "reddedildi"):
         query = query.where(CapitalIncrease.status == status)
+    # ── KALİTE FİLTRESİ (14.06.2026): oranı OLMAYAN kayıt gösterilmez ──
+    # KAP'tan oran parse edilemeden gelen 'ghost' kayıtlar (bedelli/bedelsiz/
+    # tahsisli/percentage hepsi NULL) listeyi kirletiyordu (PKART, ALKLC, AYES,
+    # GUNDG vb. — hepsi tamamlandi + oransız). Oranı olmayan kayıt kullanıcıya
+    # bilgi vermez → gizlenir. Oran dolunca (halkarz sync / KAP parse) tekrar görünür.
+    from sqlalchemy import or_ as _or_q
+    query = query.where(_or_q(
+        CapitalIncrease.bedelli_pct.isnot(None),
+        CapitalIncrease.bedelsiz_pct.isnot(None),
+        CapitalIncrease.tahsisli_pct.isnot(None),
+        CapitalIncrease.percentage.isnot(None),
+    ))
     if year:
         # Yil filtresi: distribution_date varsa o, yoksa spk_approval_date, yoksa ykk_date
         from sqlalchemy import or_, extract, and_
