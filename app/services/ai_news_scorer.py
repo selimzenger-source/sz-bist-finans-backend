@@ -47,6 +47,33 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
+# ── HİBRİT MODEL (12.06.2026, kullanıcı kararı) ──
+# Yön/büyüklük-kritik haber tipleri (pay alım-satım, M&A, sermaye artırımı, ihale
+# vb.) güçlü Claude Sonnet ile BİRİNCİL puanlanır — küçük modeller (Flash/Haiku)
+# bu tiplerde yön karıştırıyor/yanlış puan veriyordu. Rutin haberler Flash'ta
+# kalır (maliyet). Sonnet başarısızsa normal zincir (Flash→Haiku→Abacus) yedek.
+_CLAUDE_SONNET_MODEL = "claude-sonnet-4-6"
+_CRITICAL_SONNET_PATTERNS = (
+    "pay alım", "pay alim", "pay alış", "pay alis", "pay satış", "pay satis",
+    "alım satım", "alim satim", "alım-satım", "alim-satim",
+    "birleşme", "birlesme", "devralma", "devral", "satın alma", "satin alma",
+    "satın al", "satin al", "iktisap", "hisse devri", "pay devri",
+    "sermaye artırım", "sermaye artirim", "bedelli", "bedelsiz",
+    "tahsisli sermaye", "sermaye azalt",
+    "pay geri alım", "pay geri alim", "geri alım program", "geri alim program",
+    "ihale", "sözleşme imzal", "sozlesme imzal", "sipariş al", "siparis al",
+    "imtiyaz", "yatırım teşvik", "yatirim tesvik",
+    "temettü", "temettu", "kar payı dağıt", "kar payi dagit", "kâr payı",
+    "bölünme", "bolunme", "tip değişik", "tip degisik",
+    "varlık satış", "varlik satis", "iştirak satış", "istirak satis",
+)
+
+
+def _is_critical_for_sonnet(title: str, content: str) -> bool:
+    """Bu bildirim yön/büyüklük-kritik mi? (Sonnet ile birincil puanlanmalı mı)"""
+    blob = f"{title or ''} {(content or '')[:600]}".lower().replace("̇", "")
+    return any(p in blob for p in _CRITICAL_SONNET_PATTERNS)
+
 # Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 _GEMINI_MODEL = "gemini-2.5-flash"  # Pro yerine Flash — KAP scoring icin yeterli, 10x daha ucuz
@@ -2246,7 +2273,55 @@ NOTLAR:
     text = None
     provider_used = None
 
-    if gemini_key:
+    # ── HİBRİT: kritik tip ise ÖNCE Claude Sonnet (güçlü model) ──
+    # Yön/büyüklük-kritik haberler (pay alım-satım, M&A, sermaye, ihale...)
+    # Sonnet ile puanlanır — küçük modellerin yön/puan hatasını minimize eder.
+    _critical = _is_critical_for_sonnet(raw_text, content)
+    if _critical and anthropic_key:
+        _sys_c = messages[0]["content"] if messages and messages[0]["role"] == "system" else ""
+        _usr_c = messages[-1]["content"] if messages else ""
+        _sonnet_payload = {
+            "model": _CLAUDE_SONNET_MODEL,
+            "max_tokens": 4096,
+            "system": [{"type": "text", "text": _sys_c, "cache_control": {"type": "ephemeral"}}],
+            "messages": [{"role": "user", "content": _usr_c}],
+            "temperature": 0.1,
+        }
+        _sonnet_headers = {
+            "x-api-key": anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        for _s_att in (1, 2):
+            try:
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(_ANTHROPIC_URL, headers=_sonnet_headers, json=_sonnet_payload)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        for block in data.get("content", []):
+                            if block.get("type") == "text":
+                                text = block.get("text", "").strip()
+                                break
+                        provider_used = "Claude-Sonnet-Primary"
+                        logger.info("AI News Scorer [HİBRİT-SONNET] %s: kritik tip → Sonnet birincil", ticker)
+                        break
+                    elif resp.status_code in (503, 529, 429) and _s_att == 1:
+                        await asyncio.sleep(2)
+                        continue
+                    else:
+                        logger.warning(
+                            "AI News Scorer: Sonnet-primary HTTP %s (%s) — Flash'a düşülüyor",
+                            resp.status_code, ticker,
+                        )
+                        break
+            except Exception as e:
+                logger.warning("AI News Scorer: Sonnet-primary hata (%s, %d) — %s", ticker, _s_att, e)
+                if _s_att == 1:
+                    await asyncio.sleep(2)
+                    continue
+                break
+
+    if not text and gemini_key:
         try:
             async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
                 resp = await client.post(
