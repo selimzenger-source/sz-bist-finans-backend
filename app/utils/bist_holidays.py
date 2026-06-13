@@ -143,10 +143,21 @@ def cautious_status(end_date: date | None, is_active: bool,
 
     if now >= lift_dt:
         status = "ended"
+        early_cancel = False
     elif not is_active:
-        status = "ended"   # erken iptal
+        status = "ended"   # erken iptal — doğal bitiş tarihinden ÖNCE kaldırıldı
+        early_cancel = True
     else:
         status = "active"
+        early_cancel = False
+
+    # ERKEN İPTAL FIX (YEOTK, 14.06.2026): tedbir doğal end_date'inden önce
+    # kaldırıldıysa kalkış ZATEN olmuştur. Gelecekteki end_date'ten geri sayım
+    # hesaplamak "Bitenler" sekmesinde "17 gün kaldı" gibi ÇELİŞKİLİ gösterim
+    # yaratıyordu. Erken iptalde lift bilgisi sıfırlanır (geri sayım yok).
+    if early_cancel:
+        return {"status": "ended", "lift_date": None, "lift_at": None,
+                "ends_this_session": False, "days_to_lift": 0, "mins_to_lift": None}
 
     ends_this_session = (status == "active" and now.date() == lift)
     days_to_lift = (lift - now.date()).days
