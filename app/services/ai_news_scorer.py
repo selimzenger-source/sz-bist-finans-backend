@@ -2689,6 +2689,36 @@ NOTLAR:
         if score is not None and summary:
             summary = _enforce_summary_score_consistency(score, summary)
 
+        # ── BELİRSİZLİK ≠ NEGATİF (BERA sınıfı genel emniyet, 12.06.2026) ──
+        # AI "işlem detayı/miktar metinde yer almıyor, somut değerlendirme
+        # yapılamıyor" derken NEGATİF skor veremez — bilinmezlik NÖTR'dür, olumsuz
+        # değil. Eksik içerik (kapak metni) geldiğinde model boşlukta negatife
+        # kayıyordu (BERA 4.0). Yapısal-veri otoriter override başarısız olsa bile
+        # bu emniyet devreye girer. Net olumsuz hüküm varsa DOKUNULMAZ.
+        if score is not None and float(score) < 4.5 and summary:
+            _s_l = summary.lower()
+            _uncertain = any(p in _s_l for p in (
+                "yer almamaktadır", "yer almamakta", "yer almamıştır",
+                "belirtilmemiş", "belirtilmemiştir", "paylaşılmamış",
+                "somut bir değerlendirme yapılama", "değerlendirme yapılamamakta",
+                "değerlendirme yapılamamaktadır", "netleşmediğinden", "netleşmemiş",
+                "bilgi bulunmamakta", "açıklanmamış", "öngörülememekte",
+                "tespit edilememekte", "anlaşılamamakta", "metinde yer almadığ",
+            ))
+            _real_neg = any(p in _s_l for p in (
+                "satış baskısı", "satis baskisi", "arz baskısı", "arz baskisi",
+                "zarar", "iflas", "konkordato", "dava", "ceza", "haciz",
+                "olumsuz sinyal", "düşüş", "dusus", "gerile", "kayıp", "kayip",
+                "güven kaybı", "guven kaybi", "küçülme", "kuculme",
+            ))
+            if _uncertain and not _real_neg:
+                logger.info(
+                    "AI News Scorer [BELİRSİZLİK→NOTR] %s: %.1f -> 5.0 "
+                    "(özet 'veri yok/değerlendirilemiyor' diyor — negatif olamaz)",
+                    ticker, float(score),
+                )
+                score = 5.0
+
         logger.info(
             "AI News Scorer [%s]: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
             provider_used, ticker, score,

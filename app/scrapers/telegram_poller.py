@@ -1367,116 +1367,162 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             # Pay alım-satım / seans-dışı gibi AI dalına girmeyen tipler ai_score=None
             # kalıp feed'de puansız "KAP Bildirimi" kartı oluyordu. Kural: puan yoksa
             # da Nötr 5.0 ver. Pay alım-satımda yön (alım/satım) belirlenebiliyorsa ona göre.
-            if ai_score is None:
-                _full = f"{news_title or ''} {text or ''}".lower()
-                _is_pas = any(k in _full for k in (
-                    "pay alım", "pay alim", "alım-satım", "alim-satim",
-                    "pay alış", "pay alis", "pay satış", "pay satis", "pay alim satim",
-                ))
-                if _is_pas and ticker:
-                    # share_transaction_details'tan pay oranı değişimine bak (alım=+, satım=-)
-                    _dir = None
-                    _r = None
+            # ── PAY ALIM-SATIM: YAPISAL VERİ OTORİTERDİR (BERA fix 12.06.2026) ──
+            # KÖK SORUN: AI yalnızca KAP kapak metnini görüyor — alım/satım YÖNÜ +
+            # MİKTAR ektelki PDF'tedir. BERA: Metro Avrasya BERA payı ALDI ama AI
+            # "miktar metinde yok" deyip 4.0 NEGATİF verdi (yanlış puan + yanlış
+            # yorum). ÇÖZÜM: KAP structured tablosundan (alıcı/satıcı + nominal lot
+            # + pay oranı değişimi) DETERMİNİSTİK skorla; bu veri KESİN olduğundan
+            # AI'ın eksik-metin tahminini EZER. Yön belirsizse AI korunur.
+            _full = f"{news_title or ''} {text or ''}".lower()
+            _is_pas = any(k in _full for k in (
+                "pay alım", "pay alim", "alım-satım", "alim-satim",
+                "pay alış", "pay alis", "pay satış", "pay satis", "pay alim satim",
+            ))
+            if _is_pas and ticker:
+                # 1) TAZE yapısal veriyi garantile (idempotent upsert). Bu blok
+                #    route'tan ÖNCE çalıştığından bu bildirimin satırı henüz
+                #    yazılmamış olabilir — inline upsert sıralama sorununu çözer.
+                from app.models.share_transaction_detail import ShareTransactionDetail as _STD
+                from sqlalchemy import select as _sel2, desc as _desc2
+                _row_exists = False
+                if kap_url:
                     try:
-                        from app.models.share_transaction_detail import ShareTransactionDetail as _STD
-                        from sqlalchemy import select as _sel2, desc as _desc2
+                        _row_exists = (await session.execute(
+                            _sel2(_STD.id).where(_STD.kap_url == kap_url).limit(1)
+                        )).scalar_one_or_none() is not None
+                    except Exception:
+                        _row_exists = False
+                if kap_url and not _row_exists:
+                    try:
+                        from app.services.kap_pay_alim_satim_fetcher import upsert_pay_alim_satim_from_kap
+                        async with session.begin_nested():
+                            await upsert_pay_alim_satim_from_kap(
+                                session, kap_url=kap_url, company_code=ticker,
+                                title=news_title or "", published_at=msg_date,
+                            )
+                    except Exception as _ups_e:
+                        logger.debug("Pay alım-satım inline upsert hata (%s): %s", ticker, _ups_e)
+                # 2) Bu kap_url'e ait satırı oku (yoksa ticker'ın en yeni satırı)
+                _r = None
+                try:
+                    if kap_url:
+                        _r = (await session.execute(
+                            _sel2(_STD).where(_STD.kap_url == kap_url)
+                            .order_by(_desc2(_STD.created_at)).limit(1)
+                        )).scalar_one_or_none()
+                    if _r is None:
                         _r = (await session.execute(
                             _sel2(_STD).where(_STD.ticker == (ticker or "").upper())
                             .order_by(_desc2(_STD.created_at)).limit(1)
                         )).scalar_one_or_none()
-                        if _r is not None and getattr(_r, "pay_orani_change_pct", None) is not None:
-                            _dir = float(_r.pay_orani_change_pct)
-                    except Exception:
-                        _dir = None
-                    # Esikler (sermaye orani degisimi):
-                    # |%0.3| alti -> Notr (mikro/insider rutin)
-                    # %0.3-1     -> hafif sinyal (6.3 / 4.0)
-                    # %1-3       -> belirgin (6.8 / 3.5)
-                    # %3-5       -> guclu (7.3 / 2.8)
-                    # >%5        -> cok guclu (7.8 / 2.3)
-                    # TAM CÜMLE özet: taraf + oran + yön + bağlamlı yorum (kuru fragman değil)
-                    def _pf(x):  # %1,23 formatı
-                        return f"%{abs(float(x)):.2f}".replace(".", ",")
-                    _party = (getattr(_r, "party_name", None) or "").strip() if _r is not None else ""
-                    if not _party or _party in ("?", "Bilinmiyor"):
-                        _party = "Önemli bir pay sahibi"
-                    _paynow = getattr(_r, "pay_orani_pct", None) if _r is not None else None
-                    _now_s = (f"; toplam payı {_pf(_paynow)} seviyesine geldi"
-                              if isinstance(_paynow, (int, float)) else "")
-                    # ── ARASE fix (11.06.2026): YON CELISKISI — AI ozet varsa o KAZANIR ──
-                    # DB'deki son share_transaction satiri KARSI TARAFIN kaydi olabilir:
-                    # aile ici pay devrinde satan %dusus yazar ama alanin satiri (+%)
-                    # daha yeni oldugu icin yon "alim" cikiyordu → patron hisse satarken
-                    # 6.8 'Hafif Olumlu' + negatif AI ozeti birlikte yayinlandi.
-                    if ai_summary and _dir is not None:
-                        _sum_l = ai_summary.lower()
-                        _neg_cue = any(k in _sum_l for k in (
-                            "geril", "azal", "düşüş", "dusus", "düşmüş", "dusmus",
-                            "satış baskısı", "satis baskisi", "arz baskısı", "arz baskisi",
-                            "olumsuz sinyal", "olumsuz bir sinyal", "güven kaybı", "guven kaybi",
-                        ))
-                        _pos_cue = any(k in _sum_l for k in (
-                            "artır", "artir", "yükselt", "yukselt", "yükselmiş", "yukselmis",
-                            "güven sinyali", "guven sinyali", "olumlu sinyal",
-                        ))
-                        if _neg_cue and not _pos_cue and _dir > 0:
-                            logger.info(
-                                "Garanti skor YON DUZELTME (%s): DB satiri 'alim' diyor ama "
-                                "AI ozet acikca satis/azalis anlatiyor → SATIS yonu esas alindi",
-                                ticker,
-                            )
-                            _dir = -abs(_dir)
-                        elif _pos_cue and not _neg_cue and _dir < 0:
-                            _dir = abs(_dir)
-                        # Buyukluk: ozette "%X'dan %Y'e" varsa gercek degisim oradan
-                        try:
-                            _pcts = [float(p.replace(",", ".")) for p in re.findall(r"%\s*([\d]+[.,]?[\d]*)", ai_summary)[:2]]
-                            if len(_pcts) == 2 and abs(_pcts[0] - _pcts[1]) > 0:
-                                _dir = (abs(_pcts[0] - _pcts[1])) * (1 if _dir > 0 else -1)
-                        except (ValueError, TypeError):
-                            pass
+                except Exception:
+                    _r = None
+                # 3) Yön: transaction_type (alıcı/satıcı) BİRİNCİL kaynak; yoksa
+                #    pay oranı değişim işareti. Oran yoksa yön bilinse de büyüklük 0.
+                _dir = None
+                if _r is not None:
+                    _ttype = (getattr(_r, "transaction_type", None) or "").lower()
+                    _chg = getattr(_r, "pay_orani_change_pct", None)
+                    _chg = float(_chg) if isinstance(_chg, (int, float)) else None
+                    if _ttype in ("alici", "alış", "alis", "alim", "alım"):
+                        _dir = abs(_chg) if _chg else 0.0001
+                    elif _ttype in ("satici", "satış", "satis", "satim", "satım"):
+                        _dir = -abs(_chg) if _chg else -0.0001
+                    elif _chg is not None:
+                        _dir = _chg
+                def _pf(x):  # %1,23 formatı
+                    return f"%{abs(float(x)):.2f}".replace(".", ",")
+                _party = (getattr(_r, "party_name", None) or "").strip() if _r is not None else ""
+                if not _party or _party in ("?", "Bilinmiyor"):
+                    _party = "Önemli bir pay sahibi"
+                _role = (getattr(_r, "party_role", None) or "").strip() if _r is not None else ""
+                _rol_s = f" ({_role})" if _role else ""
+                _paynow = getattr(_r, "pay_orani_pct", None) if _r is not None else None
+                _now_s = (f"; toplam payı {_pf(_paynow)} seviyesine ulaştı"
+                          if isinstance(_paynow, (int, float)) and _paynow else "")
+                _lot = getattr(_r, "nominal_lot", None) if _r is not None else None
+                _lot_s = (f" ({int(_lot):,} lot nominal)".replace(",", ".")
+                          if isinstance(_lot, (int, float)) and _lot else "")
+                # ── ARASE fix: AI özeti AÇIK satış/azalış anlatıyorsa DB yön'ünü düzelt ──
+                if ai_summary and _dir is not None and abs(_dir) > 0.001:
+                    _sum_l = ai_summary.lower()
+                    _neg_cue = any(k in _sum_l for k in (
+                        "geril", "azal", "düşüş", "dusus", "düşmüş", "dusmus",
+                        "satış baskısı", "satis baskisi", "arz baskısı", "arz baskisi",
+                        "olumsuz sinyal", "olumsuz bir sinyal", "güven kaybı", "guven kaybi",
+                    ))
+                    _pos_cue = any(k in _sum_l for k in (
+                        "artır", "artir", "yükselt", "yukselt", "yükselmiş", "yukselmis",
+                        "güven sinyali", "guven sinyali", "olumlu sinyal",
+                    ))
+                    if _neg_cue and not _pos_cue and _dir > 0:
+                        _dir = -abs(_dir)
+                    elif _pos_cue and not _neg_cue and _dir < 0:
+                        _dir = abs(_dir)
+                    try:
+                        _pcts = [float(p.replace(",", ".")) for p in re.findall(r"%\s*([\d]+[.,]?[\d]*)", ai_summary)[:2]]
+                        if len(_pcts) == 2 and abs(_pcts[0] - _pcts[1]) > 0:
+                            _dir = (abs(_pcts[0] - _pcts[1])) * (1 if _dir > 0 else -1)
+                    except (ValueError, TypeError):
+                        pass
 
-                    if _dir is not None:
-                        _abs = abs(_dir)
-                        _alim = _dir > 0
-                        _fiil = "artırdı" if _alim else "azalttı"
-                        if _abs < 0.3:
-                            ai_score = 5.0
-                            ai_summary = ai_summary or (
-                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
-                                "Çok küçük ölçekli, mikro nitelikte bir işlem; fiyata doğrudan etki beklenmez.")
-                        elif _abs < 1.0:
-                            ai_score = 6.3 if _alim else 4.0
-                            ai_summary = ai_summary or (
-                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
-                                + ("İçeriden hafif alım; sınırlı da olsa güven sinyali olarak okunabilir."
-                                   if _alim else "Hafif satış; küçük çaplı pozisyon azaltımı, etkisi sınırlı."))
-                        elif _abs < 3.0:
-                            ai_score = 6.8 if _alim else 3.5
-                            ai_summary = ai_summary or (
-                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
-                                + ("İçeriden belirgin alım — yönetimin/ortağın hisseye güveni açısından olumlu sinyal."
-                                   if _alim else "Belirgin satış — pozisyon azaltımı; yatırımcı açısından temkinli bir sinyal."))
-                        elif _abs < 5.0:
-                            ai_score = 7.3 if _alim else 2.8
-                            ai_summary = ai_summary or (
-                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} oranında {_fiil}{_now_s}. "
-                                + ("Güçlü içeriden alım — kayda değer bir güven göstergesi, fiyat destekleyici olabilir."
-                                   if _alim else "Güçlü satış — kayda değer bir pozisyon azaltımı; arz baskısı yaratabilir, olumsuz sinyal."))
-                        else:
-                            ai_score = 7.8 if _alim else 2.3
-                            ai_summary = ai_summary or (
-                                f"{_party}, {ticker} sermayesindeki payını {_pf(_abs)} gibi yüksek bir oranda {_fiil}{_now_s}. "
-                                + ("Çok güçlü içeriden alım — büyük ölçekli güven sinyali, fiyat üzerinde olumlu etki potansiyeli."
-                                   if _alim else "Çok güçlü satış — büyük ölçekli çıkış; ciddi arz baskısı ve güven kaybı sinyali, olumsuz."))
-                    else:
+                if _dir is not None:
+                    # ★ OTORİTER: yapısal yön KESİN → AI skorunu/özetini EZ.
+                    # Eşikler (pay oranı değişimi): <%0.3 Nötr · %0.3-1 hafif ·
+                    # %1-3 belirgin · %3-5 güçlü · >%5 çok güçlü.
+                    _abs = abs(_dir)
+                    _alim = _dir > 0
+                    _fiil = "artırdı" if _alim else "azalttı"
+                    _old_ai = ai_score
+                    if _abs < 0.3:
                         ai_score = 5.0
-                        ai_summary = ai_summary or (
-                            f"{_party}, {ticker} paylarında alım-satım işlemi gerçekleştirdi. "
-                            "İşlem ölçeği netleşmediğinden fiyata doğrudan etki beklenmez.")
-                else:
+                        _yorum = "Çok küçük ölçekli, mikro nitelikte bir işlem; fiyata doğrudan etki beklenmez."
+                    elif _abs < 1.0:
+                        ai_score = 6.3 if _alim else 4.0
+                        _yorum = ("İçeriden hafif alım; sınırlı da olsa güven sinyali olarak okunabilir."
+                                  if _alim else "Hafif satış; küçük çaplı pozisyon azaltımı, etkisi sınırlı.")
+                    elif _abs < 3.0:
+                        ai_score = 6.8 if _alim else 3.5
+                        _yorum = ("İçeriden belirgin alım — yönetimin/ortağın hisseye güveni açısından olumlu sinyal."
+                                  if _alim else "Belirgin satış — pozisyon azaltımı; yatırımcı açısından temkinli bir sinyal.")
+                    elif _abs < 5.0:
+                        ai_score = 7.3 if _alim else 2.8
+                        _yorum = ("Güçlü içeriden alım — kayda değer bir güven göstergesi, fiyat destekleyici olabilir."
+                                  if _alim else "Güçlü satış — kayda değer pozisyon azaltımı; arz baskısı yaratabilir, olumsuz sinyal.")
+                    else:
+                        ai_score = 7.8 if _alim else 2.3
+                        _yorum = ("Çok güçlü içeriden alım — büyük ölçekli güven sinyali, fiyat üzerinde olumlu etki potansiyeli."
+                                  if _alim else "Çok güçlü satış — büyük ölçekli çıkış; ciddi arz baskısı ve güven kaybı sinyali, olumsuz.")
+                    # ÖZET HER ZAMAN deterministik (AI'ın eksik-metin özeti DEĞİL —
+                    # bu, BERA'daki "miktar metinde yok" hatasını kökten siler).
+                    if _abs < 0.0009:
+                        # oran verisi yok ama yön (alıcı/satıcı) kesin → net cümle
+                        ai_summary = (
+                            f"{_party}{_rol_s}, {ticker} paylarında "
+                            f"{'alış' if _alim else 'satış'} işlemi gerçekleştirdi{_lot_s}{_now_s}. {_yorum}")
+                    else:
+                        ai_summary = (
+                            f"{_party}{_rol_s}, {ticker} sermayesindeki payını {_pf(_abs)} oranında "
+                            f"{_fiil}{_lot_s}{_now_s}. {_yorum}")
+                    if _old_ai is not None and abs(float(_old_ai) - float(ai_score)) >= 0.1:
+                        logger.info(
+                            "Pay alım-satım OTORİTER skor (%s): AI %.1f -> %.1f "
+                            "(yapısal yön=%s, oran=%s)",
+                            ticker, float(_old_ai), float(ai_score),
+                            "alım" if _alim else "satım", _pf(_abs),
+                        )
+                elif ai_score is None:
+                    # Yapısal veri YOK + AI da skorlamadı → Nötr fallback
                     ai_score = 5.0
-                    ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
+                    ai_summary = ai_summary or (
+                        f"{_party}, {ticker} paylarında alım-satım işlemi gerçekleştirdi. "
+                        "İşlem ölçeği netleşmediğinden fiyata doğrudan etki beklenmez.")
+                # else: yön belirsiz ama AI skor verdi → AI korunur (dokunma)
+            elif ai_score is None:
+                # Pay alım-satım DEĞİL ve AI skorlamadı → garanti Nötr (bare kart önlenir)
+                ai_score = 5.0
+                ai_summary = ai_summary or f"{(news_title or '').strip()} — bildirim. Fiyata doğrudan etki beklenmemektedir."
 
                 # AILE ICI DEVIR yumusatmasi: paylar piyasaya satilmiyor, gercek
                 # arz baskisi yok → satis yonlu skor en fazla hafif-temkinli (4.2)
