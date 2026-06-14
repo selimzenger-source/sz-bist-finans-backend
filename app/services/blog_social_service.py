@@ -105,18 +105,107 @@ BAŞLIK: {title}
 """
 
 
-def generate_blog_thread(title: str, content_text: str, slug: str | None = None) -> list[str]:
-    """Gemini ile blog'u 4-5 tweet thread'ine çevirir. Hata olursa paragraf-bölme fallback."""
-    tickers = _find_tickers(f"{title}\n{content_text}")
-    tag_line = " ".join(f"#{t}" for t in tickers)
-    hashtags = (tag_line + " " + _GENEL_HASHTAGS).strip()
+def _anthropic_key() -> str | None:
+    try:
+        from app.config import get_settings
+        return getattr(get_settings(), "ANTHROPIC_API_KEY", "") or None
+    except Exception:
+        return None
 
+
+def _finalize_thread(tweets: list[str], hashtags: str) -> list[str]:
+    """Son tweette hashtag + yatırım uyarısı garanti et."""
+    tweets = [str(t).strip() for t in tweets if str(t).strip()][:_MAX_TWEETS]
+    if not tweets:
+        return tweets
+    if "#" not in tweets[-1]:
+        tweets[-1] = tweets[-1].rstrip() + "\n\n" + hashtags
+    if "tavsiye" not in tweets[-1].lower():
+        tweets[-1] = tweets[-1].rstrip() + "\n\n⚠️ Yatırım tavsiyesi değildir."
+    return tweets
+
+
+def _parse_thread_json(txt: str) -> list[str]:
+    txt = re.sub(r"^```(?:json)?\s*|\s*```$", "", (txt or "").strip()).strip()
+    i, j = txt.find("["), txt.rfind("]")
+    if i < 0 or j < 0:
+        return []
+    arr = json.loads(txt[i:j + 1])
+    return [str(t).strip() for t in arr if str(t).strip()]
+
+
+def _thread_naive_fallback(title: str, content_text: str, hashtags: str) -> list[str]:
+    """Cümle-GÜVENLİ kaba fallback — kelime/cümle ORTASINDAN ASLA kesmez.
+
+    Cümlelere ayırır, ~260 karaktere kadar gruplar; her grup içindeki cümleleri
+    alt alta + boş satırla dizer (şık görünüm). İlk tweet 🧵 girişli.
+    """
+    sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', content_text) if len(s.strip()) > 15]
+    bodies: list[list[str]] = []
+    cur: list[str] = []
+    cur_len = 0
+    for s in sentences:
+        if len(s) > 270:  # tek cümle çok uzunsa kelime sınırında kırp (orta-kelime DEĞİL)
+            s = s[:270].rsplit(" ", 1)[0] + "…"
+        if cur_len + len(s) > 250 and cur:
+            bodies.append(cur); cur = []; cur_len = 0
+        cur.append(s); cur_len += len(s) + 2
+        if len(bodies) >= _MAX_TWEETS - 1:
+            break
+    if cur and len(bodies) < _MAX_TWEETS - 1:
+        bodies.append(cur)
+    tweets = [f"🧵 {title}\n\nDetaylar aşağıda 👇"]
+    for grp in bodies[:_MAX_TWEETS - 2]:
+        tweets.append("\n\n".join(grp))   # cümleler alt alta + boş satır
+    tweets.append(f"📲 Detaylı rehber: borsacebimde.com\n\n{hashtags}")
+    return tweets[:_MAX_TWEETS]
+
+
+def generate_blog_thread(title: str, content_text: str, slug: str | None = None) -> list[str]:
+    """Blog'u 4-5 tweet'lik AKICI thread'e çevirir.
+
+    Sıra: Claude Sonnet (birincil, en kaliteli) → Gemini → cümle-güvenli fallback.
+    Format: her tweette cümleler alt alta + boş satır, emoji, max 2 genel hashtag.
+    """
+    tickers = _find_tickers(f"{title}\n{content_text}")
+    tag_line = " ".join(f"#{t}" for t in tickers[:1])  # en fazla 1 ticker hashtag
+    hashtags = (tag_line + " " + _GENEL_HASHTAGS).strip()
+    prompt = _THREAD_PROMPT.format(
+        n="4-5", title=title, content=content_text[:6000], hashtags=hashtags,
+    )
+
+    # 1) Claude Sonnet — Ayın Halka Arzı ile aynı kalite
+    akey = _anthropic_key()
+    if akey:
+        try:
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": akey, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                json={
+                    "model": "claude-sonnet-4-6",
+                    "max_tokens": 4000,
+                    "system": "Sadece geçerli JSON dizi döndür, başka hiçbir şey yazma.",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.5,
+                },
+                timeout=90.0,
+            )
+            if resp.status_code == 200:
+                blocks = resp.json().get("content", [])
+                txt = next((b.get("text", "") for b in blocks if b.get("type") == "text"), "")
+                tweets = _parse_thread_json(txt)
+                if len(tweets) >= 2:
+                    logger.info("Blog thread: Claude Sonnet (%d tweet)", len(tweets))
+                    return _finalize_thread(tweets, hashtags)
+            else:
+                logger.warning("Blog thread Claude HTTP %d", resp.status_code)
+        except Exception as e:
+            logger.warning("Blog thread Claude hata: %s", e)
+
+    # 2) Gemini fallback
     key = _gemini_key()
     if key:
         try:
-            prompt = _THREAD_PROMPT.format(
-                n="4-5", title=title, content=content_text[:6000], hashtags=hashtags,
-            )
             resp = httpx.post(
                 _GEMINI_URL,
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -131,27 +220,16 @@ def generate_blog_thread(title: str, content_text: str, slug: str | None = None)
                 timeout=90.0,
             )
             if resp.status_code == 200:
-                txt = resp.json()["choices"][0]["message"]["content"].strip()
-                txt = re.sub(r"^```(?:json)?\s*|\s*```$", "", txt).strip()
-                arr = json.loads(txt[txt.find("["): txt.rfind("]") + 1])
-                tweets = [str(t).strip() for t in arr if str(t).strip()][:_MAX_TWEETS]
+                tweets = _parse_thread_json(resp.json()["choices"][0]["message"]["content"])
                 if len(tweets) >= 2:
-                    # Son tweette hashtag/uyarı yoksa ekle (garanti)
-                    if "#" not in tweets[-1]:
-                        tweets[-1] = tweets[-1].rstrip() + "\n\n" + hashtags
-                    if "tavsiye" not in tweets[-1].lower():
-                        tweets[-1] = tweets[-1].rstrip() + "\n⚠️ Yatırım tavsiyesi değildir."
-                    return tweets
+                    logger.info("Blog thread: Gemini (%d tweet)", len(tweets))
+                    return _finalize_thread(tweets, hashtags)
         except Exception as e:
             logger.warning("Blog thread Gemini hata: %s", e)
 
-    # Fallback — paragrafları böl
-    paras = [p.strip() for p in content_text.split("\n\n") if len(p.strip()) > 40]
-    tweets = [f"🧵 {title}"]
-    for p in paras[:3]:
-        tweets.append(p[:420])
-    tweets.append(f"Detaylı rehber: borsacebimde.com\n\n{hashtags}\n⚠️ Yatırım tavsiyesi değildir.")
-    return tweets[:_MAX_TWEETS]
+    # 3) Cümle-güvenli fallback (kelime ortasından KESMEZ)
+    logger.warning("Blog thread: AI başarısız, cümle-güvenli fallback")
+    return _finalize_thread(_thread_naive_fallback(title, content_text, hashtags), hashtags)
 
 
 def generate_blog_card(title: str, category: str | None = None) -> str | None:

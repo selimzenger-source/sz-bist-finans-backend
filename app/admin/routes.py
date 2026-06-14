@@ -4584,16 +4584,11 @@ async def _post_publish_actions(blog, logger_):
     except Exception as e:
         logger_.warning(f"Blog bildirim gonderilemedi: {e}")
 
-    # ── X (Twitter) THREAD — blog yayinlaninca otomatik (40sn arali, gorselli) ──
-    try:
-        import asyncio as _aio
-        from app.services.blog_social_service import post_blog_to_twitter
-        _aio.create_task(post_blog_to_twitter(
-            blog.title, blog.content, blog.slug, getattr(blog, "category", None),
-        ))
-        logger_.info(f"Blog X thread gorevi baslat: {blog.title}")
-    except Exception as e:
-        logger_.warning(f"Blog X thread baslatilamadi: {e}")
+    # ── X (Twitter) THREAD — ARTIK YAYINDA OTOMATİK ATMAZ (14.06.2026) ──
+    # Eskiden yayınlanınca thread DİREKT atılıyordu (taslak/onay yok) ve kötü
+    # çıktıda kullanıcı müdahale edemiyordu. Artık tweet atmak SADECE blog
+    # listesindeki manuel 'X Thread' butonundan → TASLAK kuyruğa eklenir, admin
+    # inceleyip 'Gönder'e basınca atılır. (Otomatik direkt-paylaşım kaldırıldı.)
 
     import os
     deploy_hook = os.getenv("RENDER_WEB_DEPLOY_HOOK", "")
@@ -4871,32 +4866,67 @@ async def tweet_blog_thread(
     blog_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    """Blog'u X (Twitter) THREAD olarak MANUEL paylaş — yayından bağımsız.
+    """Blog'u X THREAD TASLAĞI olarak kuyruğa ekle (Ayın Halka Arzı gibi).
 
-    blog_social_service: içeriği 4-5 tweet'lik akıcı thread'e çevirir (cümleler
-    alt alta + boş satır, emoji, max 2 hashtag), 1. tweete kapak görseli ekler,
-    40 sn aralıkla atar. Yayınlanmış olması GEREKMEZ (taslak da paylaşılabilir).
+    DİREKT ATMAZ — thread + kapak üretip 'Bekleyen Tweetler'e TASLAK koyar; admin
+    inceleyip 'Gönder'e basınca atılır. Thread: 4-5 tweet, cümleler alt alta +
+    boş satır, emoji, max 2 hashtag, 1. tweete kapak görseli.
     """
     if not get_current_admin(request):
         return RedirectResponse(url="/admin/login", status_code=303)
 
+    import asyncio as _aio
+    import json as _json
     from app.models.blog_post import BlogPost
+    from app.models.pending_tweet import PendingTweet
+
     blog = (await db.execute(select(BlogPost).where(BlogPost.id == blog_id))).scalar_one_or_none()
     if not blog:
         return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
 
     try:
-        from app.services.blog_social_service import post_blog_to_twitter
-        _fire_and_forget(post_blog_to_twitter(
-            blog.title, blog.content, blog.slug, getattr(blog, "category", None),
-        ))
-        logger.info(f"Blog X thread MANUEL tetiklendi: {blog.title} (id={blog.id})")
-    except Exception as e:
-        logger.warning(f"Blog X thread manuel tetikleme hatasi: {e}")
-        return RedirectResponse(url="/admin/blog?error=Thread+baslatilamadi", status_code=303)
+        from app.services.blog_social_service import (
+            generate_blog_thread, generate_blog_card, _html_to_text,
+        )
+        # Sync fonksiyonlar (httpx/PIL) — event loop'u bloklamamak için thread'de
+        content_text = _html_to_text(blog.content)
+        tweets = await _aio.to_thread(generate_blog_thread, blog.title, content_text, blog.slug)
+        if not tweets or len(tweets) < 2:
+            return RedirectResponse(url="/admin/blog?error=Thread+uretilemedi,+tekrar+deneyin", status_code=303)
 
+        # Kapak görseli — /tmp deploy'da silinir, kalıcı static/tmp'e kopyala
+        cover_path = None
+        try:
+            _raw = await _aio.to_thread(generate_blog_card, blog.title, getattr(blog, "category", None))
+            if _raw:
+                import os as _os, shutil as _shutil, tempfile as _tf
+                if _raw.startswith(_tf.gettempdir()):
+                    _pdir = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "static", "tmp")
+                    _os.makedirs(_pdir, exist_ok=True)
+                    cover_path = _os.path.join(_pdir, _os.path.basename(_raw))
+                    _shutil.copy2(_raw, cover_path)
+                else:
+                    cover_path = _raw
+        except Exception as _ce:
+            logger.warning(f"Blog kapak gorseli uretilemedi: {_ce}")
+
+        pending = PendingTweet(
+            text=tweets[0],
+            source="tweet_blog_thread",
+            status="pending",
+            thread_data=_json.dumps(tweets, ensure_ascii=False),
+            image_path=cover_path,
+        )
+        db.add(pending)
+        await db.commit()
+        logger.info(f"Blog X thread TASLAK kuyruga eklendi: {blog.title} (id={pending.id}, {len(tweets)} tweet)")
+    except Exception as e:
+        logger.warning(f"Blog X thread taslak hatasi: {e}", exc_info=True)
+        return RedirectResponse(url="/admin/blog?error=Thread+taslagi+olusturulamadi", status_code=303)
+
+    from urllib.parse import quote as _q
     return RedirectResponse(
-        url="/admin/blog?success=X+thread+baslatildi+(kapak+gorseli+%2B+4-5+tweet,+40sn+arali).+Telegram%27a+rapor+dusecek.",
+        url=f"/admin/tweets?trigger_ok=1&trigger_msg={_q(f'Blog X thread TASLAGI hazir ({len(tweets)} tweet + kapak). Incele ve Gonder butonuna bas.')}",
         status_code=303,
     )
 
