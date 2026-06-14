@@ -183,6 +183,12 @@
                         <option value="temel_analiz">Temel Analiz</option>
                     </select>
                 </div>
+                <div>
+                    <label class="block text-sm text-gray-300 mb-1.5">Özel İstek / Talimat <span class="text-gray-500">(opsiyonel)</span></label>
+                    <textarea name="custom_instruction" rows="3" placeholder="ornek: Yazinin sonunda sunu belirt: Midas'ta Borsa Cebimde'ye ozel 10.001 komisyonla hesap acabilirsiniz. Veya: belirli bir acidan ele al, X'e degin vb."
+                              class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition"></textarea>
+                    <p class="text-xs text-gray-500 mt-1">Buraya yazdigin sey aynen uygulanir (orn. sonda bir cagri/link). AI ayrica konu hakkinda guncel web aramasi yapar.</p>
+                </div>
             </div>
             <div class="px-6 py-4 border-t border-gray-700 flex items-center justify-end gap-3">
                 <button type="button" onclick="document.getElementById('generateModal').classList.add('hidden')"

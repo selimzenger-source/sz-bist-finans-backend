@@ -4518,6 +4518,7 @@ async def generate_blog(
     form = await request.form()
     topic = form.get("topic", "").strip() or None
     category = form.get("category", "borsa_rehberi")
+    custom_instruction = (form.get("custom_instruction") or "").strip() or None
 
     # Mevcut basliklari al (tekrar onleme)
     result = await db.execute(select(BlogPost.title))
@@ -4529,6 +4530,7 @@ async def generate_blog(
             topic=topic,
             category=category,
             existing_titles=existing_titles,
+            custom_instruction=custom_instruction,
         )
     except Exception as e:
         logger.error(f"Blog uretim hatasi: {e}")

@@ -179,12 +179,62 @@ def _slugify(text: str) -> str:
     return text[:200]
 
 
+async def _fetch_tavily_for_topic(topic: str) -> str:
+    """Blog konusu için Tavily ile GÜNCEL web bilgisi toplar (best-effort).
+
+    Blog üreteci eskiden sadece modelin eğitim bilgisini kullanıyordu (güncellik
+    yitebiliyordu). Artık konu hakkında canlı web araması yapılıp bağlam olarak
+    modele verilir → eski/yanlış bilgi riski düşer. Tavily yoksa/hata olursa boş döner.
+    """
+    try:
+        settings = get_settings()
+        key = getattr(settings, "TAVILY_API_KEY", None) or ""
+        if not key or not topic:
+            return ""
+        from datetime import datetime as _dt
+        yr = _dt.now().year
+        async with httpx.AsyncClient(timeout=18) as client:
+            resp = await client.post(
+                "https://api.tavily.com/search",
+                json={
+                    "api_key": key,
+                    "query": f"{topic} {yr} güncel Borsa İstanbul BIST",
+                    "search_depth": "advanced",   # en kapsamlı arama
+                    "max_results": 6,
+                    "include_answer": True,
+                },
+            )
+        if resp.status_code != 200:
+            logger.warning("Blog Tavily HTTP %d", resp.status_code)
+            return ""
+        data = resp.json()
+        parts = []
+        ans = (data.get("answer") or "").strip()
+        if ans:
+            parts.append(f"Özet: {ans}")
+        for r in data.get("results", [])[:6]:
+            c = (r.get("content") or "")[:300]
+            if c:
+                parts.append(f"- {r.get('title','')}: {c}")
+        out = "\n".join(parts)[:2500]
+        logger.info("Blog Tavily araması: %d sonuç", len(data.get("results", [])))
+        return out
+    except Exception as e:
+        logger.warning("Blog Tavily arama hatası: %s", e)
+        return ""
+
+
 async def generate_blog_post(
     topic: str | None = None,
     category: str | None = None,
     existing_titles: list[str] | None = None,
+    custom_instruction: str | None = None,
+    use_web_search: bool = True,
 ) -> dict | None:
     """AI ile blog yazisi uretir.
+
+    custom_instruction: admin'in özel isteği (örn. sonda bir CTA/link belirtme).
+    use_web_search: True ise Tavily ile güncel web bilgisi toplanır (varsayılan).
 
     Returns:
         {"title": str, "content": str, "meta_description": str, "slug": str, "category": str}
@@ -208,7 +258,29 @@ async def generate_blog_post(
     if existing_titles:
         existing_info = f"\n\nDaha önce yazılmış başlıklar (TEKRARLAMA):\n" + "\n".join(f"- {t}" for t in existing_titles[:30])
 
-    user_prompt = f"Konu: {topic}\nKategori: {CATEGORY_LABELS.get(category, category)}{existing_info}\n\nBu konu hakkında detaylı ve eğitici bir blog yazısı yaz. JSON formatında döndür."
+    # ── GÜNCEL WEB BİLGİSİ (Tavily) — eski bilgi vermesin ──
+    web_block = ""
+    if use_web_search:
+        _web = await _fetch_tavily_for_topic(topic)
+        if _web:
+            from datetime import datetime as _dt2
+            web_block = (
+                f"\n\nGÜNCEL WEB BİLGİSİ ({_dt2.now().year} — bu güncel verileri ESAS al, "
+                f"eski/güncelliğini yitirmiş bilgi VERME, tarih/rakam güncel olsun):\n{_web}"
+            )
+
+    # ── ÖZEL TALİMAT (admin'in istediği — örn. final CTA/link) ──
+    custom_block = ""
+    if custom_instruction and custom_instruction.strip():
+        custom_block = (
+            f"\n\n⚠️ ÖZEL TALİMAT (MUTLAKA UYGULA — genel 'promosyon yapma' kuralının ÜSTÜNDEDİR): "
+            f"{custom_instruction.strip()}\n"
+            "Bu talimatı yazının uygun yerinde, özellikle SONDA (Yatırım Uyarısı paragrafından "
+            "hemen önce) doğal ve akıcı bir paragrafla uygula. Bir çağrı/link/öneri içeriyorsa "
+            "onu AYNEN ve eksiksiz dahil et."
+        )
+
+    user_prompt = f"Konu: {topic}\nKategori: {CATEGORY_LABELS.get(category, category)}{existing_info}{web_block}{custom_block}\n\nBu konu hakkında detaylı ve eğitici bir blog yazısı yaz. JSON formatında döndür."
 
     # Gemini API dene
     result = await _call_ai(settings, user_prompt)
