@@ -169,8 +169,17 @@
         <div class="px-4 py-3 flex gap-3">
             <div class="flex-1">
                 {% if tweet.thread_data %}
-                {# Thread önizleme: her tweeti numaralı göster #}
                 {% set thread_list = tweet.thread_data | fromjson if tweet.thread_data else [] %}
+                {% if tweet.status == 'pending' %}
+                {# DÜZENLENEBİLİR thread — ilave bilgi / yeni tweet eklenebilir #}
+                <form method="post" action="/admin/tweets/{{ tweet.id }}/edit-thread">
+                    <div class="text-xs text-gray-400 mb-1">🧵 {{ thread_list|length }} tweet — düzenle / ilave bilgi ekle. Tweetleri <code class="text-purple-300 bg-gray-900 px-1 rounded">~~~</code> satırı ayırır (yeni tweet için araya ~~~ koy).</div>
+                    <textarea name="thread_text" rows="22"
+                              class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 font-sans leading-relaxed focus:outline-none focus:border-purple-500">{{ thread_list | join('\n\n~~~\n\n') }}</textarea>
+                    <button type="submit" class="mt-1 bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded transition">💾 Düzenlemeyi Kaydet</button>
+                    <span class="text-xs text-gray-500 ml-2">{{ thread_list|length }} tweet · ~~~ ile ayrılan her blok bir tweet</span>
+                </form>
+                {% else %}
                 {% for t in thread_list %}
                 <div class="mb-2 pb-2 {{ 'border-b border-gray-700' if not loop.last else '' }}">
                     <span class="text-xs font-bold text-purple-400">🧵 {{ loop.index }}/{{ thread_list|length }}</span>
@@ -178,7 +187,15 @@
                     <span class="text-xs text-gray-500">{{ t|length }} kar</span>
                 </div>
                 {% endfor %}
-                <span class="text-xs text-purple-400">Toplam: {{ thread_list|length }} tweet, ~{{ thread_list|length * 4 }}s aralıkla gönderilecek</span>
+                {% endif %}
+                {% elif tweet.status == 'pending' %}
+                {# DÜZENLENEBİLİR tek tweet #}
+                <form method="post" action="/admin/tweets/{{ tweet.id }}/edit-thread">
+                    <textarea name="thread_text" rows="6"
+                              class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-gray-100 font-sans leading-relaxed focus:outline-none focus:border-purple-500">{{ tweet.text }}</textarea>
+                    <button type="submit" class="mt-1 bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1.5 rounded transition">💾 Kaydet</button>
+                    <span class="text-xs text-gray-500 ml-2">Thread'e çevirmek için ~~~ satırıyla böl</span>
+                </form>
                 {% else %}
                 <pre class="whitespace-pre-wrap text-sm text-gray-200 font-sans leading-relaxed">{{ tweet.text }}</pre>
                 <span class="text-xs text-gray-500">{{ tweet.text|length }} karakter</span>

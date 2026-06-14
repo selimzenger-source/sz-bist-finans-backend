@@ -2030,6 +2030,49 @@ async def reject_tweet(
     return RedirectResponse(url="/admin/tweets", status_code=303)
 
 
+@router.post("/tweets/{tweet_id}/edit-thread")
+async def edit_tweet_thread(
+    request: Request,
+    tweet_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Bekleyen thread/tweet metnini DÜZENLE (gönderim öncesi ilave bilgi ekleme).
+
+    Form 'thread_text': tweetler kendi satırında '~~~' (veya '---') ile ayrılır.
+    Yeni tweet eklemek için araya bir ~~~ satırı koy. İlk tweet ana metin olur.
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    import re as _re, json as _json
+    from urllib.parse import quote as _q
+    from app.models.pending_tweet import PendingTweet
+
+    form = await request.form()
+    raw = (form.get("thread_text") or "").strip()
+    tweet = (await db.execute(select(PendingTweet).where(PendingTweet.id == tweet_id))).scalar_one_or_none()
+    if not tweet or tweet.status != "pending":
+        return RedirectResponse(url="/admin/tweets", status_code=303)
+
+    # Tweetleri ayır: kendi satırında 3+ tilde/tire
+    parts = _re.split(r'\n\s*[-~]{3,}\s*\n', raw)
+    tweets = [p.strip() for p in parts if p.strip()]
+    if not tweets:
+        return RedirectResponse(url="/admin/tweets?error=Bos+icerik", status_code=303)
+
+    if len(tweets) >= 2:
+        tweet.thread_data = _json.dumps(tweets, ensure_ascii=False)
+        tweet.text = tweets[0]
+    else:
+        # Tek parçaya indiyse artık thread değil — düz tweet yap
+        tweet.thread_data = None
+        tweet.text = tweets[0]
+    await db.commit()
+
+    _msg = _q(f"Güncellendi ({len(tweets)} tweet). İncele ve Gönder.")
+    return RedirectResponse(url=f"/admin/tweets?trigger_ok=1&trigger_msg={_msg}", status_code=303)
+
+
 @router.post("/spk/set-last-bulletin")
 async def set_last_bulletin_no(request: Request):
     """SPK last_bulletin_no'yu manuel set et. Body: {"bulletin_no": "2026/18"}"""
