@@ -130,6 +130,12 @@
                                     Bildirim
                                 </button>
                             </form>
+                            <form method="POST" action="/admin/blog/{{ blog.id }}/tweet-thread" class="inline"
+                                  onsubmit="return confirm('Bu blogu X (Twitter) THREAD olarak paylas? Kapak gorseli + 4-5 tweet, 40sn arali.')">
+                                <button type="submit" class="px-3 py-1 rounded text-xs font-medium bg-sky-600/20 text-sky-400 hover:bg-sky-600/40 transition" title="X thread olarak paylas">
+                                    X Thread
+                                </button>
+                            </form>
                             <form method="POST" action="/admin/blog/{{ blog.id }}/delete" class="inline"
                                   onsubmit="return confirm('Bu blog yazisini silmek istediginizden emin misiniz?')">
                                 <button type="submit" class="px-3 py-1 rounded text-xs font-medium bg-red-600/20 text-red-400 hover:bg-red-600/40 transition" title="Sil">

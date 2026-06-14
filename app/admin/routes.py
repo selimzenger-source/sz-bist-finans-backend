@@ -4865,6 +4865,42 @@ async def resend_blog_notification(
     )
 
 
+@router.post("/blog/{blog_id}/tweet-thread")
+async def tweet_blog_thread(
+    request: Request,
+    blog_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Blog'u X (Twitter) THREAD olarak MANUEL paylaş — yayından bağımsız.
+
+    blog_social_service: içeriği 4-5 tweet'lik akıcı thread'e çevirir (cümleler
+    alt alta + boş satır, emoji, max 2 hashtag), 1. tweete kapak görseli ekler,
+    40 sn aralıkla atar. Yayınlanmış olması GEREKMEZ (taslak da paylaşılabilir).
+    """
+    if not get_current_admin(request):
+        return RedirectResponse(url="/admin/login", status_code=303)
+
+    from app.models.blog_post import BlogPost
+    blog = (await db.execute(select(BlogPost).where(BlogPost.id == blog_id))).scalar_one_or_none()
+    if not blog:
+        return RedirectResponse(url="/admin/blog?error=Blog+bulunamadi", status_code=303)
+
+    try:
+        from app.services.blog_social_service import post_blog_to_twitter
+        _fire_and_forget(post_blog_to_twitter(
+            blog.title, blog.content, blog.slug, getattr(blog, "category", None),
+        ))
+        logger.info(f"Blog X thread MANUEL tetiklendi: {blog.title} (id={blog.id})")
+    except Exception as e:
+        logger.warning(f"Blog X thread manuel tetikleme hatasi: {e}")
+        return RedirectResponse(url="/admin/blog?error=Thread+baslatilamadi", status_code=303)
+
+    return RedirectResponse(
+        url="/admin/blog?success=X+thread+baslatildi+(kapak+gorseli+%2B+4-5+tweet,+40sn+arali).+Telegram%27a+rapor+dusecek.",
+        status_code=303,
+    )
+
+
 @router.post("/blog/{blog_id}/delete")
 async def delete_blog(
     request: Request,
