@@ -282,70 +282,21 @@ async def generate_blog_post(
 
     user_prompt = f"Konu: {topic}\nKategori: {CATEGORY_LABELS.get(category, category)}{existing_info}{web_block}{custom_block}\n\nBu konu hakkında detaylı ve eğitici bir blog yazısı yaz. JSON formatında döndür."
 
-    # Gemini API dene
+    # AI çağır + parse et. Parse başarısızsa (Claude çıktısı bozuk/kesik JSON
+    # olabilir) GEMINI ile yeniden dene — kullanıcı: "üretemedi" hatası bu yüzden.
     result = await _call_ai(settings, user_prompt)
-    if not result:
-        return None
-
-    # JSON parse — Claude bazen ```json ... ``` sarmaliyla donuyor, temizle
-    cleaned = result.strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
-        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
-
-    title = ""
-    content = ""
-    meta_desc = ""
-
-    # Once standart JSON parse dene
-    try:
-        json_match = re.search(r'\{[\s\S]*\}', cleaned)
-        if json_match:
-            data = json.loads(json_match.group())
-            title = data.get("title", "").strip()
-            content = data.get("content", "").strip()
-            meta_desc = data.get("meta_description", "").strip()
-    except json.JSONDecodeError as e:
-        logger.warning(
-            f"Blog generation JSON parse basarisiz (HTML icinde escape edilmemis tirnak "
-            f"olabilir): {e}. Regex fallback deneniyor."
-        )
-
-    # JSON parse basarisiz veya eksikse regex ile tek tek cikar
-    # (Claude HTML'de \" kacmiyorsa bu kurtaricidir)
-    if not title or not content:
-        # title: "..."
-        t_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
-        if t_match:
-            title = t_match.group(1).replace('\\"', '"').replace("\\n", "\n").strip()
-
-        # meta_description: "..."
-        m_match = re.search(r'"meta_description"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
-        if m_match:
-            meta_desc = m_match.group(1).replace('\\"', '"').strip()
-
-        # content: "..." — HTML icinde tirnak olabilir, daha dikkatli regex
-        # "content": " ile basla, sonraki "meta_description" ya da } kadar al.
-        c_match = re.search(
-            r'"content"\s*:\s*"(.*?)"\s*,\s*"meta_description"',
-            cleaned,
-            re.DOTALL,
-        )
-        if not c_match:
-            # meta_description onceden geliyorsa veya yoksa: content ... " } ile bitis
-            c_match = re.search(
-                r'"content"\s*:\s*"(.*?)"\s*\}',
-                cleaned,
-                re.DOTALL,
-            )
-        if c_match:
-            content = c_match.group(1).replace('\\n', '\n').strip()
+    title, content, meta_desc = _extract_blog_fields(result)
 
     if not title or not content:
-        tail = result[-400:] if len(result) > 400 else result
+        logger.warning("Blog ilk denemede parse edilemedi (provider=birincil) — Gemini ile yeniden deneniyor")
+        result = await _call_ai(settings, user_prompt, skip_claude=True)
+        title, content, meta_desc = _extract_blog_fields(result)
+
+    if not title or not content:
+        tail = (result or "")[-400:]
         logger.error(
-            f"Blog generation: Title/content cikarilamadi. "
-            f"Response length: {len(result)}. Last 400 chars: {tail}"
+            f"Blog generation: Title/content cikarilamadi (2 deneme). "
+            f"Response length: {len(result or '')}. Last 400 chars: {tail}"
         )
         return None
 
@@ -367,12 +318,52 @@ async def generate_blog_post(
     }
 
 
-async def _call_ai(settings, user_prompt: str) -> str | None:
-    """AI API'yi cagir — Claude Haiku birincil, Gemini fallback."""
+def _extract_blog_fields(result: str | None) -> tuple[str, str, str]:
+    """AI yanıtından (title, content, meta_description) çıkarır.
+
+    Önce standart JSON parse; başarısızsa (HTML içinde escape edilmemiş tırnak)
+    regex fallback. Çıkaramazsa ('', '', '') döner — çağıran başka provider dener.
+    """
+    if not result:
+        return "", "", ""
+    cleaned = result.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", cleaned)
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    title = content = meta_desc = ""
+    try:
+        json_match = re.search(r'\{[\s\S]*\}', cleaned)
+        if json_match:
+            data = json.loads(json_match.group())
+            title = (data.get("title") or "").strip()
+            content = (data.get("content") or "").strip()
+            meta_desc = (data.get("meta_description") or "").strip()
+    except json.JSONDecodeError:
+        pass
+    if not title or not content:
+        t_match = re.search(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+        if t_match:
+            title = t_match.group(1).replace('\\"', '"').replace("\\n", "\n").strip()
+        m_match = re.search(r'"meta_description"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+        if m_match:
+            meta_desc = m_match.group(1).replace('\\"', '"').strip()
+        c_match = re.search(r'"content"\s*:\s*"(.*?)"\s*,\s*"meta_description"', cleaned, re.DOTALL)
+        if not c_match:
+            c_match = re.search(r'"content"\s*:\s*"(.*?)"\s*\}', cleaned, re.DOTALL)
+        if c_match:
+            content = c_match.group(1).replace('\\n', '\n').strip()
+    return title, content, meta_desc
+
+
+async def _call_ai(settings, user_prompt: str, skip_claude: bool = False) -> str | None:
+    """AI API'yi cagir — Claude Haiku birincil, Gemini fallback.
+
+    skip_claude=True ise doğrudan Gemini denenir (Claude çıktısı bozuksa retry için).
+    """
 
     # Claude Haiku (birincil — hızlı ve güvenilir)
     anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", "")
-    if anthropic_key:
+    if anthropic_key and not skip_claude:
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 resp = await client.post(
@@ -384,7 +375,7 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
                     },
                     json={
                         "model": "claude-haiku-4-5-20251001",
-                        "max_tokens": 8000,
+                        "max_tokens": 16000,
                         "system": _SYSTEM_PROMPT,
                         "messages": [
                             {"role": "user", "content": user_prompt},
@@ -428,7 +419,7 @@ async def _call_ai(settings, user_prompt: str) -> str | None:
                             {"role": "system", "content": _SYSTEM_PROMPT},
                             {"role": "user", "content": user_prompt},
                         ],
-                        "max_tokens": 8000,
+                        "max_tokens": 16000,
                         "temperature": 0.4,
                     },
                 )
