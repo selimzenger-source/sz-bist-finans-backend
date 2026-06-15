@@ -4225,6 +4225,35 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
             )
             return 4.2
 
+    # ─── 🛑 SON EMNİYET (İDARİ/NÖTR BEYAN) — AKSGY vakası 15.06.2026 ───
+    # AI özetinin KENDİSİ haberi "idari/bilgilendirme amaçlı, performansı
+    # DOĞRUDAN ETKİLEMEYEN" diye beyan ediyorsa skor POZİTİF (>=6) KALAMAZ.
+    # AKSGY: özet "operasyonel veya finansal performansını doğrudan etkilemeyen,
+    # tamamen idari ve bilgilendirme amaçlı bir duyurudur" derken 6.8 yayınlandı.
+    # Bu, kullanıcının defalarca bildirdiği "özet idari/nötr ama puan pozitif"
+    # çelişkisinin GENEL çözümü — fonksiyon sonunda mutlak kilit, kaçış yok.
+    if ai_summary and score >= 6.0:
+        _adm = ai_summary.lower().replace("̇", "")
+        for _a, _b in (("ğ", "g"), ("ı", "i"), ("ş", "s"), ("ç", "c"), ("ö", "o"), ("ü", "u")):
+            _adm = _adm.replace(_a, _b)  # ASCII'ye katla — Türkçe karakter eşleşmesi garanti
+        _admin_decl = any(p in _adm for p in (
+            "idari ve bilgilendirme", "idari ve rutin", "rutin ve idari",
+            "bilgilendirme amacli bir duyuru", "bilgilendirme amacli bir bildirim",
+            "tamamen idari", "tamamen rutin", "idari/rutin nitelik", "rutin/idari nitelik",
+            "dogrudan etkilemeyen", "dogrudan etki yaratmayan",
+            "dogrudan bir etkisi olmayan", "dogrudan bir etki beklenmey",
+            "performansini dogrudan etkilemey", "fiyatina dogrudan etkisi beklenmem",
+            "operasyonel veya finansal performansini",  # "...etkilemeyen" ile gelir
+        ))
+        if _admin_decl:
+            logger.info(
+                "AI News Scorer [SON-EMNIYET-IDARI] %s: %.1f -> 5.0 "
+                "(ozet 'idari/bilgilendirme amacli, dogrudan etkilemeyen' beyan ediyor "
+                "— pozitif skor yayinlanamaz)",
+                ticker, score,
+            )
+            return 5.0
+
     # ─── 🛑 SON EMNİYET (POZİTİF YÖN) — NÖTR KARARI MUTLAK (12.06.2026) ───
     # Rutin yönetim/atama haberi hangi lift/floor'dan geçmiş olursa olsun
     # 6.0+ ile fonksiyondan ÇIKAMAZ. Denetim bulgusu: erken-return atlandığında
