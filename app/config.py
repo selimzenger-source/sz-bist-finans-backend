@@ -78,6 +78,15 @@ class Settings(BaseSettings):
     # True yapilinca otomatik atilir (sistem oturunca)
     TWITTER_AUTO_SEND: bool = False
 
+    # ── Meta (Facebook Page + Instagram) Graph API — X thread onayinda capraz paylasim ──
+    # auto-video-pipeline/.env'den Render env'ine kopyalanir. Bossa platform atlanir.
+    FB_PAGE_ID: str = ""
+    FB_PAGE_ACCESS_TOKEN: str = ""
+    INSTAGRAM_ACCESS_TOKEN: str = ""
+    INSTAGRAM_BUSINESS_ACCOUNT_ID: str = ""
+    FB_APP_ID: str = ""          # token yenileme (opsiyonel)
+    FB_APP_SECRET: str = ""
+
     # Abacus AI (RouteLLM) — scraper veri dogrulama + haber puanlama
     ABACUS_API_KEY: str = ""
 

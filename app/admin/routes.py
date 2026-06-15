@@ -1982,8 +1982,22 @@ async def approve_tweet(
         if success:
             tweet.status = "sent"
             tweet.sent_at = datetime.now(timezone.utc)
-            # Basarili gonderim sonrasi temp gorsel dosyasini temizle
-            if tweet.image_path:
+            # ── ÇAPRAZ PAYLAŞIM (14.06.2026): thread + kapak görseli ise X'in yanı
+            # sıra Facebook'a TAM POST (parça parça değil) + Instagram'a resimli
+            # post da gider. Token yoksa servis sessizce atlar. Görseli cross_post
+            # kendi temizler (IG public URL'den okuduğu için önce silinmemeli).
+            _did_cross = False
+            if thread_tweets and tweet.image_path:
+                try:
+                    from app.services.meta_social_service import cross_post_thread
+                    _full_text = "\n\n".join(str(t) for t in thread_tweets)
+                    _fire_and_forget(cross_post_thread(_full_text, tweet.image_path))
+                    _did_cross = True
+                    logger.info(f"Çapraz paylaşım (FB+IG) başlatıldı: tweet {tweet.id}")
+                except Exception as _ce:
+                    logger.warning(f"Çapraz paylaşım başlatılamadı: {_ce}")
+            # Görseli temizle (çapraz paylaşım yoksa — varsa cross_post siler)
+            if tweet.image_path and not _did_cross:
                 try:
                     import os
                     if os.path.exists(tweet.image_path):
