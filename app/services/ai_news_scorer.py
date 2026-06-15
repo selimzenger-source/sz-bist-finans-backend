@@ -3173,6 +3173,46 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         )
         return 5.0
 
+    # ─── 💰 TEMETTÜ/KAR PAYI — DAĞITMAMA veya TUTAR-YOK → NÖTR (YIGIT 16.06.2026) ──
+    # "Kar Payı Dağıtım İşlemlerine İlişkin Bildirim" GENERİK başlıktır — dağıtım
+    # DA dağıtmama DA olabilir. YIGIT vakası: AI içeriği alamadan ("detaylarına/
+    # tutar-orana erişilemedi, verim hesabı yapılamamakta") generic başlıktan
+    # "ilk kez dağıtım = güçlü pozitif sinyal" HALÜSİNASYONU yapıp 7.8 verdi;
+    # şirket aslında DAĞITMAMA kararı açıklamıştı. İki durumda da NÖTR:
+    #   1) İçerik/özet açıkça DAĞITMAMA diyor
+    #   2) Temettü kararı ama tutar/oran YOK → verim hesaplanamaz, pozitiflik
+    #      tutara bağlı olduğundan VARSAYIMLA pozitif verilemez.
+    if score is not None and score > 5.0 and any(
+        k in content_lower or k in summary_lower
+        for k in ("kar payı", "kar payi", "kâr payı", "temettü", "temettu")
+    ):
+        _div_blob = (content_lower + " " + summary_lower)
+        for _a, _b in (("ğ", "g"), ("ı", "i"), ("ş", "s"), ("ç", "c"), ("ö", "o"), ("ü", "u")):
+            _div_blob = _div_blob.replace(_a, _b)
+        _non_dist = any(p in _div_blob for p in (
+            "dagitilmama", "dagitmama", "dagitilmayacak", "dagitilmamasi",
+            "dagitilmamasina", "dagitim yapilmama", "dagitmama karar",
+            "kar payi dagitilmay", "temettu dagitilmay", "kar dagitilmay",
+        ))
+        _no_amount = any(p in _div_blob for p in (
+            "erisilemedi", "verim hesabi yapilamamakta", "verim hesabi yapilamiyor",
+            "tutar ve oran acikla", "tutar/oran acikla", "miktar aciklanmad",
+            "kesin verim hesabi yapilam", "detay paylasilmam", "tutar belirtilmem",
+        ))
+        if _non_dist:
+            logger.info(
+                "AI News Scorer [TEMETTU-DAGITMAMA→NOTR] %s: %.1f -> 5.0 "
+                "(kar payı DAĞITMAMA kararı — pozitif olamaz)", ticker, score,
+            )
+            return 5.0
+        if _no_amount:
+            logger.info(
+                "AI News Scorer [TEMETTU-TUTAR-YOK→NOTR] %s: %.1f -> 5.0 "
+                "(tutar/oran yok, verim hesaplanamıyor — varsayımla pozitif verilemez)",
+                ticker, score,
+            )
+            return 5.0
+
     # ─── 🛑 B10 fix: KRİTİK NEGATİF TESPİTİ ÖNE ALINDI ──────────────
     # Eski konum fonksiyonun SONUNDAYDI; YENI-IS / KURUMSAL-ALIM floor'lari
     # erken `return` ile cap'i atliyordu (TTK 376/iflas/islem durdurma iceren
