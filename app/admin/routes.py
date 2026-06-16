@@ -5163,28 +5163,28 @@ async def news_pool(
     from datetime import timedelta as _td, timezone as _tz
 
     now_utc = datetime.now(_tz.utc)
-    cutoff = now_utc - _td(hours=12)
+    cutoff = now_utc - _td(hours=12)        # normal pozitif/negatif
+    cutoff_high = now_utc - _td(hours=48)   # YÜKSEK ETKİLİ haberler daha uzun kalır
+    _dt_col = sa_func.coalesce(KapAllDisclosure.published_at, KapAllDisclosure.created_at)
 
+    # ── KATMANLI PENCERE (16.06.2026): önemli haber geç de olsa tweetlenebilsin ──
+    # Normal pozitif (>=6) / negatif (<=4): son 12 saat.
+    # YÜKSEK ETKİLİ (>=7.5 / <=2.5): son 48 saat — ASELS 8.9 gibi kıymetli haber
+    # 12 saat geçince havuzdan düşüp tweetlenemiyordu (kullanıcı şikayeti).
     q = (
         select(KapAllDisclosure)
-        .where(
-            or_(
-                and_(KapAllDisclosure.published_at.isnot(None),
-                     KapAllDisclosure.published_at >= cutoff),
-                and_(KapAllDisclosure.published_at.is_(None),
-                     KapAllDisclosure.created_at >= cutoff),
-            )
-        )
         .where(KapAllDisclosure.ai_impact_score.isnot(None))
         .where(
             or_(
-                KapAllDisclosure.ai_impact_score >= 6.0,
-                KapAllDisclosure.ai_impact_score <= 4.0,
+                and_(_dt_col >= cutoff,
+                     or_(KapAllDisclosure.ai_impact_score >= 6.0,
+                         KapAllDisclosure.ai_impact_score <= 4.0)),
+                and_(_dt_col >= cutoff_high,
+                     or_(KapAllDisclosure.ai_impact_score >= 7.5,
+                         KapAllDisclosure.ai_impact_score <= 2.5)),
             )
         )
-        .order_by(
-            desc(sa_func.coalesce(KapAllDisclosure.published_at, KapAllDisclosure.created_at))
-        )
+        .order_by(desc(_dt_col))
         .limit(150)
     )
     result = await db.execute(q)

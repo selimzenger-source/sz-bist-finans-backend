@@ -1793,11 +1793,21 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
 
                         is_duplicate = False
                         if kap_url:
+                            # ★ ORPHAN FIX (ASELS 16.06.2026): zaman kısıtı eklendi.
+                            # "Yeni İş İlişkisi", "Özel Durum Açıklaması" gibi GENERİK
+                            # başlıklar tekrar eder; TV içeriği boş gelince kap_url
+                            # title-resolve ile 24 saat önceki AYNI BAŞLIKLI eski habere
+                            # bağlanıp is_duplicate=True oluyordu → yeni haber DB'ye
+                            # YAZILMIYOR ama push/tweet atılıp ORPHAN oluyordu. Artık
+                            # yalnız SON 6 SAAT içindeki kayıt duplicate sayılır.
+                            from datetime import timedelta as _td_dup
+                            _dup_cutoff = datetime.now(timezone.utc) - _td_dup(hours=6)
                             existing_check = await session.execute(
                                 _sa_select(KapAllDisclosure.id).where(
                                     KapAllDisclosure.kap_url == kap_url,
                                     KapAllDisclosure.company_code == _tk,
                                     KapAllDisclosure.title == ka_title,
+                                    KapAllDisclosure.created_at >= _dup_cutoff,
                                 ).limit(1)
                             )
                             is_duplicate = existing_check.scalar_one_or_none() is not None
@@ -2109,7 +2119,18 @@ async def poll_telegram_messages(bot_token: str, chat_id: str) -> int:
             if _pt_objs:
                 should_notify = (ai_score is None) or bool(_pos_tickers)
             else:
-                should_notify = (ai_score is None) or (ai_score is not None and ai_score >= 6)
+                # ★ ORPHAN FIX (ASELS 16.06.2026): _pt_objs BOŞ = bu döngüde HİÇBİR
+                # kap_disc YAZILMADI (duplicate atlandı veya yazım başarısız). Önceden
+                # burada ai_score>=6 ile push/tweet atılıyordu → DB'de OLMAYAN habere
+                # bildirim/tweet gidip ORPHAN oluyordu. Artık YAZILMAMIŞ habere bildirim
+                # atılmaz (gerçek duplicate zaten önceden bildirilmiştir).
+                should_notify = False
+                if ai_score is not None and ai_score >= 6:
+                    logger.warning(
+                        "[ORPHAN-ÖNLEME] %s skor=%.1f ama DB'ye YAZILMADI (_pt_objs boş) "
+                        "— push/tweet ATLANDI. Sebep: duplicate eşleşmesi veya yazım hatası.",
+                        ticker, ai_score,
+                    )
 
             if not should_notify:
                 logger.info(
