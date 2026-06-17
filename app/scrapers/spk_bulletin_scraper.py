@@ -1019,68 +1019,43 @@ async def _check_spk_bulletins_inner():
                     except Exception:
                         pass
 
-                if full_bulletin_text and not _analiz_already_tweeted:
-                    try:
-                        if new_ipos_this_bulletin:
-                            # IPO tweeti atıldıysa 3dk bekle (çakışma olmasın)
-                            logger.info("SPK bulten analiz: IPO tweeti atildi, 180sn (3dk) bekleniyor...")
-                            await asyncio.sleep(180)
-
-                        from app.services.twitter_service import tweet_spk_bulletin_analysis
-                        from app.services.admin_telegram import notify_tweet_sent as _notify_tw
-                        logger.info("SPK bulten analiz tweeti baslatiliyor: %s", bno_str_val)
-
-                        # ★ to_thread: tweet_spk_bulletin_analysis SENKRON ve AĞIR (AI
-                        # çağrısı 10-30sn + görsel + Twitter POST). Doğrudan await'siz
-                        # çağrılınca event loop'u 30sn+ bloklar → health check timeout →
-                        # instance restart → SONRAKİ push adımı kaybolur (kullanıcılara
-                        # bildirim gitmez). Thread'e taşı → loop serbest, push'a sıra gelir.
-                        _ba_result = await asyncio.to_thread(tweet_spk_bulletin_analysis, full_bulletin_text, bno_str_val)
-                        _ba_ok = bool(_ba_result)
-
-                        # Basarili tweet sonrasi FLAG kaydet — tekrar atilmasin
-                        if _ba_ok:
-                            try:
-                                from app.models.pending_tweet import PendingTweet
-                                _an_flag = PendingTweet(
-                                    source=_analiz_key,
-                                    status="sent",
-                                    text=f"SPK {bno_str_val} bulten analiz tweet flag",
-                                )
-                                db.add(_an_flag)
-                                await db.commit()
-                                logger.info("SPK analiz tweet flag kaydedildi: %s", _analiz_key)
-                            except Exception as _flag_err:
-                                logger.warning("SPK analiz tweet flag kaydedilemedi: %s", _flag_err)
-
-                        # AI text'ten konu basliklarini cikar (bildirim icin)
-                        if isinstance(_ba_result, str) and _ba_result:
-                            _topic_lines = []
-                            for _line in _ba_result.split("\n"):
-                                _stripped = _line.strip()
-                                if _stripped and any(_stripped.startswith(e) for e in ["🚀","💰","💵","📊","📈","⚖️","🏛","🔔","📋","🏢","🔍","⚠️","🎯","🚫"]):
-                                    _topic_lines.append(_stripped[:80])
-                            if _topic_lines:
-                                _bulletin_notif_summary = " | ".join(_topic_lines[:4])
-                            else:
-                                _meaningful = [l.strip() for l in _ba_result.split("\n") if l.strip() and len(l.strip()) > 15]
-                                _bulletin_notif_summary = _meaningful[0][:200] if _meaningful else ""
-
-                        await _notify_tw(
-                            "spk_bulten_analiz", f"Bülten {bno_str_val}", _ba_ok,
-                            f"AI analiz tweeti ({'basarili' if _ba_ok else 'basarisiz'})",
-                        )
-                        logger.info("SPK bulten analiz tweeti: %s, sonuc=%s", bno_str_val, _ba_ok)
-                    except Exception as _ba_err:
-                        logger.error("SPK bulten analiz tweet HATASI: %s", _ba_err, exc_info=True)
-
-                # ────────────────────────────────────────────
-                # Push Bildirim: Yeni SPK Bülteni (AI analizden sonra)
-                # 4. SAVUNMA KATMANI: Push icin de PendingTweet flag — daha once
-                # gonderildiyse atla. In-memory cooldown'a guvenmiyoruz (restart
-                # sonrasi resetlenir).
-                # ────────────────────────────────────────────
+                # ════════════════════════════════════════════════════════
+                # ★★★ ÖNCELİK SIRASI: PUSH BİLDİRİM → SONRA TWEET ★★★
+                # Kullanıcı kuralı: "asıl olan kullanıcıya bildirim; tweet sonra".
+                # Eskiden push EN SONDAYDI; tweet adımında çökme/restart olunca
+                # bildirim hiç gitmiyordu (bülten 2026/39). Artık:
+                #   1) AI analiz metni üretilir (to_thread, bloklamaz)
+                #   2) PUSH İLK gönderilir (flag ile) — her şeyden önce kullanıcı bilgilenir
+                #   3) Tweet SONRA atılır (push'a dokunmaz; tweet patlasa bile bildirim gitti)
+                # ════════════════════════════════════════════════════════
+                _ai_text_for_push = ""
                 _push_key = f"spk_bulten_push_{bno_str_val}"
+
+                # 1) AI analiz metnini üret (özet için) — to_thread, event loop serbest
+                if full_bulletin_text:
+                    try:
+                        from app.services.twitter_service import _generate_bulletin_analysis_sync
+                        _ai_text_for_push = await asyncio.to_thread(
+                            _generate_bulletin_analysis_sync, full_bulletin_text, bno_str_val
+                        ) or ""
+                    except Exception as _ai_err:
+                        logger.warning("SPK push için AI metin üretilemedi: %s — generic özetle devam", _ai_err)
+                        _ai_text_for_push = ""
+
+                # Özet çıkar (konu başlıkları)
+                if _ai_text_for_push:
+                    _topic_lines = []
+                    for _line in _ai_text_for_push.split("\n"):
+                        _stripped = _line.strip()
+                        if _stripped and any(_stripped.startswith(e) for e in ["🚀","💰","💵","📊","📈","⚖️","🏛","🔔","📋","🏢","🔍","⚠️","🎯","🚫"]):
+                            _topic_lines.append(_stripped[:80])
+                    if _topic_lines:
+                        _bulletin_notif_summary = " | ".join(_topic_lines[:4])
+                    else:
+                        _meaningful = [l.strip() for l in _ai_text_for_push.split("\n") if l.strip() and len(l.strip()) > 15]
+                        _bulletin_notif_summary = _meaningful[0][:200] if _meaningful else ""
+
+                # 2) ★ PUSH'U İLK GÖNDER (flag ile idempotent) ★
                 _push_already_sent = False
                 try:
                     from app.models.pending_tweet import PendingTweet as _PT
@@ -1096,21 +1071,53 @@ async def _check_spk_bulletins_inner():
                 if not _push_already_sent:
                     try:
                         await notif_service.notify_spk_bulletin(bno_str_val, _bulletin_notif_summary)
-                        # Flag kaydet — sonraki run tekrar push atmasin
                         try:
                             from app.models.pending_tweet import PendingTweet as _PT
-                            _push_flag = _PT(
-                                source=_push_key, status="sent",
-                                text=f"SPK {bno_str_val} push flag",
-                            )
-                            db.add(_push_flag)
+                            db.add(_PT(source=_push_key, status="sent", text=f"SPK {bno_str_val} push flag"))
                             await db.commit()
                             logger.info("SPK bulten push flag kaydedildi: %s", _push_key)
                         except Exception as _flag_err:
                             logger.warning("SPK push flag kaydedilemedi: %s", _flag_err)
-                        logger.info("SPK bulten push bildirim gonderildi: %s (ozet: %s)", bno_str_val, _bulletin_notif_summary[:80] if _bulletin_notif_summary else "yok")
+                        logger.info("SPK bulten push bildirim gonderildi (ONCELIK): %s (ozet: %s)",
+                                    bno_str_val, _bulletin_notif_summary[:80] if _bulletin_notif_summary else "yok")
                     except Exception as _push_err:
                         logger.error("SPK bulten push bildirim hatasi: %s", _push_err)
+
+                # 3) TWEET SONRA — push zaten gitti, tweet patlasa bile sorun değil
+                if full_bulletin_text and not _analiz_already_tweeted:
+                    try:
+                        if new_ipos_this_bulletin:
+                            logger.info("SPK bulten analiz: IPO tweeti atildi, 180sn (3dk) bekleniyor...")
+                            await asyncio.sleep(180)
+
+                        from app.services.twitter_service import tweet_spk_bulletin_analysis
+                        from app.services.admin_telegram import notify_tweet_sent as _notify_tw
+                        logger.info("SPK bulten analiz tweeti baslatiliyor: %s", bno_str_val)
+
+                        # to_thread (senkron+ağır: görsel + Twitter POST) + önceden
+                        # üretilmiş AI metnini geç (çift AI çağrısı olmasın).
+                        _ba_result = await asyncio.to_thread(
+                            tweet_spk_bulletin_analysis, full_bulletin_text, bno_str_val, _ai_text_for_push or None
+                        )
+                        _ba_ok = bool(_ba_result)
+
+                        if _ba_ok:
+                            try:
+                                from app.models.pending_tweet import PendingTweet
+                                db.add(PendingTweet(source=_analiz_key, status="sent",
+                                                    text=f"SPK {bno_str_val} bulten analiz tweet flag"))
+                                await db.commit()
+                                logger.info("SPK analiz tweet flag kaydedildi: %s", _analiz_key)
+                            except Exception as _flag_err:
+                                logger.warning("SPK analiz tweet flag kaydedilemedi: %s", _flag_err)
+
+                        await _notify_tw(
+                            "spk_bulten_analiz", f"Bülten {bno_str_val}", _ba_ok,
+                            f"AI analiz tweeti ({'basarili' if _ba_ok else 'basarisiz'})",
+                        )
+                        logger.info("SPK bulten analiz tweeti: %s, sonuc=%s", bno_str_val, _ba_ok)
+                    except Exception as _ba_err:
+                        logger.error("SPK bulten analiz tweet HATASI: %s", _ba_err, exc_info=True)
 
                 # ────────────────────────────────────────────
                 # Capital Increase state machine — SPK onay/red yansit

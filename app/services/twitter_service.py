@@ -3555,8 +3555,12 @@ def _extract_spk_short_summary(ai_text: str, bulletin_no: str) -> str:
     return "\n".join(highlights)
 
 
-def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | str:
+def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str, precomputed_ai_text: str = None) -> bool | str:
     """SPK bulten analiz tweetini atar VE analizi DB'ye kaydeder.
+
+    precomputed_ai_text: AI analiz metni ZATEN uretildiyse (push'u tweet'ten
+    ONCE gondermek icin cagiran tarafindan onceden uretilmis) tekrar uretme —
+    cift AI cagrisini onler. Bos/None ise normal uretir.
 
     ÖNEMLİ: Twitter'a tweet atmak başarısız olsa bile (kill switch, rate limit,
     network hatası vb.), AI analiz metni + Cloudinary görseli MUTLAKA
@@ -3576,8 +3580,8 @@ def tweet_spk_bulletin_analysis(bulletin_text: str, bulletin_no: str) -> bool | 
                            len(bulletin_text) if bulletin_text else 0)
             return False
 
-        # 1. AI analiz üret
-        ai_text = _generate_bulletin_analysis_sync(bulletin_text, bulletin_no)
+        # 1. AI analiz üret — önceden üretildiyse tekrar üretme (push-first akışı)
+        ai_text = precomputed_ai_text if (precomputed_ai_text and precomputed_ai_text.strip()) else _generate_bulletin_analysis_sync(bulletin_text, bulletin_no)
         if not ai_text:
             logger.warning("SPK bulten analiz: AI metin uretilemedi, atlandi")
             return False
