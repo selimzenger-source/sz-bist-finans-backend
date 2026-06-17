@@ -927,7 +927,11 @@ async def _check_spk_bulletins_inner():
                     try:
                         from app.services.twitter_service import tweet_new_ipos_batch
                         from app.services.admin_telegram import notify_tweet_sent
-                        tw_ok = tweet_new_ipos_batch(new_ipos_this_bulletin, bno_str_val)
+                        # ★ to_thread: tweet_new_ipos_batch SENKRON (görsel üretimi +
+                        # Twitter POST) — async loop'ta doğrudan çağrılınca event loop'u
+                        # bloklar, Render health check 5sn'de yanıt alamayıp instance'ı
+                        # ÖLDÜRÜR (SPK bülteni "çöktü" maili). Thread'e taşı → loop serbest.
+                        tw_ok = await asyncio.to_thread(tweet_new_ipos_batch, new_ipos_this_bulletin, bno_str_val)
                         tickers = ", ".join(i.ticker or i.company_name for i in new_ipos_this_bulletin)
                         await notify_tweet_sent("spk_onayi_toplu", tickers, tw_ok, f"Bülten: {bno_str_val}")
 
@@ -1026,8 +1030,12 @@ async def _check_spk_bulletins_inner():
                         from app.services.admin_telegram import notify_tweet_sent as _notify_tw
                         logger.info("SPK bulten analiz tweeti baslatiliyor: %s", bno_str_val)
 
-                        # tweet_spk_bulletin_analysis basarili olursa AI text doner (str), basarisiz olursa False
-                        _ba_result = tweet_spk_bulletin_analysis(full_bulletin_text, bno_str_val)
+                        # ★ to_thread: tweet_spk_bulletin_analysis SENKRON ve AĞIR (AI
+                        # çağrısı 10-30sn + görsel + Twitter POST). Doğrudan await'siz
+                        # çağrılınca event loop'u 30sn+ bloklar → health check timeout →
+                        # instance restart → SONRAKİ push adımı kaybolur (kullanıcılara
+                        # bildirim gitmez). Thread'e taşı → loop serbest, push'a sıra gelir.
+                        _ba_result = await asyncio.to_thread(tweet_spk_bulletin_analysis, full_bulletin_text, bno_str_val)
                         _ba_ok = bool(_ba_result)
 
                         # Basarili tweet sonrasi FLAG kaydet — tekrar atilmasin
