@@ -611,6 +611,34 @@ class IPOService:
         # awaiting_trading → trading: trading_start <= today
         # ==========================================
 
+        # ★ TARİH İLERİ KAYMA REVERT (BETAE: sub_start 17→18 güncellendi ama status
+        # in_distribution takılı kaldı): subscription_start GELECEĞE kaydıysa status'u
+        # newly_approved'a GERİ AL + distribution flag'lerini sıfırla. Böylece scraper
+        # tarihi güncellediğinde sistem otomatik algılar, push/tweet doğru yeni günde
+        # tekrar tetiklenir (kullanıcı isteği: "tekrarında da tarihi güncellesin").
+        revert_result = await self.db.execute(
+            select(IPO).where(
+                and_(
+                    IPO.status == "in_distribution",
+                    IPO.archived == False,
+                    IPO.subscription_start.isnot(None),
+                    IPO.subscription_start > today,  # başvuru başlangıcı GELECEKTE
+                )
+            )
+        )
+        for ipo in revert_result.scalars().all():
+            ipo.status = "newly_approved"
+            ipo.distribution_tweeted = False
+            ipo.distribution_completed = False
+            ipo.updated_at = datetime.utcnow()
+            logger.warning(
+                "TARİH REVERT: %s in_distribution → newly_approved (sub_start=%s gelecekte) "
+                "— tarih güncellenmiş, push/tweet yeni günde tekrar atılacak",
+                ipo.ticker or ipo.company_name, ipo.subscription_start,
+            )
+        if revert_result:
+            await self.db.flush()
+
         # Tutarsiz IPO'lari bul (tarihler status'un ilerisinde)
         result = await self.db.execute(
             select(IPO).where(
@@ -786,14 +814,14 @@ class IPOService:
                 )
             except Exception:
                 pass
-            # Push #1: Basvuru basladi bildirimi (kullanicilara)
-            try:
-                from app.services.notification import NotificationService
-                notif_service = NotificationService(self.db)
-                sent = await notif_service.notify_ipo_subscription_start(ipo)
-                logger.info(f"Basvuru basladi bildirimi: {ipo.ticker} — {sent} kisi")
-            except Exception as e:
-                logger.warning(f"Basvuru basladi bildirim hatasi: {e}")
+            # ★ KULLANICI PUSH'U BURADA ATILMAZ (BETAE gece 03:08 bug'ı):
+            # auto_update_statuses gece UTC cron'unda çalışır; buradan push atınca
+            # "halka arz bugün başlıyor" bildirimi gecenin köründe gidiyordu. ÜSTELİK
+            # tarih scraper tarafından 1 gün ileri kaydırılınca status in_distribution
+            # takılı kalıp yanlış gün push atıyordu. Push artık SADECE açılış saatine
+            # 10 dk kala çalışan sabah catch-up job'ından (distribution_tweeted flag'i
+            # ile) gönderilir → doğru gün + doğru saat (09:00 / subscription_hours).
+            # Burada sadece status + admin telegram. Tweet de zaten sabah job'ında.
 
             # Tweet #2: Dagitima Cikis — SABAH TWEETI ile atilir
             # (check_morning_tweets acilisa 1 saat kala tweet atar, burada atilmaz

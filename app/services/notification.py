@@ -751,7 +751,49 @@ class NotificationService:
         )
 
     async def notify_ipo_subscription_start(self, ipo) -> int:
-        """Basvuru baslangici bildirimi — notify_ipo_start = True olanlara."""
+        """Basvuru baslangici bildirimi — notify_ipo_start = True olanlara.
+
+        ★ SAVUNMA KATMANI (BETAE gece 03:08 bug'ı): bu bildirim ASLA
+        subscription_start gününden ÖNCE ve açılış saatinden (varsayılan 09:00)
+        �makul ölçüde önce atılmaz. Çağıran job hatalı tetiklese bile gece
+        push'u engellenir. Saat bilgisi yoksa 09:00 varsayılır.
+        """
+        try:
+            from datetime import datetime as _dt
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                _now = _dt.now(_ZI("Europe/Istanbul"))
+            except Exception:
+                from datetime import timedelta as _tdh
+                _now = _dt.utcnow() + _tdh(hours=3)
+            _sub = getattr(ipo, "subscription_start", None)
+            if _sub is not None:
+                # Başvuru günü gelmediyse (gelecek tarih) → atma
+                if _now.date() < _sub:
+                    logger.info(
+                        "IPO başvuru push ATLANDI (erken): %s sub_start=%s, bugün=%s",
+                        ipo.ticker or ipo.company_name, _sub, _now.date(),
+                    )
+                    return 0
+                # Bugünse ama açılış saatinden 30+ dk önceyse → atma (gece koruması)
+                if _now.date() == _sub:
+                    _oh, _om = 9, 0
+                    if getattr(ipo, "subscription_hours", None):
+                        import re as _re2
+                        _m = _re2.match(r"(\d{1,2}):(\d{2})", str(ipo.subscription_hours).split("-")[0].strip())
+                        if _m:
+                            _oh, _om = int(_m.group(1)), int(_m.group(2))
+                    _open_min = _oh * 60 + _om
+                    _now_min = _now.hour * 60 + _now.minute
+                    if _now_min < _open_min - 30:
+                        logger.info(
+                            "IPO başvuru push ATLANDI (açılış öncesi): %s açılış %02d:%02d, şu an %02d:%02d",
+                            ipo.ticker or ipo.company_name, _oh, _om, _now.hour, _now.minute,
+                        )
+                        return 0
+        except Exception as _gerr:
+            logger.debug("IPO push saat guard hata: %s — devam", _gerr)
+
         title = "📋 Başvuru Başladı"
         body = f"{ipo.ticker or ipo.company_name} halka arz başvurusu başladı!"
         if ipo.subscription_end:
