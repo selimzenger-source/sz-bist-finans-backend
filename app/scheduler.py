@@ -4010,7 +4010,7 @@ async def expire_subscriptions():
                 expired_news, expired_notif, expired_stale_wallet, expired_orphan,
             )
             try:
-                from app.services.admin_telegram import send_admin_telegram
+                from app.services.admin_telegram import send_admin_message
                 parts = []
                 if expired_news > 0:
                     parts.append(f"Haber: {expired_news}")
@@ -4022,7 +4022,7 @@ async def expire_subscriptions():
                     parts.append(f"Orphan ücretli (NULL expires): {expired_orphan}")
                 if trimmed_users > 0:
                     parts.append(f"✂️ Watchlist kırpılan kullanıcı: {trimmed_users} (→ ilk 5 hisse)")
-                await send_admin_telegram(
+                await send_admin_message(
                     f"⏰ Abonelik Expire\n"
                     f"{chr(10).join(parts)}\n"
                     f"Zaman: {_now.strftime('%Y-%m-%d %H:%M UTC')}"

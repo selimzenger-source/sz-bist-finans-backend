@@ -762,8 +762,8 @@ async def _check_spk_bulletins_inner():
                         )
                         if retry_count == 1:
                             try:
-                                from app.services.admin_telegram import send_admin_telegram
-                                await send_admin_telegram(
+                                from app.services.admin_telegram import send_admin_message
+                                await send_admin_message(
                                     f"⏳ SPK Bülteni {bno_str_val}: PDF henüz hazır değil/boş — "
                                     f"otomatik yeniden denenecek (max {EMPTY_PDF_MAX_RETRY} deneme)."
                                 )
@@ -966,14 +966,14 @@ async def _check_spk_bulletins_inner():
                 # Telegram: Yeni SPK Bülteni Tespit Bildirimi
                 # ────────────────────────────────────────────
                 try:
-                    from app.services.admin_telegram import send_admin_telegram
+                    from app.services.admin_telegram import send_admin_message
                     _bulten_msg = (
                         f"📋 <b>Yeni SPK Bülteni Tespit Edildi</b>\n\n"
                         f"Bülten No: <b>{bno_str_val}</b>\n"
                         f"Halka Arz Onayı: <b>{'Var (%d adet)' % len(approvals) if approvals else 'Yok'}</b>\n"
                         f"İçerik: {full_bulletin_text[:300]}..."
                     )
-                    await send_admin_telegram(_bulten_msg)
+                    await send_admin_message(_bulten_msg)
                 except Exception as _tg_err:
                     logger.warning("SPK bulten telegram bildirimi hatasi: %s", _tg_err)
 
