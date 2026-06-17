@@ -214,6 +214,27 @@ class IPOService:
                         existing.status = "newly_approved"
 
             ipo = existing
+            # ★ TARİH-STATUS SENKRONU (BETAE 17→18 bug'ı): scraper tarihi her
+            # güncellediğinde status'u ANINDA tarihe göre düzelt — auto_update'in
+            # 2 saatlik turunu bekleme. subscription_start GELECEKTE ise status
+            # in_distribution'da KALAMAZ → newly_approved'a çekilir + flag sıfırlanır.
+            # (trading/awaiting_trading'e dokunma — onlar geçmiş aşama.)
+            try:
+                from zoneinfo import ZoneInfo as _ZI3
+                _td_now = datetime.now(_ZI3("Europe/Istanbul")).date()
+            except Exception:
+                _td_now = datetime.utcnow().date()
+            if (existing.status == "in_distribution"
+                    and existing.subscription_start
+                    and existing.subscription_start > _td_now):
+                existing.status = "newly_approved"
+                existing.distribution_tweeted = False
+                existing.distribution_completed = False
+                logger.warning(
+                    "TARİH-STATUS SENKRON: %s in_distribution → newly_approved "
+                    "(sub_start=%s gelecekte, scraper güncelledi)",
+                    existing.ticker or existing.company_name, existing.subscription_start,
+                )
             logger.info(f"IPO guncellendi: {ipo.ticker or ipo.company_name}")
         else:
             if not allow_create:
