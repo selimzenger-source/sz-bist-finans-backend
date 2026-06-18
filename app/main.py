@@ -15325,6 +15325,46 @@ async def admin_trigger_kap_scrape(request: Request, payload: dict):
         return resp
 
 
+@app.post("/api/v1/admin/send-ipo-announcement")
+@limiter.limit("5/minute")
+async def admin_send_ipo_announcement(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
+    """Admin: Bir IPO hakkında ÖZEL kısa bildirim gönderir (tarih değişikliği, erteleme vb).
+
+    Body: {"admin_password":"...", "ipo_id":48, "title":"...", "body":"..."}
+    Halka arz takibi açık kullanıcılara (notify_ipo_start) gider; deep-link
+    halka-arz-detay. Render'da çalışır → FCM düzgün teslim.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    from app.models.ipo import IPO
+    from app.services.notification import NotificationService
+
+    ipo_id = payload.get("ipo_id")
+    title = (payload.get("title") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not ipo_id or not title or not body:
+        return {"status": "error", "message": "ipo_id, title, body zorunlu"}
+
+    ipo = (await db.execute(select(IPO).where(IPO.id == int(ipo_id)))).scalar_one_or_none()
+    if not ipo:
+        return {"status": "error", "message": f"IPO bulunamadi: {ipo_id}"}
+
+    notif = NotificationService(db)
+    data = {
+        "type": "ipo_update",
+        "ipo_id": str(ipo.id),
+        "ticker": ipo.ticker or "",
+        "screen": "halka-arz-detay",
+    }
+    sent = await notif._send_filtered(
+        "notify_ipo_start", title, body, data,
+        f"IPO duyuru: {ipo.ticker or ipo.company_name}",
+        channel_id="ipo_alerts_v2", category="ipo",
+    )
+    return {"status": "ok", "ipo": ipo.ticker or ipo.company_name, "sent": sent}
+
+
 @app.post("/api/v1/admin/trigger-ipo-hype-poll")
 @limiter.limit("3/minute")
 async def admin_trigger_ipo_hype_poll(request: Request, payload: dict, db: AsyncSession = Depends(get_db)):
