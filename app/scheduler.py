@@ -1560,6 +1560,18 @@ async def check_morning_tweets():
                         logger.info("Dagitim tweeti zaten atilmis (refresh): %s — atlanıyor", ipo.ticker)
                         _timing_mark_sent(ipo.id, "distribution_morning_tweet")
                         continue
+                    # ★★★ TARİH RE-CHECK (BETAE erteleme bug'ı): refresh sonrası
+                    # subscription_start HÂLÂ BUGÜN mü? Tarih ertelendiyse/değiştiyse
+                    # (scraper, admin panel, manuel) tweet ASLA atılmaz. Race'i kapatır:
+                    # job IPO'yu eski tarihle seçmiş olsa bile, gönderim anında taze
+                    # tarihi doğrular. "Dağıtım başladı" yanlış güne asla gitmez.
+                    if ipo.subscription_start != today:
+                        logger.warning(
+                            "Dagitim tweeti IPTAL: %s — sub_start=%s artık bugün(%s) DEĞİL "
+                            "(tarih ertelendi/değişti), tweet atılmıyor",
+                            ipo.ticker or ipo.company_name, ipo.subscription_start, today,
+                        )
+                        continue
                     if tweet_idx > 0:
                         await asyncio.sleep(random.uniform(50, 55))
                     tw_ok = tweet_distribution_start(ipo)
@@ -1686,6 +1698,14 @@ async def check_morning_tweets():
             if ipo.distribution_tweeted:
                 logger.info("CATCH-UP: Tweet zaten atilmis (refresh): %s — atlanıyor", ipo.ticker)
                 _timing_mark_sent(ipo.id, "distribution_catchup_tweet")
+                continue
+            # ★★★ TARİH RE-CHECK (BETAE erteleme bug'ı): tarih ertelendiyse ATMA
+            if ipo.subscription_start != today:
+                logger.warning(
+                    "CATCH-UP dagitim tweeti IPTAL: %s — sub_start=%s artık bugün(%s) DEĞİL "
+                    "(tarih ertelendi/değişti)",
+                    ipo.ticker or ipo.company_name, ipo.subscription_start, today,
+                )
                 continue
 
             logger.warning(

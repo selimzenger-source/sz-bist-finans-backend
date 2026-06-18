@@ -3374,6 +3374,7 @@ async def admin_patch_ipo_fields(
     if not ipo:
         raise HTTPException(status_code=404, detail="IPO bulunamadi")
 
+    _old_sub_start = ipo.subscription_start
     updated = {}
     for k, v in fields.items():
         if k in ALLOWED:
@@ -3385,6 +3386,27 @@ async def admin_patch_ipo_fields(
                     raise HTTPException(status_code=400, detail=f"{k} gecersiz tarih: {v} (YYYY-MM-DD bekleniyor)")
             setattr(ipo, k, v)
             updated[k] = str(v)
+
+    # ★ PANELDEN TARİH DEĞİŞİNCE OTOMATİK DÜZELTME (kullanıcı: "panelden
+    # değiştirirsem yanlış olmamalı"): subscription_start değiştiyse dağıtım
+    # flag'lerini SIFIRLA — yeni tarihte tweet/bildirim doğru tetiklensin.
+    # Yeni başlangıç GELECEKTE ise status'u newly_approved'a çek (in_distribution
+    # takılı kalıp "dağıtım başladı" tweeti atmasın). 'status' alanı açıkça
+    # verildiyse ona dokunma (admin bilerek set etmiş olabilir).
+    if "subscription_start" in updated and ipo.subscription_start != _old_sub_start:
+        from datetime import datetime as _dt2
+        try:
+            from zoneinfo import ZoneInfo as _ZI4
+            _today4 = _dt2.now(_ZI4("Europe/Istanbul")).date()
+        except Exception:
+            _today4 = _dt2.utcnow().date()
+        ipo.distribution_tweeted = False
+        ipo.distribution_completed = False
+        if "status" not in fields and ipo.subscription_start and ipo.subscription_start > _today4:
+            ipo.status = "newly_approved"
+        updated["_auto_reset"] = "distribution_tweeted=False" + (
+            f", status=newly_approved" if ipo.status == "newly_approved" else "")
+
     await db.commit()
 
     return {"status": "ok", "ipo_id": ipo_id, "ticker": ipo.ticker, "updated": updated}
