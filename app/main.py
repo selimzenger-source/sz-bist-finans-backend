@@ -3572,6 +3572,92 @@ async def admin_trigger_spk_bulten_push(
     return {"status": "sent", "bulletin_no": bulletin_no, "recipients": n}
 
 
+@app.post("/api/v1/admin/reprocess-spk-bulletin")
+@limiter.limit("3/minute")
+async def admin_reprocess_spk_bulletin(request: Request, payload: dict = Body(...)):
+    """Admin: Bir SPK bültenini TAM yeniden işle (AI başarısız olduysa kurtarma).
+
+    Body: {"admin_password":"...", "bulletin_no":"2026/40", "send_push": true}
+    Bülteni SPK'dan çeker → AI analiz → tweet at (+ app içeriği) → push
+    (send_push=true ve daha önce gitmemişse). Render'da çalışır: Twitter + AI ortamı.
+    """
+    if not _verify_admin_password(payload.get("admin_password", "")):
+        raise HTTPException(status_code=403, detail="Yetkisiz erisim")
+
+    bno_str = (payload.get("bulletin_no") or "").strip()
+    send_push = bool(payload.get("send_push", True))
+    if "/" not in bno_str:
+        return {"status": "error", "message": "bulletin_no format: 2026/40"}
+    try:
+        _y, _n = bno_str.split("/"); year, no = int(_y), int(_n)
+    except Exception:
+        return {"status": "error", "message": "bulletin_no parse hatasi"}
+
+    import asyncio as _aio2
+    from app.scrapers.spk_bulletin_scraper import SPKBulletinScraper
+    from app.services.twitter_service import tweet_spk_bulletin_analysis, _generate_bulletin_analysis_sync
+    from app.models.pending_tweet import PendingTweet
+    from app.database import async_session
+
+    sc = SPKBulletinScraper()
+    full_text = ""
+    try:
+        lst = await sc.fetch_bulletin_list(year)
+        target = next((b for b in lst if b.get("bulletin_no") == (year, no)), None)
+        if not target:
+            return {"status": "error", "message": f"{bno_str} SPK listesinde bulunamadi"}
+        _appr, full_text = await sc.process_bulletin(target["pdf_url"], (year, no))
+    finally:
+        try:
+            await sc.client.aclose()
+        except Exception:
+            pass
+
+    if not full_text:
+        return {"status": "error", "message": "bulten metni cekilemedi (PDF bos?)"}
+
+    # AI analiz (thread — bloklamasin)
+    ai_text = await _aio2.to_thread(_generate_bulletin_analysis_sync, full_text, bno_str)
+    if not ai_text:
+        return {"status": "error", "message": "AI analiz HALA basarisiz — saglayici anahtarlarini kontrol et"}
+
+    # Özet çıkar
+    topics = [l.strip()[:80] for l in ai_text.split("\n")
+              if l.strip() and any(l.strip().startswith(e) for e in ["🚀","💰","💵","📊","📈","⚖️","🏛","🔔","📋","🏢","🔍","⚠️","🎯","🚫"])]
+    summary = " | ".join(topics[:4]) if topics else (
+        next((l.strip()[:200] for l in ai_text.split("\n") if len(l.strip()) > 15), ""))
+
+    # Tweet (precomputed ai_text ile — çift AI çağrısı yok)
+    tw_ok = await _aio2.to_thread(tweet_spk_bulletin_analysis, full_text, bno_str, ai_text)
+
+    push_sent = 0
+    async with async_session() as db2:
+        # analiz flag
+        try:
+            db2.add(PendingTweet(source=f"spk_bulten_analiz_{bno_str}", status="sent",
+                                 text=f"SPK {bno_str} bulten analiz tweet flag (reprocess)"))
+            await db2.commit()
+        except Exception:
+            await db2.rollback()
+        # push (daha once gitmediyse)
+        if send_push:
+            from app.services.notification import NotificationService
+            already = (await db2.execute(select(PendingTweet).where(
+                PendingTweet.source == f"spk_bulten_push_{bno_str}").limit(1))).scalar_one_or_none()
+            if not already:
+                notif = NotificationService(db2)
+                push_sent = await notif.notify_spk_bulletin(bno_str, summary)
+                try:
+                    db2.add(PendingTweet(source=f"spk_bulten_push_{bno_str}", status="sent",
+                                         text=f"SPK {bno_str} push flag (reprocess)"))
+                    await db2.commit()
+                except Exception:
+                    await db2.rollback()
+
+    return {"status": "ok", "bulletin_no": bno_str, "tweet_ok": bool(tw_ok),
+            "push_sent": push_sent, "summary": summary[:120]}
+
+
 @app.post("/api/v1/admin/trigger-ceiling-poll-push")
 @limiter.limit("5/minute")
 async def admin_trigger_ceiling_poll_push(

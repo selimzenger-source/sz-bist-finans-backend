@@ -1056,6 +1056,13 @@ async def _check_spk_bulletins_inner():
                         _bulletin_notif_summary = _meaningful[0][:200] if _meaningful else ""
 
                 # 2) ★ PUSH'U İLK GÖNDER (flag ile idempotent) ★
+                # ★ KRİTİK GUARD (2026/40 bug'ı): AI analizi BAŞARISIZSA push GÖNDERME.
+                # Eskiden AI 3 sağlayıcıda da düşse (Gemini blip + Claude key invalid +
+                # Abacus kredi yok) push yine de gidiyordu → kullanıcı "bülten yayınlandı"
+                # bildirimi alıyor ama ne tweet ne app içeriği oluyordu. Artık: gerçek
+                # AI metni (özet) yoksa push ATILMAZ + admin'e uyarı + flag KAYDEDİLMEZ
+                # (böylece AI düzelince bir sonraki turda/manuel reprocess'te tekrar denenir).
+                _has_real_content = bool(_ai_text_for_push and _ai_text_for_push.strip() and _bulletin_notif_summary)
                 _push_already_sent = False
                 try:
                     from app.models.pending_tweet import PendingTweet as _PT
@@ -1067,6 +1074,25 @@ async def _check_spk_bulletins_inner():
                         logger.info("SPK bulten push ZATEN gonderilmis: %s — atlandi", _push_key)
                 except Exception:
                     pass
+
+                if not _has_real_content:
+                    _push_already_sent = True  # push'u engelle
+                    logger.error(
+                        "SPK bulten push ATLANDI (AI içerik YOK): %s — analiz başarısız, "
+                        "kullanıcıya boş bildirim gönderilmiyor. Manuel reprocess gerekebilir.",
+                        bno_str_val,
+                    )
+                    try:
+                        from app.services.admin_telegram import send_admin_message as _sam
+                        await _sam(
+                            f"⚠️ SPK Bülteni {bno_str_val} işlendi AMA AI analizi başarısız "
+                            f"(içerik üretilemedi). Kullanıcıya bildirim GÖNDERİLMEDİ, tweet atılmadı. "
+                            f"AI sağlayıcıları kontrol et (Gemini/Claude key/Abacus kredi). "
+                            f"Düzeltince: POST /api/v1/admin/reprocess-spk-bulletin",
+                            silent=False,
+                        )
+                    except Exception:
+                        pass
 
                 if not _push_already_sent:
                     try:
