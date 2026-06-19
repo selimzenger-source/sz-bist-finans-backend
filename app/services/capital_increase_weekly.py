@@ -217,24 +217,30 @@ async def run_weekly_capital_spk(*, force: bool = False, dry_run: bool = False) 
     if total < MIN_FOR_TWEET and not force:
         return {"sent": False, "reason": "below_threshold", "total": total}
 
-    # Görseller: bedelli + bedelsiz (+tahsisli) ayrı, her görselde max 8 kart
+    # Görseller: bedelli + bedelsiz (+tahsisli) ayrı. Görsel DİNAMİK yüksekliktedir —
+    # tüm kartlar tek görselde gösterilir (eskiden cards[:8] ile 8'den fazlası kırpılıyordu:
+    # "12 hisse" yazıp 8 göstermesi bug'ı). Twitter tek tweette max 4 görsel kabul ettiği
+    # için, bir tip 14'ten fazlaysa 14'erli sayfalara bölünür (toplam 4 görsel sınırı korunur).
     image_paths: list[str] = []
     order = [("bedelli", "BEDELLİ ARTIRIM TALEPLERİ"),
              ("bedelsiz", "BEDELSİZ ARTIRIM TALEPLERİ"),
              ("tahsisli", "TAHSİSLİ ARTIRIM TALEPLERİ")]
+    _PER_IMG = 14  # tek görselde max kart (aşırı uzun görsel olmasın)
     for typ, title in order:
         cards = data.get(typ) or []
         if not cards:
             continue
         color = _TYPE_META[typ][1]
-        # max 8 kart/görsel
-        chunk = cards[:8]
-        img = generate_pending_spk_image(
-            [{"title": f"{title}  ·  {len(cards)} hisse", "color": color, "cards": chunk}],
-            label, suffix=typ,
-        )
-        if img:
-            image_paths.append(img)
+        npages = (len(cards) + _PER_IMG - 1) // _PER_IMG
+        for p in range(npages):
+            chunk = cards[p * _PER_IMG:(p + 1) * _PER_IMG]
+            _pg = f" ({p + 1}/{npages})" if npages > 1 else ""
+            img = generate_pending_spk_image(
+                [{"title": f"{title}  ·  {len(cards)} hisse{_pg}", "color": color, "cards": chunk}],
+                label, suffix=f"{typ}{p + 1}" if npages > 1 else typ,
+            )
+            if img:
+                image_paths.append(img)
     if not image_paths:
         return {"sent": False, "reason": "image_failed", "total": total}
 
