@@ -10311,6 +10311,91 @@ class ErrorReportRequest(BaseModel):
     timestamp: str = ""
 
 
+@app.post("/api/v1/report-news")
+@limiter.limit("10/minute")
+async def report_news(request: Request, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
+    """Kullanıcı: KAP haber yorumunu 'yanlış' diye bildirir.
+
+    Body: {device_id, disclosure_id?, ticker?, note (max 100), ai_score?}
+    Günde max 3/cihaz. Telegram'a ID + mevcut skor/özet + kullanıcı notuyla düşer
+    → admin (prompt/skor düzeltmesi yapar). ASCII/Türkçe uyumlu.
+    """
+    from sqlalchemy import text as _sql
+    from app.services.admin_telegram import send_admin_message
+
+    device_id = (payload.get("device_id") or "").strip()[:80]
+    note = (payload.get("note") or "").strip()
+    ticker = (payload.get("ticker") or "").strip().upper()[:12]
+    try:
+        disclosure_id = int(payload.get("disclosure_id")) if payload.get("disclosure_id") else None
+    except (ValueError, TypeError):
+        disclosure_id = None
+    if not device_id or not note:
+        return {"ok": False, "error": "device_id ve not zorunlu"}
+    note = note[:100]  # max 100 karakter
+
+    # Tablo (idempotent)
+    await db.execute(_sql(
+        "CREATE TABLE IF NOT EXISTS news_error_reports ("
+        "id serial PRIMARY KEY, device_id varchar(80), disclosure_id integer, "
+        "ticker varchar(12), note varchar(120), created_at timestamptz DEFAULT now())"
+    ))
+    # Günlük limit: 3/cihaz
+    cnt = (await db.execute(_sql(
+        "SELECT COUNT(*) FROM news_error_reports WHERE device_id=:d "
+        "AND created_at > now() - interval '24 hours'"
+    ), {"d": device_id})).scalar() or 0
+    if cnt >= 3:
+        return {"ok": False, "error": "limit",
+                "message": "Günlük en fazla 3 hata bildirimi gönderebilirsiniz. Yarın tekrar deneyin."}
+    # Aynı cihaz aynı haberi 1 kez bildirsin (spam önle)
+    if disclosure_id:
+        dup = (await db.execute(_sql(
+            "SELECT 1 FROM news_error_reports WHERE device_id=:d AND disclosure_id=:i LIMIT 1"
+        ), {"d": device_id, "i": disclosure_id})).scalar()
+        if dup:
+            return {"ok": False, "error": "duplicate",
+                    "message": "Bu haberi zaten bildirdiniz, teşekkürler."}
+
+    await db.execute(_sql(
+        "INSERT INTO news_error_reports (device_id, disclosure_id, ticker, note) "
+        "VALUES (:d,:i,:t,:n)"
+    ), {"d": device_id, "i": disclosure_id, "t": ticker or None, "n": note})
+    await db.commit()
+
+    # Mevcut skor/özet — admin'in görmesi için
+    _sc = _sm = _ttl = None
+    if disclosure_id:
+        try:
+            from app.models.kap_all_disclosure import KapAllDisclosure
+            disc = (await db.execute(select(KapAllDisclosure).where(KapAllDisclosure.id == disclosure_id))).scalar_one_or_none()
+            if disc:
+                _sc = disc.ai_impact_score; _sm = disc.ai_summary; _ttl = disc.title
+                if not ticker:
+                    ticker = disc.company_code
+        except Exception:
+            pass
+
+    lines = [
+        "🚩 <b>Haber Yorum Hata Bildirimi</b>",
+        f"<b>Ticker:</b> {ticker or '?'}",
+    ]
+    if disclosure_id:
+        lines.append(f"<b>Disclosure ID:</b> <code>{disclosure_id}</code>")
+    if _ttl:
+        lines.append(f"<b>Başlık:</b> {_ttl[:60]}")
+    if _sc is not None:
+        lines.append(f"<b>Mevcut Skor:</b> {_sc}")
+    if _sm:
+        lines.append(f"<b>Mevcut Özet:</b> {_sm[:160]}")
+    lines.append(f"\n💬 <b>Kullanıcı notu:</b> {note}")
+    lines.append(f"<b>Cihaz:</b> <code>{device_id[:16]}</code> · <b>Bugün:</b> {cnt+1}/3")
+    await send_admin_message("\n".join(lines), parse_mode="HTML", silent=False)
+
+    return {"ok": True, "remaining": max(0, 3 - cnt - 1),
+            "message": "Bildiriminiz alındı, teşekkürler! En kısa sürede inceleyeceğiz."}
+
+
 @app.post("/api/v1/error-report")
 @limiter.limit("5/minute")
 async def submit_error_report(
