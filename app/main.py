@@ -10324,15 +10324,20 @@ async def report_news(request: Request, payload: dict = Body(...), db: AsyncSess
     from app.services.admin_telegram import send_admin_message
 
     device_id = (payload.get("device_id") or "").strip()[:80]
-    note = (payload.get("note") or "").strip()
+    note = (payload.get("note") or "").strip()[:100]  # opsiyonel ek not (max 100)
+    reason = (payload.get("reason") or "").strip()[:40]  # zorunlu yön/sebep
     ticker = (payload.get("ticker") or "").strip().upper()[:12]
     try:
         disclosure_id = int(payload.get("disclosure_id")) if payload.get("disclosure_id") else None
     except (ValueError, TypeError):
         disclosure_id = None
-    if not device_id or not note:
-        return {"ok": False, "error": "device_id ve not zorunlu"}
-    note = note[:100]  # max 100 karakter
+    # Zorunlu: yön/sebep (reason). Not opsiyonel.
+    _ALLOWED_REASONS = {
+        "pozitif_olmali", "negatif_olmali", "notr_olmali",
+        "puan_cok_dusuk", "puan_cok_yuksek", "alakasiz_yanlis",
+    }
+    if not device_id or reason not in _ALLOWED_REASONS:
+        return {"ok": False, "error": "device_id ve gecerli sebep zorunlu"}
 
     # Tablo (idempotent)
     await db.execute(_sql(
@@ -10357,10 +10362,12 @@ async def report_news(request: Request, payload: dict = Body(...), db: AsyncSess
             return {"ok": False, "error": "duplicate",
                     "message": "Bu haberi zaten bildirdiniz, teşekkürler."}
 
+    # reason'i note'un basina ekleyip kaydet (ayri kolon migration'a gerek yok)
+    _note_full = (f"[{reason}] " + note).strip()[:120]
     await db.execute(_sql(
         "INSERT INTO news_error_reports (device_id, disclosure_id, ticker, note) "
         "VALUES (:d,:i,:t,:n)"
-    ), {"d": device_id, "i": disclosure_id, "t": ticker or None, "n": note})
+    ), {"d": device_id, "i": disclosure_id, "t": ticker or None, "n": _note_full})
     await db.commit()
 
     # Mevcut skor/özet — admin'in görmesi için
@@ -10376,8 +10383,17 @@ async def report_news(request: Request, payload: dict = Body(...), db: AsyncSess
         except Exception:
             pass
 
+    _REASON_TR = {
+        "pozitif_olmali": "📈 Aslında POZİTİF olmalı",
+        "negatif_olmali": "📉 Aslında NEGATİF olmalı",
+        "notr_olmali": "➖ Aslında NÖTR olmalı",
+        "puan_cok_dusuk": "⬆️ Puan çok DÜŞÜK (yükseltilmeli)",
+        "puan_cok_yuksek": "⬇️ Puan çok YÜKSEK (düşürülmeli)",
+        "alakasiz_yanlis": "❌ Yorum alakasız/yanlış",
+    }
     lines = [
         "🚩 <b>Haber Yorum Hata Bildirimi</b>",
+        f"<b>Şikayet:</b> {_REASON_TR.get(reason, reason)}",
         f"<b>Ticker:</b> {ticker or '?'}",
     ]
     if disclosure_id:
@@ -10388,7 +10404,8 @@ async def report_news(request: Request, payload: dict = Body(...), db: AsyncSess
         lines.append(f"<b>Mevcut Skor:</b> {_sc}")
     if _sm:
         lines.append(f"<b>Mevcut Özet:</b> {_sm[:160]}")
-    lines.append(f"\n💬 <b>Kullanıcı notu:</b> {note}")
+    if note:
+        lines.append(f"\n💬 <b>Ek not:</b> {note}")
     lines.append(f"<b>Cihaz:</b> <code>{device_id[:16]}</code> · <b>Bugün:</b> {cnt+1}/3")
     await send_admin_message("\n".join(lines), parse_mode="HTML", silent=False)
 
