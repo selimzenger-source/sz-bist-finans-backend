@@ -1197,6 +1197,41 @@ def _check_routine_pattern(content: str, ticker: str) -> dict | None:
     if _decision_signal:
         return None  # karar bildirimi — rutin sayma, AI analiz etsin
 
+    # ★ YÜKSEK GÜVENLİ RUTİN SİNYALLER — TÜM METİNDE ara (ISMEN/INFO varant bug'ı):
+    # "BISTECH Pay Piyasası Alım Satım Sistemi Duyurusu", devre kesici, MKK/Takasbank
+    # duyurusu gibi ifadeler bildirimin KONUSUNU kesin belirler. Gerçek KAP gövdesi
+    # önce VARANT TABLOSU/şirket listesiyle başlayıp bu ifade 300. karakterden SONRA
+    # geldiğinde 300-char tarama kaçırıyordu → AI'a düşüp "işleme kapatılacak/kapalı"yı
+    # negatif sanarak 2.0 veriyordu. Bu spesifik ifadeler için tüm metni tara (yanlış
+    # pozitif riski yok — bu cümleler ancak gerçekten teknik/idari duyurularda geçer).
+    # Devre kesici → kendi şablonu; diğer BISTECH/MKK/Takasbank/varant → ortak şablon.
+    if re.search(r"devre\s*kesici", text_lower):
+        return {
+            "category": "Devre Kesici",
+            "summary": ("Borsa İstanbul, hissede yaşanan ani ve yüksek fiyat hareketi "
+                        "nedeniyle Pay Bazında Devre Kesici uygulamasının devreye girdiğini "
+                        "bildirmiştir. Bu, şirketin temel faaliyetleriyle ilgili bir gelişme "
+                        "olmayıp anlık volatiliteyi kontrol altına almayı amaçlayan standart "
+                        "bir borsa mekanizmasıdır. Yatırımcı açısından doğrudan pozitif veya "
+                        "negatif etkisi bulunmaz."),
+            "hashtags": ["devrekesici", "bistech"],
+        }
+    if re.search(
+        r"b[ıi]stech\s*pay\s*piyasas[ıi]\s*al[ıi]m\s*sat[ıi]m\s*sistemi"
+        r"|pay\s*piyasas[ıi]\s*al[ıi]m\s*sat[ıi]m\s*sistemi\s*duyuru"
+        r"|merkezi\s*kayit\s*kurulu[sş]u\s*duyuru|takasbank\s*duyuru",
+        text_lower,
+    ):
+        return {
+            "category": "BISTECH/MKK/Takasbank Duyurusu",
+            "summary": ("Bu, Borsa İstanbul/MKK'nin teknik bir sistem duyurusudur "
+                        "(varantların tatil/teknik nedenle geçici işleme kapatılması, "
+                        "tescil, ödeme sisteme düşmesi vb.). Şirketin operasyonel veya "
+                        "finansal performansıyla doğrudan ilgisi olmayan rutin/idari bir "
+                        "bildirimdir; fiyata pozitif/negatif etki beklenmez."),
+            "hashtags": ["bistech"],
+        }
+
     _scan_zone = text_lower[:300]
     for pattern, category, summary, hashtags in _ROUTINE_FILTERS:
         if re.search(pattern, _scan_zone):
