@@ -1616,13 +1616,20 @@ def generate_kap_news_image(
                 lines.append(cur)
             return lines
 
+        import re as _re_par
         body_maxw = W - 2 * PAD
         summary = (ai_summary or "").strip()
+        # ★ Uzun özette kelime ortasından DEĞİL, son TAM CÜMLEDEN kes (HRKET yarım
+        # cümle bug'ı). 950 karaktere kadarki son cümle-sonu noktasına kadar al.
         if len(summary) > 950:
-            summary = summary[:950].rsplit(" ", 1)[0] + "…"
+            _cut = summary[:950]
+            _m = list(_re_par.finditer(r'[.!?]["\')\]]?(?:\s|$)', _cut))
+            if _m:
+                summary = _cut[:_m[-1].end()].strip()
+            else:
+                summary = _cut.rsplit(" ", 1)[0] + "…"
         # PARAGRAFLAMA: önce mevcut \n paragrafları al; metin TEK BLOK ise cümlelere
         # böl ve HER 2 CÜMLEDE bir paragraf yap (aralarına boş satır) → okunaklı.
-        import re as _re_par
         _paras = [p.strip() for p in summary.split("\n") if p.strip()]
         if len(_paras) <= 1 and summary:
             _sents = [s.strip() for s in
@@ -1644,13 +1651,19 @@ def generate_kap_news_image(
                 else:
                     _merged.append(_s)
             _paras = [" ".join(_merged[i:i + 2]) for i in range(0, len(_merged), 2)] or [summary]
+        # ★ TAM CÜMLE GARANTİSİ: 18 satır bütçesini aşacak paragrafı YARIM ekleme,
+        # tamamen atla → görsel her zaman tam cümleyle biter (HRKET yarım kalma fix).
+        # (İlk paragraf her durumda gösterilir; sonrakiler bütçeye sığarsa eklenir.)
+        _LINE_BUDGET = 18
         body_lines: list = []
         for _para in _paras:
-            body_lines.extend(_wrap(_para, f_body, body_maxw))
+            _plines = _wrap(_para, f_body, body_maxw)
+            if body_lines and (len(body_lines) + len(_plines)) > _LINE_BUDGET:
+                break  # bu paragraf sığmıyor → yarım bırakma, dur (önceki tam cümlede biter)
+            body_lines.extend(_plines)
             body_lines.append("")   # paragraf arası boş satır
         if body_lines and body_lines[-1] == "":
             body_lines.pop()
-        body_lines = body_lines[:18]
         line_h = 42
 
         # ETKİ ETİKETİ (kullanıcı kuralı 12.06.2026): "Olumlu/Olumsuz" YOK.
