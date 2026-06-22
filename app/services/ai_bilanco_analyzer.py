@@ -604,6 +604,18 @@ async def parse_bilanco_from_kap(ticker: str, kap_content: str) -> dict | None:
         logger.warning("KAP parse: %s — içerik çok kısa", ticker)
         return None
 
+    # ★ EK SÜRE / FİNANSAL RAPOR ERTELEME bildirimi (KLRHO bug'ı): başlık
+    # "Finansal Durum Tablosu (Bilanço)" olsa bile içerik "finansal raporların
+    # KAP'a bildirimi için ek süre verilmesi / Ek Süre Taleplerine İlişkin SPK
+    # Değerlendirmesi" ise BU GERÇEK BİLANÇO DEĞİLDİR — şirket henüz açıklamadı,
+    # SPK ek süre verdi. Parse etme, alert ATMA (yanlış alarm). None dön.
+    _low = kap_content.lower()
+    if ("ek süre" in _low or "ek sure" in _low) and (
+        "finansal rapor" in _low or "additionaltimedemand" in _low
+        or "ek süre talep" in _low or "ek sure talep" in _low):
+        logger.info("KAP parse: %s — 'finansal rapor ek süre' bildirimi, bilanço DEĞİL — atlandı (alarm yok)", ticker)
+        return None
+
     from app.services.bilanco_kap_scraper import parse_kap_finansal_rapor
     result = parse_kap_finansal_rapor(kap_content, ticker)
 
