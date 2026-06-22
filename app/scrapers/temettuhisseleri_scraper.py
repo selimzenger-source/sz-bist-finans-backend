@@ -75,6 +75,26 @@ def _parse_payment_date(year: int, month: int, day: int) -> date | None:
         return None
 
 
+async def _ticker_no_withholding(session, ticker: str) -> bool:
+    """GYO / GSYO hisselerinde temettü STOPAJI YOK (net = brüt).
+
+    Sektör tablosundan tespit eder ('Gayrimenkul Y.O.' / 'Girişim Sermayesi Y.O.').
+    Sektör bulunamazsa ticker suffix'i (GYO) ile yedek tahmin.
+    """
+    try:
+        from sqlalchemy import text as _t
+        r = await session.execute(
+            _t("SELECT sector_name FROM stock_sectors WHERE ticker = :tk LIMIT 1"),
+            {"tk": (ticker or "").upper()},
+        )
+        s = (r.scalar() or "").lower()
+        if s:
+            return ("gayrimenkul" in s) or ("girişim sermayesi" in s) or ("girisim sermayesi" in s)
+    except Exception:
+        pass
+    return (ticker or "").upper().endswith("GYO")
+
+
 async def upsert_dividend_history(session, ticker: str, payments: list[dict], company_name: str | None = None) -> int:
     """Her odeme kaydini dividend_history'ye upsert et.
 
@@ -83,7 +103,12 @@ async def upsert_dividend_history(session, ticker: str, payments: list[dict], co
     """
     # Turkiye stopaj orani: 2024 sonrasi BIST hisseleri icin %15 (eski %10).
     # Net = Brut * 0.85
-    WITHHOLDING_RATE = Decimal("0.85")
+    # ★ GYO / GSYO İSTİSNASI (kullanıcı/Twitter bildirimi): Gayrimenkul Yatırım
+    # Ortaklığı ve Girişim Sermayesi YO temettülerinde STOPAJ YOKTUR → Net = Brüt.
+    # Eskiden hepsine %15 uygulanıyordu (AAGYO 0,43 brüt → yanlış 0,36 net).
+    # Sektör bazlı tespit (ticker suffix güvenilmez — BASGZ de GYO).
+    _no_stopaj = await _ticker_no_withholding(session, ticker)
+    WITHHOLDING_RATE = Decimal("1.0") if _no_stopaj else Decimal("0.85")
 
     inserted = 0
     for p in payments:
@@ -159,6 +184,42 @@ async def upsert_dividend_history(session, ticker: str, payments: list[dict], co
         except Exception as e:
             logger.debug("upsert_dividend_history satir hatasi: %s", e)
             continue
+
+    # ★ BAYAT KAYIT TEMİZLİĞİ (AVPGY bug'ı): kaynak bir ödemenin tarihini REVİZE
+    # edince (örn. AVPGY Haz 24 → Haz 5) eski tarih için ayrı kayıt açılıyor ama
+    # silinmiyordu → bayat tarih "önümüzdeki hafta ödeyecek"te kalıyordu. Bu scrape'te
+    # GELEN tarihler doğrudur; aynı (ticker, yıl) için temettuhisseleri kaynaklı olup
+    # bu turda GELMEYEN kayıtlar bayattır → silinir. (KAP/diğer kaynaklara dokunma.)
+    try:
+        from collections import defaultdict
+        fresh_by_year: dict[int, set] = defaultdict(set)
+        for p in payments:
+            try:
+                _y = int(p.get("year") or 0)
+                _d = _parse_payment_date(_y, p.get("month") or 1, p.get("day") or 1)
+                if _y and _d is not None:
+                    fresh_by_year[_y].add(_d)
+            except Exception:
+                continue
+        for _y, _dates in fresh_by_year.items():
+            if not _dates:
+                continue
+            stale = await session.execute(
+                select(DividendHistory).where(
+                    DividendHistory.ticker == ticker,
+                    DividendHistory.payment_year == _y,
+                    DividendHistory.source == "temettuhisseleri",
+                    DividendHistory.payment_date.isnot(None),
+                    DividendHistory.payment_date.notin_(list(_dates)),
+                )
+            )
+            for _srow in stale.scalars().all():
+                logger.info("Bayat temettü kaydı silindi: %s %s (yeni tarihler: %s)",
+                            ticker, _srow.payment_date, sorted(_dates))
+                await session.delete(_srow)
+    except Exception as _ce:
+        logger.debug("Bayat temettü temizlik hatası (%s): %s", ticker, _ce)
+
     return inserted
 
 
