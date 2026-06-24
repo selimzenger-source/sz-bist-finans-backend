@@ -829,86 +829,116 @@ async def _check_spk_bulletins_inner():
                 _analiz_already_tweeted = False
 
                 for approval in approvals:
-                    ipo_data = {
-                        "company_name": approval["company_name"],
-                        "spk_bulletin_url": approval.get("bulletin_url"),
-                        "spk_bulletin_no": approval.get("bulletin_no"),
-                        "spk_approval_date": today,
-                        "status": "newly_approved",
-                    }
-                    if approval.get("sale_price"):
-                        ipo_data["ipo_price"] = float(approval["sale_price"])
-
-                    ipo = await ipo_service.create_or_update_ipo(
-                        ipo_data, allow_create=True,
-                    )
-
-                    # SPKApplication tablosunda varsa → approved yap
+                    # ★ HER ONAY İZOLE (24.06.2026): bir onay patlarsa (örn 5.
+                    #   sıradaki şirket) diğerleri + zaten commit'lenenler ETKİLENMESİN.
+                    #   Eskiden tek try yoktu → 5. onayda exception TÜM loop'u kırıp
+                    #   rollback ediyordu (4 push gitmiş, 0 IPO kalmıştı — Golda vakası).
                     try:
-                        from sqlalchemy import select as _sel, and_ as _and
-                        from app.models.spk_application import SPKApplication as _SPKApp
-                        _spk_result = await db.execute(
-                            _sel(_SPKApp).where(
-                                _and(
-                                    _SPKApp.status == "pending",
-                                    _SPKApp.company_name.ilike(
-                                        f"%{approval['company_name'][:30]}%"
-                                    ),
-                                )
-                            )
+                        ipo_data = {
+                            "company_name": approval["company_name"],
+                            "spk_bulletin_url": approval.get("bulletin_url"),
+                            "spk_bulletin_no": approval.get("bulletin_no"),
+                            "spk_approval_date": today,
+                            "status": "newly_approved",
+                        }
+                        if approval.get("sale_price"):
+                            ipo_data["ipo_price"] = float(approval["sale_price"])
+
+                        ipo = await ipo_service.create_or_update_ipo(
+                            ipo_data, allow_create=True,
                         )
-                        for _spk_app in _spk_result.scalars().all():
-                            _spk_app.status = "approved"
-                            logger.info(
-                                "SPKApplication approved: %s (id=%d)",
-                                _spk_app.company_name, _spk_app.id,
-                            )
-                    except Exception as _spk_err:
-                        logger.warning("SPKApplication guncelleme hatasi: %s", _spk_err)
 
-                    if ipo:
-                        # Duplicate tweet kontrolu — bu bulten icin tweet atilmis mi?
-                        _tweet_key = f"spk_onayi_{bno_str_val}_{ipo.id}"
-                        _already_tweeted = False
+                        # SPKApplication tablosunda varsa → approved yap
                         try:
-                            from app.models.pending_tweet import PendingTweet
-                            _tw_check = await db.execute(
-                                select(PendingTweet).where(
-                                    PendingTweet.source == _tweet_key
-                                ).limit(1)
-                            )
-                            if _tw_check.scalar_one_or_none():
-                                _already_tweeted = True
-                                logger.info("SPK tweet zaten atilmis: %s", _tweet_key)
-                        except Exception:
-                            pass
-
-                        if not _already_tweeted:
-                            new_ipos_this_bulletin.append(ipo)
-                        await notif_service.notify_new_ipo(ipo)
-                        try:
-                            from app.services.admin_telegram import notify_spk_approval
-                            await notify_spk_approval(
-                                company_name=approval["company_name"],
-                                approval_type=f"SPK Bulten {bno_str_val}",
-                            )
-                        except Exception:
-                            pass
-
-                        # AI IPO Raporu — SPK onayi alir almaz uret
-                        if not ipo.ai_report:
-                            try:
-                                import asyncio
-                                from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
-                                asyncio.create_task(generate_and_save_ipo_report(ipo.id))
-                                logger.info(
-                                    "AI IPO rapor task baslatildi (SPK onayi): %s",
-                                    ipo.ticker or ipo.company_name,
+                            from sqlalchemy import select as _sel, and_ as _and
+                            from app.models.spk_application import SPKApplication as _SPKApp
+                            _spk_result = await db.execute(
+                                _sel(_SPKApp).where(
+                                    _and(
+                                        _SPKApp.status == "pending",
+                                        _SPKApp.company_name.ilike(
+                                            f"%{approval['company_name'][:30]}%"
+                                        ),
+                                    )
                                 )
-                            except Exception as _ai_err:
-                                logger.warning("AI IPO rapor task hatasi: %s", _ai_err)
+                            )
+                            for _spk_app in _spk_result.scalars().all():
+                                _spk_app.status = "approved"
+                                logger.info(
+                                    "SPKApplication approved: %s (id=%d)",
+                                    _spk_app.company_name, _spk_app.id,
+                                )
+                        except Exception as _spk_err:
+                            logger.warning("SPKApplication guncelleme hatasi: %s", _spk_err)
 
-                    total_approvals += 1
+                        # ★★ KRİTİK FIX: IPO'yu BİLDİRİMDEN ÖNCE COMMIT et.
+                        #   Eskiden commit loop SONUNDAydı → sonraki onayda hata olunca
+                        #   tüm IPO insert'leri rollback, ama push'lar çoktan gitmişti.
+                        #   Artık her IPO anında persist → push SADECE DB'de gerçekten
+                        #   var olan IPO için atılır; sonraki hata eskiyi silemez.
+                        try:
+                            await db.commit()
+                        except Exception as _ipo_commit_err:
+                            logger.error(
+                                "SPK IPO commit hatasi (%s): %s — bu onay atlandi",
+                                approval.get("company_name"), _ipo_commit_err,
+                            )
+                            await db.rollback()
+                            continue
+
+                        if ipo:
+                            # Duplicate tweet kontrolu — bu bulten icin tweet atilmis mi?
+                            _tweet_key = f"spk_onayi_{bno_str_val}_{ipo.id}"
+                            _already_tweeted = False
+                            try:
+                                from app.models.pending_tweet import PendingTweet
+                                _tw_check = await db.execute(
+                                    select(PendingTweet).where(
+                                        PendingTweet.source == _tweet_key
+                                    ).limit(1)
+                                )
+                                if _tw_check.scalar_one_or_none():
+                                    _already_tweeted = True
+                                    logger.info("SPK tweet zaten atilmis: %s", _tweet_key)
+                            except Exception:
+                                pass
+
+                            if not _already_tweeted:
+                                new_ipos_this_bulletin.append(ipo)
+                            await notif_service.notify_new_ipo(ipo)
+                            try:
+                                from app.services.admin_telegram import notify_spk_approval
+                                await notify_spk_approval(
+                                    company_name=approval["company_name"],
+                                    approval_type=f"SPK Bulten {bno_str_val}",
+                                )
+                            except Exception:
+                                pass
+
+                            # AI IPO Raporu — SPK onayi alir almaz uret
+                            if not ipo.ai_report:
+                                try:
+                                    import asyncio
+                                    from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+                                    asyncio.create_task(generate_and_save_ipo_report(ipo.id))
+                                    logger.info(
+                                        "AI IPO rapor task baslatildi (SPK onayi): %s",
+                                        ipo.ticker or ipo.company_name,
+                                    )
+                                except Exception as _ai_err:
+                                    logger.warning("AI IPO rapor task hatasi: %s", _ai_err)
+
+                        total_approvals += 1
+                    except Exception as _appr_err:
+                        logger.error(
+                            "SPK onay isleme hatasi (%s) — bu onay atlandi, digerleri devam: %s",
+                            approval.get("company_name", "?"), _appr_err,
+                        )
+                        try:
+                            await db.rollback()
+                        except Exception:
+                            pass
+                        continue
 
                 # IPO'lar olusturuldu — ARA COMMIT yap ki tweet/bildirim
                 # basarisiz olsa bile IPO kaybi yasanmasin
