@@ -11338,12 +11338,18 @@ async def list_capital_increases(
     # tahsisli/percentage hepsi NULL) listeyi kirletiyordu (PKART, ALKLC, AYES,
     # GUNDG vb. — hepsi tamamlandi + oransız). Oranı olmayan kayıt kullanıcıya
     # bilgi vermez → gizlenir. Oran dolunca (halkarz sync / KAP parse) tekrar görünür.
-    from sqlalchemy import or_ as _or_q
+    # ── ORAN SANITESİ (24.06.2026): >%10000 = bariz parse hatası (amount kolonu
+    #    pct sanılmış, örn ATEKS %202380, IZINV %132755, BUCIM %16666). Bu kayıtlar
+    #    halkarz'da doğru oranla görünür ama bizim parse'ımız bozuk → kullanıcıya
+    #    saçma sayı gösterme. En az bir oran alanı DOLU ve ≤10000 olmalı. (Tweet'le
+    #    aynı tavan — "tam liste halkarz'daki gibi" tutarlılığı.)
+    from sqlalchemy import or_ as _or_q, and_ as _and_q
+    _SANE = 10000
     query = query.where(_or_q(
-        CapitalIncrease.bedelli_pct.isnot(None),
-        CapitalIncrease.bedelsiz_pct.isnot(None),
-        CapitalIncrease.tahsisli_pct.isnot(None),
-        CapitalIncrease.percentage.isnot(None),
+        _and_q(CapitalIncrease.bedelli_pct.isnot(None), CapitalIncrease.bedelli_pct <= _SANE),
+        _and_q(CapitalIncrease.bedelsiz_pct.isnot(None), CapitalIncrease.bedelsiz_pct <= _SANE),
+        _and_q(CapitalIncrease.tahsisli_pct.isnot(None), CapitalIncrease.tahsisli_pct <= _SANE),
+        _and_q(CapitalIncrease.percentage.isnot(None), CapitalIncrease.percentage <= _SANE),
     ))
     if year:
         # Yil filtresi: distribution_date varsa o, yoksa spk_approval_date, yoksa ykk_date

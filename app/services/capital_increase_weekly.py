@@ -56,11 +56,14 @@ async def get_pending_spk_cards() -> dict:
                    COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) AS pct
             FROM capital_increases
             WHERE status = 'ykk_alindi' AND spk_approval_date IS NULL
-              -- ★ Pencere 120 -> 365 gün: halkarz HÂLÂ listeliyorsa (last_seen son
-              --   3 gün) SPK onayı hâlâ bekleniyor demektir; YKK eski olsa bile
-              --   gösterilmeli (DSTKF/PRZMA/RUBNS gibi 4-6 ay önce YKK almışlar
-              --   halkarz'da duruyordu ama 120 gün filtresi düşürüyordu).
-              AND ykk_date IS NOT NULL AND ykk_date >= (CURRENT_DATE - INTERVAL '365 days')
+              -- ★ YKK tarih penceresi KALDIRILDI (24.06.2026): tek doğru ölçüt
+              --   "halkarz HÂLÂ listeliyor mu" = last_seen son 3 gün. YKK ne kadar
+              --   eski olursa olsun halkarz listeliyorsa SPK onayı hâlâ bekleniyor
+              --   demektir; göstermeliyiz (REEDR/MERCN/ALKLC/RYSAS/PASEU gibi 1 yıldan
+              --   eski ama halkarz'da duran kayıtları 365 gün filtresi düşürüyordu →
+              --   "tam liste halkarz'daki gibi" kuralı). YKK tarihi yine de dolu olmalı
+              --   (kartta gösteriliyor).
+              AND ykk_date IS NOT NULL
               AND last_seen_on_source IS NOT NULL
               AND last_seen_on_source >= (NOW() - INTERVAL '3 days')
               AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) IS NOT NULL
@@ -82,8 +85,8 @@ async def get_pending_spk_cards() -> dict:
 def _fmt_pct(v) -> str:
     if v is None:
         return "—"
-    s = f"{float(v):.2f}".rstrip("0").rstrip(".")
-    return "%" + s.replace(".", ",")
+    # Her zaman virgülden sonra 2 hane (kullanıcı kuralı): %900 -> %900,00
+    return "%" + f"{float(v):.2f}".replace(".", ",")
 
 
 def generate_pending_spk_image(sections: list[dict], label: str, suffix: str = "") -> str | None:
