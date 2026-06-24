@@ -3196,6 +3196,32 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
     content_lower = content.lower().replace("̇", "")
     summary_lower = (ai_summary or "").lower().replace("̇", "")
 
+    # ─── 🚫 İÇERİĞE ERİŞİLEMEDİ / AI "NÖTR" DEDİ → NÖTR-KİLİT (PKENT 16994, 24.06.2026) ──
+    # KÖK SORUN: AI içeriği çekemeyince özette "detaylı içeriğine erişilemediği için
+    # ... NÖTR olarak değerlendirilmektedir" yazıyor AMA skoru 6.2 (Hafif Olumlu)
+    # bırakıyordu — kendi özetiyle çelişen skor (kullanıcı: "nötr işaretli yüzlerce
+    # haber var, bu neden pozitif?"). AI'nin KENDİ özeti veri olmadığını/nötr
+    # olduğunu itiraf ediyorsa skor MUTLAKA 5.0. Bu, başlıktan uydurulan pozitifliği
+    # (PKENT "Özel Durum Açıklaması (Genel)" — Yatırımcı Tazmin Merkezi tipi standart
+    # bildirim) kökten keser. content değil ÖZET üzerinden bakar (AI'nin beyanı).
+    _su = summary_lower
+    for _a, _b in (("ğ", "g"), ("ı", "i"), ("ş", "s"), ("ç", "c"), ("ö", "o"), ("ü", "u"), ("â", "a")):
+        _su = _su.replace(_a, _b)
+    _no_data_markers = (
+        "icerigine erisileme", "icerige erisileme", "erisilemedigi icin",
+        "erisilemediginden", "degerlendirilememis", "degerlendirilememekte",
+        "analiz yapilacak veri bulunma", "analiz edilecek veri bulunma",
+        "zaman damgasi disinda", "notr olarak degerlendiril",
+        "somut veri bulunma", "yeterli veri bulunma", "analiz icin veri",
+    )
+    if score is not None and score != 5.0 and any(m in _su for m in _no_data_markers):
+        logger.info(
+            "AI News Scorer [VERI-YOK/AI-NOTR→NOTR] %s: %.1f -> 5.0 "
+            "(AI özeti içeriğe erişilemediğini/nötr olduğunu beyan ediyor — "
+            "skor özetle çelişemez)", ticker, score,
+        )
+        return 5.0
+
     # ─── ⚽ SPOR KULUBU TRANSFER HABERI → NOTR (MUTLAK ONCELIK) ──────
     # Besiktas/Galatasaray/Trabzonspor/Fenerbahce transfer/futbolcu/teknik
     # direktor/sozlesme haberlerinin FINANSAL etkisi belirsiz — pozitif
