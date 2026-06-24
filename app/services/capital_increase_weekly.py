@@ -56,7 +56,11 @@ async def get_pending_spk_cards() -> dict:
                    COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) AS pct
             FROM capital_increases
             WHERE status = 'ykk_alindi' AND spk_approval_date IS NULL
-              AND ykk_date IS NOT NULL AND ykk_date >= (CURRENT_DATE - INTERVAL '120 days')
+              -- ★ Pencere 120 -> 365 gün: halkarz HÂLÂ listeliyorsa (last_seen son
+              --   3 gün) SPK onayı hâlâ bekleniyor demektir; YKK eski olsa bile
+              --   gösterilmeli (DSTKF/PRZMA/RUBNS gibi 4-6 ay önce YKK almışlar
+              --   halkarz'da duruyordu ama 120 gün filtresi düşürüyordu).
+              AND ykk_date IS NOT NULL AND ykk_date >= (CURRENT_DATE - INTERVAL '365 days')
               AND last_seen_on_source IS NOT NULL
               AND last_seen_on_source >= (NOW() - INTERVAL '3 days')
               AND COALESCE(bedelli_pct, bedelsiz_pct, tahsisli_pct) IS NOT NULL
@@ -182,38 +186,30 @@ def generate_pending_spk_image(sections: list[dict], label: str, suffix: str = "
 
 
 def build_tweet_text(data: dict) -> str:
-    nb = len(data.get("bedelli", []))
+    # SADECE BEDELSİZ (kullanıcı kuralı) — bedelli/tahsisli tweet'e girmez.
     nz = len(data.get("bedelsiz", []))
-    nt = len(data.get("tahsisli", []))
     lines = [
-        "📋 SPK Onayı Bekleyen Sermaye Artırımı Talepleri",
+        "📋 SPK Onayı Bekleyen Bedelsiz Sermaye Artırımları",
         "",
-        "Yönetim kurulu kararı alınmış, SPK onayı bekleyen bedelli/bedelsiz artırımlar 👇",
+        "Yönetim kurulu kararı alınmış, SPK onayı bekleyen bedelsiz artırımlar 👇",
         "",
+        f"🟢 {nz} hisse",
+        "",
+        "Oran + YKK tarihi görselde.",
+        "",
+        "#bedelsiz #sermayeartırımı",
     ]
-    parts = []
-    if nb:
-        parts.append(f"🟠 {nb} bedelli")
-    if nz:
-        parts.append(f"🟢 {nz} bedelsiz")
-    if nt:
-        parts.append(f"🔵 {nt} tahsisli")
-    if parts:
-        lines.append("📊 " + " · ".join(parts))
-        lines.append("")
-    lines.append("Detaylar (oran + YKK tarihi) görselde.")
-    lines.append("")
-    lines.append("#sermayeartırımı #borsa")
     return "\n".join(lines)
 
 
 async def run_weekly_capital_spk(*, force: bool = False, dry_run: bool = False) -> dict:
-    """Çarşamba 08:00 — SPK onayı bekleyen artırım talepleri grafikli tweet."""
+    """Çarşamba 08:00 — SPK onayı bekleyen BEDELSİZ artırım talepleri grafikli tweet."""
     data = await get_pending_spk_cards()
-    total = sum(len(v) for v in data.values())
+    # Sadece bedelsiz say (bedelli/tahsisli tweet'e girmez)
+    total = len(data.get("bedelsiz", []))
     label = f"{_today_tr().day} {_TR_MONTHS[_today_tr().month]} {_today_tr().year} itibarıyla"
-    logger.info("SPK bekleyen artırım: %d talep (bedelli=%d bedelsiz=%d tahsisli=%d)",
-                total, len(data["bedelli"]), len(data["bedelsiz"]), len(data["tahsisli"]))
+    logger.info("SPK bekleyen BEDELSİZ artırım: %d talep (bedelli=%d görmezden geliniyor)",
+                total, len(data.get("bedelli", [])))
     if total < MIN_FOR_TWEET and not force:
         return {"sent": False, "reason": "below_threshold", "total": total}
 
@@ -221,10 +217,11 @@ async def run_weekly_capital_spk(*, force: bool = False, dry_run: bool = False) 
     # tüm kartlar tek görselde gösterilir (eskiden cards[:8] ile 8'den fazlası kırpılıyordu:
     # "12 hisse" yazıp 8 göstermesi bug'ı). Twitter tek tweette max 4 görsel kabul ettiği
     # için, bir tip 14'ten fazlaysa 14'erli sayfalara bölünür (toplam 4 görsel sınırı korunur).
+    # ★ SADECE BEDELSİZ (kullanıcı kuralı): bedelli/tahsisli tweet'e GİRMEZ.
+    # Bedelli artırım yatırımcıdan para ister (seyreltme riski) — bedelsiz ise
+    # iç kaynaktan dağıtım, retail için pozitif algı. Sadece bedelsiz paylaşılır.
     image_paths: list[str] = []
-    order = [("bedelli", "BEDELLİ ARTIRIM TALEPLERİ"),
-             ("bedelsiz", "BEDELSİZ ARTIRIM TALEPLERİ"),
-             ("tahsisli", "TAHSİSLİ ARTIRIM TALEPLERİ")]
+    order = [("bedelsiz", "BEDELSİZ SERMAYE ARTIRIMI TALEPLERİ")]
     _PER_IMG = 14  # tek görselde max kart (aşırı uzun görsel olmasın)
     for typ, title in order:
         cards = data.get(typ) or []
