@@ -2177,6 +2177,65 @@ Respond with ONLY the JSON specified by the user prompt. No other text."""
 
 
 # -------------------------------------------------------
+# DÖVİZ→TL ÇEVRİM DÜZELTME (KLNMA fix, 25.06.2026)
+# AI özette döviz tutarını TL'ye çevirirken kendi ESKİ bilgisini (~40 TL) kullanıp
+# yanlış rakam üretiyordu (kullanıcı twitter'da yakaladı: 350M USD → "14 milyar TL"
+# = sabit 40 kur; doğrusu canlı 46,5 kurla ~16,3 milyar TL). Çözüm: (1) canlı kuru
+# prompt'a ver, (2) çıktıdaki '<döviz tutarı> (... TL)' kalıplarını canlı kurla
+# YENİDEN HESAPLA; kur yoksa TL parantezini SİL (yanlış sayı yerine eksik bırak).
+# -------------------------------------------------------
+_FX_AMOUNT_RE = re.compile(
+    r"(?P<amt>\d[\d.,]*)\s*(?P<mag>milyar|milyon|bin)?\s*"
+    r"(?P<cur>ABD\s*dolar[ıi]|amerikan\s*dolar[ıi]|dolar[ıi]?|usd|euro|avro|eur)"
+    r"[^()]{0,45}?\([^()]*?\bTL\b[^()]*?\)",
+    re.IGNORECASE,
+)
+_FX_MAG = {"bin": 1e3, "milyon": 1e6, "milyar": 1e9, "": 1.0}
+
+
+def _fmt_tl_amount(v: float) -> str:
+    """TL tutarını okunur biçimle: 16,28 milyar TL / 850 milyon TL."""
+    if v >= 1e9:
+        s = f"{v / 1e9:.2f}".rstrip("0").rstrip(".")
+        return s.replace(".", ",") + " milyar TL"
+    if v >= 1e6:
+        s = f"{v / 1e6:.2f}".rstrip("0").rstrip(".")
+        return s.replace(".", ",") + " milyon TL"
+    return f"{v:,.0f}".replace(",", ".") + " TL"
+
+
+def _normalize_currency_to_tl(summary: str, rates: dict) -> str:
+    """Özetteki döviz→TL çevrimlerini CANLI kurla yeniden hesaplar / kur yoksa siler."""
+    if not summary or "TL" not in summary:
+        return summary
+
+    def _sub(m):
+        full = m.group(0)
+        before = full[: full.rfind("(")].rstrip()  # parantezden önceki orijinal metin
+        cur_raw = (m.group("cur") or "").lower()
+        if "dolar" in cur_raw or "usd" in cur_raw:
+            ccy = "USD"
+        elif "euro" in cur_raw or "avro" in cur_raw or "eur" in cur_raw:
+            ccy = "EUR"
+        else:
+            return full
+        rate = rates.get(ccy)
+        if not rate:
+            return before  # canlı kur yok → yanlış TL yerine parantezi tamamen çıkar
+        try:
+            amt = float(m.group("amt").replace(".", "").replace(",", "."))
+        except (ValueError, TypeError):
+            return full
+        base = amt * _FX_MAG.get((m.group("mag") or "").lower(), 1.0)
+        return f"{before} (güncel kurla yaklaşık {_fmt_tl_amount(base * rate)})"
+
+    try:
+        return _FX_AMOUNT_RE.sub(_sub, summary)
+    except Exception:
+        return summary
+
+
+# -------------------------------------------------------
 # ADIM 2: AI Puanlama (Abacus RouteLLM)
 # -------------------------------------------------------
 
@@ -2280,6 +2339,32 @@ async def score_news(
     # AI'nin yield-bazli ve oran-bazli puanlamasini dogru yapmasi icin kritik.
     context_data = await _fetch_context_data(ticker, content)
 
+    # ── CANLI DÖVİZ KURU (KLNMA fix): AI'nin TL çevriminde eski/sabit kur (~40)
+    #    kullanmasını önle — kuru prompt'a enjekte et. Cache'li, hızlı.
+    _live_rates: dict = {}
+    try:
+        from app.services.business_deal_processor import get_exchange_rate as _get_fx
+        for _ccy in ("USD", "EUR"):
+            _rr, _ = await _get_fx(_ccy)
+            if _rr:
+                _live_rates[_ccy] = float(_rr)
+    except Exception:
+        _live_rates = {}
+    if _live_rates:
+        _fx_block = (
+            "GÜNCEL DÖVİZ KURU (bugün, CANLI): "
+            + " · ".join(f"1 {k} = {v:.2f} TL" for k, v in _live_rates.items())
+            + "\n⚠️ DÖVİZ→TL ÇEVİRME KURALI: USD/EUR tutarlarını TL'ye çevirirken "
+            "SADECE yukarıdaki canlı kuru kullan. Kendi bildiğin/varsaydığın kuru "
+            "(örn. 40 TL) ASLA kullanma. Çevrim = döviz tutarı × canlı kur."
+        )
+    else:
+        _fx_block = (
+            "⚠️ DÖVİZ→TL ÇEVİRME KURALI: Canlı kura erişilemedi. Döviz (USD/EUR) "
+            "tutarlarını TL'ye ÇEVİRME; sadece orijinal döviz cinsini yaz "
+            "(örn. '350 milyon ABD doları'), parantez içinde TL karşılığı EKLEME."
+        )
+
     prompt = f"""Borsa Istanbul (BIST) KAP bildirimi analizi.
 
 Hisse: {ticker}
@@ -2290,6 +2375,8 @@ Kaynak: {source_info}
 --- ICERIK BITIS ---
 
 {context_data}
+
+{_fx_block}
 
 GOREV:
 1. Haberi yatirimci bakis acisiyla Turkce ozetle. Cumle sayisi PUANA gore:
@@ -2856,6 +2943,12 @@ NOTLAR:
                     ticker, float(score),
                 )
                 score = 5.0
+
+        # ── DÖVİZ→TL ÇEVRİM DÜZELTME (canlı kur) — özet son hali ──
+        # AI prompt'taki kurala rağmen sabit kur yazarsa SON EMNİYET: parantezdeki
+        # TL'yi canlı kurla yeniden hesapla (kur yoksa parantezi sil).
+        if summary:
+            summary = _normalize_currency_to_tl(summary, _live_rates)
 
         logger.info(
             "AI News Scorer [%s]: %s — skor=%s, kaynak=%s, hashtags=%s, ozet=%s",
