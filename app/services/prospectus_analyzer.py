@@ -1252,9 +1252,10 @@ async def analyze_with_ai(
     settings = get_settings()
     abacus_key = settings.ABACUS_API_KEY or None
     anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
+    gemini_key = getattr(settings, "GEMINI_API_KEY", None) or None
 
-    if not abacus_key and not anthropic_key:
-        logger.error("AI API key yok (ne Abacus ne Claude) — izahname analizi yapılamadı")
+    if not abacus_key and not anthropic_key and not gemini_key:
+        logger.error("AI API key yok (Abacus/Claude/Gemini hiçbiri) — izahname analizi yapılamadı")
         return None
 
     # Kullanıcı mesajı: şirket bağlamı + PDF metni
@@ -1362,6 +1363,50 @@ async def analyze_with_ai(
                     )
             except Exception as e:
                 logger.error("Claude izahname hata (%s) — %s", company_name, e)
+
+        # ── Yedek 2: Google Gemini (28.06.2026) ──
+        # KÖK SORUN: izahname analizi SADECE Abacus + Claude deniyordu, Gemini YOKTU.
+        # Abacus kredisi bitince + Claude başarısız olunca 5 izahnamenin de analizi
+        # None dönüp "üret" butonu hata veriyordu (kullanıcı: "hepsini denedim,
+        # hiçbiri üretilmedi"). Haber puanlayıcıdaki çalışan Gemini fallback'i buraya
+        # da eklendi — Abacus kredisi gerekmeden (Render'da OCR zaten ücretsiz
+        # Tesseract) analiz Gemini ile tamamlanır.
+        if not content and gemini_key:
+            try:
+                logger.info("Gemini fallback (izahname) baslatiliyor: %s", company_name)
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _GEMINI_URL,
+                        headers={
+                            "Authorization": f"Bearer {gemini_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": _GEMINI_MODEL,
+                            "max_tokens": 4096,
+                            "temperature": 0.15,
+                            "messages": [
+                                {"role": "system", "content": full_system},
+                                {"role": "user", "content": user_message},
+                            ],
+                        },
+                    )
+                if resp.status_code == 200:
+                    content = (
+                        resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    )
+                    if content:
+                        provider_used = "Gemini"
+                        logger.info("İzahname analizi Gemini ile uretildi: %s", company_name)
+                    else:
+                        logger.warning("Gemini 200 OK ama content bos (%s)", company_name)
+                else:
+                    logger.error(
+                        "Gemini izahname hatasi HTTP %d — %s",
+                        resp.status_code, resp.text[:300],
+                    )
+            except Exception as e:
+                logger.error("Gemini izahname hata (%s) — %s", company_name, e)
 
         if not content:
             logger.error("AI boş izahname analizi döndü (tüm providerlar basarisiz) — %s", company_name)
