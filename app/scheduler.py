@@ -5284,16 +5284,25 @@ def _setup_scheduler_impl():
         except Exception as e:
             logger.error("Izahname finder job hatasi: %s", e)
 
-    scheduler.add_job(
-        _prospectus_finder_job,
-        IntervalTrigger(hours=6),
-        id="prospectus_final_finder",
-        name="Nihai Izahname Bulucu (6 saatte bir)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=1800,
-    )
+    # ⛔ DEVRE DIŞI (28.06.2026): Bu job SONSUZ KREDİ YAKAN DÖNGÜ'ye sebep oluyordu.
+    # check_final_prospectuses her 6 saatte URL'yi (final olsa bile) yeniden set edip
+    # analizi NULL'a çekip analyze_prospectus'u tetikliyordu; analiz 270 sayfalık
+    # taranmış PDF'i Vision OCR'a (Gemini) sokup devasa kredi yakıyor, OCR kredisi
+    # bitince tamamlanmıyor → 'analysis IS NULL' filtresi tekrar eşleşiyor → her
+    # döngüde aynı 5 izahnameyi tekrar tekrar analiz ediyordu (kullanıcı: "deli gibi
+    # kredi tüketiyor, DURDUR"). prospectus_finder.py'deki kök bug da düzeltildi
+    # (new_url == old_url ise tetikleme yok); güvenli olduğuna emin olunca tekrar açılır.
+    # scheduler.add_job(
+    #     _prospectus_finder_job,
+    #     IntervalTrigger(hours=6),
+    #     id="prospectus_final_finder",
+    #     name="Nihai Izahname Bulucu (6 saatte bir)",
+    #     replace_existing=True,
+    #     max_instances=1,
+    #     coalesce=True,
+    #     misfire_grace_time=1800,
+    # )
+    logger.warning("⛔ Izahname finder job DEVRE DISI (kredi yakan dongu — 28.06.2026)")
 
     # Her 15 dk: kap_url'u NULL kalan haberlerin gercek KAP linkini doldur.
     # (TradingView gec indeksledigi icin link bulunamadan kaydedilen haberler —

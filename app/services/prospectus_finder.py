@@ -271,15 +271,18 @@ async def check_final_prospectuses():
                         ipo.company_name or "", ipo.prospectus_url,
                         approval_date=ipo.spk_approval_date,
                     )
-                    if not new_url:
+                    old_url = ipo.prospectus_url or ""
+                    # ⛔ KREDİ YAKAN DÖNGÜ FIX (28.06.2026): URL DEĞİŞMEDİYSE
+                    # yeniden analiz ETME. Eskiden new_url == old_url olsa bile
+                    # analizi NULL'a çekip analyze_prospectus'u her 6 saatte tekrar
+                    # tetikliyordu → 270 sayfa Vision OCR × her döngü = devasa kredi.
+                    if not new_url or new_url == old_url:
                         logger.info(
-                            "[IZAHNAME-FINDER] %s: nihai izahname henuz yok (mevcut: %s)",
-                            ipo.ticker or ipo.company_name,
-                            (ipo.prospectus_url or "-")[:80],
+                            "[IZAHNAME-FINDER] %s: yeni/farkli nihai izahname yok — atlandi (mevcut: %s)",
+                            ipo.ticker or ipo.company_name, (old_url or "-")[:80],
                         )
                         continue
 
-                    old_url = ipo.prospectus_url
                     ipo.prospectus_url = new_url
                     # Eski (taslak) analiz varsa sifirla → yeniden analiz edilsin
                     had_analysis = bool(ipo.prospectus_analysis)
