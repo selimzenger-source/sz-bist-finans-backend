@@ -1383,7 +1383,9 @@ async def analyze_with_ai(
                         },
                         json={
                             "model": _GEMINI_MODEL,
-                            "max_tokens": 4096,
+                            # ★ Gemini 2.5 Pro thinking token yiyor — 4096 uzun izahname
+                            #   analizinde yetmeyip çıktıyı kesebiliyor. 16000'e çıkarıldı.
+                            "max_tokens": 16000,
                             "temperature": 0.15,
                             "messages": [
                                 {"role": "system", "content": full_system},

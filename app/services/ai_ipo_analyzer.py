@@ -1013,7 +1013,10 @@ async def generate_ipo_report(
                         },
                         json={
                             "model": _GEMINI_MODEL,
-                            "max_tokens": 6500,
+                            # ★ Gemini 2.5 Pro "thinking" token yiyor — uzun rapor için
+                            #   6500 yetmiyordu (düşünme hepsini yiyip çıktı BOŞ kalıyordu
+                            #   → JSON parse patlıyor → 500). 24000'e çıkarıldı.
+                            "max_tokens": 24000,
                             "temperature": 0.12,
                             "messages": [
                                 {"role": "system", "content": system_prompt},
