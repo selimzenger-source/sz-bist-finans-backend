@@ -1416,10 +1416,27 @@ async def run_prospectus_analysis_admin(
     await db.commit()
 
     try:
-        from app.services.prospectus_analyzer import analyze_prospectus
-        # GC korumalı arka plan görevi (_bg_tasks referans tutar)
-        _fire_and_forget(analyze_prospectus(ipo_id, ipo.prospectus_url, delay_seconds=0))
-        msg = f"İzahname analizi başlatıldı: {ipo.company_name} — birkaç dakika içinde tamamlanır"
+        # ★ TEK BUTON (28.06.2026): "AI İzahname Üret" artık SIRAYLA ikisini de yapar:
+        #   1) analyze_prospectus → olumlu/olumsuz dipnotlar + görsel + tweet
+        #   2) generate_and_save_ipo_report → AI puanlı (overall_score) DERİN analiz
+        #   (uygulamada/web'de VIP kullanıcıya gösterilen puanlı rapor). İzahname
+        #   analizi önce biter (prospectus_context'i rapora besler), sonra rapor üretilir.
+        _pdf_url = ipo.prospectus_url
+
+        async def _full_ipo_ai():
+            try:
+                from app.services.prospectus_analyzer import analyze_prospectus
+                await analyze_prospectus(ipo_id, _pdf_url, delay_seconds=0)
+            except Exception as _e1:
+                logger.error("Tek-buton: izahname analizi hatasi (ipo %d): %s", ipo_id, _e1)
+            try:
+                from app.services.ai_ipo_analyzer import generate_and_save_ipo_report
+                await generate_and_save_ipo_report(ipo_id, force=True)
+            except Exception as _e2:
+                logger.error("Tek-buton: AI rapor hatasi (ipo %d): %s", ipo_id, _e2)
+
+        _fire_and_forget(_full_ipo_ai())
+        msg = f"İzahname analizi + AI puanlı rapor başlatıldı: {ipo.company_name} — birkaç dakika içinde tamamlanır"
         return RedirectResponse(url=f"/admin/?success={msg}", status_code=303)
     except Exception as e:
         logger.error("Admin prospectus analiz hatasi: %s", e)
