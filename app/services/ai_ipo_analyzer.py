@@ -884,9 +884,10 @@ async def generate_ipo_report(
     settings = get_settings()
     abacus_key = settings.ABACUS_API_KEY or None
     anthropic_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
+    gemini_key = getattr(settings, "GEMINI_API_KEY", None) or None
 
-    if not abacus_key and not anthropic_key:
-        logger.error("AI API key yok (ne Abacus ne Claude) — IPO rapor uretilemedi")
+    if not abacus_key and not anthropic_key and not gemini_key:
+        logger.error("AI API key yok (Abacus/Claude/Gemini hiçbiri) — IPO rapor uretilemedi")
         return None
 
     context = _build_ipo_context(
@@ -994,6 +995,48 @@ async def generate_ipo_report(
                     )
             except Exception as e:
                 logger.error("Claude IPO rapor hata (%s) — %s", ipo.ticker or ipo.company_name, e)
+
+        # ── Yedek 2: Google Gemini 2.5 Pro (28.06.2026) ──
+        # KÖK SORUN: IPO raporu da SADECE Abacus + Claude deniyordu (Gemini sabitleri
+        # tanımlıydı ama çağrı yoktu). Abacus kredisi bitince + Claude başarısız olunca
+        # puanlı derin analiz None dönüp "AI raporu görünmüyor" oluyordu. İzahname
+        # analizindeki çalışan Gemini fallback'i buraya da eklendi.
+        if not content and gemini_key:
+            try:
+                logger.info("Gemini fallback (IPO rapor) baslatiliyor: %s", ipo.ticker or ipo.company_name)
+                async with httpx.AsyncClient(timeout=_AI_TIMEOUT) as client:
+                    resp = await client.post(
+                        _GEMINI_URL,
+                        headers={
+                            "Authorization": f"Bearer {gemini_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": _GEMINI_MODEL,
+                            "max_tokens": 6500,
+                            "temperature": 0.12,
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_message},
+                            ],
+                        },
+                    )
+                if resp.status_code == 200:
+                    content = (
+                        resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                    )
+                    if content:
+                        provider_used = "Gemini"
+                        logger.info("IPO rapor Gemini ile uretildi: %s", ipo.ticker or ipo.company_name)
+                    else:
+                        logger.warning("Gemini 200 OK ama content bos (%s)", ipo.ticker or ipo.company_name)
+                else:
+                    logger.error(
+                        "Gemini IPO rapor hatasi HTTP %d — %s",
+                        resp.status_code, resp.text[:300],
+                    )
+            except Exception as e:
+                logger.error("Gemini IPO rapor hata (%s) — %s", ipo.ticker or ipo.company_name, e)
 
         if not content:
             logger.error("AI bos IPO raporu dondu (tum providerlar basarisiz) — %s", ipo.ticker or ipo.company_name)
