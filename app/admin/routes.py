@@ -2480,9 +2480,10 @@ async def _generate_ayin_thread_with_ai(
 
     from app.config import get_settings
     settings = get_settings()
-    api_key = settings.ANTHROPIC_API_KEY
-    if not api_key:
-        logger.warning("[THREAD-AI] ANTHROPIC_API_KEY tanımlı değil, thread üretilemedi")
+    api_key = getattr(settings, "ANTHROPIC_API_KEY", None) or None
+    gemini_key = getattr(settings, "GEMINI_API_KEY", None) or None
+    if not api_key and not gemini_key:
+        logger.warning("[THREAD-AI] AI anahtarı yok (Claude/Gemini) — thread üretilemedi")
         return None
 
     # Rapor özetini oluştur (Claude'a gönderilecek — mümkün olduğunca çok veri)
@@ -2541,39 +2542,73 @@ async def _generate_ayin_thread_with_ai(
         report_summary=report_summary,
     )
 
+    # ── İçerik üret: Claude → Gemini fallback (28.06.2026) ──
+    # 'Ayın halka arzı' thread'i SADECE Claude kullanıyordu; Claude ölünce None
+    # dönüp tek tweet'e (sadece kapak görseli) düşüyordu — kullanıcı: "5 tweet
+    # üretip atıyorduk, şimdi sadece kapağı üretiyor". Gemini 2.5 Pro fallback'i
+    # eklendi (max_tokens yüksek — thinking token + 4-5 tweet sığsın).
+    content_text = ""
+    if api_key:
+        try:
+            async with _hx.AsyncClient(timeout=45.0) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 6000,
+                        "system": _THREAD_SYSTEM_PROMPT,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.4,
+                    },
+                )
+            if resp.status_code == 200:
+                for block in resp.json().get("content", []):
+                    if block.get("type") == "text":
+                        content_text = block.get("text", "").strip()
+                        break
+            else:
+                logger.error("[THREAD-AI] Claude API hatası (%d): %s — Gemini'ye geçiliyor",
+                             resp.status_code, resp.text[:200])
+        except Exception as _ce:
+            logger.error("[THREAD-AI] Claude hata: %s — Gemini'ye geçiliyor", _ce)
+
+    if not content_text and gemini_key:
+        try:
+            async with _hx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={"Authorization": f"Bearer {gemini_key}", "Content-Type": "application/json"},
+                    json={
+                        "model": "gemini-2.5-pro",
+                        "max_tokens": 16000,
+                        "temperature": 0.4,
+                        "messages": [
+                            {"role": "system", "content": _THREAD_SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                    },
+                )
+            if resp.status_code == 200:
+                content_text = (
+                    resp.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+                )
+                if content_text:
+                    logger.info("[THREAD-AI] Thread Gemini ile üretildi")
+            else:
+                logger.error("[THREAD-AI] Gemini API hatası (%d): %s", resp.status_code, resp.text[:200])
+        except Exception as _ge:
+            logger.error("[THREAD-AI] Gemini hata: %s", _ge)
+
+    if not content_text:
+        logger.error("[THREAD-AI] Tüm sağlayıcılar boş döndü — thread üretilemedi")
+        return None
+
     try:
-        async with _hx.AsyncClient(timeout=45.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 6000,
-                    "system": _THREAD_SYSTEM_PROMPT,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.4,
-                },
-            )
-
-        if resp.status_code != 200:
-            logger.error("[THREAD-AI] Claude API hatası (%d): %s", resp.status_code, resp.text[:300])
-            return None
-
-        data = resp.json()
-        content_text = ""
-        for block in data.get("content", []):
-            if block.get("type") == "text":
-                content_text = block.get("text", "").strip()
-                break
-
-        if not content_text:
-            logger.error("[THREAD-AI] Claude boş yanıt döndü")
-            return None
-
         # JSON parse
         if content_text.startswith("```"):
             content_text = content_text.split("```")[1]
