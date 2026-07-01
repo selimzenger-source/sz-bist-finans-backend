@@ -552,6 +552,23 @@ async def check_spk_bulletins_job():
             pass
 
 
+async def spk_bulletin_catchup_job():
+    """SPK bülten CATCH-UP (self-healing) — her 15 dk.
+
+    check_spk_bulletins yarıda kesilirse (restart/exception/AI-down/Twitter-down)
+    IPO'lar oluşur ama analiz+tweet+push kaybolur. Bu job, son 24 saatte IPO'su
+    oluşmuş ama push flag'i eksik bültenleri tespit edip tamamlar → bülten
+    bildirimi/tweeti her ihtimale karşı EN GEÇ 15 dk içinde kesin gider.
+    """
+    try:
+        from app.services.spk_bulletin_catchup import catchup_incomplete_bulletins
+        res = await catchup_incomplete_bulletins()
+        if res.get("completed"):
+            logger.warning("SPK bülten catch-up: %s", res)
+    except Exception as e:
+        logger.error("SPK bülten catch-up hatasi: %s", e)
+
+
 async def check_resmi_gazete_job():
     """Resmi Gazete monitor — borsa etkili kararları yakalar."""
     try:
@@ -4624,6 +4641,21 @@ def _setup_scheduler_impl():
         id="spk_bulletin_monitor_day",
         name="SPK Bulten Monitor (Gunduz)",
         replace_existing=True,
+    )
+
+    # 3c-2. SPK Bülten CATCH-UP (self-healing) — her 15 dk, 7/24.
+    # check_spk_bulletins yarıda kesilirse (restart/exception/AI-down/Twitter-down)
+    # IPO oluşur ama analiz+tweet+push kaybolur; bu job eksik bültenleri tamamlar.
+    # "Her ihtimale karşı bülten bildirimi kaybolmasın" güvencesi (01.07.2026).
+    scheduler.add_job(
+        spk_bulletin_catchup_job,
+        IntervalTrigger(minutes=15),
+        id="spk_bulletin_catchup",
+        name="SPK Bulten Catch-Up (self-healing, 15dk)",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
     )
 
     # 3c. Resmi Gazete Monitor — her 30 dakikada bir, 7/24, hafta ici
