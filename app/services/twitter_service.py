@@ -3398,7 +3398,12 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
         payload_base = {
             "messages": messages,
             "temperature": 0.3,
-            "max_tokens": 8192,  # Gemini 2.5 thinking token yiyor
+            # ★ 8192 -> 24000 (01.07.2026): Gemini 2.5 Pro "thinking" token yiyor;
+            #   uzun/karmaşık bültende 8192 düşünmeye harcanıp çıktı BOŞ dönüyordu
+            #   → analiz None → push guard bildirimi bloklıyordu (kullanıcı: "SARA
+            #   IPO oluştu, bildirim geldi ama SPK analizi/tweet/push yok"). Çıktı
+            #   3500 karakterle zaten sınırlı; yüksek limit sadece thinking'e alan açar.
+            "max_tokens": 24000,
         }
 
         content = None
