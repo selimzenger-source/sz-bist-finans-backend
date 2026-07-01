@@ -417,10 +417,28 @@ async def download_pdf(url: str) -> Optional[str]:
     tüm PDF'i RAM'de tutmaktan kaçınır (Render 512MB limiti).
     """
     try:
+        # ★ Gerçek tarayıcı UA + Referer/Accept (01.07.2026): bazı broker siteleri
+        #   (terayatirim vb.) 'SZAlgo/1.0' botsu UA'yı veya header'sız isteği
+        #   engelliyor → Render PDF'i indiremiyor, izahname analizi başarısız
+        #   (SARA vakası). Tarayıcı taklidi anti-bot'u aşar.
+        try:
+            from urllib.parse import urlparse as _up
+            _pr = _up(url)
+            _referer = f"{_pr.scheme}://{_pr.netloc}/"
+        except Exception:
+            _referer = url
         async with httpx.AsyncClient(
             timeout=90.0,
             follow_redirects=True,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; SZAlgo/1.0)"},
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/pdf,application/octet-stream,*/*",
+                "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+                "Referer": _referer,
+            },
         ) as client:
             # Streaming indirme — tüm içeriği RAM'e almaz
             async with client.stream("GET", url) as resp:
