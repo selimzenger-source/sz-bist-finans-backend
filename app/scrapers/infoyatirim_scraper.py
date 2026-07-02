@@ -170,7 +170,16 @@ class InfoYatirimScraper:
                 "participation_method": participation_code,
                 "participation_description": participation_desc,
                 "participation_raw": katilim_raw,
-                "katilim_endeksi": "uygun" if "uygundur" in endeks_raw.lower() else "uygun_degil" if endeks_raw else None,
+                # ★ FIX (02.07.2026): eskiden SADECE "uygundur" aranıyordu; metin
+                #   "Katılım Endeksine Uygun" (sonu -dur değil) yazınca yanlışlıkla
+                #   "uygun_degil" set ediyordu (SOHO vakası — halkarz 'uygun' derken
+                #   bizde 'uygun_degil' çıktı). Artık halkarz/gedik ile aynı sağlam
+                #   mantık: "uygun" geçiyor + "değil" geçmiyorsa uygun.
+                "katilim_endeksi": (
+                    "uygun" if (endeks_raw and "uygun" in endeks_raw.lower()
+                                and "değil" not in endeks_raw.lower())
+                    else ("uygun_degil" if endeks_raw else None)
+                ),
                 "detail_url": detail_url,
             }
 
