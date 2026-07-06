@@ -318,6 +318,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     """
     # ── Cache: son 10 gunde ayni ticker icin sebep var mi? (fallback olarak) ──
     _cached_reason = ""
+    _cached_date = None
     try:
         async with async_session() as session:
             cache_since = datetime.now(timezone.utc) - timedelta(days=10)
@@ -336,6 +337,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             cached = cache_res.scalar_one_or_none()
             if cached and cached.reason:
                 _cached_reason = cached.reason
+                _cached_date = cached.date
                 logger.info(f"[REASON CACHE] {ticker}: cache mevcut '{_cached_reason[:50]}' (from {cached.date})")
     except Exception as e:
         logger.warning(f"Reason cache check error for {ticker}: {e}")
@@ -356,7 +358,10 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
             res = await session.execute(stmt)
             news_items = res.scalars().all()
             for n in news_items:
-                t_str = f"KAP: {n.title}"
+                # Tarih damgası — model "30 günden eski olayı yazma" kuralını ancak
+                # tarihleri görürse uygulayabilir (KOCMT bedelsiz bug'ı, 06.07.2026)
+                _d = n.created_at.strftime("%d.%m.%Y") if n.created_at else "tarih?"
+                t_str = f"[{_d}] KAP: {n.title}"
                 if n.ai_summary: t_str += f" ({n.ai_summary})"
                 internal_news.append(t_str)
     except Exception as e:
@@ -381,7 +386,11 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 if res.status_code == 200:
                     data = res.json()
                     results = data.get("results", [])
-                    external_search = "\n".join([r.get("content", "") for r in results])
+                    # Yayın tarihi damgası — tarihsiz web içeriği ESKİ olabilir, model bilsin
+                    external_search = "\n".join([
+                        f"[{r.get('published_date') or 'TARİHSİZ — eski olabilir'}] {r.get('content', '')}"
+                        for r in results
+                    ])
 
                 # 1b. Bilanço / finansal sonuç araması
                 current_year = date.today().year
@@ -393,7 +402,10 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 if res2.status_code == 200:
                     data2 = res2.json()
                     results2 = data2.get("results", [])
-                    bilanco_search = "\n".join([r.get("content", "") for r in results2])
+                    bilanco_search = "\n".join([
+                        f"[{r.get('published_date') or 'TARİHSİZ — eski olabilir'}] {r.get('content', '')}"
+                        for r in results2
+                    ])
 
                 # 1c. Hukuki / kurumsal gelişme araması (dava, anlaşma, ceza, soruşturma)
                 corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye varlık satışı borç"
@@ -404,7 +416,10 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 if res3.status_code == 200:
                     data3 = res3.json()
                     results3 = data3.get("results", [])
-                    corporate_search = "\n".join([r.get("content", "") for r in results3])
+                    corporate_search = "\n".join([
+                        f"[{r.get('published_date') or 'TARİHSİZ — eski olabilir'}] {r.get('content', '')}"
+                        for r in results3
+                    ])
         except Exception as e:
             logger.warning(f"Tavily search error for {ticker}: {e}")
 
@@ -602,12 +617,29 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     context_str = "\n".join(context_parts) if context_parts else "- Belirgin haber veya veri bulunamadı."
 
     hareket = "TAVAN (+%9.95 civarı yükseliş)" if is_ceiling else "TABAN (-%9.95 civarı düşüş)"
+
+    # ── Önceki sebep bağlamı — tutarlılık çapası (KOCMT bedelsiz bug'ı, 06.07.2026):
+    # Hisse 2-3 gün önce de tavan yaptıysa ve o günkü sebep doğruysa, model bugün
+    # ondan DAHA ESKİ bir olaya (aylar önceki bedelsiz/bölünme) asla dönmemeli.
+    prev_reason_ctx = ""
+    if _cached_reason:
+        _cd = _cached_date.strftime("%d.%m.%Y") if _cached_date else "yakın geçmiş"
+        prev_reason_ctx = f"""
+━━━ ÖNCEKİ SEBEP (TUTARLILIK ÇAPASI) ━━━
+Bu hisse {_cd} tarihinde de {"tavan" if is_ceiling else "taban"} yapmıştı ve o gün tespit edilen sebep şuydu:
+"{_cached_reason}"
+- Bugün için bundan DAHA YENİ ve somut bir gelişme bulamazsan → bu sebebi AYNEN tekrar yaz.
+- Bu sebepten DAHA ESKİ bir olayı (örn. haftalar/aylar önceki bedelsiz, bölünme, eski SPK kararı) ASLA yeni sebep olarak yazma.
+"""
+
     prompt = f"""Sen Türkiye borsası (BIST) uzmanısın. #{ticker} hissesi bugün {hareket} yaptı.
 Görevin: Bu fiyat hareketinin GERÇEK sebebini bulmak ve SADECE 4-6 kelime ile yazmak.
 
 ━━━ ADIM 1 — VERİLERİ DİKKATLİCE İNCELE ━━━
+Her haberin başında [tarih] etiketi var. [TARİHSİZ] etiketli içerik ESKİ olabilir — tek başına sebep olarak KULLANMA.
 {context_str}
 {ipo_rule}
+{prev_reason_ctx}
 
 ━━━ ADIM 2 — SIRAYLA KONTROL ET ━━━
 A) BİLANÇO / FİNANSAL SONUÇ: Şirket son 7 günde finansal tablo, kâr/zarar, gelir açıklaması yaptı mı?
@@ -746,6 +778,22 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
             if any(pos in t_lower for pos in positive_words):
                 logger.info(f"[YÖN FİLTRE] Taban hisse {ticker}: olumlu sebep elendi → '{t[:50]}'")
                 return ""
+        # ── SERMAYE İŞLEMİ DOĞRULAMA (KOCMT bedelsiz bug'ı, 06.07.2026) ──
+        # "Bedelsiz / bölünme / sermaye artırımı" iddiası SADECE son 30 günün KAP
+        # verisinde karşılığı varsa kabul edilir. Yoksa model ya Tavily'deki eski
+        # makaleden ya da ezberinden konuşuyordur → reddet (cache'e düşer).
+        _capital_claims = ["bedelsiz", "bölünme", "bolunme", "sermaye artırımı",
+                           "sermaye artirimi", "sermaye tavanı", "sermaye tavani"]
+        if any(cl in t_lower for cl in _capital_claims):
+            _kap_blob = " ".join(internal_news).lower()
+            _kap_evidence = ["bedelsiz", "sermaye art", "bölünme", "bolunme",
+                             "sermaye tavan", "kayıtlı sermaye", "kayitli sermaye"]
+            if not any(ev in _kap_blob for ev in _kap_evidence):
+                logger.info(
+                    f"[SERMAYE DOĞRULAMA] {ticker}: '{t[:60]}' iddiası son 30 gün KAP'ta "
+                    f"karşılıksız — elendi (Tavily eski makale / model ezberi şüphesi)"
+                )
+                return ""
         # Hedef fiyat rakamlarını temizle — "68,36 TL" → kaldır (yatırım tavsiyesi riski)
         t = re.sub(r'\d+[.,]\d+\s*TL', '', t).strip()
         t = re.sub(r'hedef\s*(?:fiyat[ıi]?\s*)?\d+[.,]?\d*', 'hedef fiyat', t, flags=re.IGNORECASE).strip()
@@ -801,7 +849,36 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                 logger.warning(f"Anthropic error for {ticker}: {e}")
                 break
 
-    # ── 2. OPENAI (GPT-4o) ──
+    # ── 2. ABACUS (Claude Sonnet 4.6) — Claude ailesi öncelikli (kullanıcı isteği,
+    #    06.07.2026: tavan/taban sebepleri güçlü-bağlam Claude modelleriyle üretilsin) ──
+    if settings.ABACUS_API_KEY:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                res = await client.post(
+                    "https://routellm.abacus.ai/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {settings.ABACUS_API_KEY}"},
+                    json={
+                        "model": "claude-sonnet-4-6",
+                        "messages": [
+                            {"role": "system", "content": _SYSTEM_PERSONA},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.1
+                    }
+                )
+                if res.status_code == 200:
+                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
+                    if ai_text:
+                        logger.info(f"Abacus result for {ticker}: {ai_text}")
+                        return ai_text
+                    else:
+                        logger.info(f"Abacus empty/filtered for {ticker}")
+                else:
+                    logger.warning(f"Abacus HTTP {res.status_code} for {ticker}: {res.text[:100]}")
+        except Exception as e:
+            logger.warning(f"Abacus error for {ticker}: {e}")
+
+    # ── 3. OPENAI (GPT-4o) ──
     if settings.OPENAI_API_KEY:
         for attempt in range(2):
             try:
@@ -837,34 +914,6 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
             except Exception as e:
                 logger.warning(f"OpenAI error for {ticker}: {e}")
                 break
-
-    # ── 3. ABACUS (Sonnet) ──
-    if settings.ABACUS_API_KEY:
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                res = await client.post(
-                    "https://routellm.abacus.ai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {settings.ABACUS_API_KEY}"},
-                    json={
-                        "model": "claude-sonnet-4-6",
-                        "messages": [
-                            {"role": "system", "content": _SYSTEM_PERSONA},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "temperature": 0.1
-                    }
-                )
-                if res.status_code == 200:
-                    ai_text = _clean_ai_text(res.json()["choices"][0]["message"]["content"])
-                    if ai_text:
-                        logger.info(f"Abacus result for {ticker}: {ai_text}")
-                        return ai_text
-                    else:
-                        logger.info(f"Abacus empty/filtered for {ticker}")
-                else:
-                    logger.warning(f"Abacus HTTP {res.status_code} for {ticker}: {res.text[:100]}")
-        except Exception as e:
-            logger.warning(f"Abacus error for {ticker}: {e}")
 
     # ── 4. GEMINI REST API ──
     if settings.GEMINI_API_KEY:
