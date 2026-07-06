@@ -1597,6 +1597,26 @@ async def check_morning_tweets():
                     if tw_ok:
                         ipo.distribution_tweeted = True
                         await db.commit()
+                    # ★ PUSH: primary path da "Başvuru Başladı" bildirimini göndersin.
+                    # Eskiden push SADECE catch-up path'ten atılıyordu; ama primary path
+                    # tweet atıp distribution_tweeted=True yapınca catch-up IPO'yu es geçiyor
+                    # → push HİÇ gitmiyordu (açılış saatinden SONRA düzeltilen/eklenen IPO'larda
+                    # görülür, ör. SSAAT 06.07.2026 elle girildiğinde). notify_ipo_subscription_start
+                    # kendi saat-guard'ına sahip (açılıştan makul süre önce atmaz), dedup
+                    # distribution_tweeted ile (bu blok bu flag True olunca bir daha girilmez).
+                    try:
+                        notif_service = NotificationService(db)
+                        push_n = await notif_service.notify_ipo_subscription_start(ipo)
+                        await db.commit()
+                        logger.info(
+                            "Dagitim push (acilis saati): %s — %s kisiye gonderildi",
+                            ipo.ticker or ipo.company_name, push_n,
+                        )
+                    except Exception as _push_err:
+                        logger.warning(
+                            "Dagitim push hatasi (%s): %s",
+                            ipo.ticker or ipo.company_name, _push_err,
+                        )
                     tweet_idx += 1
                     logger.info(
                         "Dagitim tweeti (acilis saati): %s — açılış %02d:%02d, şimdi %s",
