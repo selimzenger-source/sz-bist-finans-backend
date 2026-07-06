@@ -1303,7 +1303,7 @@ async def health_check():
         "status": "ok",
         "service": "bist-finans-backend",
         "version": "2.0.0",
-        "deploy_marker": "type-conv-route-2026-05-12",
+        "deploy_marker": "ssaat-push-fix-2026-07-06",
     }
     # Dahili sistem bilgilerini sadece development'ta goster
     if not settings.is_production:
