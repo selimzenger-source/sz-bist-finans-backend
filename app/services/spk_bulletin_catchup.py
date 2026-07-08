@@ -121,6 +121,25 @@ async def catchup_incomplete_bulletins() -> dict:
             ))).fetchall()
             recent = [r[0] for r in rows if r[0]]
 
+            # ★ IPO'SUZ BÜLTEN BOŞLUĞU (2026/44 vakası, 08.07.2026): görev IPO
+            # commit'inden ÖNCE ölürse (OOM restart) veya bülten hiç IPO onayı
+            # içermiyorsa yukarıdaki sorgu bülteni GÖREMEZ → analiz+tweet+push
+            # kalıcı kaybolur. Çözüm: scraper_state'teki son işlenen bülten
+            # no'sunu da kontrol listesine ekle (son 48 saatte işaretlenmişse).
+            try:
+                st = (await db.execute(sa_text(
+                    "SELECT value FROM scraper_state "
+                    "WHERE key = 'spk_last_bulletin_no' "
+                    "AND updated_at >= NOW() - INTERVAL '48 hours'"
+                ))).scalar_one_or_none()
+                if st and st not in recent:
+                    recent.append(st)
+                    logger.info(
+                        "[BULTEN-CATCHUP] scraper_state'ten eklendi (IPO'suz olabilir): %s", st,
+                    )
+            except Exception as _st_err:
+                logger.warning("[BULTEN-CATCHUP] scraper_state okunamadi: %s", _st_err)
+
             for bno in recent:
                 push_exists = (await db.execute(sa_text(
                     "SELECT 1 FROM pending_tweets WHERE source = :s LIMIT 1"
