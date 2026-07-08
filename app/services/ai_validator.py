@@ -28,7 +28,7 @@ _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 
 # Anthropic Claude Sonnet 4 — 3. yedek (direkt API)
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 _TIMEOUT = 30  # saniye
 

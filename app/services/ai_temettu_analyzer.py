@@ -14,7 +14,7 @@ settings = get_settings()
 _ABACUS_URL = "https://routellm.abacus.ai/v1/chat/completions"
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _AI_MODEL = "claude-sonnet-4-6"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-sonnet-4-6"
 _AI_TIMEOUT = 120
 
 

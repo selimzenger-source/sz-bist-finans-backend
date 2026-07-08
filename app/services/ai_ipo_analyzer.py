@@ -43,7 +43,7 @@ _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/comp
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 _AI_MODEL = "claude-sonnet-4-6"
 _GEMINI_MODEL = "gemini-2.5-pro"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-sonnet-4-6"
 _AI_TIMEOUT = 180  # v3: daha detayli analiz → daha uzun zaman
 
 # ── Prompt Override Mekanizması ──

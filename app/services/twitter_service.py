@@ -3151,7 +3151,7 @@ _BULLETIN_AI_MODEL = "gpt-4.1"
 
 # Anthropic Claude Sonnet 4 — 2. yedek (direkt API)
 _ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-_CLAUDE_MODEL = "claude-sonnet-4-20250514"
+_CLAUDE_MODEL = "claude-sonnet-4-6"
 
 # Gemini 2.5 Pro — 3. yedek (OpenAI uyumlu endpoint)
 _GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"

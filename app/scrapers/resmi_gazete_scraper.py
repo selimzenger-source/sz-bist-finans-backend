@@ -639,7 +639,7 @@ Yukarıdaki kararları analiz et. Borsa etkisi olan kararları JSON formatında 
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "claude-3-5-sonnet-20241022",
+                        "model": "claude-sonnet-4-6",
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_message},
@@ -669,7 +669,7 @@ Yukarıdaki kararları analiz et. Borsa etkisi olan kararları JSON formatında 
                             "Content-Type": "application/json",
                         },
                         json={
-                            "model": "claude-sonnet-4-20250514",
+                            "model": "claude-sonnet-4-6",
                             "max_tokens": 2000,
                             "temperature": 0.2,
                             "system": system_prompt,

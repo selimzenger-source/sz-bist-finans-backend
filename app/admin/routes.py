@@ -2559,7 +2559,7 @@ async def _generate_ayin_thread_with_ai(
                         "content-type": "application/json",
                     },
                     json={
-                        "model": "claude-sonnet-4-20250514",
+                        "model": "claude-sonnet-4-6",
                         "max_tokens": 6000,
                         "system": _THREAD_SYSTEM_PROMPT,
                         "messages": [{"role": "user", "content": prompt}],
