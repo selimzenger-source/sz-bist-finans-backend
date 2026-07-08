@@ -3462,27 +3462,49 @@ def _generate_bulletin_analysis_sync(bulletin_text: str, bulletin_no: str) -> st
             except Exception as e:
                 logger.warning("SPK bulten Claude hata: %s", e)
 
-        # ── 3. Yedek: Gemini 2.5 Pro ──
+        # ── 3. Yedek: Gemini 2.5 Pro (2 deneme) + Gemini Flash (son bacak) ──
+        # ★ 2026/44 vakasi (08.07.2026): Abacus kredisi bitmis + Claude key 401
+        #   iken Gemini TEK denemede tekledi -> analiz bos -> push guard tweet+
+        #   bildirimi blokladi. Tek noktadan olum olmasin: Pro'yu 2 kez dene
+        #   (5 sn arayla), hala bos ise ayri kotali gemini-2.5-flash'a dus.
         if not content and gemini_key:
-            try:
-                resp = httpx.post(
-                    _GEMINI_URL,
-                    headers={
-                        "Authorization": f"Bearer {gemini_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={**payload_base, "model": _GEMINI_MODEL},
-                    timeout=60.0,
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if content:
-                        logger.info("SPK bulten AI [Gemini-Pro] analiz uretildi: %d karakter", len(content))
-                else:
-                    logger.error("SPK bulten Gemini hatasi: HTTP %d — %s", resp.status_code, resp.text[:300])
-            except Exception as e:
-                logger.error("SPK bulten Gemini hata: %s", e)
+            _gemini_plan = [(_GEMINI_MODEL, 2), ("gemini-2.5-flash", 1)]
+            for _g_model, _g_attempts in _gemini_plan:
+                if content:
+                    break
+                for _g_try in range(_g_attempts):
+                    try:
+                        resp = httpx.post(
+                            _GEMINI_URL,
+                            headers={
+                                "Authorization": f"Bearer {gemini_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={**payload_base, "model": _g_model},
+                            timeout=60.0,
+                        )
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                            if content:
+                                logger.info(
+                                    "SPK bulten AI [%s deneme %d] analiz uretildi: %d karakter",
+                                    _g_model, _g_try + 1, len(content),
+                                )
+                                break
+                            logger.warning(
+                                "SPK bulten %s deneme %d: HTTP 200 ama icerik BOS (thinking?)",
+                                _g_model, _g_try + 1,
+                            )
+                        else:
+                            logger.error(
+                                "SPK bulten %s deneme %d hatasi: HTTP %d — %s",
+                                _g_model, _g_try + 1, resp.status_code, resp.text[:300],
+                            )
+                    except Exception as e:
+                        logger.error("SPK bulten %s deneme %d hata: %s", _g_model, _g_try + 1, e)
+                    if not content and _g_try + 1 < _g_attempts:
+                        time.sleep(5)
 
         if not content:
             logger.error("SPK bulten AI: Tum providerlar basarisiz")
