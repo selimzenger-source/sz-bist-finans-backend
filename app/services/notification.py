@@ -19,6 +19,17 @@ NOTIFICATION_DELAY_SECONDS = 0.3
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════════
+# ★ UYUMLULUK KİLİDİ — Borsa İstanbul ihtarı (2. uyarı, Temmuz 2026)
+# Ücretsiz (abonesiz) kullanıcılara KAP haber push'u TAMAMEN durduruldu.
+# SADECE aktif ücretli abone (ana_yildiz / diamond) KAP haber bildirimi alır.
+# İki ücretsiz yol bu flag ile kapatılır:
+#   1. _send_bist50_free (BIST50 puansız başlık) — notify_kap_news içinde
+#   2. notify_kap_watchlist içindeki abonesiz (title_free) alıcılar
+# Geri açmak için: FREE_KAP_NOTIFICATIONS_ENABLED = True
+# ═══════════════════════════════════════════════════════════════════════
+FREE_KAP_NOTIFICATIONS_ENABLED = False
+
 # ─── Watchlist Bildirim Spam Korumasi ───
 # Ayni ticker icin ayni kullaniciya belirli sure icinde tekrar bildirim gondermeyi engeller.
 # Key: "device_id:ticker" → Value: son gonderim zamani (epoch)
@@ -1179,7 +1190,8 @@ class NotificationService:
         # 2. BIST 50 ucretsiz per-user bildirim (ucretli aboneler HARIC — dedup)
         # Ucretsiz kullanicilara AI puani GOSTERILMEZ — premium ozellik
         # AMA filtre uygulanir: kullanicinin kap_min_score'undan dusukse push gonderilmez
-        if ticker_upper in BIST50_TICKERS:
+        # ★ UYUMLULUK: FREE_KAP_NOTIFICATIONS_ENABLED=False iken bu ücretsiz yol KAPALI.
+        if FREE_KAP_NOTIFICATIONS_ENABLED and ticker_upper in BIST50_TICKERS:
             # Free kullanicinin data'sinda ai_score olmasin (UI'da gizli kalsin)
             data_free = {k: v for k, v in data.items() if k != "ai_score"}
             sent += await self._send_bist50_free(title_free, body, data_free, ticker_upper, ai_score=ai_score, dedup_id=_dedup_id)
@@ -1617,7 +1629,13 @@ class NotificationService:
         watchlist_off = 0   # takip (watchlist) bildirimi kapali (notify_kap_watchlist=False)
         no_token = 0        # push token yok
         sendable = []
+        _free_blocked = 0   # ★ UYUMLULUK: abonesiz (free) kullanıcıya KAP haber engellendi
         for u in candidates:
+            # ★ UYUMLULUK: FREE_KAP_NOTIFICATIONS_ENABLED=False iken SADECE aktif
+            # ücretli abone (ana_yildiz/diamond) KAP watchlist haberi alır. Abonesiz
+            # (title_free alacak) kullanıcıya HİÇ gönderilmez.
+            if not FREE_KAP_NOTIFICATIONS_ENABLED and u.id not in _paid_user_ids:
+                _free_blocked += 1; continue
             if not getattr(u, "notifications_enabled", False):
                 notif_off += 1; continue
             if not getattr(u, "notify_kap_watchlist", False):
@@ -1668,10 +1686,10 @@ class NotificationService:
         _pref_skip = max(0, total_watching - len(filtered_device_ids) - skipped_spam)
         logger.info(
             "KAP Watchlist funnel #%s [%s]: takipci=%d | cooldown_skip=%d | pref_skip=%d | "
-            "aday=%d | gonderilebilir=%d | GONDERILDI=%d || notif_off=%d wl_off=%d no_token=%d send_fail=%d | dedup=%s",
+            "aday=%d | gonderilebilir=%d | GONDERILDI=%d || free_blocked=%d notif_off=%d wl_off=%d no_token=%d send_fail=%d | dedup=%s",
             ticker, sentiment_tag, total_watching, skipped_spam, _pref_skip,
             len(candidates), len(sendable), sent_count,
-            notif_off, watchlist_off, no_token, send_failed, str(_dedup_tok)[:60],
+            _free_blocked, notif_off, watchlist_off, no_token, send_failed, str(_dedup_tok)[:60],
         )
 
         if sent_count > 0:
