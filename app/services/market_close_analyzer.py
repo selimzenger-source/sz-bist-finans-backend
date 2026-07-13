@@ -311,6 +311,38 @@ async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list
         logger.error(f"Supplementary scrape hatasi: {e}")
     return results[:limit]
 
+# ═══════════════════════════════════════════════════════════════════════
+# SPESİFİK KURUMSAL-OLAY DOĞRULAMA (KOCMT + KONTR bug'ları, 06-13.07.2026)
+# Reason belirli bir olaya atıfsa (devir, pay/hisse satışı, bedelsiz, sermaye
+# artırımı, anlaşma, ihale, birleşme, varlık satışı...), AYNI olay son 30 gün
+# KAP verisinde de geçmelidir. Geçmiyorsa model ya Tavily'deki ESKİ makaleden
+# (ör. KONTR "Tera Yatırıma hisse devri" = Kasım 2025) ya da ezberinden
+# konuşuyordur → REDDET. Hem yeni AI çıktısına hem cache/çapaya uygulanır.
+# ═══════════════════════════════════════════════════════════════════════
+_EVENT_CLAIM_KEYWORDS: dict[str, list[str]] = {
+    "devir": ["devir", "devri", "devred", "devret"],
+    "pay/hisse satışı": ["pay satış", "hisse satış", "pay alım", "pay devri", "hisse devri", "pay sat", "hisse sat"],
+    "bedelsiz": ["bedelsiz"],
+    "bölünme": ["bölünme", "bolunme", "bölünüyor"],
+    "sermaye artırımı": ["sermaye artırım", "sermaye artirim", "kayıtlı sermaye", "kayitli sermaye", "sermaye tavan"],
+    "anlaşma/sözleşme": ["anlaşma imzal", "sözleşme imzal", "sözleşme kazan", "anlaşma sağla", "mutabakat"],
+    "ihale": ["ihale"],
+    "birleşme": ["birleşme", "birleşti", "birlesme"],
+    "varlık satışı": ["varlık satış", "gayrimenkul satış", "arsa satış", "otel satış", "fabrika satış", "iştirak satış"],
+}
+
+
+def _unverified_specific_event(text_lower: str, kap_blob_lower: str) -> str | None:
+    """Reason spesifik bir kurumsal olaya atıfsa ve bu olay son 30 gün KAP
+    blob'unda YOKSA olay etiketini döndürür (reddedilmeli). Aksi halde None.
+    KAP = güncel/otoriter kaynak; olay orada yoksa eski/uydurma sayılır."""
+    for label, kws in _EVENT_CLAIM_KEYWORDS.items():
+        if any(kw in text_lower for kw in kws):
+            if not any(kw in kap_blob_lower for kw in kws):
+                return label
+    return None
+
+
 async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = None, pct: float = None, consec: int = 1, monthly: int = 1) -> str:
     """Internal KAP + Tavily + Context ile Coklu-AI Fallback ile analiz yapar.
     Sira: OpenAI (GPT-4o) -> Anthropic (Claude 3.5 Sonnet) -> Abacus (Sonnet) -> Gemini 2.5 Pro
@@ -366,6 +398,21 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 internal_news.append(t_str)
     except Exception as e:
         logger.warning(f"Internal KAP news error for {ticker}: {e}")
+
+    # ── ÇAPA/CACHE TEMİZLİĞİ (KONTR perpetüasyon bug'ı, 13.07.2026) ──
+    # Önceki-sebep çapası bir kez yanlış olaya kilitlenince (ör. KONTR "Tera
+    # Yatırıma hisse devri" = Kasım 2025) her gün kendini tekrar ediyordu.
+    # Cache'lenmiş sebep, son 30 gün KAP'ta karşılığı OLMAYAN spesifik bir
+    # olaysa çapa/fallback olarak KULLANILMAZ (temizlenir).
+    if _cached_reason:
+        _kap_blob_lc = " ".join(internal_news).lower()
+        _stale_ev = _unverified_specific_event(_cached_reason.lower(), _kap_blob_lc)
+        if _stale_ev:
+            logger.info(
+                f"[ÇAPA TEMİZLE] {ticker}: önceki sebep '{_cached_reason[:50]}' ({_stale_ev}) "
+                f"son 30 gün KAP'ta yok — çapa/fallback iptal (perpetüasyon kesildi)"
+            )
+            _cached_reason = ""
 
     query_action = "neden yükseldi tavan" if is_ceiling else "neden düştü taban"
     # Şirket adı mapping — haber kaynakları ticker yerine şirket adı kullanır
@@ -778,22 +825,17 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
             if any(pos in t_lower for pos in positive_words):
                 logger.info(f"[YÖN FİLTRE] Taban hisse {ticker}: olumlu sebep elendi → '{t[:50]}'")
                 return ""
-        # ── SERMAYE İŞLEMİ DOĞRULAMA (KOCMT bedelsiz bug'ı, 06.07.2026) ──
-        # "Bedelsiz / bölünme / sermaye artırımı" iddiası SADECE son 30 günün KAP
-        # verisinde karşılığı varsa kabul edilir. Yoksa model ya Tavily'deki eski
-        # makaleden ya da ezberinden konuşuyordur → reddet (cache'e düşer).
-        _capital_claims = ["bedelsiz", "bölünme", "bolunme", "sermaye artırımı",
-                           "sermaye artirimi", "sermaye tavanı", "sermaye tavani"]
-        if any(cl in t_lower for cl in _capital_claims):
-            _kap_blob = " ".join(internal_news).lower()
-            _kap_evidence = ["bedelsiz", "sermaye art", "bölünme", "bolunme",
-                             "sermaye tavan", "kayıtlı sermaye", "kayitli sermaye"]
-            if not any(ev in _kap_blob for ev in _kap_evidence):
-                logger.info(
-                    f"[SERMAYE DOĞRULAMA] {ticker}: '{t[:60]}' iddiası son 30 gün KAP'ta "
-                    f"karşılıksız — elendi (Tavily eski makale / model ezberi şüphesi)"
-                )
-                return ""
+        # ── SPESİFİK OLAY DOĞRULAMA (KOCMT + KONTR bug'ları) ──
+        # devir/satış/anlaşma/ihale/sermaye/birleşme iddiası son 30 gün KAP'ta
+        # karşılıksızsa → reddet (Tavily eski makale / model ezberi şüphesi).
+        _kap_blob = " ".join(internal_news).lower()
+        _ev_label = _unverified_specific_event(t_lower, _kap_blob)
+        if _ev_label:
+            logger.info(
+                f"[OLAY DOĞRULAMA] {ticker}: '{t[:60]}' ({_ev_label}) son 30 gün KAP'ta "
+                f"karşılıksız — elendi (eski makale / ezber şüphesi)"
+            )
+            return ""
         # Hedef fiyat rakamlarını temizle — "68,36 TL" → kaldır (yatırım tavsiyesi riski)
         t = re.sub(r'\d+[.,]\d+\s*TL', '', t).strip()
         t = re.sub(r'hedef\s*(?:fiyat[ıi]?\s*)?\d+[.,]?\d*', 'hedef fiyat', t, flags=re.IGNORECASE).strip()
