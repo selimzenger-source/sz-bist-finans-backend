@@ -314,7 +314,7 @@ async def scrape_uzmanpara_supplementary(is_ceiling: bool, exclude_tickers: list
 # ═══════════════════════════════════════════════════════════════════════
 # SPESİFİK KURUMSAL-OLAY DOĞRULAMA (KOCMT + KONTR bug'ları, 06-13.07.2026)
 # Reason belirli bir olaya atıfsa (devir, pay/hisse satışı, bedelsiz, sermaye
-# artırımı, anlaşma, ihale, birleşme, varlık satışı...), AYNI olay son 30 gün
+# artırımı, anlaşma, ihale, birleşme, varlık satışı...), AYNI olay son 14 gün
 # KAP verisinde de geçmelidir. Geçmiyorsa model ya Tavily'deki ESKİ makaleden
 # (ör. KONTR "Tera Yatırıma hisse devri" = Kasım 2025) ya da ezberinden
 # konuşuyordur → REDDET. Hem yeni AI çıktısına hem cache/çapaya uygulanır.
@@ -333,7 +333,7 @@ _EVENT_CLAIM_KEYWORDS: dict[str, list[str]] = {
 
 
 def _unverified_specific_event(text_lower: str, kap_blob_lower: str) -> str | None:
-    """Reason spesifik bir kurumsal olaya atıfsa ve bu olay son 30 gün KAP
+    """Reason spesifik bir kurumsal olaya atıfsa ve bu olay son 14 gün KAP
     blob'unda YOKSA olay etiketini döndürür (reddedilmeli). Aksi halde None.
     KAP = güncel/otoriter kaynak; olay orada yoksa eski/uydurma sayılır."""
     for label, kws in _EVENT_CLAIM_KEYWORDS.items():
@@ -382,7 +382,10 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     internal_news = []
     try:
         async with async_session() as session:
-            since = datetime.now(timezone.utc) - timedelta(days=30)
+            # ★ 30 → 14 gün (13.07.2026, kullanıcı isteği): tavan/taban sebebi
+            # SADECE son 2 haftanın haberine dayanabilir. Eski haber (KONTR
+            # Kasım-2025 devri gibi) context'e bile girmesin.
+            since = datetime.now(timezone.utc) - timedelta(days=14)
             stmt = select(KapAllDisclosure).where(
                 KapAllDisclosure.company_code == ticker,
                 KapAllDisclosure.created_at >= since
@@ -402,7 +405,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
     # ── ÇAPA/CACHE TEMİZLİĞİ (KONTR perpetüasyon bug'ı, 13.07.2026) ──
     # Önceki-sebep çapası bir kez yanlış olaya kilitlenince (ör. KONTR "Tera
     # Yatırıma hisse devri" = Kasım 2025) her gün kendini tekrar ediyordu.
-    # Cache'lenmiş sebep, son 30 gün KAP'ta karşılığı OLMAYAN spesifik bir
+    # Cache'lenmiş sebep, son 14 gün KAP'ta karşılığı OLMAYAN spesifik bir
     # olaysa çapa/fallback olarak KULLANILMAZ (temizlenir).
     if _cached_reason:
         _kap_blob_lc = " ".join(internal_news).lower()
@@ -410,7 +413,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
         if _stale_ev:
             logger.info(
                 f"[ÇAPA TEMİZLE] {ticker}: önceki sebep '{_cached_reason[:50]}' ({_stale_ev}) "
-                f"son 30 gün KAP'ta yok — çapa/fallback iptal (perpetüasyon kesildi)"
+                f"son 14 gün KAP'ta yok — çapa/fallback iptal (perpetüasyon kesildi)"
             )
             _cached_reason = ""
 
@@ -428,7 +431,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 # 1a. Genel haber araması (şirket adı + ticker ile)
                 res = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 10, "days": 30}
+                    json={"api_key": tavily_key, "query": query, "search_depth": "advanced", "max_results": 10, "days": 14}
                 )
                 if res.status_code == 200:
                     data = res.json()
@@ -444,7 +447,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 bilanco_query = f"{search_name} bilanço finansal sonuçlar kâr gelir {current_year}"
                 res2 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 5, "days": 30}
+                    json={"api_key": tavily_key, "query": bilanco_query, "search_depth": "basic", "max_results": 5, "days": 14}
                 )
                 if res2.status_code == 200:
                     data2 = res2.json()
@@ -458,7 +461,7 @@ async def _analyze_reason_with_ai(ticker: str, is_ceiling: bool, price: float = 
                 corp_query = f"{search_name} dava anlaşma mahkeme soruşturma ceza sermaye varlık satışı borç"
                 res3 = await client.post(
                     "https://api.tavily.com/search",
-                    json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 5, "days": 30}
+                    json={"api_key": tavily_key, "query": corp_query, "search_depth": "basic", "max_results": 5, "days": 14}
                 )
                 if res3.status_code == 200:
                     data3 = res3.json()
@@ -719,10 +722,10 @@ Bugünün tarihi: {date.today().strftime("%d.%m.%Y")}
 A) Bulduğun haberin #{ticker} ŞİRKETİNE ait olduğundan %100 emin ol.
    Aynı/benzer isimdeki BAŞKA bir şirketin haberi mi? → EMPTY yaz.
 B) ⚠️ TARİH FİLTRESİ:
-   Haberin tarihi 30 günden eski mi? → KESİNLİKLE EMPTY yaz!
+   Haberin tarihi 14 günden (2 HAFTA) eski mi? → KESİNLİKLE EMPTY yaz!
    • 2+ ay önce, 6 ay önce → GEÇERSİZ → EMPTY yaz.
    • Haberde tarih belirtilmemiş ama olay eski bir gelişmeyse (bölünme, eski dava sonucu, geçmiş SPK kararı) → EMPTY yaz.
-   • Son 30 gün içindeki haberler geçerlidir. Son 7 gün içindeki haberleri ÖNCELIKLE tercih et.
+   • SADECE son 14 gün (2 hafta) içindeki haberler geçerlidir. Son 7 gün içindeki haberleri ÖNCELIKLE tercih et.
 C) Karar iptal mi edilmiş? → EMPTY yaz.
 
 ━━━ ADIM 3.3 — GÜNCELLIK ÖNCELİĞİ ━━━
@@ -731,7 +734,7 @@ Birden fazla haber/sebep bulduysan HER ZAMAN en güncel olanı seç!
 - Dünkü veya bugünkü haber VARSA → aylık haberleri kesinlikle yazma.
 - Örnek: Şirketin dün "rekor bilanço" açıklaması + 3 hafta önce "sermaye tavanı artırımı" → "Rekor yıllık bilanço açıklandı." yaz.
 - Örnek: Bugün "ABD davası anlaşması" + 1 ay önce "bedelsiz karar" → bugünkü davayı yaz.
-- ⚠️ TEKRAR: 30 günden eski olay = GEÇERSİZ. 2 ay, 6 ay önceki olayları ASLA sebep olarak kullanma!
+- ⚠️ TEKRAR: 14 günden (2 hafta) eski olay = GEÇERSİZ. 3 hafta, 2 ay, 6 ay önceki olayları ASLA sebep olarak kullanma!
 
 ━━━ ADIM 3.5 — SEBEP YÖNÜ DOĞRULA (KRİTİK!) ━━━
 {"Bu hisse TAVAN yaptı (YÜKSELDİ). Yazdığın sebebin hisseyi YÜKSELTECEĞİ mantıklı olmalı." if is_ceiling else "Bu hisse TABAN yaptı (DÜŞTÜ). Yazdığın sebebin hisseyi DÜŞÜRECEĞİ mantıklı olmalı."}
@@ -826,13 +829,13 @@ Somut bulgu yoksa VEYA sebebin yönü ters ise → sadece "EMPTY" yaz.
                 logger.info(f"[YÖN FİLTRE] Taban hisse {ticker}: olumlu sebep elendi → '{t[:50]}'")
                 return ""
         # ── SPESİFİK OLAY DOĞRULAMA (KOCMT + KONTR bug'ları) ──
-        # devir/satış/anlaşma/ihale/sermaye/birleşme iddiası son 30 gün KAP'ta
+        # devir/satış/anlaşma/ihale/sermaye/birleşme iddiası son 14 gün KAP'ta
         # karşılıksızsa → reddet (Tavily eski makale / model ezberi şüphesi).
         _kap_blob = " ".join(internal_news).lower()
         _ev_label = _unverified_specific_event(t_lower, _kap_blob)
         if _ev_label:
             logger.info(
-                f"[OLAY DOĞRULAMA] {ticker}: '{t[:60]}' ({_ev_label}) son 30 gün KAP'ta "
+                f"[OLAY DOĞRULAMA] {ticker}: '{t[:60]}' ({_ev_label}) son 14 gün KAP'ta "
                 f"karşılıksız — elendi (eski makale / ezber şüphesi)"
             )
             return ""
