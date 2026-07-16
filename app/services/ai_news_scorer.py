@@ -712,6 +712,21 @@ _ROUTINE_FILTERS: list[tuple[str, str, str, list[str]]] = [
         "Sorumluluk beyanı, finansal raporların doğruluğu konusunda yönetim kurulu ve mali işler sorumlusunun verdiği standart imza beyanıdır. İdari/usul bildirimi olup hisse fiyatına doğrudan etkisi beklenmemektedir.",
         ["bilgilendirme"],
     ),
+    # --- İLİŞKİLİ TARAF İŞLEMLERİ RAPORU (SPK Kurumsal Yönetim Tebliği II-17.1) ---
+    # Her şirketin yıllık yayınladığı standart uyum raporu: yaygın/süreklilik arz eden
+    # ilişkili taraf işlemlerinin hasılata oranı %10 eşiğinin altında mı? Oranın limit
+    # altında kalması "olumlu gelişme" DEĞİL, beklenen normal durumdur. AI "kurumsal
+    # yönetim uyumu / şeffaflık" açısıyla hafif-pozitif veriyordu (HRKET 6.3, 14.07.2026
+    # — kullanıcı bildirimi: "nötr haber, hep pozitif gibi atıyor"). DETERMİNİSTİK NÖTR.
+    (
+        r"ili[şs]kili\s*taraf\s*i[şs]lemler",
+        "İlişkili Taraf İşlemleri Raporu",
+        "İlişkili Taraf İşlemleri Raporu, SPK Kurumsal Yönetim Tebliği (II-17.1) gereği her "
+        "şirketin periyodik olarak yayınladığı standart bir uyum bildirimidir. İlişkili taraf "
+        "işlemlerinin oranının mevzuat limitinin altında kalması beklenen/normal durumdur; "
+        "şirketin faaliyetlerine veya hisse fiyatına doğrudan etkisi beklenmez.",
+        ["bilgilendirme"],
+    ),
     (
         r"faaliyet\s*raporu(?!\s*hakkinda)",
         "Faaliyet Raporu",
