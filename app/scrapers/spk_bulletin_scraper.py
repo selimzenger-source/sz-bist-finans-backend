@@ -823,6 +823,11 @@ async def _check_spk_bulletins_inner():
 
                 # Bu bultendeki yeni IPO'lari topla — sonra tek tweet atilacak
                 new_ipos_this_bulletin = []
+                # ★ FAZ C listesi (kullanici istegi, 17.07.2026): IPO onay push'lari
+                # loop icinde DEGIL, bulten analiz+tweet+push'tan SONRA sirayla atilir.
+                # Sebep: her push tum kullanici tabanina ~5-6 dk suruyor; loop icinde
+                # olunca bulten tweeti 20-35 dk gecikiyordu (2026/45: 4 IPO = 35 dk).
+                _deferred_ipo_pushes = []
                 # Push bildirim ozeti — analiz tweetinden gelecek, default bos
                 # ASLA undefined olmasin (analiz atlanirsa NameError'a sebep oluyordu)
                 _bulletin_notif_summary = ""
@@ -905,7 +910,9 @@ async def _check_spk_bulletins_inner():
 
                             if not _already_tweeted:
                                 new_ipos_this_bulletin.append(ipo)
-                            await notif_service.notify_new_ipo(ipo)
+                            # ★ Push ERTELENDI (Faz C): bulten analiz+tweet+push'tan
+                            # sonra sirayla gonderilir — loop'u bloklamaz.
+                            _deferred_ipo_pushes.append(ipo)
                             try:
                                 from app.services.admin_telegram import notify_spk_approval
                                 await notify_spk_approval(
@@ -1195,6 +1202,47 @@ async def _check_spk_bulletins_inner():
                             )
                 except Exception as _ci_err:
                     logger.warning("SPK Bulten cap_inc state machine hata: %s", _ci_err)
+
+                # ════════════════════════════════════════════════════════
+                # ★★★ FAZ C — IPO ONAY PUSH'LARI EN SONDA (17.07.2026) ★★★
+                # Yeni sira: IPO'lar olusur (hizli) → toplu onay tweeti →
+                # bulten analizi + push + analiz tweeti → EN SON tek tek IPO
+                # push'lari (her biri tum kullanici tabanina ~5-6 dk surer).
+                # Boylece bulten tweet/bildirimi dakikalar icinde cikar;
+                # yavas push'lar arkadan sirayla gider.
+                # Dedup: spk_ipo_push_{bulten}_{ipo_id} flag'i — restart/
+                # reprocess durumunda ayni IPO'ya cift push atilmaz.
+                # ════════════════════════════════════════════════════════
+                for _push_ipo in _deferred_ipo_pushes:
+                    _ipo_push_key = f"spk_ipo_push_{bno_str_val}_{_push_ipo.id}"
+                    try:
+                        from app.models.pending_tweet import PendingTweet as _PT_ipo
+                        _ip_check = await db.execute(
+                            select(_PT_ipo).where(_PT_ipo.source == _ipo_push_key).limit(1)
+                        )
+                        if _ip_check.scalar_one_or_none():
+                            logger.info("IPO onay push zaten gonderilmis: %s — atlandi", _ipo_push_key)
+                            continue
+                    except Exception:
+                        pass
+                    try:
+                        _sent_n = await notif_service.notify_new_ipo(_push_ipo)
+                        try:
+                            from app.models.pending_tweet import PendingTweet as _PT_ipo2
+                            db.add(_PT_ipo2(source=_ipo_push_key, status="sent",
+                                            text=f"IPO onay push flag ({_push_ipo.company_name[:60]})"))
+                            await db.commit()
+                        except Exception:
+                            await db.rollback()
+                        logger.info(
+                            "IPO onay push (Faz C): %s — %s kisiye gonderildi",
+                            _push_ipo.company_name, _sent_n,
+                        )
+                    except Exception as _push_err:
+                        logger.error(
+                            "IPO onay push hatasi (%s): %s — digerleri devam",
+                            _push_ipo.company_name, _push_err,
+                        )
 
                 # NOT: bulten_no zaten LOOP BASINDA kaydedildi (idempotent guvence).
                 # Burada tekrar kaydetmiyoruz — eski duplicate save sebebiydi.
