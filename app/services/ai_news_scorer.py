@@ -3317,10 +3317,17 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         _su = _su.replace(_a, _b)
     _no_data_markers = (
         "icerigine erisileme", "icerige erisileme", "erisilemedigi icin",
-        "erisilemediginden", "degerlendirilememis", "degerlendirilememekte",
+        "erisilemediginden", "erisilememis",            # erişilememiştir / erişilememiş (ISVEA)
+        "detaylarina erisilem", "detaylara erisilem",   # "detaylarına erişilememiştir"
+        "degerlendirilememis", "degerlendirilememekte",
         "analiz yapilacak veri bulunma", "analiz edilecek veri bulunma",
-        "zaman damgasi disinda", "notr olarak degerlendiril",
+        "zaman damgasi disinda",
+        "notr olarak degerlendiril", "notr degerlendirme yapil", "notr bir degerlendirme",
         "somut veri bulunma", "yeterli veri bulunma", "analiz icin veri",
+        "baslik duzeyinde", "yalnizca baslik",          # "içerik yalnızca başlık düzeyinde mevcut"
+        "yon ve tutar belirsiz", "yon belirsiz", "yon ve buyukluk belirsiz",
+        "belirsiz oldugu icin",
+        "etkisi tahmin edilemez", "etkisi tahmin edilememekte",  # "etkisi tahmin edilemez"
     )
     if score is not None and score != 5.0 and any(m in _su for m in _no_data_markers):
         logger.info(
