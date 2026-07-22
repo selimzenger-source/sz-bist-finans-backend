@@ -3278,6 +3278,28 @@ def _extract_dividend_yield_pct(content: str) -> float | None:
     return None
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# "VERİ YOK / OKUYAMADIM / BELİRSİZ" REGEX — çekim-bağımsız kök-pattern.
+# Kullanıcı isteği (ISVEA 6.3, 21.07.2026): AI özeti içeriğe erişemediğini/
+# belirsiz olduğunu söylüyorsa ASLA pozitif/negatif tweet atılmamalı.
+# Kelime-listesi çekim farklarını kaçırıyordu (erisilemedi ✓ ama
+# erisilememistir ✗); regex kökü ("erisilem") tüm çekimleri yakalar.
+# Metin normalize edilmiş (Türkçe→ASCII) özet üzerinde çalışır.
+# ═══════════════════════════════════════════════════════════════════════
+_NO_DATA_RE = re.compile(
+    r"erisilem"                                          # erişileme/-medi/-memiş/-mez/-memiştir
+    r"|degerlendirilememe"
+    r"|(?:yalnizca|sadece)\s*baslik|baslik\s*duzeyinde"  # "yalnızca başlık düzeyinde"
+    r"|notr\s*(?:olarak\s*|bir\s*)?degerlendir"          # "nötr (olarak) değerlendir..."
+    r"|belirsiz\s*oldug"                                 # "belirsiz olduğu için"
+    r"|(?:yon|tutar|etki|buyukluk|adet|oran)\b[^.]{0,30}\bbelirsiz"  # "yön ve tutar belirsiz"
+    r"|tahmin\s*edile(?:me|mez|memekte|bilmemekte)"      # "etkisi tahmin edilemez"
+    r"|(?:somut|yeterli)\s*veri\s*bulunma"
+    r"|analiz\s*(?:icin|edilecek|yapilacak)\s*veri"
+    r"|zaman\s*damgasi\s*disinda"
+)
+
+
 def _validate_score_against_content(score: float, content: str, ticker: str, ai_summary: str = "", verdict: str = "") -> float:
     """Icerik patirnlerine gore skoru dogrular ve gerekirse duzeltir.
 
@@ -3329,11 +3351,13 @@ def _validate_score_against_content(score: float, content: str, ticker: str, ai_
         "belirsiz oldugu icin",
         "etkisi tahmin edilemez", "etkisi tahmin edilememekte",  # "etkisi tahmin edilemez"
     )
-    if score is not None and score != 5.0 and any(m in _su for m in _no_data_markers):
+    if score is not None and score != 5.0 and (
+        any(m in _su for m in _no_data_markers) or _NO_DATA_RE.search(_su)
+    ):
         logger.info(
             "AI News Scorer [VERI-YOK/AI-NOTR→NOTR] %s: %.1f -> 5.0 "
-            "(AI özeti içeriğe erişilemediğini/nötr olduğunu beyan ediyor — "
-            "skor özetle çelişemez)", ticker, score,
+            "(AI özeti içeriğe erişilemediğini/nötr/belirsiz olduğunu beyan ediyor — "
+            "skor özetle çelişemez, pozitif/negatif tweet atılmaz)", ticker, score,
         )
         return 5.0
 
